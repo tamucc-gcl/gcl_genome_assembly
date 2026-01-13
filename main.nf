@@ -76,6 +76,18 @@ workflow {
     
     // Parse sample sheet and create input channel
     ch_input = parseSampleSheet(params.sample_sheet)
+
+    // Debug: Print all channel contents
+    ch_input.view { sample_id, hifi_bam, hic_r1, hic_r2 ->
+        """
+        ========================================
+        Sample ID  : ${sample_id}
+        HiFi BAM   : ${hifi_bam}
+        Hi-C R1    : ${hic_r1}
+        Hi-C R2    : ${hic_r2}
+        ========================================
+        """
+    }
     
     /*
     ========================================================================================
