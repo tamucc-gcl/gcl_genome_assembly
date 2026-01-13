@@ -54,8 +54,8 @@ include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
     IMPORT WORKFLOWS
 ========================================================================================
 */
-include { HIC_QC_RAW } from './workflows/hic_qc.nf'
-include { HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
+include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
+include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 /*
 ========================================================================================
