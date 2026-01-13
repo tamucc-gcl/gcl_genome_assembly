@@ -44,17 +44,24 @@ if (!params.sample_sheet) {
 
 /*
 ========================================================================================
+    IMPORT FUNCTIONS
+========================================================================================
+*/
+include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
+
+/*
+========================================================================================
     IMPORT WORKFLOWS
 ========================================================================================
 */
 include { HIC_QC } from './workflows/hic_qc.nf'
+include { HIFI_QC } from './workflows/hifi_qc.nf'
 /*
 ========================================================================================
     IMPORT MODULES
 ========================================================================================
 */
 
-include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 
 /*
@@ -140,20 +147,14 @@ workflow {
     )
     /*
     ========================================================================================
-        STEP 3: QC HiFi Reads
+        STEP 3: QC HiFi Reads - runs after converting BAM -> FASTQ
     ========================================================================================
     */
-    /*
-    FASTQC_HIFI(
+    HIFI_QC(
         ch_fastq_all.map { sample_id, hifi_fastq, hic_r1, hic_r2 ->
             tuple(sample_id, hifi_fastq)
         }
     )
-    
-    MULTIQC_HIFI(
-        FASTQC_HIFI.out.collect()
-    )
-    */
     /*
     ========================================================================================
         STEP 4: Assemble with Hifiasm

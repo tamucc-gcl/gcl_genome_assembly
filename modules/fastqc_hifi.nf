@@ -1,20 +1,20 @@
 /*
 ========================================================================================
-    FASTQC HI-C MODULE
+    FASTQC HiFi MODULE
 ========================================================================================
-    Runs FastQC on Hi-C paired-end reads
+    Runs FastQC on HiFi reads
 ========================================================================================
 */
 
-process FASTQC_HIC {
+process FASTQC_HIFI {
     tag "${sample_id}"
     label 'fastqc'
     
     //temporarily output
-    publishDir "${params.outdir}/${sample_id}/qc/hic/fastqc", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/${sample_id}/qc/hifi/fastqc", mode: params.publish_dir_mode
     
     input:
-    tuple val(sample_id), path(hic_r1), path(hic_r2)
+    tuple val(sample_id), path(hifi_fastq)
     
     output:
     tuple val(sample_id), path("*.html"), emit: fastqc_html
@@ -25,15 +25,12 @@ process FASTQC_HIC {
     fastqc \\
         --threads ${task.cpus} \\
         --outdir . \\
-        ${hic_r1} \\
-        ${hic_r2}
+        ${hifi_fastq}
     """
     
     stub:
     """
-    touch ${hic_r1.baseName}_fastqc.html
-    touch ${hic_r1.baseName}_fastqc.zip
-    touch ${hic_r2.baseName}_fastqc.html
-    touch ${hic_r2.baseName}_fastqc.zip
+    touch ${hifi_fastq.baseName}_fastqc.html
+    touch ${hifi_fastq.baseName}_fastqc.zip
     """
 }

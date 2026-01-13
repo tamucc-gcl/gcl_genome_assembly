@@ -1,33 +1,33 @@
 /*
 ========================================================================================
-    HI-C QC SUBWORKFLOW
+    HiFi QC SUBWORKFLOW
 ========================================================================================
-    Runs FastQC on Hi-C read pairs and aggregates results with MultiQC
+    Runs FastQC on HiFi reads and aggregates results with MultiQC
 ========================================================================================
 */
 
 nextflow.enable.dsl = 2
 
-include { FASTQC_HIC } from '../modules/fastqc_hic'
-include { MULTIQC_HIC } from '../modules/multiqc_hic'
+include { FASTQC_HIFI } from '../modules/fastqc_hifi.nf'
+include { MULTIQC_HIFI } from '../modules/multiqc_hifi.nf'
 
-workflow HIC_QC {
+workflow HIFI_QC {
     take:
-    hic_reads  // channel: tuple(sample_id, hic_r1, hic_r2)
+    hifi_reads  // channel: tuple(sample_id, hic_r1, hic_r2)
     
     main:
     // Run FastQC on each Hi-C read pair
-    FASTQC_HIC(hic_reads)
+    FASTQC_HIFI(hifi_reads)
     
     // Aggregate all FastQC reports with MultiQC
     // Extract just the zip files from the tuples
     MULTIQC_HIC(
-        FASTQC_HIC.out.fastqc_zip.map { sample_id, zips -> zips }.collect()
+        FASTQC_HIFI.out.fastqc_zip.map { sample_id, zips -> zips }.collect()
     )
     
     emit:
-    fastqc_html = FASTQC_HIC.out.fastqc_html
-    fastqc_zip = FASTQC_HIC.out.fastqc_zip
+    fastqc_html = FASTQC_HIFI.out.fastqc_html
+    fastqc_zip = FASTQC_HIFI.out.fastqc_zip
     multiqc_report = MULTIQC_HIC.out.report
     multiqc_data = MULTIQC_HIC.out.data
 }
