@@ -90,6 +90,7 @@ workflow {
     // Parse sample sheet and create input channel
     ch_input = parseSampleSheet(params.sample_sheet)
 
+    /*
     // Debug: Print all channel contents
     ch_input.view { sample_id, hifi_bam, hic_r1, hic_r2 ->
         """
@@ -101,6 +102,7 @@ workflow {
         ========================================
         """
     }
+    */
     
     /*
     ========================================================================================
@@ -170,6 +172,7 @@ workflow {
         }
         .set { ch_fastq_all }
 
+    /*
     // Debug: Print all channel contents
     ch_fastq_all.view { sample_id, hifi_fastq, hic_r1, hic_r2 ->
         """
@@ -181,6 +184,7 @@ workflow {
         ========================================
         """
     }
+    */
 
     /*
     ========================================================================================

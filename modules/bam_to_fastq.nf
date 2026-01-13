@@ -11,7 +11,7 @@ process BAM_TO_FASTQ {
     label 'bam_to_fastq'
     
     //temporarily publish for debugging
-    publishDir "${params.outdir}/hifi_fastq", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/fastq/hifi", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hifi_bam)

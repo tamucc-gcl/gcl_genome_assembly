@@ -11,7 +11,7 @@ process TRIM_HIC {
     label 'fastp'
 
     //temporarily publish
-    publishDir "${params.outdir}/${sample_id}/trimmed/hic", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/fastq/hic/trimmed", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hic_r1), path(hic_r2)
