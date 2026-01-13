@@ -11,7 +11,7 @@ process FASTQC_HIC {
     label 'fastqc'
     
     //temporarily output
-    publishDir "${params.outdir}/${sample_id}/qc/hic/${qc_label}/fastqc", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/${sample_id}/qc/hic/${qc_label}/fastqc", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hic_r1), path(hic_r2)
