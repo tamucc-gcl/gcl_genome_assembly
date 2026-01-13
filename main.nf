@@ -116,22 +116,27 @@ workflow {
         }
         .set { ch_fastq_all }
 
+    ch_fastq_all.view { sample_id, hifi_fastq, hic_r1, hic_r2 ->
+        """
+        ========================================
+        Sample ID  : ${sample_id}
+        HiFi FQ    : ${hifi_fastq}
+        Hi-C R1    : ${hic_r1}
+        Hi-C R2    : ${hic_r2}
+        ========================================
+        """
+    }
+
     /*
     ========================================================================================
         STEP 2: QC Raw Hi-C Reads
     ========================================================================================
     */
-    /*
-    FASTQC_HIC(
+    HIC_QC(
         ch_fastq_all.map { sample_id, hifi_fastq, hic_r1, hic_r2 ->
             tuple(sample_id, hic_r1, hic_r2)
         }
     )
-    
-    MULTIQC_HIC(
-        FASTQC_HIC.out.collect()
-    )
-    */
     /*
     ========================================================================================
         STEP 3: QC HiFi Reads
