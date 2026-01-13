@@ -134,7 +134,7 @@ workflow {
     ========================================================================================
     */
     HIC_QC(
-        ch_fastq_all.map { sample_id, hifi_fastq, hic_r1, hic_r2 ->
+        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
             tuple(sample_id, hic_r1, hic_r2)
         }
     )
