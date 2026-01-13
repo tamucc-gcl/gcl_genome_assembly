@@ -116,6 +116,7 @@ workflow {
         }
         .set { ch_fastq_all }
 
+    // Debug: Print all channel contents
     ch_fastq_all.view { sample_id, hifi_fastq, hic_r1, hic_r2 ->
         """
         ========================================
