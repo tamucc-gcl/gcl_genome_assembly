@@ -21,13 +21,13 @@ workflow HIFI_QC {
     
     // Aggregate all FastQC reports with MultiQC
     // Extract just the zip files from the tuples
-    MULTIQC_HIC(
+    MULTIQC_HIFI(
         FASTQC_HIFI.out.fastqc_zip.map { sample_id, zips -> zips }.collect()
     )
     
     emit:
     fastqc_html = FASTQC_HIFI.out.fastqc_html
     fastqc_zip = FASTQC_HIFI.out.fastqc_zip
-    multiqc_report = MULTIQC_HIC.out.report
-    multiqc_data = MULTIQC_HIC.out.data
+    multiqc_report = MULTIQC_HIFI.out.report
+    multiqc_data = MULTIQC_HIFI.out.data
 }
