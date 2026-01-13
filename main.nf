@@ -44,6 +44,12 @@ if (!params.sample_sheet) {
 
 /*
 ========================================================================================
+    IMPORT WORKFLOWS
+========================================================================================
+*/
+include { HIC_QC } from './workflows/hic_qc.nf'
+/*
+========================================================================================
     IMPORT MODULES
 ========================================================================================
 */
@@ -52,8 +58,6 @@ include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 
 /*
-include { FASTQC_HIC } from './modules/fastqc_hic.nf'
-include { MULTIQC_HIC } from './modules/multiqc_hic.nf'
 include { FASTQC_HIFI } from './modules/fastqc_hifi.nf'
 include { MULTIQC_HIFI } from './modules/multiqc_hifi.nf'
 
