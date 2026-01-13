@@ -25,6 +25,8 @@ workflow HIC_QC {
     )
     
     emit:
-    fastqc_results = FASTQC_HIC.out
-    multiqc_report = MULTIQC_HIC.out
+    fastqc_html = FASTQC_HIC.out.fastqc_html
+    fastqc_zip = FASTQC_HIC.out.fastqc_zip
+    multiqc_report = MULTIQC_HIC.out.report
+    multiqc_data = MULTIQC_HIC.out.data
 }
