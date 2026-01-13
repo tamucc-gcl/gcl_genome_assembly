@@ -9,6 +9,8 @@
         - hifi_bam: Path to HiFi BAM file
         - hic_r1: Path to Hi-C R1 FASTQ file
         - hic_r2: Path to Hi-C R2 FASTQ file
+    
+    Rows with missing information are skipped and logged
 ========================================================================================
 */
 
@@ -18,24 +20,36 @@ def parseSampleSheet(sample_sheet_path) {
         .fromPath(sample_sheet_path, checkIfExists: true)
         .splitCsv(header: true, strip: true)
         .map { row ->
-            // Validate required columns exist
-            if (!row.sample_id) {
-                error "Missing 'sample_id' column in sample sheet"
-            }
-            if (!row.hifi_bam) {
-                error "Missing 'hifi_bam' column in sample sheet for sample: ${row.sample_id}"
-            }
-            if (!row.hic_r1) {
-                error "Missing 'hic_r1' column in sample sheet for sample: ${row.sample_id}"
-            }
-            if (!row.hic_r2) {
-                error "Missing 'hic_r2' column in sample sheet for sample: ${row.sample_id}"
+            // Check for missing required columns
+            def missing = []
+            if (!row.sample_id) missing << "sample_id"
+            if (!row.hifi_bam) missing << "hifi_bam"
+            if (!row.hic_r1) missing << "hic_r1"
+            if (!row.hic_r2) missing << "hic_r2"
+            
+            // Skip row if any required fields are missing
+            if (missing.size() > 0) {
+                log.warn "Skipping sample '${row.sample_id ?: 'UNKNOWN'}': missing required field(s): ${missing.join(', ')}"
+                return null
             }
             
-            // Validate files exist
-            def hifi_bam = file(row.hifi_bam, checkIfExists: true)
-            def hic_r1 = file(row.hic_r1, checkIfExists: true)
-            def hic_r2 = file(row.hic_r2, checkIfExists: true)
+            // Check if files exist
+            def hifi_bam = file(row.hifi_bam)
+            def hic_r1 = file(row.hic_r1)
+            def hic_r2 = file(row.hic_r2)
+            
+            if (!hifi_bam.exists()) {
+                log.warn "Skipping sample '${row.sample_id}': hifi_bam file does not exist: ${row.hifi_bam}"
+                return null
+            }
+            if (!hic_r1.exists()) {
+                log.warn "Skipping sample '${row.sample_id}': hic_r1 file does not exist: ${row.hic_r1}"
+                return null
+            }
+            if (!hic_r2.exists()) {
+                log.warn "Skipping sample '${row.sample_id}': hic_r2 file does not exist: ${row.hic_r2}"
+                return null
+            }
             
             // Return tuple with validated data
             tuple(
@@ -45,4 +59,5 @@ def parseSampleSheet(sample_sheet_path) {
                 hic_r2
             )
         }
+        .filter { it != null }  // Remove null entries (skipped samples)
 }

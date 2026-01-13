@@ -31,6 +31,8 @@ log.info """\
 params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link' //change to copy at end
+params.busco_lineage = 'actinopterygii_odb10'
+params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
 
 /*
 ========================================================================================
@@ -57,6 +59,7 @@ include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
 include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 /*
 ========================================================================================
     IMPORT MODULES
@@ -187,44 +190,15 @@ workflow {
     
     HIFIASM(ch_fastq_all)
 
-    HIFIASM.out.assemblies
-    .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-        [
-            tuple("${sample_id}_hap1", hap1_fasta),
-            tuple("${sample_id}_hap2", hap2_fasta)
-        ]
-    }
-    .set { ch_assemblies }
-    
-    // Debug: Print all channel contents
-    ch_assemblies.view { haplotype_id, assembly_fasta ->
-        """
-        ========================================
-        Haplotype ID : ${haplotype_id}
-        Assembly     : ${assembly_fasta}
-        ========================================
-        """
-    }
-
     /*
     ========================================================================================
-        STEP 5: QC Assembled Genomes
+        STEP 9: QC Assembled Genomes
     ========================================================================================
     */
-    /*
-    // Hifiasm outputs phased assemblies (hap1 and hap2)
-    // Flatten to run QC on each haplotype independently
-    HIFIASM.out
-        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-            [
-                tuple("${sample_id}_hap1", hap1_fasta),
-                tuple("${sample_id}_hap2", hap2_fasta)
-            ]
-        }
-        .set { ch_assemblies }
-    
-    QC_ASSEMBLY(ch_assemblies)
-    */
+    ASSEMBLY_QC_INITIAL(
+        HIFIASM.out.assemblies,
+        BAM_TO_FASTQ.out
+    )
     /*
     ========================================================================================
         STEP 6: Scaffold with Hi-C
