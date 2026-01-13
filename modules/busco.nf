@@ -11,7 +11,7 @@ process BUSCO {
     tag "${haplotype_id}"
     label 'busco'
     
-    publishDir "${params.outdir}/${haplotype_id}/qc/assembly/busco", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly/busco", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly_fasta)

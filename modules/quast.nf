@@ -10,13 +10,13 @@ process QUAST {
     tag "${sample_id}"
     label 'quast'
     
-    publishDir "${params.outdir}/${sample_id}/qc/assembly/quast", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly/quast", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hap1_fasta), path(hap2_fasta)
     
     output:
-    tuple val(sample_id), path("quast_results"), emit: results
+    tuple val(sample_id), path("${sample_id}_quast"), emit: results
     
     script:
     """
@@ -25,13 +25,13 @@ process QUAST {
         ${hap2_fasta} \\
         --threads ${task.cpus} \\
         --labels ${sample_id}.hap1,${sample_id}.hap2 \\
-        --output-dir quast_results
+        --output-dir ${sample_id}_quast
     """
     
     stub:
     """
-    mkdir -p quast_results
-    touch quast_results/report.txt
-    touch quast_results/report.html
+    mkdir -p ${sample_id}_quast
+    touch ${sample_id}_quast/report.txt
+    touch ${sample_id}_quast/report.html
     """
 }

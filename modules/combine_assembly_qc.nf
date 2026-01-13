@@ -10,7 +10,7 @@ process COMBINE_ASSEMBLY_QC {
     tag "${sample_id}"
     label 'summarize_assembly'
     
-    publishDir "${params.outdir}/${sample_id}/qc/assembly/summary", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly/summary", mode: params.publish_dir_mode
     
     // Resource requirements
     cpus 4

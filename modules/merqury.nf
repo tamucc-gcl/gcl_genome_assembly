@@ -10,7 +10,7 @@ process MERQURY {
     tag "${sample_id}"
     label 'merqury'
     
-    publishDir "${params.outdir}/${sample_id}/qc/assembly/merqury", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly/merqury", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hap1_fasta), path(hap2_fasta), path(hifi_fastq)
