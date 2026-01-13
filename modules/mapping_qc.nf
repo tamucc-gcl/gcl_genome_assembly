@@ -42,9 +42,9 @@ process MAPPING_QC {
     samtools coverage ${haplotype_id}.sorted.bam > ${haplotype_id}_mapping_stats/coverage.txt
     
     # Calculate average depth
-    awk 'NR==1{next} $1!="*"{
-        L = $3 - $2 + 1
-        sum += $7 * L
+    awk 'NR==1{next} \$1!="*"{
+        L = \$3 - \$2 + 1
+        sum += \$7 * L
         len += L
         } END {
         print sum / len
