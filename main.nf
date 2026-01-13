@@ -65,12 +65,9 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
+include { HIFIASM } from './modules/hifiasm.nf'
 
 /*
-include { FASTQC_HIFI } from './modules/fastqc_hifi.nf'
-include { MULTIQC_HIFI } from './modules/multiqc_hifi.nf'
-
-include { HIFIASM } from './modules/hifiasm.nf'
 include { QC_ASSEMBLY } from './modules/qc_assembly.nf'
 include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
 include { QC_SCAFFOLDS } from './modules/qc_scaffolds.nf'
@@ -182,16 +179,33 @@ workflow {
         """
     }
 
-
-
     /*
     ========================================================================================
-        STEP 4: Assemble with Hifiasm
+        STEP 8: Assemble with Hifiasm
     ========================================================================================
     */
-    /*
+    
     HIFIASM(ch_fastq_all)
-    */
+
+    HIFIASM.out.assemblies
+    .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+        [
+            tuple("${sample_id}_hap1", hap1_fasta),
+            tuple("${sample_id}_hap2", hap2_fasta)
+        ]
+    }
+    .set { ch_assemblies }
+    
+    // Debug: Print all channel contents
+    ch_assemblies.view { haplotype_id, assembly_fasta ->
+        """
+        ========================================
+        Haplotype ID : ${haplotype_id}
+        Assembly     : ${assembly_fasta}
+        ========================================
+        """
+    }
+
     /*
     ========================================================================================
         STEP 5: QC Assembled Genomes
