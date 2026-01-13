@@ -54,7 +54,8 @@ include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
     IMPORT WORKFLOWS
 ========================================================================================
 */
-include { HIC_QC } from './workflows/hic_qc.nf'
+include { HIC_QC_RAW } from './workflows/hic_qc.nf'
+include { HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 /*
 ========================================================================================
@@ -63,6 +64,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 */
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
+include { TRIM_HIC } from './modules/trim_hic.nf'
 
 /*
 include { FASTQC_HIFI } from './modules/fastqc_hifi.nf'
@@ -111,15 +113,60 @@ workflow {
             tuple(sample_id, hifi_bam)
         }
     )
+
+    /*
+    ========================================================================================
+        STEP 2: QC Raw Hi-C Reads
+    ========================================================================================
+    */
+    HIC_QC_RAW(
+        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
+            tuple(sample_id, hic_r1, hic_r2)
+        },
+        "raw"
+    )
+
     
-    // Combine HiFi FASTQ with Hi-C reads
-    ch_input
-        .map { sample_id, hifi_bam, hic_r1, hic_r2 ->
+    /*
+    ========================================================================================
+        STEP 3: Trim Hi-C Reads
+    ========================================================================================
+    */
+    TRIM_HIC(
+        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
             tuple(sample_id, hic_r1, hic_r2)
         }
+    )
+    
+
+    /*
+    ========================================================================================
+        STEP 5: QC Trimmed Hi-C Reads
+    ========================================================================================
+    */
+    HIC_QC_TRIMMED(
+        TRIM_HIC.out.trimmed_reads,
+        "trimmed"
+    )
+    
+    /*
+    ========================================================================================
+        STEP 6: QC HiFi Reads - runs after converting BAM -> FASTQ
+    ========================================================================================
+    */
+    HIFI_QC(
+        BAM_TO_FASTQ.out
+    )
+
+    /*
+    ========================================================================================
+        STEP 7: Combine HiFi FASTQ with trimmed Hi-C reads
+    ========================================================================================
+    */
+    TRIM_HIC.out.trimmed_reads
         .join(BAM_TO_FASTQ.out)
-        .map { sample_id, hic_r1, hic_r2, hifi_fastq ->
-            tuple(sample_id, hifi_fastq, hic_r1, hic_r2)
+        .map { sample_id, hic_r1_trim, hic_r2_trim, hifi_fastq ->
+            tuple(sample_id, hifi_fastq, hic_r1_trim, hic_r2_trim)
         }
         .set { ch_fastq_all }
 
@@ -135,26 +182,8 @@ workflow {
         """
     }
 
-    /*
-    ========================================================================================
-        STEP 2: QC Raw Hi-C Reads
-    ========================================================================================
-    */
-    HIC_QC(
-        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
-            tuple(sample_id, hic_r1, hic_r2)
-        }
-    )
-    /*
-    ========================================================================================
-        STEP 3: QC HiFi Reads - runs after converting BAM -> FASTQ
-    ========================================================================================
-    */
-    HIFI_QC(
-        ch_fastq_all.map { sample_id, hifi_fastq, hic_r1, hic_r2 ->
-            tuple(sample_id, hifi_fastq)
-        }
-    )
+
+
     /*
     ========================================================================================
         STEP 4: Assemble with Hifiasm

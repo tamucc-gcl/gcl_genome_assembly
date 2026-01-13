@@ -14,15 +14,17 @@ include { MULTIQC_HIC } from '../modules/multiqc_hic'
 workflow HIC_QC {
     take:
     hic_reads  // channel: tuple(sample_id, hic_r1, hic_r2)
+    qc_label   // string: label for output directory (e.g., "raw" or "trimmed")
     
     main:
     // Run FastQC on each Hi-C read pair
-    FASTQC_HIC(hic_reads)
+    FASTQC_HIC(hic_reads, qc_label)
     
     // Aggregate all FastQC reports with MultiQC
     // Extract just the zip files from the tuples
     MULTIQC_HIC(
-        FASTQC_HIC.out.fastqc_zip.map { sample_id, zips -> zips }.collect()
+        FASTQC_HIC.out.fastqc_zip.map { sample_id, zips -> zips }.collect(),
+        qc_label
     )
     
     emit:
