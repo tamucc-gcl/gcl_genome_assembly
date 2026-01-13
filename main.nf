@@ -30,7 +30,7 @@ log.info """\
 
 params.sample_sheet = null
 params.outdir = './results'
-params.publish_dir_mode = 'copy'
+params.publish_dir_mode = 'link' //change to copy at end
 
 /*
 ========================================================================================
@@ -49,9 +49,9 @@ if (!params.sample_sheet) {
 */
 
 include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
+include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 
 /*
-include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { FASTQC_HIC } from './modules/fastqc_hic.nf'
 include { MULTIQC_HIC } from './modules/multiqc_hic.nf'
 include { FASTQC_HIFI } from './modules/fastqc_hifi.nf'
@@ -94,7 +94,7 @@ workflow {
         STEP 1: Convert BAM to FASTQ
     ========================================================================================
     */
-    /*
+    
     BAM_TO_FASTQ(
         ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
             tuple(sample_id, hifi_bam)
@@ -111,8 +111,6 @@ workflow {
             tuple(sample_id, hifi_fastq, hic_r1, hic_r2)
         }
         .set { ch_fastq_all }
-    
-    /*
 
     /*
     ========================================================================================
