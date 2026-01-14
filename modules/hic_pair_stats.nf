@@ -141,7 +141,7 @@ EOF
         theme(axis.text.x = element_text(angle=45, hjust=1))
     
     # Plot 2: Insert size distribution (log scale)
-    insert_filtered <- insert_dist[insert_dist\\$insert_size < 1000000,]
+    insert_filtered <- insert_dist[insert_dist\$insert_size < 1000000,]
     p2 <- ggplot(insert_filtered, aes(x=insert_size, y=count)) +
         geom_line() +
         scale_x_log10() +
