@@ -77,7 +77,7 @@ process HIC_COVERAGE {
                       col.names=c("chr", "start", "end", "count", "bases", "length", "fraction"))
     
     # Calculate normalized coverage
-    cov\\$normalized_cov <- cov\\$count / (cov\\$length / 1000)  # reads per kb
+    cov\$normalized_cov <- cov\$count / (cov\$length / 1000)  # reads per kb
     
     # Get chromosome sizes for proper ordering
     chr_sizes <- cov %>% 
@@ -85,7 +85,7 @@ process HIC_COVERAGE {
         summarize(max_pos = max(end)) %>%
         arrange(desc(max_pos))
     
-    cov\\$chr <- factor(cov\\$chr, levels=chr_sizes\\$chr)
+    cov\$chr <- factor(cov\$chr, levels=chr_sizes\$chr)
     
     # Plot 1: Coverage across genome
     p1 <- ggplot(cov, aes(x=start/1e6, y=normalized_cov)) +
@@ -109,7 +109,7 @@ process HIC_COVERAGE {
     ggsave("${haplotype_id}_${qc_label}_coverage_distribution.png", p2, width=8, height=6, dpi=300)
     
     # Plot 3: Cumulative coverage
-    cov_sorted <- sort(cov\\$normalized_cov)
+    cov_sorted <- sort(cov\$normalized_cov)
     cumulative <- data.frame(
         coverage = cov_sorted,
         percentile = (1:length(cov_sorted)) / length(cov_sorted) * 100
@@ -120,10 +120,10 @@ process HIC_COVERAGE {
         theme_minimal() +
         labs(title=paste("Cumulative Hi-C Coverage (${qc_label})"),
              x="Normalized Coverage (reads/kb)", y="Percentile (%)") +
-        geom_vline(xintercept=median(cov\\$normalized_cov), 
+        geom_vline(xintercept=median(cov\$normalized_cov), 
                    linetype="dashed", color="red", alpha=0.7) +
-        annotate("text", x=median(cov\\$normalized_cov)*1.5, y=50, 
-                 label=paste("Median:", round(median(cov\\$normalized_cov), 2)))
+        annotate("text", x=median(cov\$normalized_cov)*1.5, y=50, 
+                 label=paste("Median:", round(median(cov\$normalized_cov), 2)))
     
     ggsave("${haplotype_id}_${qc_label}_coverage_cumulative.png", p3, width=8, height=6, dpi=300)
 RSCRIPT
