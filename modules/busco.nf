@@ -22,14 +22,6 @@ process BUSCO {
     script:
     def lineage = params.busco_lineage ?: "auto"
     """
-        # Decompress assemblies if needed
-    if [[ ${assembly_fasta} =~ \\.gz\$ ]]; then
-        pigz -dc ${assembly_fasta} > hap.fasta
-        hap_input="hap.fasta"
-    else
-        hap_input="${hap1_fasta}"
-    fi
-
     busco \\
         --in ${hap_input} \\
         --out ${haplotype_id}_busco \\

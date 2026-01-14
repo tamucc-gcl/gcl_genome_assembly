@@ -20,21 +20,6 @@ process MERQURY {
     
     script:
     """
-    # Decompress assemblies if needed
-    if [[ ${hap1_fasta} =~ \\.gz\$ ]]; then
-        pigz -dc ${hap1_fasta} > hap1.fasta
-        hap1_input="hap1.fasta"
-    else
-        hap1_input="${hap1_fasta}"
-    fi
-    
-    if [[ ${hap2_fasta} =~ \\.gz\$ ]]; then
-        pigz -dc ${hap2_fasta} > hap2.fasta
-        hap2_input="hap2.fasta"
-    else
-        hap2_input="${hap2_fasta}"
-    fi
-
     mkdir -p ${sample_id}_merqury
     cd ${sample_id}_merqury
     
