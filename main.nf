@@ -237,6 +237,7 @@ workflow {
         }
         .set { ch_hic_mapping_input }
     
+    /*
     // Debug: View the mapping input channel
     ch_hic_mapping_input.view { haplotype_id, fasta, hic_r1, hic_r2 ->
         """
@@ -248,7 +249,8 @@ workflow {
         ========================================
         """
     }
-    
+    */
+
     // Map Hi-C reads to assemblies
     MAP_HIC_TO_ASSEMBLY(ch_hic_mapping_input)
 
