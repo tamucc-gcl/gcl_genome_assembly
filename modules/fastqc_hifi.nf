@@ -11,7 +11,7 @@ process FASTQC_HIFI {
     label 'fastqc'
     
     //temporarily output
-    publishDir "${params.outdir}/${sample_id}/qc/hifi/fastqc", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/${sample_id}/qc/hifi/fastqc", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hifi_fastq)

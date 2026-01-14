@@ -6,7 +6,7 @@ nextflow.enable.dsl=2
 ========================================================================================
     Genome Assembly and Scaffolding Pipeline
 ========================================================================================
-    Author: Your Name
+    Author: Jason Selwyn
     Description: Pipeline for assembling and scaffolding genomes from HiFi and Hi-C reads
 ========================================================================================
 */
@@ -33,6 +33,9 @@ params.outdir = './results'
 params.publish_dir_mode = 'link' //change to copy at end
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
+params.hic_resolutions = "1000000,500000,100000,50000,10000"
+params.hic_coverage_window = 100000
+params.hic_min_mapq = 30  // Minimum mapping quality for valid Hi-C pairs
 
 /*
 ========================================================================================
@@ -60,6 +63,8 @@ include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
+include { HIC_MAPPING_QC as HIC_MAPPING_QC_RAW } from './workflows/hic_mapping_qc.nf'
+include { HIC_MAPPING_QC as HIC_MAPPING_QC_FILTERED } from './workflows/hic_mapping_qc.nf'
 /*
 ========================================================================================
     IMPORT MODULES
@@ -69,6 +74,8 @@ include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
+include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
+include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 
 /*
 include { QC_ASSEMBLY } from './modules/qc_assembly.nf'
@@ -203,6 +210,103 @@ workflow {
         HIFIASM.out.assemblies,
         BAM_TO_FASTQ.out
     )
+
+    /*
+    ========================================================================================
+        STEP 10: Map Hi-C to Contigs
+    ========================================================================================
+    */
+    // Split assemblies into individual haplotypes
+    HIFIASM.out.assemblies
+        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+            [
+                tuple("${sample_id}_hap1", sample_id, hap1_fasta),
+                tuple("${sample_id}_hap2", sample_id, hap2_fasta)
+            ]
+        }
+        .set { ch_individual_haplotypes }
+    
+    // Combine each haplotype with its corresponding trimmed Hi-C reads
+    ch_individual_haplotypes
+        .map { haplotype_id, sample_id, fasta ->
+            tuple(sample_id, haplotype_id, fasta)
+        }
+        .combine(TRIM_HIC.out.trimmed_reads, by: 0)
+        .map { sample_id, haplotype_id, fasta, hic_r1, hic_r2 ->
+            tuple(haplotype_id, fasta, hic_r1, hic_r2)
+        }
+        .set { ch_hic_mapping_input }
+    
+    // Debug: View the mapping input channel
+    ch_hic_mapping_input.view { haplotype_id, fasta, hic_r1, hic_r2 ->
+        """
+        ========================================
+        Haplotype ID : ${haplotype_id}
+        Assembly     : ${fasta}
+        Hi-C R1      : ${hic_r1}
+        Hi-C R2      : ${hic_r2}
+        ========================================
+        """
+    }
+    
+    // Map Hi-C reads to assemblies
+    MAP_HIC_TO_ASSEMBLY(ch_hic_mapping_input)
+
+    /*
+    ========================================================================================
+        STEP 11: Hi-C Mapping QC on Raw BAMs
+    ========================================================================================
+    */
+    
+    // Prepare raw BAM files channel (haplotype_id, bam, bai)
+    MAP_HIC_TO_ASSEMBLY.out.bam
+        .set { ch_raw_hic_bams }
+    
+    // Prepare assemblies channel (haplotype_id, assembly_fasta)
+    ch_individual_haplotypes
+        .map { haplotype_id, sample_id, fasta ->
+            tuple(haplotype_id, fasta)
+        }
+        .set { ch_assemblies_for_qc }
+    
+    // Run Hi-C mapping QC on raw BAMs
+    HIC_MAPPING_QC_RAW(
+        ch_raw_hic_bams,
+        ch_assemblies_for_qc,
+        "raw"
+    )
+
+    /*
+    ========================================================================================
+        STEP 12: Filter Hi-C BAM Files
+    ========================================================================================
+    */
+    
+    // Combine BAM files with assemblies for filtering
+    MAP_HIC_TO_ASSEMBLY.out.bam
+        .join(ch_assemblies_for_qc)
+        .set { ch_bam_with_assembly }
+    
+    // Filter BAM files to remove invalid pairs and duplicates
+    FILTER_HIC_BAM(ch_bam_with_assembly)
+
+    /*
+    ========================================================================================
+        STEP 13: Hi-C Mapping QC on Filtered BAMs
+    ========================================================================================
+    */
+    
+    // Prepare filtered BAM files channel (haplotype_id, bam, bai)
+    FILTER_HIC_BAM.out.bam
+        .set { ch_filtered_hic_bams }
+    
+    // Run Hi-C mapping QC on filtered BAMs
+    HIC_MAPPING_QC_FILTERED(
+        ch_filtered_hic_bams,
+        ch_assemblies_for_qc,
+        "filtered"
+    )
+
     /*
     ========================================================================================
         STEP 6: Scaffold with Hi-C

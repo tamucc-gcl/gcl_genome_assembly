@@ -23,7 +23,7 @@ process BUSCO {
     def lineage = params.busco_lineage ?: "auto"
     """
     busco \\
-        --in ${hap_input} \\
+        --in ${assembly_fasta} \\
         --out ${haplotype_id}_busco \\
         --mode genome \\
         --lineage_dataset ${lineage} \\
