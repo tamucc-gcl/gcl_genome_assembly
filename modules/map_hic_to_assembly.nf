@@ -33,7 +33,7 @@ process MAP_HIC_TO_ASSEMBLY {
     output:
     tuple val(haplotype_id),
           path("${haplotype_id}.hic.qname.bam"),
-          path("${haplotype_id}.hic.qname.bam.csi"),
+          //path("${haplotype_id}.hic.qname.bam.csi"),
           emit: bam
 
     tuple val(haplotype_id),
@@ -76,7 +76,7 @@ process MAP_HIC_TO_ASSEMBLY {
         -
 
     # CSI index works on unsorted BAMs
-    samtools index -@ ${task.cpus} -c ${haplotype_id}.hic.qname.bam
+    //samtools index -@ ${task.cpus} -c ${haplotype_id}.hic.qname.bam
 
     # -------------------------------------------------------------------------
     # 2) Mapping QC
@@ -89,7 +89,7 @@ process MAP_HIC_TO_ASSEMBLY {
     stub:
     """
     touch ${haplotype_id}.sorted.bam
-    touch ${haplotype_id}.sorted.bam.bai
+    //touch ${haplotype_id}.sorted.bam.bai
     touch ${haplotype_id}_mapping_stats.txt
     """
 }
