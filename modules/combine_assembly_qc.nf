@@ -37,20 +37,28 @@ process COMBINE_ASSEMBLY_QC {
     mkdir -p ${sample_id}_qc_inputs/busco
     mkdir -p ${sample_id}_qc_inputs/mapping
     
-    # Copy all inputs to organized directory structure
+    # Copy QUAST results
     cp -r ${quast_results}/* ${sample_id}_qc_inputs/quast/
-    cp -r ${merqury_results}/* ${sample_id}_qc_inputs/merqury/
     
-    # Copy BUSCO results with haplotype labels
+    # Copy only the MERQURY stats files (not the huge .meryl databases!)
+    cp ${merqury_results}/*.qv ${sample_id}_qc_inputs/merqury/ 2>/dev/null || true
+    cp ${merqury_results}/*.completeness.stats ${sample_id}_qc_inputs/merqury/ 2>/dev/null || true
+    cp ${merqury_results}/*.png ${sample_id}_qc_inputs/merqury/ 2>/dev/null || true
+    cp ${merqury_results}/*.hist ${sample_id}_qc_inputs/merqury/ 2>/dev/null || true
+    
+    # Copy BUSCO results - only the summary files
     for busco_dir in ${busco_results}; do
         busco_name=\$(basename \$busco_dir)
-        cp -r \$busco_dir ${sample_id}_qc_inputs/busco/
+        mkdir -p ${sample_id}_qc_inputs/busco/\$busco_name
+        cp \$busco_dir/short_summary.*.json ${sample_id}_qc_inputs/busco/\$busco_name/ 2>/dev/null || true
+        cp \$busco_dir/short_summary.*.txt ${sample_id}_qc_inputs/busco/\$busco_name/ 2>/dev/null || true
     done
     
-    # Copy mapping results with haplotype labels
+    # Copy mapping results - only the stats files
     for mapping_dir in ${mapping_results}; do
         mapping_name=\$(basename \$mapping_dir)
-        cp -r \$mapping_dir ${sample_id}_qc_inputs/mapping/
+        mkdir -p ${sample_id}_qc_inputs/mapping/\$mapping_name
+        cp \$mapping_dir/*.txt ${sample_id}_qc_inputs/mapping/\$mapping_name/
     done
     
     # Create a manifest file listing all inputs
