@@ -270,14 +270,16 @@ workflow {
             tuple(haplotype_id, fasta)
         }
         .set { ch_assemblies_for_qc }
-    
+
+    // comment out to skip QC on raw mapped bams instead of filtered bams
+    /*
     // Run Hi-C mapping QC on raw BAMs
     HIC_MAPPING_QC_RAW(
         ch_raw_hic_bams,
         ch_assemblies_for_qc,
         "raw"
     )
-
+    */
     /*
     ========================================================================================
         STEP 12: Filter Hi-C BAM Files
