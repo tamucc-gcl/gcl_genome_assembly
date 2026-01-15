@@ -43,7 +43,11 @@ params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
 params.yahs_min_contig_length = 10000
 params.yahs_min_mapq = 1
-params.yahs_resolution = 50000
+params.yahs_resolutions = '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
+params.yahs_rounds_per_resolution = null   // corresponds to -R if set
+params.yahs_enzyme = null                  // corresponds to -e if set
+params.yahs_no_contig_ec = true
+params.yahs_no_scaffold_ec = true
 
 /*
 ========================================================================================
@@ -84,10 +88,9 @@ include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
+include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
 
 /*
-include { QC_ASSEMBLY } from './modules/qc_assembly.nf'
-include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
 include { QC_SCAFFOLDS } from './modules/qc_scaffolds.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
 include { QC_FINAL } from './modules/qc_final.nf'
@@ -280,14 +283,14 @@ workflow {
         .set { ch_assemblies_for_qc }
 
     // comment out to skip QC on raw mapped bams instead of filtered bams
-    /*
+    
     // Run Hi-C mapping QC on raw BAMs
     HIC_MAPPING_QC_RAW(
         ch_raw_hic_bams,
         ch_assemblies_for_qc,
         "raw"
     )
-    */
+    
     /*
     ========================================================================================
         STEP 12: Filter Hi-C BAM Files
@@ -307,7 +310,7 @@ workflow {
         STEP 13: Hi-C Mapping QC on Filtered BAMs
     ========================================================================================
     */
-    /*
+    
     // Prepare filtered BAM files channel (haplotype_id, bam, bai)
     FILTER_HIC_BAM.out.bam
         .set { ch_filtered_hic_bams }
@@ -318,30 +321,20 @@ workflow {
         ch_assemblies_for_qc,
         "filtered"
     )
-    */
+    
     /*
     ========================================================================================
         STEP 6: Scaffold with Hi-C
     ========================================================================================
     */
-    /*
-    // Combine assemblies with Hi-C reads for scaffolding
-    HIFIASM.out
-        .join(
-            ch_fastq_all.map { sample_id, hifi_fastq, hic_r1, hic_r2 ->
-                tuple(sample_id, hic_r1, hic_r2)
-            }
-        )
-        .flatMap { sample_id, hap1_fasta, hap2_fasta, hic_r1, hic_r2 ->
-            [
-                tuple("${sample_id}_hap1", hap1_fasta, hic_r1, hic_r2),
-                tuple("${sample_id}_hap2", hap2_fasta, hic_r1, hic_r2)
-            ]
-        }
-        .set { ch_scaffold_input }
     
-    SCAFFOLD_HIC(ch_scaffold_input)
-    */
+    // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta)
+    FILTER_HIC_BAM.out.bam
+        .join(ch_assemblies_for_qc)
+        .set { ch_scaffolding_input }
+    
+    // Run Hi-C scaffolding
+    SCAFFOLD_HIC(ch_scaffolding_input)
     /*
     ========================================================================================
         STEP 7: QC Scaffolded Genomes
