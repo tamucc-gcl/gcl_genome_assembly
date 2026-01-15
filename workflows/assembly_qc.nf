@@ -125,10 +125,11 @@ workflow ASSEMBLY_QC {
     COMBINE_ASSEMBLY_QC(ch_all_qc)
     
     emit:
-    quast_results = QUAST.out.results
-    merqury_results = MERQURY.out.results
-    busco_results = BUSCO.out.results
-    mapping_results = MAPPING_QC.out.results
-    combined_report = COMBINE_ASSEMBLY_QC.out.report
-    combined_plots = COMBINE_ASSEMBLY_QC.out.plots
+    //quast_results = QUAST.out.results
+    //merqury_results = MERQURY.out.results
+    //busco_results = BUSCO.out.results
+    //mapping_results = MAPPING_QC.out.results
+    //combined_report = COMBINE_ASSEMBLY_QC.out.report
+    //combined_plots = COMBINE_ASSEMBLY_QC.out.plots
+    assembly_summary = COMBINE_ASSEMBLY_QC.out.summary
 }
