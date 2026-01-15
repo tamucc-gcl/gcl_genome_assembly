@@ -36,6 +36,9 @@ message("Sample ID:", sample_id, "\n")
 library(tidyverse)
 library(jsonlite)
 
+#### Debugging ####
+list.dirs(input_dir)
+list.files(input_dir, recursive = TRUE)
 
 #### Get Data ####
 quast_out <- file.path(input_dir, 'quast/transposed_report.tsv') %>%
