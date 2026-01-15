@@ -37,8 +37,8 @@ library(tidyverse)
 library(jsonlite)
 
 #### Debugging ####
-list.dirs(input_dir)
-list.files(input_dir, recursive = TRUE)
+#list.dirs(input_dir)
+#list.files(input_dir, recursive = TRUE)
 
 #### Get Data ####
 quast_out <- file.path(input_dir, 'quast/transposed_report.tsv') %>%
@@ -52,7 +52,7 @@ quast_out <- file.path(input_dir, 'quast/transposed_report.tsv') %>%
               values_from = value)
 
 busco_out <- list.files(file.path(input_dir, 'busco'),
-           pattern = 'short_summary.json',
+           pattern = 'short_summary.*json',
            recursive = TRUE, full.names = TRUE) %>%
   tibble(filepath  = .) %>%
   mutate(haplotype = str_extract(filepath, 'hap[0-9]')) %>%
