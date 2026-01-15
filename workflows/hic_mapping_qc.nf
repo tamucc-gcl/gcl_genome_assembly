@@ -15,11 +15,10 @@
 nextflow.enable.dsl = 2
 
 include { HIC_CONTACT_MAP } from '../modules/hic_contact_map.nf'
-/*
 include { HIC_PAIR_STATS } from '../modules/hic_pair_stats.nf'
 include { HIC_COVERAGE } from '../modules/hic_coverage.nf'
 include { COMBINE_HIC_MAPPING_QC } from '../modules/combine_hic_mapping_qc.nf'
-*/
+
 workflow HIC_MAPPING_QC {
     take:
     bam_files      // channel: tuple(haplotype_id, bam, bai)
