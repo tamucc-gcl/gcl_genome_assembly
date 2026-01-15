@@ -285,7 +285,7 @@ workflow {
         STEP 12: Filter Hi-C BAM Files
     ========================================================================================
     */
-    
+    /*
     // Combine BAM files with assemblies for filtering
     MAP_HIC_TO_ASSEMBLY.out.bam
         .join(ch_assemblies_for_qc)
@@ -293,13 +293,13 @@ workflow {
     
     // Filter BAM files to remove invalid pairs and duplicates
     FILTER_HIC_BAM(ch_bam_with_assembly)
-
+    */
     /*
     ========================================================================================
         STEP 13: Hi-C Mapping QC on Filtered BAMs
     ========================================================================================
     */
-    
+    /*
     // Prepare filtered BAM files channel (haplotype_id, bam, bai)
     FILTER_HIC_BAM.out.bam
         .set { ch_filtered_hic_bams }
@@ -310,7 +310,7 @@ workflow {
         ch_assemblies_for_qc,
         "filtered"
     )
-
+    */
     /*
     ========================================================================================
         STEP 6: Scaffold with Hi-C
