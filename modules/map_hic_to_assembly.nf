@@ -63,17 +63,16 @@ process MAP_HIC_TO_ASSEMBLY {
     # 1) Map Hi-C reads + collate by queryname
     #    samtools collate keeps mates together for pairtools
     # -------------------------------------------------------------------------
-    bwa-mem2 mem \\
-      -t ${task.cpus} \\
-      -5SP \\
-      ${extra_args} \\
-      ${assembly_fasta} \\
-      ${hic_r1} ${hic_r2} \\
-    | samtools view -@ ${task.cpus} -b - \\
-    | samtools collate \\
-        -@ ${task.cpus} \\
-        -O \\
-        -o ${haplotype_id}.hic.qname.bam \\
+    bwa-mem2 mem \
+    -t ${task.cpus} \
+    -5SP \
+    ${extra_args} \
+    ${assembly_fasta} \
+    ${hic_r1} ${hic_r2} \
+    | samtools view -@ ${task.cpus} -b - \
+    | samtools collate \
+        -@ ${task.cpus} \
+        -o ${haplotype_id}.hic.qname.bam \
         -
 
     # CSI index works on unsorted BAMs
