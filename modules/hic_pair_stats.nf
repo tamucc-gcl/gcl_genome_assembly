@@ -87,11 +87,17 @@ process HIC_PAIR_STATS {
     ' ${haplotype_id}_${qc_label}_pair_types.txt > ${haplotype_id}_${qc_label}_trans_cis_ratio.txt
     
     # Get insert size distribution for cis pairs
+    // Get insert size distribution for cis pairs
     samtools view -f 1 -F 256 ${bam} \\
         | awk '\$3 == \$7 && \$9 > 0 {print \$9}' \\
         | sort -n \\
         | uniq -c \\
         > ${haplotype_id}_${qc_label}_insert_size_dist.txt
+
+    # Check if insert size file is empty and create placeholder if needed
+    if [ ! -s ${haplotype_id}_${qc_label}_insert_size_dist.txt ]; then
+        echo "0 0" > ${haplotype_id}_${qc_label}_insert_size_dist.txt
+    fi
     
     # Create comprehensive summary
     cat > ${haplotype_id}_${qc_label}_pair_stats_summary.txt <<EOF
@@ -127,7 +133,12 @@ EOF
     pair_types <- read.table("${haplotype_id}_${qc_label}_pair_types.txt")
     colnames(pair_types) <- c("count", "type", "orientation")
     
-    insert_dist <- read.table("${haplotype_id}_${qc_label}_insert_size_dist.txt")
+    # Read insert size distribution - handle empty case
+    insert_dist <- tryCatch({
+        read.table("${haplotype_id}_${qc_label}_insert_size_dist.txt")
+    }, error = function(e) {
+        data.frame(count=numeric(0), insert_size=numeric(0))
+    })
     colnames(insert_dist) <- c("count", "insert_size")
     
     mapq_dist <- read.table("${haplotype_id}_${qc_label}_mapq_dist.txt")
@@ -141,13 +152,22 @@ EOF
         theme(axis.text.x = element_text(angle=45, hjust=1))
     
     # Plot 2: Insert size distribution (log scale)
-    insert_filtered <- insert_dist[insert_dist\$insert_size < 1000000,]
-    p2 <- ggplot(insert_filtered, aes(x=insert_size, y=count)) +
-        geom_line() +
-        scale_x_log10() +
-        theme_minimal() +
-        labs(title="Insert Size Distribution (${qc_label})", 
-             x="Insert Size (bp, log scale)", y="Count")
+    # Only plot if we have data
+    if(nrow(insert_dist) > 0 && insert_dist\$insert_size[1] > 0) {
+        insert_filtered <- insert_dist[insert_dist\$insert_size < 1000000,]
+        p2 <- ggplot(insert_filtered, aes(x=insert_size, y=count)) +
+            geom_line() +
+            scale_x_log10() +
+            theme_minimal() +
+            labs(title="Insert Size Distribution (${qc_label})", 
+                x="Insert Size (bp, log scale)", y="Count")
+    } else {
+        p2 <- ggplot() + 
+            annotate("text", x=0.5, y=0.5, 
+                    label="No insert size data available\n(expected for raw Hi-C BAMs)", 
+                    size=5) +
+            theme_void()
+    }
     
     # Plot 3: Mapping quality distribution
     p3 <- ggplot(mapq_dist, aes(x=mapq, y=count)) +
