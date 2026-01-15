@@ -33,9 +33,17 @@ params.outdir = './results'
 params.publish_dir_mode = 'link' //change to copy at end
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
-params.hic_resolutions = "1000000,500000,100000,50000,10000"
 params.hic_coverage_window = 100000
 params.hic_min_mapq = 30  // Minimum mapping quality for valid Hi-C pairs
+params.hic_resolutions = "1000000,500000,100000,50000,10000"
+params.hic_base_bin = "10000"
+params.hic_plot_resolutions = "1000000,500000,100000"
+params.hic_balance = false
+params.hic_min_mapq_raw = 30
+params.hic_min_mapq_filtered = 1
+params.yahs_min_contig_length = 10000
+params.yahs_min_mapq = 1
+params.yahs_resolution = 50000
 
 /*
 ========================================================================================

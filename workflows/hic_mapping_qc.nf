@@ -66,14 +66,14 @@ workflow HIC_MAPPING_QC {
         HI-C PAIR STATISTICS - Analyze pair types, orientations, distances
     ========================================================================================
     */
-    //HIC_PAIR_STATS(ch_bam_labeled)
+    HIC_PAIR_STATS(ch_bam_labeled)
     
     /*
     ========================================================================================
         HI-C COVERAGE - Calculate and visualize coverage across assemblies
     ========================================================================================
     */
-    //HIC_COVERAGE(ch_bam_with_assembly)
+    HIC_COVERAGE(ch_bam_with_assembly)
     
     /*
     ========================================================================================
@@ -81,7 +81,7 @@ workflow HIC_MAPPING_QC {
     ========================================================================================
     */
     // Group all QC results by haplotype and qc_label
-    /*
+    
     HIC_CONTACT_MAP.out.stats
         .join(HIC_PAIR_STATS.out.summary, by: [0, 1])
         .join(HIC_COVERAGE.out.stats, by: [0, 1])
@@ -91,13 +91,13 @@ workflow HIC_MAPPING_QC {
         .set { ch_all_hic_qc }
     
     COMBINE_HIC_MAPPING_QC(ch_all_hic_qc)
-    */
+    
     emit:
     contact_maps = HIC_CONTACT_MAP.out.contact_maps
     cool_files = HIC_CONTACT_MAP.out.cool
     mcool_files = HIC_CONTACT_MAP.out.mcool
-    //pair_stats = HIC_PAIR_STATS.out.summary
-    //coverage_stats = HIC_COVERAGE.out.stats
-    //combined_report = COMBINE_HIC_MAPPING_QC.out.report
-    //combined_summary = COMBINE_HIC_MAPPING_QC.out.summary
+    pair_stats = HIC_PAIR_STATS.out.summary
+    coverage_stats = HIC_COVERAGE.out.stats
+    combined_report = COMBINE_HIC_MAPPING_QC.out.report
+    combined_summary = COMBINE_HIC_MAPPING_QC.out.summary
 }
