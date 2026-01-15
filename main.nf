@@ -48,6 +48,7 @@ params.yahs_rounds_per_resolution = null   // corresponds to -R if set
 params.yahs_enzyme = null                  // corresponds to -e if set
 params.yahs_no_contig_ec = true
 params.yahs_no_scaffold_ec = true
+params.bwa_mem2_hic_args = null
 
 /*
 ========================================================================================

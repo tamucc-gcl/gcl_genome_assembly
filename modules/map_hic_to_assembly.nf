@@ -28,7 +28,7 @@ process MAP_HIC_TO_ASSEMBLY {
         mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(hic_r1), path(hic_r2), path(assembly_fasta)
+    tuple val(haplotype_id), path(assembly_fasta), path(hic_r1), path(hic_r2)
 
     output:
     tuple val(haplotype_id),
