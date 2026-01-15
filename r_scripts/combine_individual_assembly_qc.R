@@ -51,10 +51,10 @@ quast_out <- file.path(input_dir, 'quast/transposed_report.tsv') %>%
 busco_out <- list.files(file.path(input_dir, 'busco'),
            pattern = 'short_summary.json',
            recursive = TRUE, full.names = TRUE) %>%
-  tibble(file = .) %>%
-  mutate(haplotype = str_extract(file, 'hap[0-9]')) %>%
+  tibble(filepath  = .) %>%
+  mutate(haplotype = str_extract(filepath, 'hap[0-9]')) %>%
   rowwise(haplotype) %>%
-  reframe(read_json(file) %>%
+  reframe(read_json(filepath) %>%
             as_tibble() %>%
             select(complete = C,
                    single = S, 
