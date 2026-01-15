@@ -10,7 +10,7 @@ process MAPPING_QC {
     tag "${haplotype_id}"
     label 'mapping_qc'
     
-    publishDir "${params.outdir}/qc/assembly/mapping", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/qc/assembly/mapping", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly_fasta), path(hifi_fastq)

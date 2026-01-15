@@ -10,7 +10,7 @@ process COMBINE_ASSEMBLY_QC {
     tag "${sample_id}"
     label 'summarize_assembly'
     
-    publishDir "${params.outdir}/qc/assembly/summary", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly/", mode: params.publish_dir_mode
     
     // Resource requirements
     cpus 4
@@ -27,10 +27,7 @@ process COMBINE_ASSEMBLY_QC {
           path(mapping_results)
     
     output:
-    tuple val(sample_id), path("${sample_id}_assembly_qc_report.html"), emit: report
-    tuple val(sample_id), path("${sample_id}_qc_plots"), emit: plots
     tuple val(sample_id), path("${sample_id}_qc_summary.tsv"), emit: summary
-    tuple val(sample_id), path("${sample_id}_qc_inputs"), emit: inputs
     
     script:
     """
@@ -67,29 +64,17 @@ MAPPING_HAPLOTYPES: ${haplotype_ids_mapping.join(',')}
 MAPPING_DIRS: \$(ls -d ${sample_id}_qc_inputs/mapping/* | xargs -n1 basename | paste -sd,)
 EOF
     
-    # Placeholder outputs for R script
-    mkdir -p ${sample_id}_qc_plots
     
-    # Call R script (to be implemented)
-    # Rscript \${projectDir}/bin/combine_assembly_qc.R \\
-    #     --input_dir ${sample_id}_qc_inputs \\
-    #     --output_dir . \\
-    #     --sample_id ${sample_id}
-    
-    # Temporary placeholder outputs
-    touch ${sample_id}_assembly_qc_report.html
-    touch ${sample_id}_qc_plots/assembly_stats.pdf
-    touch ${sample_id}_qc_summary.tsv
+    # Call R script to join everything within a sample together
+    Rscript \${projectDir}/r_scripts/combine_assembly_qc.R \\
+        --input_dir ${sample_id}_qc_inputs \\
+        --output_dir . \\
+        --sample_id ${sample_id}
     """
     
     stub:
     """
     mkdir -p ${sample_id}_qc_inputs
-    mkdir -p ${sample_id}_qc_plots
-    touch ${sample_id}_assembly_qc_report.html
-    touch ${sample_id}_qc_plots/assembly_stats.pdf
-    touch ${sample_id}_qc_plots/busco_comparison.pdf
-    touch ${sample_id}_qc_plots/coverage_plot.pdf
     touch ${sample_id}_qc_summary.tsv
     """
 }
