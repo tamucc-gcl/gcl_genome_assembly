@@ -74,7 +74,7 @@ EOF
     
     
     # Call R script to join everything within a sample together
-    Rscript ${projectDir}/r_scripts/combine_assembly_qc.R \\
+    Rscript ${projectDir}/r_scripts/combine_individual_assembly_qc.R \\
         --input_dir ${sample_id}_qc_inputs \\
         --output_dir . \\
         --sample_id ${sample_id}
