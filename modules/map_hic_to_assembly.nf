@@ -11,7 +11,7 @@ process MAP_HIC_TO_ASSEMBLY {
     tag "${haplotype_id}"
     label 'map_hic'
     
-    publishDir "${params.outdir}/mapping/hic", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/mapping/hic/raw", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly_fasta), path(hic_r1), path(hic_r2)
