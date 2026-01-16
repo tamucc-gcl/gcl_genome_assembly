@@ -32,12 +32,12 @@ process MAP_HIC_TO_ASSEMBLY {
 
     output:
     tuple val(haplotype_id),
-          path("${haplotype_id}.hic.qname.bam"),
-          //path("${haplotype_id}.hic.qname.bam.csi"),
+          path("${haplotype_id}.sorted.bam"),
+          path("${haplotype_id}.sorted.bam.bai"),
           emit: bam
 
     tuple val(haplotype_id),
-          path("${haplotype_id}.hic_map_flagstat.txt"),
+          path("${haplotype_id}_mapping_stats.txt"),
           emit: stats
 
     script:
@@ -63,33 +63,26 @@ process MAP_HIC_TO_ASSEMBLY {
     # 1) Map Hi-C reads + collate by queryname
     #    samtools collate keeps mates together for pairtools
     # -------------------------------------------------------------------------
-    bwa-mem2 mem \
-    -t ${task.cpus} \
-    -5SP \
-    ${extra_args} \
-    ${assembly_fasta} \
-    ${hic_r1} ${hic_r2} \
+    bwa-mem2 mem -t ${task.cpus} -5SP ${extra_args} ${assembly_fasta} ${hic_r1} ${hic_r2} \
     | samtools view -@ ${task.cpus} -b - \
-    | samtools collate \
-        -@ ${task.cpus} \
-        -o ${haplotype_id}.hic.qname.bam \
-        -
+    | samtools sort -@ ${task.cpus} -o ${haplotype_id}.sorted.bam -
+    samtools index -@ ${task.cpus} ${haplotype_id}.sorted.bam
 
     # CSI index works on unsorted BAMs
-    //samtools index -@ ${task.cpus} -c ${haplotype_id}.hic.qname.bam
+    samtools index -@ ${task.cpus} -c ${haplotype_id}.sorted.bam
 
     # -------------------------------------------------------------------------
     # 2) Mapping QC
     # -------------------------------------------------------------------------
     samtools flagstat -@ ${task.cpus} \\
-      ${haplotype_id}.hic.qname.bam \\
-      > ${haplotype_id}.hic_map_flagstat.txt
+      ${haplotype_id}.sorted.bam \\
+      > ${haplotype_id}_mapping_stats.txt
     """
     
     stub:
     """
     touch ${haplotype_id}.sorted.bam
-    //touch ${haplotype_id}.sorted.bam.bai
+    touch ${haplotype_id}.sorted.bam.bai
     touch ${haplotype_id}_mapping_stats.txt
     """
 }

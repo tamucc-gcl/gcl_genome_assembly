@@ -53,15 +53,16 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    pairtools parse \\
-      --min-mapq \${MINQ} \\
-      --walks-policy 5unique \\
-      --max-inter-align-gap 30 \\
-      --chroms-path chrom.sizes \\
-      --output-stats ${haplotype_id}_parse_stats.txt \\
-      --nproc-in  ${task.cpus} \\
-      --nproc-out ${task.cpus} \\
-      ${bam} \\
+    samtools collate -@ ${task.cpus} -O -u ${bam} \\
+        pairtools parse \\
+        --min-mapq \${MINQ} \\
+        --walks-policy 5unique \\
+        --max-inter-align-gap 30 \\
+        --chroms-path chrom.sizes \\
+        --output-stats ${haplotype_id}_parse_stats.txt \\
+        --nproc-in  ${task.cpus} \\
+        --nproc-out ${task.cpus} \\
+        - \\
     | pairtools sort \\
         --nproc ${task.cpus} \\
         --tmpdir "\${TMPDIR}" \\
