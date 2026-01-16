@@ -64,7 +64,7 @@ process HIC_CONTACT_MAP {
     if [[ "${qc_label}" == "raw" ]]; then
       MINQ=${min_mapq_raw}
 
-      samtools collate -@ ${task.cpus} -O -u ${bam} \\
+      samtools collate -@ ${task.cpus} -O -u ${bam} | \\
         pairtools parse \\
             --min-mapq \${MINQ} \\
             --walks-policy 5unique \\
@@ -79,18 +79,18 @@ process HIC_CONTACT_MAP {
       | pairtools dedup --mark-dups \\
           --output-stats ${haplotype_id}_${qc_label}_dedup_stats.txt \\
       | pairtools split --output-pairs ${haplotype_id}_${qc_label}.pairs.gz
-
     else
       MINQ=${min_mapq_filtered}
 
-      pairtools parse \\
-        --min-mapq \${MINQ} \\
-        --walks-policy all \\
-        --chroms-path chrom.sizes \\
-        --output-stats ${haplotype_id}_${qc_label}_parse_stats.txt \\
-        --nproc-in  ${task.cpus} \\
-        --nproc-out ${task.cpus} \\
-        ${bam} \\
+      samtools collate -@ ${task.cpus} -O -u ${bam} | \\
+        pairtools parse \\
+          --min-mapq \${MINQ} \\
+          --walks-policy all \\
+          --chroms-path chrom.sizes \\
+          --output-stats ${haplotype_id}_${qc_label}_parse_stats.txt \\
+          --nproc-in  ${task.cpus} \\
+          --nproc-out ${task.cpus} \\
+          - \\
       | pairtools select '(pair_type == "UU")' \\
       | pairtools sort --nproc ${task.cpus} --tmpdir "\${TMPDIR}" \\
       | pairtools split --output-pairs ${haplotype_id}_${qc_label}.pairs.gz
