@@ -78,6 +78,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { HIC_MAPPING_QC as HIC_MAPPING_QC_RAW } from './workflows/hic_mapping_qc.nf'
 include { HIC_MAPPING_QC as HIC_MAPPING_QC_FILTERED } from './workflows/hic_mapping_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
 /*
 ========================================================================================
     IMPORT MODULES
@@ -341,9 +342,10 @@ workflow {
         STEP 7: QC Scaffolded Genomes
     ========================================================================================
     */
-    /*
-    QC_SCAFFOLDS(SCAFFOLD_HIC.out)
-    */
+    ASSEMBLY_QC_SCAFFOLD(
+        SCAFFOLD_HIC.out.scaffolds,
+        BAM_TO_FASTQ.out
+    )
     /*
     ========================================================================================
         STEP 8: Gap Filling and Finalization
