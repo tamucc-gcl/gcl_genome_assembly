@@ -24,7 +24,7 @@ process MAP_HIC_TO_ASSEMBLY {
     tag "${haplotype_id}"
     label 'map_hic'
 
-    publishDir "${params.outdir}/mapping/hic/raw/${haplotype_id}",
+    publishDir "${params.outdir}/mapping/hic/raw",
         mode: params.publish_dir_mode
 
     input:
