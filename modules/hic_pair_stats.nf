@@ -87,7 +87,6 @@ process HIC_PAIR_STATS {
     ' ${haplotype_id}_${qc_label}_pair_types.txt > ${haplotype_id}_${qc_label}_trans_cis_ratio.txt
     
     # Get insert size distribution for cis pairs
-    // Get insert size distribution for cis pairs
     samtools view -f 1 -F 256 ${bam} \\
         | awk '\$3 == \$7 && \$9 > 0 {print \$9}' \\
         | sort -n \\
