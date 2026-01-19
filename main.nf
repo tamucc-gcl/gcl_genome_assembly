@@ -342,8 +342,24 @@ workflow {
         STEP 15: QC Scaffolded Genomes
     ========================================================================================
     */
+    // Re-pair scaffolded haplotypes by sample
+    SCAFFOLD_HIC.out.scaffolds
+        .map { haplotype_id, scaffold ->
+            // Extract sample_id and haplotype number
+            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+            def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+            tuple(sample_id, hap_num, scaffold)
+        }
+        .groupTuple()
+        .map { sample_id, hap_nums, scaffolds ->
+            // Sort by haplotype number to ensure hap1, hap2 order
+            def sorted = [hap_nums, scaffolds].transpose().sort { it[0] }
+            tuple(sample_id, sorted[0][1], sorted[1][1])
+        }
+        .set { ch_scaffolds_paired }
+
     ASSEMBLY_QC_SCAFFOLD(
-        SCAFFOLD_HIC.out.scaffolds,
+        ch_scaffolds_paired,
         BAM_TO_FASTQ.out
     )
     /*
