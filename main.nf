@@ -221,7 +221,8 @@ workflow {
     */
     ASSEMBLY_QC_INITIAL(
         HIFIASM.out.assemblies,
-        BAM_TO_FASTQ.out
+        BAM_TO_FASTQ.out,
+        "contigs"
     )
 
     /*
@@ -360,7 +361,8 @@ workflow {
 
     ASSEMBLY_QC_SCAFFOLD(
         ch_scaffolds_paired,
-        BAM_TO_FASTQ.out
+        BAM_TO_FASTQ.out,
+        "scaffolds"
     )
     /*
     ========================================================================================
