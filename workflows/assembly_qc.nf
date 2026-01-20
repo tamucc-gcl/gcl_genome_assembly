@@ -23,6 +23,7 @@ workflow ASSEMBLY_QC {
     take:
     assemblies   // channel: tuple(sample_id, hap1_fasta, hap2_fasta)
     hifi_reads   // channel: tuple(sample_id, hifi_fastq)
+    qc_label    // value/channel: label for output subfolder (e.g. 'contig' or 'scaffold')
     
     main:
     
@@ -122,7 +123,21 @@ workflow ASSEMBLY_QC {
         .join(ch_mapping_by_sample)
         .set { ch_all_qc }
     
-    COMBINE_ASSEMBLY_QC(ch_all_qc)
+    // Attach qc_label to each sample so outputs go to separate folders
+    assemblies
+        .map { sample_id, hap1_fasta, hap2_fasta -> sample_id }
+        .combine(qc_label)
+        .map { sample_id, qc_label -> tuple(sample_id, qc_label) }
+        .set { ch_qc_label_by_sample }
+
+    ch_all_qc
+        .join(ch_qc_label_by_sample)
+        .map { sample_id, quast_results, merqury_results, haplotype_ids_busco, busco_results, haplotype_ids_mapping, mapping_results, qc_label ->
+            tuple(sample_id, qc_label, quast_results, merqury_results, haplotype_ids_busco, busco_results, haplotype_ids_mapping, mapping_results)
+        }
+        .set { ch_all_qc_labeled }
+
+    COMBINE_ASSEMBLY_QC(ch_all_qc_labeled)
     
     emit:
     //quast_results = QUAST.out.results
