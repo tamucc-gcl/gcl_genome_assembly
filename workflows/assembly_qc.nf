@@ -8,8 +8,6 @@
     - BUSCO: per-haplotype
     - MAPPING: per-haplotype (map HiFi reads back to assembly)
     - COMBINE_QC: aggregate and visualize all QC metrics
-    
-    Can process either initial contigs or scaffolded assemblies with appropriate labeling
 ========================================================================================
 */
 
@@ -25,27 +23,15 @@ workflow ASSEMBLY_QC {
     take:
     assemblies   // channel: tuple(sample_id, hap1_fasta, hap2_fasta)
     hifi_reads   // channel: tuple(sample_id, hifi_fastq)
-    qc_label     // string: "contigs" or "scaffolds"
     
     main:
-    
-    /*
-    ========================================================================================
-        Add QC label to assemblies for downstream processes
-    ========================================================================================
-    */
-    assemblies
-        .map { sample_id, hap1_fasta, hap2_fasta ->
-            tuple(sample_id, hap1_fasta, hap2_fasta, qc_label)
-        }
-        .set { ch_assemblies_labeled }
     
     /*
     ========================================================================================
         QUAST - Run on both haplotypes per sample
     ========================================================================================
     */
-    QUAST(ch_assemblies_labeled)
+    QUAST(assemblies)
     
     /*
     ========================================================================================
@@ -53,14 +39,7 @@ workflow ASSEMBLY_QC {
     ========================================================================================
     */
     MERQURY(
-        ch_assemblies_labeled
-            .map { sample_id, hap1_fasta, hap2_fasta, label ->
-                tuple(sample_id, hap1_fasta, hap2_fasta, label)
-            }
-            .join(hifi_reads)
-            .map { sample_id, hap1_fasta, hap2_fasta, label, hifi_fastq ->
-                tuple(sample_id, hap1_fasta, hap2_fasta, hifi_fastq, label)
-            }
+        assemblies.join(hifi_reads)
     )
     
     /*
@@ -68,11 +47,11 @@ workflow ASSEMBLY_QC {
         Split haplotypes for per-haplotype QC
     ========================================================================================
     */
-    ch_assemblies_labeled
-        .flatMap { sample_id, hap1_fasta, hap2_fasta, label ->
+    assemblies
+        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
             [
-                tuple("${sample_id}_hap1", sample_id, hap1_fasta, label),
-                tuple("${sample_id}_hap2", sample_id, hap2_fasta, label)
+                tuple("${sample_id}_hap1", sample_id, hap1_fasta),
+                tuple("${sample_id}_hap2", sample_id, hap2_fasta)
             ]
         }
         .set { ch_individual_haplotypes }
@@ -83,8 +62,8 @@ workflow ASSEMBLY_QC {
     ========================================================================================
     */
     BUSCO(
-        ch_individual_haplotypes.map { haplotype_id, sample_id, fasta, label ->
-            tuple(haplotype_id, fasta, label)
+        ch_individual_haplotypes.map { haplotype_id, sample_id, fasta ->
+            tuple(haplotype_id, fasta)
         }
     )
     
@@ -95,12 +74,12 @@ workflow ASSEMBLY_QC {
     */
     // Combine each haplotype with its corresponding HiFi reads
     ch_individual_haplotypes
-        .map { haplotype_id, sample_id, fasta, label ->
-            tuple(sample_id, haplotype_id, fasta, label)
+        .map { haplotype_id, sample_id, fasta ->
+            tuple(sample_id, haplotype_id, fasta)
         }
         .combine(hifi_reads, by: 0)
-        .map { sample_id, haplotype_id, fasta, label, hifi_fastq ->
-            tuple(haplotype_id, fasta, hifi_fastq, label)
+        .map { sample_id, haplotype_id, fasta, hifi_fastq ->
+            tuple(haplotype_id, fasta, hifi_fastq)
         }
         .set { ch_mapping_input }
     
@@ -113,38 +92,44 @@ workflow ASSEMBLY_QC {
     */
     // Collect all QC outputs by sample
     QUAST.out.results
-        .map { sample_id, results, label -> tuple(sample_id, label, results) }
+        .map { sample_id, results -> tuple(sample_id, results) }
         .set { ch_quast_by_sample }
     
     MERQURY.out.results
-        .map { sample_id, results, label -> tuple(sample_id, label, results) }
+        .map { sample_id, results -> tuple(sample_id, results) }
         .set { ch_merqury_by_sample }
     
     BUSCO.out.results
-        .map { haplotype_id, results, label -> 
+        .map { haplotype_id, results -> 
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            tuple(sample_id, label, haplotype_id, results)
+            tuple(sample_id, haplotype_id, results)
         }
-        .groupTuple(by: [0, 1])
+        .groupTuple()
         .set { ch_busco_by_sample }
     
     MAPPING_QC.out.results
-        .map { haplotype_id, results, label ->
+        .map { haplotype_id, results ->
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            tuple(sample_id, label, haplotype_id, results)
+            tuple(sample_id, haplotype_id, results)
         }
-        .groupTuple(by: [0, 1])
+        .groupTuple()
         .set { ch_mapping_by_sample }
     
-    // Combine all QC results per sample and label
+    // Combine all QC results per sample
     ch_quast_by_sample
-        .join(ch_merqury_by_sample, by: [0, 1])
-        .join(ch_busco_by_sample, by: [0, 1])
-        .join(ch_mapping_by_sample, by: [0, 1])
+        .join(ch_merqury_by_sample)
+        .join(ch_busco_by_sample)
+        .join(ch_mapping_by_sample)
         .set { ch_all_qc }
     
     COMBINE_ASSEMBLY_QC(ch_all_qc)
     
     emit:
+    //quast_results = QUAST.out.results
+    //merqury_results = MERQURY.out.results
+    //busco_results = BUSCO.out.results
+    //mapping_results = MAPPING_QC.out.results
+    //combined_report = COMBINE_ASSEMBLY_QC.out.report
+    //combined_plots = COMBINE_ASSEMBLY_QC.out.plots
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary
 }

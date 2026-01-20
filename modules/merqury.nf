@@ -7,16 +7,16 @@
 */
 
 process MERQURY {
-    tag "${sample_id}_${qc_label}"
+    tag "${sample_id}"
     label 'merqury'
     
-    //publishDir "${params.outdir}/qc/assembly/${qc_label}/merqury", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/qc/assembly/merqury", mode: params.publish_dir_mode
     
     input:
-    tuple val(sample_id), path(hap1_fasta), path(hap2_fasta), path(hifi_fastq), val(qc_label)
+    tuple val(sample_id), path(hap1_fasta), path(hap2_fasta), path(hifi_fastq)
     
     output:
-    tuple val(sample_id), path("${sample_id}_merqury"), val(qc_label), emit: results
+    tuple val(sample_id), path("${sample_id}_merqury"), emit: results
     
     script:
     """

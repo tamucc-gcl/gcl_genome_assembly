@@ -8,16 +8,16 @@
 */
 
 process BUSCO {
-    tag "${haplotype_id}_${qc_label}"
+    tag "${haplotype_id}"
     label 'busco'
     
-    //publishDir "${params.outdir}/qc/assembly/${qc_label}/busco", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/qc/assembly/busco", mode: params.publish_dir_mode
     
     input:
-    tuple val(haplotype_id), path(assembly_fasta), val(qc_label)
+    tuple val(haplotype_id), path(assembly_fasta)
     
     output:
-    tuple val(haplotype_id), path("${haplotype_id}_busco"), val(qc_label), emit: results
+    tuple val(haplotype_id), path("${haplotype_id}_busco"), emit: results
     
     script:
     def lineage = params.busco_lineage ?: "auto"

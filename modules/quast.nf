@@ -7,16 +7,16 @@
 */
 
 process QUAST {
-    tag "${sample_id}_${qc_label}"
+    tag "${sample_id}"
     label 'quast'
     
-    //publishDir "${params.outdir}/qc/assembly/${qc_label}/quast", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/qc/assembly/quast", mode: params.publish_dir_mode
     
     input:
-    tuple val(sample_id), path(hap1_fasta), path(hap2_fasta), val(qc_label)
+    tuple val(sample_id), path(hap1_fasta), path(hap2_fasta)
     
     output:
-    tuple val(sample_id), path("${sample_id}_quast"), val(qc_label), emit: results
+    tuple val(sample_id), path("${sample_id}_quast"), emit: results
     
     script:
     """

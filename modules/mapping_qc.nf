@@ -7,16 +7,16 @@
 */
 
 process MAPPING_QC {
-    tag "${haplotype_id}_${qc_label}"
+    tag "${haplotype_id}"
     label 'mapping_qc'
     
-    //publishDir "${params.outdir}/qc/assembly/${qc_label}/mapping", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/qc/assembly/mapping", mode: params.publish_dir_mode
     
     input:
-    tuple val(haplotype_id), path(assembly_fasta), path(hifi_fastq), val(qc_label)
+    tuple val(haplotype_id), path(assembly_fasta), path(hifi_fastq)
     
     output:
-    tuple val(haplotype_id), path("${haplotype_id}_mapping_stats"), val(qc_label), emit: results
+    tuple val(haplotype_id), path("${haplotype_id}_mapping_stats"), emit: results
     
     script:
     """
