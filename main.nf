@@ -313,34 +313,27 @@ workflow {
     
     /*
     ========================================================================================
-        STEP 13: Hi-C Mapping QC on Filtered BAMs
+        STEP 13: Scaffold with Hi-C
     ========================================================================================
     */
-    
-    // Prepare filtered BAM files channel (haplotype_id, bam, bai)
-    FILTER_HIC_BAM.out.bam
-        .set { ch_filtered_hic_bams }
-    
-    // Run Hi-C mapping QC on filtered BAMs
-        Channel.empty()
 
-    // Capture filtered pairs.gz (contig coordinates) for downstream scaffold-coordinate QC
-    HIC_MAPPING_QC_FILTERED.out.pairs
-        .set { ch_filtered_hic_pairs }
-    
-    /*
-    ========================================================================================
-        STEP 14: Scaffold with Hi-C
-    ========================================================================================
-    */
-    
     // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta)
     FILTER_HIC_BAM.out.bam
         .join(ch_assemblies_for_qc)
         .set { ch_scaffolding_input }
-    
+
     // Run Hi-C scaffolding
     SCAFFOLD_HIC(ch_scaffolding_input)
+
+    /*
+    ========================================================================================
+        STEP 14: Hi-C Mapping QC on Filtered BAMs (includes scaffold liftover QC)
+    ========================================================================================
+    */
+
+    // Prepare filtered BAM files channel (haplotype_id, bam, bai)
+    FILTER_HIC_BAM.out.bam
+        .set { ch_filtered_hic_bams }
 
     // Run Hi-C mapping QC on filtered BAMs (contig coordinates + scaffold liftover QC, no remapping)
     // Note: scaffold QC runs only if scaffold_assemblies and scaffold_agp are provided.
@@ -351,8 +344,6 @@ workflow {
         SCAFFOLD_HIC.out.scaffolds,
         SCAFFOLD_HIC.out.agp
     )
-
-
 
     /*
     ========================================================================================
