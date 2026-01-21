@@ -179,42 +179,42 @@ process HIC_COVERAGE_FROM_PAIRS {
     samtools faidx ${assembly_fasta}
 
     # Create windows across the genome
-    bedtools makewindows \
-        -g ${assembly_fasta}.fai \
-        -w ${window_size} \
+    bedtools makewindows \\
+        -g ${assembly_fasta}.fai \\
+        -w ${window_size} \\
         > windows.bed
 
     # Build a BED of read-ends from pairs (both ends)
-    zcat ${pairs_gz} \
+    zcat ${pairs_gz} \\
       | awk 'BEGIN{OFS="\\t"} /^#/ {next} {
           # end1
-          s1=\$3-1; if (s1<0) s1=0
-          print \$2, s1, \$3
+          s1=\\\$3-1; if (s1<0) s1=0
+          print \\\$2, s1, \\\$3
           # end2
-          s2=\$5-1; if (s2<0) s2=0
-          print \$4, s2, \$5
-        }' \
-      | sort -k1,1 -k2,2n \
+          s2=\\\$5-1; if (s2<0) s2=0
+          print \\\$4, s2, \\\$5
+        }' \\
+      | sort -k1,1 -k2,2n \\
       > ends.bed
 
     # Calculate coverage per window
-    bedtools coverage \
-        -a windows.bed \
-        -b ends.bed \
-        -sorted \
+    bedtools coverage \\
+        -a windows.bed \\
+        -b ends.bed \\
+        -sorted \\
         > ${haplotype_id}_${qc_label}_coverage.txt
 
     # Generate bedgraph for visualization (window counts)
-    awk 'BEGIN{OFS="\\t"} {print \$1, \$2, \$3, \$4}' ${haplotype_id}_${qc_label}_coverage.txt \
+    awk 'BEGIN{OFS="\\t"} {print \\\$1, \\\$2, \\\$3, \\\$4}' ${haplotype_id}_${qc_label}_coverage.txt \\
       > ${haplotype_id}_${qc_label}.bedgraph
 
     # Calculate coverage statistics
     awk '{
         count++
-        sum += \$4
-        if (count == 1 || \$4 < min) min = \$4
-        if (count == 1 || \$4 > max) max = \$4
-        cov[\$4]++
+        sum += \\\$4
+        if (count == 1 || \\\$4 < min) min = \\\$4
+        if (count == 1 || \\\$4 > max) max = \\\$4
+        cov[\\\$4]++
     } END {
         mean = sum / count
         print "Input Type: pairs.gz (no remapping)"
@@ -238,7 +238,7 @@ process HIC_COVERAGE_FROM_PAIRS {
                       col.names=c("chr", "start", "end", "count", "bases", "length", "fraction"))
 
     # Calculate normalized coverage
-    cov$normalized_cov <- cov$count / (cov$length / 1000)  # reads per kb
+    cov\$normalized_cov <- cov\$count / (cov\$length / 1000)  # reads per kb
 
     # Get chromosome sizes for proper ordering
     chr_sizes <- cov %>% 
@@ -246,7 +246,7 @@ process HIC_COVERAGE_FROM_PAIRS {
         summarize(max_end = max(end)) %>%
         arrange(desc(max_end))
 
-    cov$chr <- factor(cov$chr, levels=chr_sizes$chr)
+    cov\$chr <- factor(cov\$chr, levels=chr_sizes\$chr)
 
     # Plot 1: Coverage distribution histogram
     p1 <- ggplot(cov, aes(x=normalized_cov)) +
