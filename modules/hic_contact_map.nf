@@ -175,6 +175,10 @@ process HIC_CONTACT_MAP {
     This variant allows reusing an existing pairs.gz (e.g., lifted to scaffold coordinates)
     without remapping or re-parsing a BAM.
 
+    Key feature: Optionally filters to major scaffolds only for cleaner visualization
+    - Set params.scaffold_min_size to filter (e.g., 10000000 for scaffolds >10 Mb)
+    - Set to 0 or null to include all scaffolds
+
     Note: The plotting/stats steps are intentionally kept consistent with HIC_CONTACT_MAP.
 ========================================================================================
 */
@@ -200,6 +204,7 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     def base_bin            = (params.hic_base_bin ?: "10000").toString()
     def plot_resolutions    = (params.hic_plot_resolutions ?: "1000000,500000,100000").toString()
     def do_balance          = (params.hic_balance ?: false) as boolean
+    def min_scaffold_size   = params.scaffold_min_size ?: 0  // 0 = include all scaffolds
     
     """
     set -euo pipefail
@@ -215,7 +220,42 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     if [ ! -s "${assembly_fasta}.fai" ]; then
       samtools faidx ${assembly_fasta}
     fi
-    cut -f1,2 ${assembly_fasta}.fai > chrom.sizes
+    cut -f1,2 ${assembly_fasta}.fai > all_chrom.sizes
+
+    # -------------------------------------------------------------------------
+    # 1b) Optional: Filter to major scaffolds only (for cleaner visualization)
+    # -------------------------------------------------------------------------
+    MIN_SIZE=${min_scaffold_size}
+    
+    if [[ \${MIN_SIZE} -gt 0 ]]; then
+      echo "[HIC_CONTACT_MAP_FROM_PAIRS] Filtering to scaffolds >= \${MIN_SIZE} bp"
+      
+      # Create filtered chromosome sizes (major scaffolds only)
+      awk -v min=\${MIN_SIZE} '\$2 >= min {print \$1"\\t"\$2}' all_chrom.sizes > chrom.sizes
+      
+      # Count filtered scaffolds
+      TOTAL_SCAFFOLDS=\$(wc -l < all_chrom.sizes)
+      MAJOR_SCAFFOLDS=\$(wc -l < chrom.sizes)
+      echo "[HIC_CONTACT_MAP_FROM_PAIRS] Using \${MAJOR_SCAFFOLDS} of \${TOTAL_SCAFFOLDS} scaffolds (>= \${MIN_SIZE} bp)"
+      
+      # Build chromosome lookup for filtering pairs
+      awk '{print \$1}' chrom.sizes > major_scaffolds.txt
+      
+      # Filter pairs.gz to only include major scaffolds
+      zcat ${pairs_gz} \\
+        | awk 'BEGIN{
+                 while((getline < "major_scaffolds.txt") > 0) chr[\$1]=1
+               }
+               /^#/ {print; next}
+               chr[\$2] && chr[\$4] {print}' \\
+        | bgzip -c > filtered.pairs.gz
+      
+      PAIRS_TO_USE="filtered.pairs.gz"
+    else
+      echo "[HIC_CONTACT_MAP_FROM_PAIRS] Using all scaffolds (no size filter)"
+      cp all_chrom.sizes chrom.sizes
+      PAIRS_TO_USE="${pairs_gz}"
+    fi
 
     # -------------------------------------------------------------------------
     # 2) pairs.gz -> .cool at base resolution
@@ -223,7 +263,7 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     cooler cload pairs \\
       -c1 2 -p1 3 -c2 4 -p2 5 \\
       chrom.sizes:${base_bin} \\
-      ${pairs_gz} \\
+      \${PAIRS_TO_USE} \\
       ${haplotype_id}_${qc_label}.cool
 
     # -------------------------------------------------------------------------
@@ -268,6 +308,15 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
       echo "pairs.gz: ${pairs_gz}"
       echo "assembly_fasta: ${assembly_fasta}"
       echo
+      if [[ \${MIN_SIZE} -gt 0 ]]; then
+        echo "=== Scaffold Filtering ==="
+        echo "Minimum scaffold size: \${MIN_SIZE} bp"
+        echo "Total scaffolds in assembly: \${TOTAL_SCAFFOLDS}"
+        echo "Major scaffolds used for visualization: \${MAJOR_SCAFFOLDS}"
+        echo "Filtered scaffolds:"
+        cat chrom.sizes
+        echo
+      fi
       echo "=== Cooler info (.cool) ==="
       cooler info ${haplotype_id}_${qc_label}.cool
       echo

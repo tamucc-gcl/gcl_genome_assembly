@@ -62,6 +62,7 @@ params.yahs_enzyme = null                  // corresponds to -e if set
 params.yahs_no_contig_ec = true
 params.yahs_no_scaffold_ec = true
 params.bwa_mem2_hic_args = null
+params.scaffold_min_size = 10000000  // Only plot scaffolds >10 Mb
 
 // Decontamination parameters
 params.db_base = "/work/birdlab/databases"
