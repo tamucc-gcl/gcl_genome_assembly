@@ -65,7 +65,7 @@ workflow DECONTAMINATE_ASSEMBLY {
         .map { haplotype_id, assembly_fasta, gxdb ->
             tuple(assembly_fasta,
                   params.decon?.source_taxid ?: 7898,
-                  gxdb
+                  gxdb)
         }
         .set { ch_screen_input }
     
