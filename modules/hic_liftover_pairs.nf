@@ -24,7 +24,7 @@ process HIC_LIFTOVER_PAIRS {
     tag "${haplotype_id}_${qc_label}"
     label 'hic_liftover_pairs'
 
-    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/${haplotype_id}/liftover", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/liftover", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id), val(qc_label), path(pairs_gz), path(scaffold_agp), path(scaffold_fasta)

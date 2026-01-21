@@ -23,7 +23,7 @@ process FILTER_HIC_BAM {
     tag "${haplotype_id}"
     label 'filter_hic_bam'
 
-    publishDir "${params.outdir}/mapping/hic/filtered", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/bam/hic/filtered", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id), path(bam), path(bai), path(assembly_fasta)

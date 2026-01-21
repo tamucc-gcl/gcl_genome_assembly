@@ -18,7 +18,7 @@ process HIC_CONTACT_MAP {
     tag "${haplotype_id}_${qc_label}"
     label 'hic_contact_map'
 
-    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/${haplotype_id}/contact_maps",
+    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/contact_maps",
         mode: params.publish_dir_mode
 
     input:
