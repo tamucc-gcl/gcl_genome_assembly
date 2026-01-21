@@ -121,9 +121,11 @@ process HIC_LIFTOVER_PAIRS {
 
     # -------------------------------------------------------------------------
     # 7) Re-sort pairs in scaffold coordinate space and bgzip
+    #    NOTE: pairtools sort does NOT accept --chroms-path
+    #    It determines chromosome order from the input pairs header
     # -------------------------------------------------------------------------
     cat header.txt lifted.body.tsv \\
-      | pairtools sort --nproc ${task.cpus} --tmpdir "\${TMPDIR}" --chroms-path scaffold.chrom.sizes \\
+      | pairtools sort --nproc ${task.cpus} --tmpdir "\${TMPDIR}" \\
       | bgzip -c > ${haplotype_id}_${qc_label}.scaffold.pairs.gz
     """
 
