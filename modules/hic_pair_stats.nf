@@ -233,8 +233,8 @@ process HIC_PAIR_STATS_FROM_PAIRS {
     # -------------------------------------------------------------------------
     zcat ${pairs_gz} \\
       | awk 'BEGIN{OFS="\\t"} /^#/ {next} {
-          type = (\$2==\$4) ? "cis" : "trans"
-          orientation = \$6 \$7
+          type = (\\\$2==\\\$4) ? "cis" : "trans"
+          orientation = \\\$6 \\\$7
           print type, orientation
         }' \\
       | sort \\
@@ -245,11 +245,11 @@ process HIC_PAIR_STATS_FROM_PAIRS {
     awk '
         BEGIN {cis=0; trans=0; total=0}
         {
-            count=\$1
-            type=\$2
-            total += count
-            if(type=="cis") cis += count
-            if(type=="trans") trans += count
+            c=\\\$1
+            type=\\\$2
+            total += c
+            if(type=="cis") cis += c
+            if(type=="trans") trans += c
         }
         END {
             print "Total pairs:", total
@@ -261,8 +261,8 @@ process HIC_PAIR_STATS_FROM_PAIRS {
 
     # Get insert size distribution for cis pairs (|pos2 - pos1|)
     zcat ${pairs_gz} \\
-      | awk '/^#/ {next} \$2==\$4 {
-          d = \$5 - \$3
+      | awk '/^#/ {next} \\\$2==\\\$4 {
+          d = \\\$5 - \\\$3
           if (d < 0) d = -d
           if (d > 0) print d
         }' \\
@@ -272,33 +272,33 @@ process HIC_PAIR_STATS_FROM_PAIRS {
 
     # Check if insert size file is empty and create placeholder if needed
     if [ ! -s ${haplotype_id}_${qc_label}_insert_size_dist.txt ]; then
-        echo -e "0\t0" > ${haplotype_id}_${qc_label}_insert_size_dist.txt
+        echo -e "0\\t0" > ${haplotype_id}_${qc_label}_insert_size_dist.txt
     fi
 
     # Create a placeholder MAPQ distribution file (not available from pairs alone)
-    echo -e "NA\tNA" > ${haplotype_id}_${qc_label}_mapq_dist.txt
+    echo -e "NA\\tNA" > ${haplotype_id}_${qc_label}_mapq_dist.txt
 
     # Generate summary report (pairs-derived)
     cat > ${haplotype_id}_${qc_label}_pair_stats_summary.txt <<EOF
-    # Hi-C Pair Statistics Summary for ${haplotype_id} (${qc_label})
-    # Generated: \$(date)
+# Hi-C Pair Statistics Summary for ${haplotype_id} (${qc_label})
+# Generated: \$(date)
 
-    === Input Type ===
-    pairs.gz (no remapping)
+=== Input Type ===
+pairs.gz (no remapping)
 
-    === Pair Type Distribution ===
-    \$(cat ${haplotype_id}_${qc_label}_pair_types.txt)
+=== Pair Type Distribution ===
+\$(cat ${haplotype_id}_${qc_label}_pair_types.txt)
 
-    === Trans/Cis Analysis ===
-    \$(cat ${haplotype_id}_${qc_label}_trans_cis_ratio.txt)
+=== Trans/Cis Analysis ===
+\$(cat ${haplotype_id}_${qc_label}_trans_cis_ratio.txt)
 
-    === Insert Size Distribution Summary ===
-    Total cis distances: \$(awk '{sum+=\$1} END {print sum}' ${haplotype_id}_${qc_label}_insert_size_dist.txt)
-    Median cis distance: \$(awk '{for(i=1;i<=\$1;i++) print \$2}' ${haplotype_id}_${qc_label}_insert_size_dist.txt | sort -n | awk '{a[NR]=\$0} END {print a[int(NR/2)]}')
+=== Insert Size Distribution Summary ===
+Total cis distances: \$(awk '{sum+=\\\$1} END {print sum}' ${haplotype_id}_${qc_label}_insert_size_dist.txt)
+Median cis distance: \$(awk '{for(i=1;i<=\\\$1;i++) print \\\$2}' ${haplotype_id}_${qc_label}_insert_size_dist.txt | sort -n | awk '{a[NR]=\\\$0} END {print a[int(NR/2)]}')
 
-    === Mapping Quality Distribution ===
-    NA (pairs input)
-    EOF
+=== Mapping Quality Distribution ===
+NA (pairs input)
+EOF
 
     # Generate plots using R (reused from HIC_PAIR_STATS)
     Rscript - <<'RSCRIPT'
@@ -326,7 +326,7 @@ process HIC_PAIR_STATS_FROM_PAIRS {
 
     # Plot 2: Insert size distribution (log scale)
     # Only plot if we have data
-    if(nrow(insert_dist) > 0 && sum(insert_dist$count) > 0) {
+    if(nrow(insert_dist) > 0 && sum(insert_dist\$count) > 0) {
         p2 <- ggplot(insert_dist, aes(x=size, y=count)) +
             geom_line() +
             scale_x_log10() +
@@ -344,7 +344,7 @@ process HIC_PAIR_STATS_FROM_PAIRS {
     pdf("${haplotype_id}_${qc_label}_pair_stats_plots.pdf", width=12, height=6)
     grid.arrange(p1, p2, ncol=2)
     dev.off()
-    RSCRIPT
+RSCRIPT
     """
 
     stub:
