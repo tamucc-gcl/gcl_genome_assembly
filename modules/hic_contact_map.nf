@@ -26,6 +26,7 @@ process HIC_CONTACT_MAP {
 
     output:
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.cool"), emit: cool
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.pairs.gz"), emit: pairs
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.mcool"), emit: mcool
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_*bp_contact_map.png"), emit: contact_maps
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_contact_stats.txt"), emit: stats
@@ -161,5 +162,109 @@ process HIC_CONTACT_MAP {
       echo "=== Cooler tree (.mcool) ==="
       cooler tree ${haplotype_id}_${qc_label}.mcool
     } > ${haplotype_id}_${qc_label}_contact_stats.txt
+    """
+}
+
+
+/*
+========================================================================================
+    HI-C CONTACT MAP MODULE (PAIRS INPUT)
+========================================================================================
+    pairs.gz -> cool -> mcool (+ optional balance) -> plots + stats
+
+    This variant allows reusing an existing pairs.gz (e.g., lifted to scaffold coordinates)
+    without remapping or re-parsing a BAM.
+
+    Note: The plotting/stats steps are intentionally kept consistent with HIC_CONTACT_MAP.
+========================================================================================
+*/
+
+process HIC_CONTACT_MAP_FROM_PAIRS {
+    tag "${haplotype_id}_${qc_label}"
+    label 'hic_contact_map'
+
+    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/${haplotype_id}/contact_maps", mode: params.publish_dir_mode
+
+    input:
+    tuple val(haplotype_id), path(pairs_gz), path(assembly_fasta), val(qc_label)
+
+    output:
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.cool"), emit: cool
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.mcool"), emit: mcool
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_*bp_contact_map.png"), emit: contact_maps
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_contact_stats.txt"), emit: stats
+
+    script:
+    """
+    set -euo pipefail
+
+    # -------------------------------------------------------------------------
+    # 0) Inputs / parameters
+    # -------------------------------------------------------------------------
+    TMPDIR="\${TMPDIR:-\$PWD}"
+    base_bin=${params.hic_base_bin ?: 1000}
+    zoom_bins="${params.hic_zoom_bins ?: '1000,5000,10000,25000,50000,100000'}"
+    do_balance=${params.hic_balance ?: false}
+    plot_bins="${params.hic_plot_bins ?: '10000,50000,100000'}"
+
+    # -------------------------------------------------------------------------
+    # 1) Ensure reference index + chrom sizes
+    # -------------------------------------------------------------------------
+    if [ ! -s "${assembly_fasta}.fai" ]; then
+      samtools faidx ${assembly_fasta}
+    fi
+    cut -f1,2 ${assembly_fasta}.fai > chrom.sizes
+
+    # -------------------------------------------------------------------------
+    # 2) pairs.gz -> .cool at base resolution
+    # -------------------------------------------------------------------------
+    cooler cload pairs \
+      -c1 2 -p1 3 -c2 4 -p2 5 \
+      chrom.sizes:${base_bin} \
+      ${pairs_gz} \
+      ${haplotype_id}_${qc_label}.cool
+
+    # -------------------------------------------------------------------------
+    # 3) .cool -> .mcool (multi-resolution), optionally balanced
+    # -------------------------------------------------------------------------
+    if [[ "\${do_balance}" == "true" ]]; then
+      cooler zoomify --balance \
+        --resolutions ${zoom_bins} \
+        --nproc ${task.cpus} \
+        ${haplotype_id}_${qc_label}.cool \
+        -o ${haplotype_id}_${qc_label}.mcool
+    else
+      cooler zoomify \
+        --resolutions ${zoom_bins} \
+        --nproc ${task.cpus} \
+        ${haplotype_id}_${qc_label}.cool \
+        -o ${haplotype_id}_${qc_label}.mcool
+    fi
+
+    # -------------------------------------------------------------------------
+    # 4) Plot contact maps at selected resolutions
+    # -------------------------------------------------------------------------
+    for BIN in \$(echo ${plot_bins} | tr ',' ' '); do
+      cooler show \
+        --dpi 200 \
+        --out ${haplotype_id}_${qc_label}_\${BIN}bp_contact_map.png \
+        ${haplotype_id}_${qc_label}.mcool::/resolutions/\${BIN}
+    done
+
+    # -------------------------------------------------------------------------
+    # 5) Basic contact map stats
+    # -------------------------------------------------------------------------
+    {
+      echo "haplotype_id\tqc_label\tcool_file\tmcool_file"
+      echo "${haplotype_id}\t${qc_label}\t${haplotype_id}_${qc_label}.cool\t${haplotype_id}_${qc_label}.mcool"
+    } > ${haplotype_id}_${qc_label}_contact_stats.txt
+    """
+
+    stub:
+    """
+    touch ${haplotype_id}_${qc_label}.cool
+    touch ${haplotype_id}_${qc_label}.mcool
+    touch ${haplotype_id}_${qc_label}_10000bp_contact_map.png
+    touch ${haplotype_id}_${qc_label}_contact_stats.txt
     """
 }

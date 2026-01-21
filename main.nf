@@ -92,6 +92,7 @@ include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
 
+
 /*
 include { QC_SCAFFOLDS } from './modules/qc_scaffolds.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
@@ -291,7 +292,9 @@ workflow {
     HIC_MAPPING_QC_RAW(
         ch_raw_hic_bams,
         ch_assemblies_for_qc,
-        "raw"
+        "raw",
+        Channel.empty(),
+        Channel.empty()
     )
     
     /*
@@ -319,10 +322,11 @@ workflow {
         .set { ch_filtered_hic_bams }
     
     // Run Hi-C mapping QC on filtered BAMs
-    HIC_MAPPING_QC_FILTERED(
-        ch_filtered_hic_bams,
-        ch_assemblies_for_qc,
-        "filtered"
+        Channel.empty()
+
+    // Capture filtered pairs.gz (contig coordinates) for downstream scaffold-coordinate QC
+    HIC_MAPPING_QC_FILTERED.out.pairs
+        .set { ch_filtered_hic_pairs }
     )
     
     /*
@@ -338,8 +342,21 @@ workflow {
     
     // Run Hi-C scaffolding
     SCAFFOLD_HIC(ch_scaffolding_input)
-    /*
-    ========================================================================================
+
+    // Run Hi-C mapping QC on filtered BAMs (contig coordinates + scaffold liftover QC, no remapping)
+    // Note: scaffold QC runs only if scaffold_assemblies and scaffold_agp are provided.
+    HIC_MAPPING_QC_FILTERED(
+        ch_filtered_hic_bams,
+        ch_assemblies_for_qc,
+        "filtered",
+        SCAFFOLD_HIC.out.scaffolds,
+        SCAFFOLD_HIC.out.agp
+    )
+
+
+
+/*
+========================================================================================
         STEP 15: QC Scaffolded Genomes
     ========================================================================================
     */
