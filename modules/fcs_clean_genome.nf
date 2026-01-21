@@ -16,11 +16,11 @@ process FCS_CLEAN_GENOME {
   command -v fcs.py >/dev/null 2>&1 || { echo "ERROR: fcs.py not found in PATH"; exit 127; }
 
   # fcs.py clean genome reads from stdin in the canonical example
-  cat ${assembly_fa} \
-    | fcs.py clean genome \
-        --action-report ${action_report} \
-        --output decontaminated.fasta \
-        --contam-fasta-out contaminants.fasta \
+  cat ${assembly_fa} \\
+    | fcs.py clean genome \\
+        --action-report ${action_report} \\
+        --output decontaminated.fasta \\
+        --contam-fasta-out contaminants.fasta \\
     | tee clean_stdout.log
   """
 }

@@ -27,7 +27,7 @@ process FCS_ADAPTOR {
   # normalize expected output name
   # (FCS-adaptor produces a cleaned fasta in its output dir)
   ls -1 fcsadaptor/output/*.fa* | head -n 1 > /tmp/_cleaned_path.txt
-  CLEANED=$(cat /tmp/_cleaned_path.txt)
-  cp "$CLEANED" fcsadaptor/cleaned.fasta
+  CLEANED=\$(cat /tmp/_cleaned_path.txt)
+  cp "\$CLEANED" fcsadaptor/cleaned.fasta
   """
 }
