@@ -17,6 +17,8 @@ outdir=genome_assembly
 nextflow run gcl_genome_assembly/main.nf \
     -profile slurm \
     -resume \
+    --yahs_no_contig_ec = false \
+    --yahs_no_scaffold_ec = false \
     --decon.run_on_contigs false \
     --decon.run_on_scaffolds false \
     --decon.source_taxid 373251 \
