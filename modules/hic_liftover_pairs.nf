@@ -61,9 +61,10 @@ process HIC_LIFTOVER_PAIRS {
     # -------------------------------------------------------------------------
     # 4) Make 1bp BED records for each end (keyed by line number)
     # pairs columns assumed: readID chr1 pos1 chr2 pos2 strand1 strand2 ...
+    # IMPORTANT: Use 1-based coordinates to match AGP (no -1 subtraction)
     # -------------------------------------------------------------------------
-    awk 'BEGIN{OFS="\\t"} {print \$2, \$3-1, \$3, NR}' body.tsv > end1.bed
-    awk 'BEGIN{OFS="\\t"} {print \$4, \$5-1, \$5, NR}' body.tsv > end2.bed
+    awk 'BEGIN{OFS="\\t"} {print \$2, \$3, \$3, NR}' body.tsv > end1.bed
+    awk 'BEGIN{OFS="\\t"} {print \$4, \$5, \$5, NR}' body.tsv > end2.bed
 
     # -------------------------------------------------------------------------
     # 5) Lift each end with AGP
@@ -85,6 +86,8 @@ process HIC_LIFTOVER_PAIRS {
           }
           {
             # end1.scaf: \$1 \$2 \$3 \$4 ; end2.scaf: \$5 \$6 \$7 \$8 ; body: starts at \$9
+            # agptools outputs: chr start end name (1-based coordinates)
+            # We want the end position (\$3 and \$7) for 1-based pairs format
             new_chr1=\$1; new_pos1=\$3
             new_chr2=\$5; new_pos2=\$7
 
