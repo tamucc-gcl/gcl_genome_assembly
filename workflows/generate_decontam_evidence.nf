@@ -53,7 +53,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
             tuple(haplotype_id,
                   clean_fasta, 
                   hifi_fastq,
-                  params.evidence?.map_preset ?: 'map-hifi'
+                  params.evidence?.map_preset ?: 'map-hifi')
         }
         .set { ch_mapping_input }
     
