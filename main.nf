@@ -13,6 +13,7 @@ nextflow.enable.dsl=2
     - Maximum parallelization
     - Reusable QC workflows as "functions"
     - Clear separation of concerns
+    - Optional decontamination at multiple stages
 ========================================================================================
 */
 
@@ -23,6 +24,7 @@ log.info """\
     =========================================
     Sample sheet : ${params.sample_sheet}
     Output dir   : ${params.outdir}
+    Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
     =========================================
     """
     .stripIndent()
@@ -36,8 +38,12 @@ log.info """\
 params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link' //change to copy at end
+
+// Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
+
+// Hi-C mapping and QC parameters
 params.hic_coverage_window = 100000
 params.hic_min_mapq = 30  // Minimum mapping quality for valid Hi-C pairs
 params.hic_resolutions = "1000000,500000,100000,50000,10000"
@@ -46,6 +52,8 @@ params.hic_plot_resolutions = "1000000,500000,100000"
 params.hic_balance = false
 params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
+
+// Hi-C scaffolding parameters (YaHS)
 params.yahs_min_contig_length = 10000
 params.yahs_min_mapq = 1
 params.yahs_resolutions = '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
@@ -54,6 +62,55 @@ params.yahs_enzyme = null                  // corresponds to -e if set
 params.yahs_no_contig_ec = true
 params.yahs_no_scaffold_ec = true
 params.bwa_mem2_hic_args = null
+
+// Decontamination parameters
+params.db_base = "/work/birdlab/databases"
+
+// FCS-GX database settings
+params.gxdb = [
+    dir: "${params.db_base}/fcs-gx",
+    profile: 'all',          // 'all' | 'test-only'
+    manifest: null,          // optional: override manifest URL/path
+    force: false             // re-download even if present
+]
+
+// DIAMOND / blobtools evidence DB settings
+params.diamond = [
+    dmnd: null,              // if you have a prebuilt .dmnd, set this
+    dir: "${params.db_base}/diamond",
+    name: "proteins",
+    taxdump_dir: "${params.db_base}/ncbi_taxonomy",
+    profile: 'custom',       // 'custom' (recommended)
+    fasta_url: "https://ftp.ncbi.nlm.nih.gov/blast/db/FASTA/nr.gz",
+    taxonmap_url: "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/prot.accession2taxid.FULL.gz",
+    force: false
+]
+
+// Decontamination control
+params.decon = [
+    // When to run decontamination
+    run_on_contigs: false,       // Run on initial contig assemblies (before Hi-C mapping)
+    run_on_scaffolds: false,     // Run on scaffolded assemblies (after Hi-C scaffolding)
+    
+    // Core settings
+    source_taxid: 7898,          // Actinopterygii; set your species taxid when possible
+    
+    // Optional: adapter/vector removal
+    run_fcs_adaptor: false,      // Requires FCS-adaptor containers; enable only if configured
+    fcsadaptor_mode: 'euk',      // 'euk' or 'prok'
+    container_engine: 'singularity',
+    
+    // Optional: generate evidence (coverage + taxonomy + blobtools plots)
+    make_blobtools_evidence: true
+]
+
+// Evidence generation settings
+params.evidence = [
+    map_preset: 'map-hifi',
+    diamond_max_target_seqs: 1,
+    diamond_evalue: 1e-25,
+    blob_min_contig_len: 1000
+]
 
 /*
 ========================================================================================
@@ -83,10 +140,15 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
 
-// NEW MODULAR WORKFLOWS
+// HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_FILTERED } from './workflows/hic_qc_from_bam.nf'
 include { HIC_SCAFFOLD_QC } from './workflows/hic_scaffold_qc.nf'
+
+// DECONTAMINATION MODULAR WORKFLOWS
+include { SETUP_DECONTAM_DBS } from './workflows/setup_decontam_dbs.nf'
+include { DECONTAMINATE_ASSEMBLY } from './workflows/decontaminate_assembly.nf'
+include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evidence.nf'
 
 /*
 ========================================================================================
@@ -103,7 +165,6 @@ include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
 
 
 /*
-include { QC_SCAFFOLDS } from './modules/qc_scaffolds.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
 include { QC_FINAL } from './modules/qc_final.nf'
 */
@@ -119,6 +180,22 @@ workflow {
     
     // Parse sample sheet and create input channel
     ch_input = parseSampleSheet(params.sample_sheet)
+
+    /*
+    ========================================================================================
+        STEP 0: Setup Decontamination Databases (if enabled)
+        Runs in parallel with BAM conversion and assembly
+        Only executes if decontamination is requested
+    ========================================================================================
+    */
+    if (params.decon.run_on_contigs || params.decon.run_on_scaffolds) {
+        SETUP_DECONTAM_DBS()
+        
+        // Store outputs for later use
+        ch_gxdb_dir = SETUP_DECONTAM_DBS.out.gxdb_dir
+        ch_diamond_db = SETUP_DECONTAM_DBS.out.diamond_db
+        ch_taxdump_dir = SETUP_DECONTAM_DBS.out.taxdump_dir
+    }
 
     /*
     // Debug: Print all channel contents
@@ -223,19 +300,67 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 9: Map Hi-C to Contigs
+        STEP 8.5: Optional Decontamination of Contig Assemblies
+        Runs in parallel with Hi-C mapping preparation
+        Databases were already set up in STEP 0 (parallel with assembly)
     ========================================================================================
     */
-    // Split assemblies into individual haplotypes
-    HIFIASM.out.assemblies
-        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-            [
-                tuple("${sample_id}_hap1", sample_id, hap1_fasta),
-                tuple("${sample_id}_hap2", sample_id, hap2_fasta)
-            ]
+    if (params.decon.run_on_contigs) {
+        // Split assemblies into individual haplotypes for decontamination
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
+            .set { ch_contigs_for_decontam }
+        
+        // Run decontamination (parallel across all haplotypes)
+        DECONTAMINATE_ASSEMBLY(
+            ch_contigs_for_decontam,
+            ch_gxdb_dir
+        )
+        
+        // Optional: Generate evidence for decontamination decisions
+        // This runs in parallel with Hi-C mapping preparation
+        if (params.decon.make_blobtools_evidence) {
+            GENERATE_DECONTAM_EVIDENCE(
+                DECONTAMINATE_ASSEMBLY.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY.out.contaminants,
+                DECONTAMINATE_ASSEMBLY.out.action_report,
+                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                BAM_TO_FASTQ.out,
+                ch_diamond_db,
+                ch_taxdump_dir
+            )
         }
-        .set { ch_individual_haplotypes }
-    
+        
+        // Use decontaminated assemblies for downstream Hi-C mapping
+        // Need to add sample_id back for joining with Hi-C reads
+        DECONTAMINATE_ASSEMBLY.out.decontaminated
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(haplotype_id, sample_id, fasta)
+            }
+            .set { ch_individual_haplotypes }
+    } else {
+        // Use original assemblies if decontamination not requested
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", sample_id, hap1_fasta),
+                    tuple("${sample_id}_hap2", sample_id, hap2_fasta)
+                ]
+            }
+            .set { ch_individual_haplotypes }
+    }
+
+    /*
+    ========================================================================================
+        STEP 9: Map Hi-C to Assemblies (contigs or decontaminated contigs)
+    ========================================================================================
+    */
     // Combine each haplotype with its corresponding trimmed Hi-C reads
     ch_individual_haplotypes
         .map { haplotype_id, sample_id, fasta ->
@@ -349,6 +474,41 @@ workflow {
         BAM_TO_FASTQ.out,
         'scaffold'
     )
+
+    /*
+    ========================================================================================
+        STEP 14.5: Optional Decontamination of Scaffolded Assemblies
+        Runs after scaffolding is complete
+        Databases were already set up in STEP 0
+    ========================================================================================
+    */
+    if (params.decon.run_on_scaffolds) {
+        // Decontaminate scaffolds (parallel across all haplotypes)
+        DECONTAMINATE_ASSEMBLY(
+            SCAFFOLD_HIC.out.scaffolds,
+            ch_gxdb_dir
+        )
+        
+        // Optional: Generate evidence for scaffold decontamination
+        // This runs in parallel with scaffold QC
+        if (params.decon.make_blobtools_evidence) {
+            GENERATE_DECONTAM_EVIDENCE(
+                DECONTAMINATE_ASSEMBLY.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY.out.contaminants,
+                DECONTAMINATE_ASSEMBLY.out.action_report,
+                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                BAM_TO_FASTQ.out,
+                ch_diamond_db,
+                ch_taxdump_dir
+            )
+        }
+        
+        // Store final decontaminated scaffolds
+        ch_final_scaffolds = DECONTAMINATE_ASSEMBLY.out.decontaminated
+    } else {
+        // Use original scaffolds if decontamination not requested
+        ch_final_scaffolds = SCAFFOLD_HIC.out.scaffolds
+    }
     
     /*
     ========================================================================================

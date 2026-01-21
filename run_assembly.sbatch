@@ -17,5 +17,7 @@ outdir=test_nf
 nextflow run gcl_genome_assembly/main.nf \
     -profile slurm \
     -resume \
+    --gxdb.profile test-only \
+    --decon.source_taxid 373251 \
     --sample_sheet ${sample_sheet} \
     --outdir ${outdir}
