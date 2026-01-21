@@ -188,11 +188,11 @@ process HIC_COVERAGE_FROM_PAIRS {
     zcat ${pairs_gz} \\
       | awk 'BEGIN{OFS="\\t"} /^#/ {next} {
           # end1
-          s1=\\\$3-1; if (s1<0) s1=0
-          print \\\$2, s1, \\\$3
+          s1=\$3-1; if (s1<0) s1=0
+          print \$2, s1, \$3
           # end2
-          s2=\\\$5-1; if (s2<0) s2=0
-          print \\\$4, s2, \\\$5
+          s2=\$5-1; if (s2<0) s2=0
+          print \$4, s2, \$5
         }' \\
       | sort -k1,1 -k2,2n \\
       > ends.bed
@@ -205,16 +205,16 @@ process HIC_COVERAGE_FROM_PAIRS {
         > ${haplotype_id}_${qc_label}_coverage.txt
 
     # Generate bedgraph for visualization (window counts)
-    awk 'BEGIN{OFS="\\t"} {print \\\$1, \\\$2, \\\$3, \\\$4}' ${haplotype_id}_${qc_label}_coverage.txt \\
+    awk 'BEGIN{OFS="\\t"} {print \$1, \$2, \$3, \$4}' ${haplotype_id}_${qc_label}_coverage.txt \\
       > ${haplotype_id}_${qc_label}.bedgraph
 
     # Calculate coverage statistics
     awk '{
         count++
-        sum += \\\$4
-        if (count == 1 || \\\$4 < min) min = \\\$4
-        if (count == 1 || \\\$4 > max) max = \\\$4
-        cov[\\\$4]++
+        sum += \$4
+        if (count == 1 || \$4 < min) min = \$4
+        if (count == 1 || \$4 > max) max = \$4
+        cov[\$4]++
     } END {
         mean = sum / count
         print "Input Type: pairs.gz (no remapping)"
