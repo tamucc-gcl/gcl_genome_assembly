@@ -10,7 +10,7 @@ process HIFIASM {
     tag "${sample_id}"
     label 'hifiasm'
     
-    publishDir "${params.outdir}/assembly/hifiasm", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/contig/hifiasm", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hifi_fastq), path(hic_r1), path(hic_r2)
