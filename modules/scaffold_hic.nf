@@ -11,7 +11,7 @@ process SCAFFOLD_HIC {
     tag "${haplotype_id}"
     label 'scaffold_hic'
 
-    publishDir "${params.outdir}/scaffolding/yahs/${haplotype_id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/scaffolding/yahs/", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id), path(bam), path(bai), path(assembly_fasta)
