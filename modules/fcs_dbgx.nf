@@ -21,7 +21,7 @@ process FCS_DB_GET {
   # Consider DB "present" if directory has files AND sentinel exists
   SENTINEL="${gxdb_dir}/.gxdb_ready"
 
-  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "$(ls -A "${gxdb_dir}" 2>/dev/null || true)" ]; then
+  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "\$(ls -A "${gxdb_dir}" 2>/dev/null || true)" ]; then
     echo "[FCS_DB_GET] Downloading GXDB using manifest: ${gxdb_manifest}"
     fcs.py db get --mft "${gxdb_manifest}" --dir "${gxdb_dir}"
     date -Is > "\${SENTINEL}"
