@@ -387,13 +387,13 @@ workflow {
         STEP 10: Hi-C Mapping QC on Raw BAMs (MODULAR - RUNS IN PARALLEL)
     ========================================================================================
     */
-    
+    /*
     HIC_QC_FROM_BAM_RAW(
         MAP_HIC_TO_ASSEMBLY.out.bam,
         ch_assemblies_for_qc,
         "raw"
     )
-    
+    */
     /*
     ========================================================================================
         STEP 11: Filter Hi-C BAM Files (PARALLEL WITH RAW QC)
