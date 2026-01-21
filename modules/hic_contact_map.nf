@@ -6,7 +6,7 @@
 
     Key improvements:
     - Fixes broken pipeline for qc_label != "raw"
-    - Explicitly selects UU pairs (better “valid pair” semantics)
+    - Explicitly selects UU pairs (better "valid pair" semantics)
     - Uses TMPDIR for pairtools sort temp
     - Optional balancing (zoomify --balance can be very expensive)
     - Configurable plotting resolutions
@@ -195,6 +195,12 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_contact_stats.txt"), emit: stats
 
     script:
+    // Use consistent parameter names with HIC_CONTACT_MAP
+    def resolutions         = (params.hic_resolutions ?: "1000000,500000,100000,50000,10000").toString()
+    def base_bin            = (params.hic_base_bin ?: "10000").toString()
+    def plot_resolutions    = (params.hic_plot_resolutions ?: "1000000,500000,100000").toString()
+    def do_balance          = (params.hic_balance ?: false) as boolean
+    
     """
     set -euo pipefail
 
@@ -202,10 +208,6 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     # 0) Inputs / parameters
     # -------------------------------------------------------------------------
     TMPDIR="\${TMPDIR:-\$PWD}"
-    base_bin=${params.hic_base_bin ?: 1000}
-    zoom_bins="${params.hic_zoom_bins ?: '1000,5000,10000,25000,50000,100000'}"
-    do_balance=${params.hic_balance ?: false}
-    plot_bins="${params.hic_plot_bins ?: '10000,50000,100000'}"
 
     # -------------------------------------------------------------------------
     # 1) Ensure reference index + chrom sizes
@@ -218,45 +220,59 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     # -------------------------------------------------------------------------
     # 2) pairs.gz -> .cool at base resolution
     # -------------------------------------------------------------------------
-    cooler cload pairs \
-      -c1 2 -p1 3 -c2 4 -p2 5 \
-      chrom.sizes:${base_bin} \
-      ${pairs_gz} \
+    cooler cload pairs \\
+      -c1 2 -p1 3 -c2 4 -p2 5 \\
+      chrom.sizes:${base_bin} \\
+      ${pairs_gz} \\
       ${haplotype_id}_${qc_label}.cool
 
     # -------------------------------------------------------------------------
     # 3) .cool -> .mcool (multi-resolution), optionally balanced
     # -------------------------------------------------------------------------
-    if [[ "\${do_balance}" == "true" ]]; then
-      cooler zoomify --balance \
-        --resolutions ${zoom_bins} \
-        --nproc ${task.cpus} \
-        ${haplotype_id}_${qc_label}.cool \
-        -o ${haplotype_id}_${qc_label}.mcool
+    if ${do_balance}; then
+      cooler zoomify \\
+        --balance \\
+        --resolutions ${resolutions} \\
+        --out ${haplotype_id}_${qc_label}.mcool \\
+        ${haplotype_id}_${qc_label}.cool
     else
-      cooler zoomify \
-        --resolutions ${zoom_bins} \
-        --nproc ${task.cpus} \
-        ${haplotype_id}_${qc_label}.cool \
-        -o ${haplotype_id}_${qc_label}.mcool
+      cooler zoomify \\
+        --resolutions ${resolutions} \\
+        --out ${haplotype_id}_${qc_label}.mcool \\
+        ${haplotype_id}_${qc_label}.cool
     fi
 
     # -------------------------------------------------------------------------
-    # 4) Plot contact maps at selected resolutions
+    # 4) Plots (only for resolutions requested)
     # -------------------------------------------------------------------------
-    for BIN in \$(echo ${plot_bins} | tr ',' ' '); do
-      cooler show \
-        --dpi 200 \
-        --out ${haplotype_id}_${qc_label}_\${BIN}bp_contact_map.png \
-        ${haplotype_id}_${qc_label}.mcool::/resolutions/\${BIN}
+    IFS=',' read -r -a PLOT_RES <<< "${plot_resolutions}"
+    for res in "\${PLOT_RES[@]}"; do
+      hicPlotMatrix \\
+        --matrix ${haplotype_id}_${qc_label}.mcool::/resolutions/\${res} \\
+        --outFileName ${haplotype_id}_${qc_label}_\${res}bp_contact_map.png \\
+        --title "${haplotype_id} (${qc_label}) Hi-C Contact Map (\${res} bp)" \\
+        --log1p \\
+        --dpi 200
     done
 
     # -------------------------------------------------------------------------
-    # 5) Basic contact map stats
+    # 5) Stats
     # -------------------------------------------------------------------------
     {
-      echo "haplotype_id\tqc_label\tcool_file\tmcool_file"
-      echo "${haplotype_id}\t${qc_label}\t${haplotype_id}_${qc_label}.cool\t${haplotype_id}_${qc_label}.mcool"
+      echo "================================================================================"
+      echo "Hi-C Contact Map Statistics for ${haplotype_id} (${qc_label})"
+      echo "Generated: \$(date)"
+      echo "================================================================================"
+      echo
+      echo "=== Input ==="
+      echo "pairs.gz: ${pairs_gz}"
+      echo "assembly_fasta: ${assembly_fasta}"
+      echo
+      echo "=== Cooler info (.cool) ==="
+      cooler info ${haplotype_id}_${qc_label}.cool
+      echo
+      echo "=== Cooler tree (.mcool) ==="
+      cooler tree ${haplotype_id}_${qc_label}.mcool
     } > ${haplotype_id}_${qc_label}_contact_stats.txt
     """
 

@@ -9,6 +9,10 @@
     - Combined report: aggregate all QC metrics
     
     Can process either raw or filtered BAMs with appropriate labeling
+    
+    SCAFFOLD QC MODE:
+    - When scaffold_assemblies and scaffold_agp are provided, lifts contig pairs
+      to scaffold coordinates and runs full QC without remapping
 ========================================================================================
 */
 
@@ -23,11 +27,11 @@ include { HIC_LIFTOVER_PAIRS } from '../modules/hic_liftover_pairs.nf'
 
 workflow HIC_MAPPING_QC {
     take:
-    bam_files      // channel: tuple(haplotype_id, bam, bai)
-    assemblies     // channel: tuple(haplotype_id, assembly_fasta)
-    qc_label       // string: "raw" or "filtered"
-    scaffold_assemblies   // channel: tuple(haplotype_id, scaffold_fasta)
-    scaffold_agp          // channel: tuple(haplotype_id, scaffold_agp)
+    bam_files             // channel: tuple(haplotype_id, bam, bai)
+    assemblies            // channel: tuple(haplotype_id, assembly_fasta)
+    qc_label              // string: "raw" or "filtered"
+    scaffold_assemblies   // channel: tuple(haplotype_id, scaffold_fasta) - can be empty
+    scaffold_agp          // channel: tuple(haplotype_id, scaffold_agp) - can be empty
     
     main:
     
@@ -80,7 +84,7 @@ workflow HIC_MAPPING_QC {
     
     /*
     ========================================================================================
-        COMBINE QC - Aggregate all Hi-C mapping QC results
+        COMBINE QC - Aggregate all Hi-C mapping QC results (CONTIG COORDINATES)
     ========================================================================================
     */
     // Group all QC results by haplotype and qc_label
@@ -96,75 +100,106 @@ workflow HIC_MAPPING_QC {
     COMBINE_HIC_MAPPING_QC_CONTIG(ch_all_hic_qc)
 
 
-/*
-========================================================================================
-    OPTIONAL: SCAFFOLD-COORDINATE QC (NO REMAPPING)
-========================================================================================
-    Uses pairs.gz from contig-mapped BAM (HIC_CONTACT_MAP output), lifts those pairs to
-    scaffold coordinates using the scaffold AGP, then re-runs pairtools/cooler QC on the
-    scaffold assembly without remapping.
+    /*
+    ========================================================================================
+        OPTIONAL: SCAFFOLD-COORDINATE QC (NO REMAPPING)
+    ========================================================================================
+        Uses pairs.gz from contig-mapped BAM (HIC_CONTACT_MAP output), lifts those pairs to
+        scaffold coordinates using the scaffold AGP, then re-runs pairtools/cooler QC on the
+        scaffold assembly without remapping.
 
-    Requirements:
-    - HIC_CONTACT_MAP must emit pairs.gz
-    - scaffold_assemblies: FASTA of scaffolded assembly for each haplotype
-    - scaffold_agp: AGP describing contig->scaffold placement for each haplotype
-========================================================================================
-*/
+        Requirements:
+        - HIC_CONTACT_MAP must emit pairs.gz
+        - scaffold_assemblies: FASTA of scaffolded assembly for each haplotype
+        - scaffold_agp: AGP describing contig->scaffold placement for each haplotype
+        
+        Only runs if scaffold_assemblies and scaffold_agp are non-empty.
+    ========================================================================================
+    */
 
-// 1) Lift contig pairs.gz to scaffold coordinates
-HIC_CONTACT_MAP.out.pairs
-    .join(scaffold_agp, by: [0])          // join on haplotype_id
-    .join(scaffold_assemblies, by: [0])   // join on haplotype_id
-    .map { haplotype_id, label, pairs_gz, agp, scaffold_fasta ->
-        tuple(haplotype_id, "scaffold_${label}", pairs_gz, agp, scaffold_fasta)
-    }
-    .set { ch_pairs_for_liftover }
+    // Check if we have scaffold inputs
+    scaffold_assemblies
+        .count()
+        .set { ch_scaffold_count }
+    
+    scaffold_agp
+        .count()
+        .set { ch_agp_count }
 
-HIC_LIFTOVER_PAIRS(ch_pairs_for_liftover)
+    // 1) Lift contig pairs.gz to scaffold coordinates
+    // Only proceed if we have both scaffold assemblies and AGP files
+    HIC_CONTACT_MAP.out.pairs
+        .join(scaffold_agp, by: [0], remainder: false)          // inner join - only if AGP exists
+        .join(scaffold_assemblies, by: [0], remainder: false)   // inner join - only if scaffold exists
+        .map { haplotype_id, label, pairs_gz, agp, scaffold_fasta ->
+            tuple(haplotype_id, "scaffold_${label}", pairs_gz, agp, scaffold_fasta)
+        }
+        .set { ch_pairs_for_liftover }
 
-// 2) Run scaffold-coordinate QC starting from lifted pairs.gz
-HIC_LIFTOVER_PAIRS.out.pairs
-    .join(scaffold_assemblies, by: [0])
-    .map { haplotype_id, label, pairs_gz, scaffold_fasta ->
-        tuple(haplotype_id, pairs_gz, scaffold_fasta, label)
-    }
-    .set { ch_scaffold_pairs_with_assembly }
+    /*
+    // Debug: check if we have liftover inputs
+    ch_pairs_for_liftover
+        .view { haplotype_id, label, pairs_gz, agp, scaffold_fasta ->
+            """
+            ========================================
+            LIFTOVER INPUT
+            Haplotype ID  : ${haplotype_id}
+            Label         : ${label}
+            Pairs.gz      : ${pairs_gz}
+            AGP           : ${agp}
+            Scaffold FASTA: ${scaffold_fasta}
+            ========================================
+            """
+        }
+    */
 
-HIC_CONTACT_MAP_FROM_PAIRS(ch_scaffold_pairs_with_assembly)
+    // Run liftover
+    HIC_LIFTOVER_PAIRS(ch_pairs_for_liftover)
 
-HIC_LIFTOVER_PAIRS.out.pairs
-    .map { haplotype_id, label, pairs_gz ->
-        tuple(haplotype_id, pairs_gz, label)
-    }
-    .set { ch_scaffold_pairs_labeled }
+    // 2) Run scaffold-coordinate QC starting from lifted pairs.gz
+    HIC_LIFTOVER_PAIRS.out.pairs
+        .join(scaffold_assemblies, by: [0])
+        .map { haplotype_id, label, pairs_gz, scaffold_fasta ->
+            tuple(haplotype_id, pairs_gz, scaffold_fasta, label)
+        }
+        .set { ch_scaffold_pairs_with_assembly }
 
-HIC_PAIR_STATS_FROM_PAIRS(ch_scaffold_pairs_labeled)
+    HIC_CONTACT_MAP_FROM_PAIRS(ch_scaffold_pairs_with_assembly)
 
-HIC_LIFTOVER_PAIRS.out.pairs
-    .join(scaffold_assemblies, by: [0])
-    .map { haplotype_id, label, pairs_gz, scaffold_fasta ->
-        tuple(haplotype_id, pairs_gz, scaffold_fasta, label)
-    }
-    .set { ch_scaffold_pairs_for_coverage }
+    HIC_LIFTOVER_PAIRS.out.pairs
+        .map { haplotype_id, label, pairs_gz ->
+            tuple(haplotype_id, pairs_gz, label)
+        }
+        .set { ch_scaffold_pairs_labeled }
 
-HIC_COVERAGE_FROM_PAIRS(ch_scaffold_pairs_for_coverage)
+    HIC_PAIR_STATS_FROM_PAIRS(ch_scaffold_pairs_labeled)
 
-/*
-========================================================================================
-    COMBINE QC (SCAFFOLD COORDS)
-========================================================================================
-*/
-HIC_CONTACT_MAP_FROM_PAIRS.out.stats
-    .join(HIC_PAIR_STATS_FROM_PAIRS.out.summary, by: [0, 1])
-    .join(HIC_COVERAGE_FROM_PAIRS.out.stats, by: [0, 1])
-    .join(HIC_CONTACT_MAP_FROM_PAIRS.out.contact_maps.map { id, label, maps -> tuple(id, label, maps) }, by: [0, 1])
-    .join(HIC_PAIR_STATS_FROM_PAIRS.out.plots.map { id, label, plots -> tuple(id, label, plots) }, by: [0, 1])
-    .join(HIC_COVERAGE_FROM_PAIRS.out.plots.map { id, label, plots -> tuple(id, label, plots) }, by: [0, 1])
-    .set { ch_all_hic_qc_scaffold }
+    HIC_LIFTOVER_PAIRS.out.pairs
+        .join(scaffold_assemblies, by: [0])
+        .map { haplotype_id, label, pairs_gz, scaffold_fasta ->
+            tuple(haplotype_id, pairs_gz, scaffold_fasta, label)
+        }
+        .set { ch_scaffold_pairs_for_coverage }
 
-COMBINE_HIC_MAPPING_QC_SCAFFOLD(ch_all_hic_qc_scaffold)
+    HIC_COVERAGE_FROM_PAIRS(ch_scaffold_pairs_for_coverage)
+
+    /*
+    ========================================================================================
+        COMBINE QC (SCAFFOLD COORDS)
+    ========================================================================================
+    */
+    HIC_CONTACT_MAP_FROM_PAIRS.out.stats
+        .join(HIC_PAIR_STATS_FROM_PAIRS.out.summary, by: [0, 1])
+        .join(HIC_COVERAGE_FROM_PAIRS.out.stats, by: [0, 1])
+        .join(HIC_CONTACT_MAP_FROM_PAIRS.out.contact_maps.map { id, label, maps -> tuple(id, label, maps) }, by: [0, 1])
+        .join(HIC_PAIR_STATS_FROM_PAIRS.out.plots.map { id, label, plots -> tuple(id, label, plots) }, by: [0, 1])
+        .join(HIC_COVERAGE_FROM_PAIRS.out.plots.map { id, label, plots -> tuple(id, label, plots) }, by: [0, 1])
+        .set { ch_all_hic_qc_scaffold }
+
+    COMBINE_HIC_MAPPING_QC_SCAFFOLD(ch_all_hic_qc_scaffold)
     
     emit:
+    // Contig-coordinate QC outputs
     contact_maps = HIC_CONTACT_MAP.out.contact_maps
     cool_files = HIC_CONTACT_MAP.out.cool
     mcool_files = HIC_CONTACT_MAP.out.mcool
@@ -173,7 +208,9 @@ COMBINE_HIC_MAPPING_QC_SCAFFOLD(ch_all_hic_qc_scaffold)
     coverage_stats = HIC_COVERAGE.out.stats
     combined_report = COMBINE_HIC_MAPPING_QC_CONTIG.out.report
     combined_summary = COMBINE_HIC_MAPPING_QC_CONTIG.out.summary
+    
     // Scaffold-coordinate QC outputs (labels prefixed with "scaffold_")
+    // These will be empty channels if scaffold inputs weren't provided
     scaffold_contact_maps = HIC_CONTACT_MAP_FROM_PAIRS.out.contact_maps
     scaffold_cool_files = HIC_CONTACT_MAP_FROM_PAIRS.out.cool
     scaffold_mcool_files = HIC_CONTACT_MAP_FROM_PAIRS.out.mcool

@@ -8,6 +8,11 @@ nextflow.enable.dsl=2
 ========================================================================================
     Author: Jason Selwyn
     Description: Pipeline for assembling and scaffolding genomes from HiFi and Hi-C reads
+    
+    MODULAR DESIGN:
+    - Maximum parallelization
+    - Reusable QC workflows as "functions"
+    - Clear separation of concerns
 ========================================================================================
 */
 
@@ -76,9 +81,13 @@ include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
-include { HIC_MAPPING_QC as HIC_MAPPING_QC_RAW } from './workflows/hic_mapping_qc.nf'
-include { HIC_MAPPING_QC as HIC_MAPPING_QC_FILTERED } from './workflows/hic_mapping_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
+
+// NEW MODULAR WORKFLOWS
+include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
+include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_FILTERED } from './workflows/hic_qc_from_bam.nf'
+include { HIC_SCAFFOLD_QC } from './workflows/hic_scaffold_qc.nf'
+
 /*
 ========================================================================================
     IMPORT MODULES
@@ -164,7 +173,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 5: QC Trimmed Hi-C Reads
+        STEP 4: QC Trimmed Hi-C Reads
     ========================================================================================
     */
     HIC_QC_TRIMMED(
@@ -174,7 +183,7 @@ workflow {
     
     /*
     ========================================================================================
-        STEP 6: QC HiFi Reads - runs after converting BAM -> FASTQ
+        STEP 5: QC HiFi Reads - runs after converting BAM -> FASTQ
     ========================================================================================
     */
     HIFI_QC(
@@ -183,7 +192,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 7: Combine HiFi FASTQ with trimmed Hi-C reads
+        STEP 6: Combine HiFi FASTQ with trimmed Hi-C reads
     ========================================================================================
     */
     TRIM_HIC.out.trimmed_reads
@@ -194,22 +203,8 @@ workflow {
         .set { ch_fastq_all }
 
     /*
-    // Debug: Print all channel contents
-    ch_fastq_all.view { sample_id, hifi_fastq, hic_r1, hic_r2 ->
-        """
-        ========================================
-        Sample ID  : ${sample_id}
-        HiFi FQ    : ${hifi_fastq}
-        Hi-C R1    : ${hic_r1}
-        Hi-C R2    : ${hic_r2}
-        ========================================
-        """
-    }
-    */
-
-    /*
     ========================================================================================
-        STEP 8: Assemble with Hifiasm
+        STEP 7: Assemble with Hifiasm
     ========================================================================================
     */
     
@@ -217,7 +212,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 9: QC Assembled Genomes
+        STEP 8: QC Assembled Genomes
     ========================================================================================
     */
     ASSEMBLY_QC_INITIAL(
@@ -228,7 +223,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 10: Map Hi-C to Contigs
+        STEP 9: Map Hi-C to Contigs
     ========================================================================================
     */
     // Split assemblies into individual haplotypes
@@ -252,54 +247,31 @@ workflow {
         }
         .set { ch_hic_mapping_input }
     
-    /*
-    // Debug: View the mapping input channel
-    ch_hic_mapping_input.view { haplotype_id, fasta, hic_r1, hic_r2 ->
-        """
-        ========================================
-        Haplotype ID : ${haplotype_id}
-        Assembly     : ${fasta}
-        Hi-C R1      : ${hic_r1}
-        Hi-C R2      : ${hic_r2}
-        ========================================
-        """
-    }
-    */
-
     // Map Hi-C reads to assemblies
     MAP_HIC_TO_ASSEMBLY(ch_hic_mapping_input)
 
-    /*
-    ========================================================================================
-        STEP 11: Hi-C Mapping QC on Raw BAMs
-    ========================================================================================
-    */
-    
-    // Prepare raw BAM files channel (haplotype_id, bam, bai)
-    MAP_HIC_TO_ASSEMBLY.out.bam
-        .set { ch_raw_hic_bams }
-    
-    // Prepare assemblies channel (haplotype_id, assembly_fasta)
+    // Prepare assemblies channel for QC (haplotype_id, assembly_fasta)
     ch_individual_haplotypes
         .map { haplotype_id, sample_id, fasta ->
             tuple(haplotype_id, fasta)
         }
         .set { ch_assemblies_for_qc }
 
-    // comment out to skip QC on raw mapped bams instead of filtered bams
+    /*
+    ========================================================================================
+        STEP 10: Hi-C Mapping QC on Raw BAMs (MODULAR - RUNS IN PARALLEL)
+    ========================================================================================
+    */
     
-    // Run Hi-C mapping QC on raw BAMs
-    HIC_MAPPING_QC_RAW(
-        ch_raw_hic_bams,
+    HIC_QC_FROM_BAM_RAW(
+        MAP_HIC_TO_ASSEMBLY.out.bam,
         ch_assemblies_for_qc,
-        "raw",
-        Channel.empty(),
-        Channel.empty()
+        "raw"
     )
     
     /*
     ========================================================================================
-        STEP 12: Filter Hi-C BAM Files
+        STEP 11: Filter Hi-C BAM Files (PARALLEL WITH RAW QC)
     ========================================================================================
     */
     
@@ -313,41 +285,47 @@ workflow {
     
     /*
     ========================================================================================
-        STEP 13: Scaffold with Hi-C
+        STEP 12A: Hi-C Mapping QC on Filtered BAMs (MODULAR - PARALLEL WITH SCAFFOLDING!)
     ========================================================================================
     */
-
+    
+    HIC_QC_FROM_BAM_FILTERED(
+        FILTER_HIC_BAM.out.bam,
+        ch_assemblies_for_qc,
+        "filtered"
+    )
+    
+    /*
+    ========================================================================================
+        STEP 12B: Scaffold with Hi-C (PARALLEL WITH FILTERED CONTIG QC!)
+    ========================================================================================
+    */
+    
     // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta)
     FILTER_HIC_BAM.out.bam
         .join(ch_assemblies_for_qc)
         .set { ch_scaffolding_input }
-
+    
     // Run Hi-C scaffolding
     SCAFFOLD_HIC(ch_scaffolding_input)
 
     /*
     ========================================================================================
-        STEP 14: Hi-C Mapping QC on Filtered BAMs (includes scaffold liftover QC)
+        STEP 13: Hi-C Mapping QC on Scaffolds (MODULAR - LIFTOVER + QC)
     ========================================================================================
     */
-
-    // Prepare filtered BAM files channel (haplotype_id, bam, bai)
-    FILTER_HIC_BAM.out.bam
-        .set { ch_filtered_hic_bams }
-
-    // Run Hi-C mapping QC on filtered BAMs (contig coordinates + scaffold liftover QC, no remapping)
-    // Note: scaffold QC runs only if scaffold_assemblies and scaffold_agp are provided.
-    HIC_MAPPING_QC_FILTERED(
-        ch_filtered_hic_bams,
-        ch_assemblies_for_qc,
-        "filtered",
+    
+    // Use pairs.gz from filtered contig QC and lift to scaffold coordinates
+    HIC_SCAFFOLD_QC(
+        HIC_QC_FROM_BAM_FILTERED.out.pairs,
+        SCAFFOLD_HIC.out.agp,
         SCAFFOLD_HIC.out.scaffolds,
-        SCAFFOLD_HIC.out.agp
+        "filtered"
     )
 
     /*
     ========================================================================================
-        STEP 15: QC Scaffolded Genomes
+        STEP 14: QC Scaffolded Genomes
     ========================================================================================
     */
     // Re-pair scaffolded haplotypes by sample
@@ -371,39 +349,23 @@ workflow {
         BAM_TO_FASTQ.out,
         'scaffold'
     )
+    
     /*
     ========================================================================================
-        STEP 8: Gap Filling and Finalization
+        FUTURE: Gap Filling and Finalization
     ========================================================================================
     */
     /*
-    // Combine scaffolds with HiFi reads for gap filling
-    SCAFFOLD_HIC.out
-        .map { haplotype_id, scaffold ->
-            // Extract original sample_id from haplotype_id (remove _hap1/_hap2)
-            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            tuple(sample_id, haplotype_id, scaffold)
-        }
-        .combine(
-            ch_fastq_all.map { sample_id, hifi_fastq, hic_r1, hic_r2 ->
-                tuple(sample_id, hifi_fastq)
-            },
-            by: 0
-        )
-        .map { sample_id, haplotype_id, scaffold, hifi_fastq ->
-            tuple(haplotype_id, scaffold, hifi_fastq)
-        }
-        .set { ch_gapfill_input }
+    // Example of using modular QC on gap-filled assemblies:
     
     GAP_FILLING(ch_gapfill_input)
-    */
-    /*
-    ========================================================================================
-        STEP 9: Final QC
-    ========================================================================================
-    */
-    /*
-    QC_FINAL(GAP_FILLING.out)
+    
+    // Reuse scaffold pairs for gap-filled assembly QC (no remapping!)
+    HIC_QC_FROM_PAIRS(
+        HIC_SCAFFOLD_QC.out.lifted_pairs,
+        GAP_FILLING.out.gapfilled_assemblies,
+        "gapfilled"
+    )
     */
 }
 
