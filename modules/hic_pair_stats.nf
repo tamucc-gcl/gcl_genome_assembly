@@ -245,8 +245,8 @@ process HIC_PAIR_STATS_FROM_PAIRS {
     awk '
         BEGIN {cis=0; trans=0; total=0}
         {
-            c=\$1
-            type=\$2
+            c=\\\$1
+            type=\\\$2
             total += c
             if(type=="cis") cis += c
             if(type=="trans") trans += c
@@ -261,8 +261,8 @@ process HIC_PAIR_STATS_FROM_PAIRS {
 
     # Get insert size distribution for cis pairs (|pos2 - pos1|)
     zcat ${pairs_gz} \\
-      | awk '/^#/ {next} \$2==\$4 {
-          d = \$5 - \$3
+      | awk '/^#/ {next} \\\$2==\\\$4 {
+          d = \\\$5 - \\\$3
           if (d < 0) d = -d
           if (d > 0) print d
         }' \\
@@ -293,8 +293,8 @@ pairs.gz (no remapping)
 \$(cat ${haplotype_id}_${qc_label}_trans_cis_ratio.txt)
 
 === Insert Size Distribution Summary ===
-Total cis distances: \$(awk '{sum+=\$1} END {print sum}' ${haplotype_id}_${qc_label}_insert_size_dist.txt)
-Median cis distance: \$(awk '{for(i=1;i<=\$1;i++) print \$2}' ${haplotype_id}_${qc_label}_insert_size_dist.txt | sort -n | awk '{a[NR]=\$0} END {print a[int(NR/2)]}')
+Total cis distances: \$(awk '{sum+=\\\$1} END {print sum}' ${haplotype_id}_${qc_label}_insert_size_dist.txt)
+Median cis distance: \$(awk '{for(i=1;i<=\\\$1;i++) print \\\$2}' ${haplotype_id}_${qc_label}_insert_size_dist.txt | sort -n | awk '{a[NR]=\\\$0} END {print a[int(NR/2)]}')
 
 === Mapping Quality Distribution ===
 NA (pairs input)
