@@ -1,0 +1,12 @@
+name: agptools
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.7
+  - pip
+  - pairtools
+  - samtools
+  - pip:
+    - git+https://github.com/WarrenLab/agptools.git
