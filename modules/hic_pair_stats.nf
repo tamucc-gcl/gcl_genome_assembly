@@ -231,13 +231,44 @@ process HIC_PAIR_STATS_FROM_PAIRS {
     # Analyze pair types and orientations from pairs.gz
     # pairs columns assumed: readID chr1 pos1 chr2 pos2 strand1 strand2 ...
     # -------------------------------------------------------------------------
-    zcat ${pairs_gz} | awk 'BEGIN{OFS="\\t"} /^#/ {next} {type = (\$2==\$4) ? "cis" : "trans"; orientation = \$6 \$7; print type, orientation}' | sort | uniq -c > ${haplotype_id}_${qc_label}_pair_types.txt
+    zcat ${pairs_gz} \\
+      | awk 'BEGIN{OFS="\\t"} /^#/ {next} {
+          type = (\$2==\$4) ? "cis" : "trans"
+          orientation = \$6 \$7
+          print type, orientation
+        }' \\
+      | sort \\
+      | uniq -c \\
+      > ${haplotype_id}_${qc_label}_pair_types.txt
 
     # Calculate trans/cis ratio
-    awk 'BEGIN {cis=0; trans=0; total=0} {c=\$1; type=\$2; total += c; if(type=="cis") cis += c; if(type=="trans") trans += c} END {print "Total pairs:", total; print "Cis pairs:", cis, "(", (cis>0?100*cis/total:0), "%)"; print "Trans pairs:", trans, "(", (trans>0?100*trans/total:0), "%)"; if (cis > 0) print "Trans/Cis ratio:", trans/cis}' ${haplotype_id}_${qc_label}_pair_types.txt > ${haplotype_id}_${qc_label}_trans_cis_ratio.txt
+    awk '
+        BEGIN {cis=0; trans=0; total=0}
+        {
+            c=\$1
+            type=\$2
+            total += c
+            if(type=="cis") cis += c
+            if(type=="trans") trans += c
+        }
+        END {
+            print "Total pairs:", total
+            print "Cis pairs:", cis, "(", (cis>0?100*cis/total:0), "%)"
+            print "Trans pairs:", trans, "(", (trans>0?100*trans/total:0), "%)"
+            if (cis > 0) print "Trans/Cis ratio:", trans/cis
+        }
+    ' ${haplotype_id}_${qc_label}_pair_types.txt > ${haplotype_id}_${qc_label}_trans_cis_ratio.txt
 
     # Get insert size distribution for cis pairs (|pos2 - pos1|)
-    zcat ${pairs_gz} | awk '/^#/ {next} \$2==\$4 {d = \$5 - \$3; if (d < 0) d = -d; if (d > 0) print d}' | sort -n | uniq -c > ${haplotype_id}_${qc_label}_insert_size_dist.txt
+    zcat ${pairs_gz} \\
+      | awk '/^#/ {next} \$2==\$4 {
+          d = \$5 - \$3
+          if (d < 0) d = -d
+          if (d > 0) print d
+        }' \\
+      | sort -n \\
+      | uniq -c \\
+      > ${haplotype_id}_${qc_label}_insert_size_dist.txt
 
     # Check if insert size file is empty and create placeholder if needed
     if [ ! -s ${haplotype_id}_${qc_label}_insert_size_dist.txt ]; then
