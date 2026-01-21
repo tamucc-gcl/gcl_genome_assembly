@@ -187,7 +187,7 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     tag "${haplotype_id}_${qc_label}"
     label 'hic_contact_map'
 
-    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/${haplotype_id}/contact_maps", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/contact_maps", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id), path(pairs_gz), path(assembly_fasta), val(qc_label)

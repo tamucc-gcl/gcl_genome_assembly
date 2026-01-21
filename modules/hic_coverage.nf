@@ -159,7 +159,7 @@ process HIC_COVERAGE_FROM_PAIRS {
     tag "${haplotype_id}_${qc_label}"
     label 'hic_coverage'
 
-    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/${haplotype_id}/coverage", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/hic_mapping/${qc_label}/coverage", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id), path(pairs_gz), path(assembly_fasta), val(qc_label)
