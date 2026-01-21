@@ -8,5 +8,8 @@ dependencies:
   - pip
   - pairtools
   - samtools
+  - htslib  # provides bgzip
+  - coreutils
+  - gawk
   - pip:
     - git+https://github.com/WarrenLab/agptools.git
