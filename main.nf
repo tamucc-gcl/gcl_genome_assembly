@@ -387,6 +387,7 @@ workflow {
         STEP 10: Hi-C Mapping QC on Raw BAMs (MODULAR - RUNS IN PARALLEL)
     ========================================================================================
     */
+    //skip for development
     /*
     HIC_QC_FROM_BAM_RAW(
         MAP_HIC_TO_ASSEMBLY.out.bam,
