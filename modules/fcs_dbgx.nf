@@ -26,6 +26,13 @@ process FCS_DB_GET {
     echo "[FCS_DB_GET] Manifest: ${gxdb_manifest}"
     echo "[FCS_DB_GET] Target directory: ${gxdb_dir}"
     
+    # Remove stale lockfile if it exists
+    LOCKFILE="${gxdb_dir}.lockfile"
+    if [ -f "\${LOCKFILE}" ]; then
+      echo "[FCS_DB_GET] Removing stale lockfile: \${LOCKFILE}"
+      rm -f "\${LOCKFILE}"
+    fi
+    
     # Nextflow automatically wraps this in singularity exec
     /app/bin/sync_files get \\
       --mft "${gxdb_manifest}" \\
