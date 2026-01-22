@@ -16,7 +16,7 @@ process FCS_DB_GET {
 
   command -v run_gx.py >/dev/null 2>&1 || { echo "ERROR: run_gx.py not found in PATH"; exit 127; }
 
-  mkdir -p "${gxdb_dir}"
+  mkdir -p "${gxdb_dir}" 2>/dev/null || true
 
   # Consider DB "present" if directory has files AND sentinel exists
   SENTINEL="${gxdb_dir}/.gxdb_ready"
