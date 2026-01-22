@@ -5,7 +5,7 @@ process FCS_GX_SCREEN {
   input:
     path assembly_fa
     val source_taxid
-    path gxdb_dir
+    val gxdb_dir
 
   output:
     path "gx_out/*.fcs_gx_report.txt", emit: action_report
@@ -19,7 +19,6 @@ process FCS_GX_SCREEN {
   mkdir -p gx_out
 
   # Find the database prefix (e.g., test-only, all, etc.)
-  # Database files are named like: test-only.gxi, test-only.gxs
   DB_PREFIX=\$(ls ${gxdb_dir}/*.gxi | head -n1 | sed 's/\\.gxi\$//')
   
   if [ -z "\${DB_PREFIX}" ]; then
@@ -30,7 +29,8 @@ process FCS_GX_SCREEN {
   
   echo "Using GX database: \${DB_PREFIX}"
 
-  run_gx.py \\
+  # Nextflow automatically wraps this in singularity exec
+  /app/bin/run_gx \\
     --fasta ${assembly_fa} \\
     --out-dir gx_out \\
     --gx-db "\${DB_PREFIX}" \\
