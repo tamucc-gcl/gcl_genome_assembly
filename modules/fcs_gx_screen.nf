@@ -12,23 +12,29 @@ process FCS_GX_SCREEN {
     path "gx_out/*.taxonomy.rpt",      emit: taxonomy_report
     path "gx_out/fcs_gx_stdout.log",   emit: stdout_log
 
-  cpus { cpus ?: 32 }
-
   script:
   """
-  command -v run_gx.py >/dev/null 2>&1 || { echo "ERROR: run_gx.py not found in PATH"; exit 127; }
-
+  set -euo pipefail
+  
   mkdir -p gx_out
 
-  export GX_NUM_CORES=${task.cpus}
+  # Find the database prefix (e.g., test-only, all, etc.)
+  # Database files are named like: test-only.gxi, test-only.gxs
+  DB_PREFIX=\$(ls ${gxdb_dir}/*.gxi | head -n1 | sed 's/\\.gxi\$//')
+  
+  if [ -z "\${DB_PREFIX}" ]; then
+    echo "ERROR: No .gxi database file found in ${gxdb_dir}"
+    ls -lh ${gxdb_dir}
+    exit 1
+  fi
+  
+  echo "Using GX database: \${DB_PREFIX}"
 
-  # If your input is gzipped fasta, run_gx.py can handle it (as shown in docs),
-  # but plain fasta is fine too.
-  run_gx.py screen genome \
-    --fasta ${assembly_fa} \
-    --out-dir gx_out \
-    --gx-db ${gxdb_dir} \
-    --tax-id ${source_taxid} \
+  run_gx.py \\
+    --fasta ${assembly_fa} \\
+    --out-dir gx_out \\
+    --gx-db "\${DB_PREFIX}" \\
+    --tax-id ${source_taxid} \\
     | tee gx_out/fcs_gx_stdout.log
   """
 }
