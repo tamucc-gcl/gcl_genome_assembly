@@ -60,56 +60,72 @@ workflow DECONTAMINATE_ASSEMBLY {
         STEP 2: FCS-GX Screening (Parallel Across All Haplotypes)
     ========================================================================================
     */
+    // Extract just the assembly files for FCS_GX_SCREEN
     ch_cleaned_input
-        .combine(gxdb_dir)  // ✅ FIXED: No Channel.value() wrapper
-        .map { haplotype_id, assembly_fasta, gxdb ->
-            tuple(assembly_fasta,
-                  params.decon?.source_taxid ?: 7898,
-                  gxdb)
-        }
-        .set { ch_screen_input }
+        .map { haplotype_id, assembly_fasta -> assembly_fasta }
+        .set { ch_assembly_files }
     
-    FCS_GX_SCREEN(ch_screen_input)
+    // Create source_taxid channel
+    ch_source_taxid = Channel.value(params.decon?.source_taxid ?: 7898)
+    
+    // Call FCS_GX_SCREEN with separate inputs
+    FCS_GX_SCREEN(
+        ch_assembly_files,
+        ch_source_taxid,
+        gxdb_dir
+    )
     
     /*
     ========================================================================================
         STEP 3: Clean Genome (Remove Identified Contaminants)
     ========================================================================================
     */
-    ch_cleaned_input
-        .map { haplotype_id, assembly_fasta -> assembly_fasta }
-        .combine(FCS_GX_SCREEN.out.action_report)
-        .set { ch_clean_input }
-    
-    FCS_CLEAN_GENOME(ch_clean_input)
+    FCS_CLEAN_GENOME(
+        ch_assembly_files,
+        FCS_GX_SCREEN.out.action_report
+    )
     
     /*
     ========================================================================================
         STEP 4: Restore Haplotype IDs for All Outputs
     ========================================================================================
     */
-    // Decontaminated assemblies
-    assemblies
+    // Restore haplotype_id by position matching (since processes run in order)
+    ch_cleaned_input
         .map { haplotype_id, assembly_fasta -> haplotype_id }
-        .combine(FCS_CLEAN_GENOME.out.decontaminated_fasta)
+        .toList()
+        .set { ch_haplotype_ids }
+    
+    FCS_CLEAN_GENOME.out.decontaminated_fasta
+        .toList()
+        .combine(ch_haplotype_ids)
+        .flatMap { fastas, ids ->
+            [fastas, ids].transpose().collect { fasta, id -> tuple(id, fasta) }
+        }
         .set { ch_decontam_with_id }
     
-    // Contaminant sequences
-    assemblies
-        .map { haplotype_id, assembly_fasta -> haplotype_id }
-        .combine(FCS_CLEAN_GENOME.out.contaminants_fasta)
+    FCS_CLEAN_GENOME.out.contaminants_fasta
+        .toList()
+        .combine(ch_haplotype_ids)
+        .flatMap { fastas, ids ->
+            [fastas, ids].transpose().collect { fasta, id -> tuple(id, fasta) }
+        }
         .set { ch_contam_with_id }
     
-    // Action reports
-    assemblies
-        .map { haplotype_id, assembly_fasta -> haplotype_id }
-        .combine(FCS_GX_SCREEN.out.action_report)
+    FCS_GX_SCREEN.out.action_report
+        .toList()
+        .combine(ch_haplotype_ids)
+        .flatMap { reports, ids ->
+            [reports, ids].transpose().collect { report, id -> tuple(id, report) }
+        }
         .set { ch_action_with_id }
     
-    // Taxonomy reports
-    assemblies
-        .map { haplotype_id, assembly_fasta -> haplotype_id }
-        .combine(FCS_GX_SCREEN.out.taxonomy_report)
+    FCS_GX_SCREEN.out.taxonomy_report
+        .toList()
+        .combine(ch_haplotype_ids)
+        .flatMap { reports, ids ->
+            [reports, ids].transpose().collect { report, id -> tuple(id, report) }
+        }
         .set { ch_taxonomy_with_id }
     
     emit:
