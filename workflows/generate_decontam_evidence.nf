@@ -32,8 +32,8 @@ workflow GENERATE_DECONTAM_EVIDENCE {
     action_reports   // channel: tuple(haplotype_id, action_report)
     taxonomy_reports // channel: tuple(haplotype_id, taxonomy_report)
     hifi_reads       // channel: tuple(sample_id, hifi_fastq)
-    diamond_db       // value: DIAMOND database path
-    taxdump_dir      // value: NCBI taxonomy directory
+    diamond_db       // channel: DIAMOND database path (already a channel)
+    taxdump_dir      // channel: NCBI taxonomy directory (already a channel)
     
     main:
     
@@ -80,7 +80,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
     */
     decontaminated
         .map { haplotype_id, clean_fasta -> tuple(haplotype_id, clean_fasta) }
-        .combine(Channel.value(diamond_db))
+        .combine(diamond_db)  // diamond_db is already a channel, don't wrap in Channel.value()
         .set { ch_diamond_combined }
     
     ch_diamond_combined
@@ -116,7 +116,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .map { haplotype_id, clean_fasta -> tuple(haplotype_id, clean_fasta) }
         .join(ch_diamond_with_id, by: 0)
         .join(ch_bam_with_id, by: 0)
-        .combine(Channel.value(taxdump_dir))
+        .combine(taxdump_dir)  // taxdump_dir is already a channel, don't wrap in Channel.value()
         .set { ch_blob_combined }
     
     ch_blob_combined
