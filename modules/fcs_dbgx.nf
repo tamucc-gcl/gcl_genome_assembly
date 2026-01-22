@@ -14,21 +14,25 @@ process FCS_DB_GET {
   """
   set -euo pipefail
 
-  mkdir -p "${gxdb_dir}" 2>/dev/null || true
+  # Resolve the actual path (follow symlinks)
+  ACTUAL_DIR=\$(readlink -f "${gxdb_dir}" 2>/dev/null || echo "${gxdb_dir}")
+  
+  # Create the actual directory
+  mkdir -p "\${ACTUAL_DIR}"
+  
+  SENTINEL="\${ACTUAL_DIR}/.gxdb_ready"
 
-  SENTINEL="${gxdb_dir}/.gxdb_ready"
-
-  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "\$(ls -A "${gxdb_dir}" 2>/dev/null || true)" ]; then
+  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "\$(ls -A "\${ACTUAL_DIR}" 2>/dev/null || true)" ]; then
     echo "[FCS_DB_GET] Downloading GXDB using manifest: ${gxdb_manifest}"
+    echo "[FCS_DB_GET] Target directory: \${ACTUAL_DIR}"
     
-    cd "${gxdb_dir}"
+    cd "\${ACTUAL_DIR}"
     
     # Download manifest file
     echo "Downloading manifest..."
     curl -L -o manifest.txt "${gxdb_manifest}"
     
     # Parse manifest and download each file
-    # Manifest format: filename<TAB>URL<TAB>hash
     echo "Parsing manifest and downloading files..."
     while IFS=\$'\\t' read -r filename url hash; do
       # Skip comments and empty lines
@@ -51,7 +55,7 @@ process FCS_DB_GET {
     echo "Verifying downloaded files..."
     ls -lh
     
-    # Check for expected database files (.gxi, .gxs, .meta.jsonl for test-only)
+    # Check for expected database files
     file_count=\$(ls *.gx* 2>/dev/null | wc -l)
     if [ "\${file_count}" -eq 0 ]; then
       echo "ERROR: No .gx* database files found after download"
@@ -62,9 +66,9 @@ process FCS_DB_GET {
     echo "[FCS_DB_GET] Database download complete. Files:"
     ls -lh *.gx* 2>/dev/null || ls -lh
   else
-    echo "[FCS_DB_GET] GXDB already present at ${gxdb_dir}; skipping download."
+    echo "[FCS_DB_GET] GXDB already present at \${ACTUAL_DIR}; skipping download."
     echo "Existing files:"
-    ls -lh "${gxdb_dir}" 2>/dev/null || echo "Directory is empty or inaccessible"
+    ls -lh "\${ACTUAL_DIR}" 2>/dev/null || echo "Directory is empty or inaccessible"
   fi
   """
 }
