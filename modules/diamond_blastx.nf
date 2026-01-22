@@ -4,14 +4,12 @@ process DIAMOND_BLASTX {
 
   input:
     path assembly_fa
-    path diamond_db
+    val diamond_db      // Changed from 'path' to 'val' - don't stage the huge DB
     val max_target_seqs
     val evalue
 
   output:
     path "diamond_hits.tsv", emit: out_hits
-
-  container "quay.io/biocontainers/diamond:2.1.10--h43eeafb_0"
 
   script:
   """

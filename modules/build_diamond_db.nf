@@ -6,6 +6,7 @@
     - Smart caching: skips if .dmnd already exists
     - Requires: taxdump (names.dmp, nodes.dmp)
     - Supports: gzipped or plain text inputs
+    - Works like FCS_DB_GET: manages database in permanent location
 ========================================================================================
 */
 
@@ -14,20 +15,21 @@ process BUILD_DIAMOND_DB {
     label 'diamond'
     
     input:
-    path db_dir
+    val db_dir        // Directory path as a string
     val db_name
     val fasta_url
     val taxonmap_url
-    path taxdump_dir
+    path taxdump_dir  // This gets staged, but that's OK since it's small
     val force_build
     
     output:
-    path "${db_dir}/${db_name}.dmnd", emit: dmnd
+    val "${db_dir}/${db_name}.dmnd", emit: dmnd  // Output path as value, not file
     
     script:
     """
     set -euo pipefail
     
+    # Ensure target directory exists
     mkdir -p "${db_dir}"
     
     DMND="${db_dir}/${db_name}.dmnd"
@@ -39,10 +41,11 @@ process BUILD_DIAMOND_DB {
        [ ! -f "\${SENTINEL}" ]; then
         
         echo "[BUILD_DIAMOND_DB] Building DIAMOND database: ${db_name}"
+        echo "[BUILD_DIAMOND_DB] Target location: ${db_dir}"
         echo "[BUILD_DIAMOND_DB] FASTA URL: ${fasta_url}"
         echo "[BUILD_DIAMOND_DB] Taxonmap URL: ${taxonmap_url}"
         
-        # Download FASTA
+        # Download FASTA directly to target directory
         echo "[BUILD_DIAMOND_DB] Downloading protein sequences..."
         if [[ "${fasta_url}" == *.gz ]]; then
             curl -L "${fasta_url}" | gunzip > "${db_dir}/${db_name}.fasta"
@@ -58,7 +61,7 @@ process BUILD_DIAMOND_DB {
             curl -L -o "${db_dir}/${db_name}.taxonmap" "${taxonmap_url}"
         fi
         
-        # Build DIAMOND database
+        # Build DIAMOND database directly in target directory
         echo "[BUILD_DIAMOND_DB] Building database (this may take several hours)..."
         diamond makedb \
             --in "${db_dir}/${db_name}.fasta" \
