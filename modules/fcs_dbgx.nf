@@ -24,7 +24,7 @@ process FCS_DB_GET {
     echo "[FCS_DB_GET] Target directory: ${gxdb_dir}"
     
     # Nextflow automatically wraps this in singularity exec
-    /app/bin/sync_files db get \\
+    /app/bin/sync_files get \\
       --mft "${gxdb_manifest}" \\
       --dir "${gxdb_dir}"
     
