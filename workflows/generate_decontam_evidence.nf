@@ -42,6 +42,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         STEP 1: Map HiFi Reads to Cleaned Assemblies (Coverage Evidence)
     ========================================================================================
     */
+    
     // Extract sample_id from haplotype_id and join with HiFi reads
     decontaminated
         .map { haplotype_id, clean_fasta ->
@@ -50,10 +51,9 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         }
         .combine(hifi_reads, by: 0)
         .map { sample_id, haplotype_id, clean_fasta, hifi_fastq ->
-            tuple(haplotype_id,
-                  clean_fasta, 
+            tuple(clean_fasta, 
                   hifi_fastq,
-                  params.evidence?.map_preset ?: 'map-hifi')
+                  params.evidence_map_preset ?: 'map-hifi')  // Removed cpus parameter
         }
         .set { ch_mapping_input }
     
@@ -64,7 +64,6 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .map { haplotype_id, clean_fasta -> haplotype_id }
         .combine(MAP_READS_MINIMAP2.out.bam)
         .set { ch_bam_with_id }
-    
     /*
     ========================================================================================
         STEP 2: DIAMOND BLASTX (Taxonomy Evidence)

@@ -6,15 +6,10 @@ process MAP_READS_MINIMAP2 {
     path assembly_fa
     path reads
     val preset
-    val cpus
 
   output:
     path "reads.bam",     emit: bam
     path "reads.bam.bai", emit: bai
-
-  // This minimap2 biocontainer *usually* includes samtools.
-  // If your environment separates them, swap to a container image that has both.
-  container "quay.io/biocontainers/minimap2:2.28--he4a0461_1"
 
   script:
   """
