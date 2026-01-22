@@ -64,53 +64,98 @@ params.yahs_no_scaffold_ec = true
 params.bwa_mem2_hic_args = null
 params.scaffold_min_size = 10000000  // Only plot scaffolds >10 Mb
 
-// Decontamination parameters
+// ============================================================================
+// Database base directory
+// ============================================================================
 params.db_base = "/work/birdlab/databases"
 
+// ============================================================================
 // FCS-GX database settings
-params.gxdb = [
-    dir: "${params.db_base}/fcs-gx",
-    profile: 'all',          // 'all' | 'test-only'
-    manifest: null,          // optional: override manifest URL/path
-    force: false             // re-download even if present
-]
+// ============================================================================
+params.gxdb_dir = "${params.db_base}/fcs-gx"
+params.gxdb_profile = 'all'          // 'all' | 'test-only'
+params.gxdb_manifest = null          // optional: override manifest URL/path
+params.gxdb_force = false            // re-download even if present
 
+// ============================================================================
 // DIAMOND / blobtools evidence DB settings
-params.diamond = [
-    dmnd: null,              // if you have a prebuilt .dmnd, set this
-    dir: "${params.db_base}/diamond",
-    name: "proteins",
-    taxdump_dir: "${params.db_base}/ncbi_taxonomy",
-    profile: 'custom',       // 'custom' (recommended)
-    fasta_url: "https://ftp.ncbi.nlm.nih.gov/blast/db/FASTA/nr.gz",
-    taxonmap_url: "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/prot.accession2taxid.FULL.gz",
-    force: false
-]
+// ============================================================================
+params.diamond_dmnd = null           // if you have a prebuilt .dmnd, set this
+params.diamond_dir = "${params.db_base}/diamond"
+params.diamond_name = "proteins"
+params.diamond_taxdump_dir = "${params.db_base}/ncbi_taxonomy"
+params.diamond_profile = 'custom'    // 'custom' (recommended)
+params.diamond_fasta_url = "https://ftp.ncbi.nlm.nih.gov/blast/db/FASTA/nr.gz"
+params.diamond_taxonmap_url = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/prot.accession2taxid.FULL.gz"
+params.diamond_force = false
 
+// ============================================================================
 // Decontamination control
-params.decon = [
-    // When to run decontamination
-    run_on_contigs: false,       // Run on initial contig assemblies (before Hi-C mapping)
-    run_on_scaffolds: false,     // Run on scaffolded assemblies (after Hi-C scaffolding)
-    
-    // Core settings
-    source_taxid: 7898,          // Actinopterygii; set your species taxid when possible
-    
-    // Optional: adapter/vector removal
-    run_fcs_adaptor: false,      // Requires FCS-adaptor containers; enable only if configured
-    fcsadaptor_mode: 'euk',      // 'euk' or 'prok'
-    container_engine: 'singularity',
-    
-    // Optional: generate evidence (coverage + taxonomy + blobtools plots)
-    make_blobtools_evidence: true
+// ============================================================================
+// When to run decontamination
+params.decon_run_on_contigs = false       // Run on initial contig assemblies (before Hi-C mapping)
+params.decon_run_on_scaffolds = false     // Run on scaffolded assemblies (after Hi-C scaffolding)
+
+// Core settings
+params.decon_source_taxid = 7898          // Actinopterygii; set your species taxid when possible
+
+// Optional: adapter/vector removal
+params.decon_run_fcs_adaptor = false      // Requires FCS-adaptor containers; enable only if configured
+params.decon_fcsadaptor_mode = 'euk'      // 'euk' or 'prok'
+params.decon_container_engine = 'singularity'
+
+// Optional: generate evidence (coverage + taxonomy + blobtools plots)
+params.decon_make_blobtools_evidence = true
+
+// ============================================================================
+// Evidence generation settings
+// ============================================================================
+params.evidence_map_preset = 'map-hifi'
+params.evidence_diamond_max_target_seqs = 1
+params.evidence_diamond_evalue = 1e-25
+params.evidence_blob_min_contig_len = 1000
+
+// ============================================================================
+// BACKWARD COMPATIBILITY LAYER (OPTIONAL)
+// ============================================================================
+// If you want to keep the old nested structure working internally,
+// you can create these derived values. This allows your workflow code
+// to stay unchanged while supporting both old and new parameter styles.
+
+// Reconstruct nested structures for internal use
+params.gxdb = [
+    dir: params.gxdb_dir,
+    profile: params.gxdb_profile,
+    manifest: params.gxdb_manifest,
+    force: params.gxdb_force
 ]
 
-// Evidence generation settings
+params.diamond = [
+    dmnd: params.diamond_dmnd,
+    dir: params.diamond_dir,
+    name: params.diamond_name,
+    taxdump_dir: params.diamond_taxdump_dir,
+    profile: params.diamond_profile,
+    fasta_url: params.diamond_fasta_url,
+    taxonmap_url: params.diamond_taxonmap_url,
+    force: params.diamond_force
+]
+
+params.decon = [
+    run_on_contigs: params.decon_run_on_contigs,
+    run_on_scaffolds: params.decon_run_on_scaffolds,
+    source_taxid: params.decon_source_taxid,
+    run_fcs_adaptor: params.decon_run_fcs_adaptor,
+    fcsadaptor_mode: params.decon_fcsadaptor_mode,
+    container_engine: params.decon_container_engine,
+    make_blobtools_evidence: params.decon_make_blobtools_evidence
+]
+
 params.evidence = [
-    map_preset: 'map-hifi',
-    diamond_max_target_seqs: 1,
-    diamond_evalue: 1e-25,
-    blob_min_contig_len: 1000
+    map_preset: params.evidence_map_preset,
+    diamond_max_target_seqs: params.evidence_diamond_max_target_seqs,
+    diamond_evalue: params.evidence_diamond_evalue,
+    blob_min_contig_len: params.evidence_blob_min_contig_len
 ]
 
 /*
