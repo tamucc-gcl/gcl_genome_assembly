@@ -17,27 +17,23 @@ nextflow.enable.dsl=2
 ========================================================================================
 */
 
-// Print pipeline header
-log.info """\
-    =========================================
-    GENOME ASSEMBLY PIPELINE
-    =========================================
-    Sample sheet : ${params.sample_sheet}
-    Output dir   : ${params.outdir}
-    Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
-    =========================================
-    """
-    .stripIndent()
-
 /*
 ========================================================================================
-    PARAMETERS
+    PARAMETERS - FLATTENED FOR EASY COMMAND-LINE OVERRIDE
+========================================================================================
+    All parameters can now be overridden individually without affecting others.
+    Example: --decon_run_on_contigs true --decon_source_taxid 373251
+    
+    IMPORTANT: Place these BEFORE any conditional logic that uses params
 ========================================================================================
 */
 
+// ============================================================================
+// Core pipeline parameters (keep existing ones)
+// ============================================================================
 params.sample_sheet = null
 params.outdir = './results'
-params.publish_dir_mode = 'link' //change to copy at end
+params.publish_dir_mode = 'link'
 
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
@@ -45,7 +41,7 @@ params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
 
 // Hi-C mapping and QC parameters
 params.hic_coverage_window = 100000
-params.hic_min_mapq = 30  // Minimum mapping quality for valid Hi-C pairs
+params.hic_min_mapq = 30
 params.hic_resolutions = "1000000,500000,100000,50000,10000"
 params.hic_base_bin = "10000"
 params.hic_plot_resolutions = "1000000,500000,100000"
@@ -57,12 +53,12 @@ params.hic_min_mapq_filtered = 1
 params.yahs_min_contig_length = 10000
 params.yahs_min_mapq = 1
 params.yahs_resolutions = '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
-params.yahs_rounds_per_resolution = null   // corresponds to -R if set
-params.yahs_enzyme = null                  // corresponds to -e if set
+params.yahs_rounds_per_resolution = null
+params.yahs_enzyme = null
 params.yahs_no_contig_ec = true
 params.yahs_no_scaffold_ec = true
 params.bwa_mem2_hic_args = null
-params.scaffold_min_size = 10000000  // Only plot scaffolds >10 Mb
+params.scaffold_min_size = 10000000
 
 // ============================================================================
 // Database base directory
@@ -70,7 +66,7 @@ params.scaffold_min_size = 10000000  // Only plot scaffolds >10 Mb
 params.db_base = "/work/birdlab/databases"
 
 // ============================================================================
-// FCS-GX database settings
+// FCS-GX database settings (FLATTENED)
 // ============================================================================
 params.gxdb_dir = "${params.db_base}/fcs-gx"
 params.gxdb_profile = 'all'          // 'all' | 'test-only'
@@ -78,7 +74,7 @@ params.gxdb_manifest = null          // optional: override manifest URL/path
 params.gxdb_force = false            // re-download even if present
 
 // ============================================================================
-// DIAMOND / blobtools evidence DB settings
+// DIAMOND / blobtools evidence DB settings (FLATTENED)
 // ============================================================================
 params.diamond_dmnd = null           // if you have a prebuilt .dmnd, set this
 params.diamond_dir = "${params.db_base}/diamond"
@@ -90,7 +86,7 @@ params.diamond_taxonmap_url = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accessi
 params.diamond_force = false
 
 // ============================================================================
-// Decontamination control
+// Decontamination control (FLATTENED)
 // ============================================================================
 // When to run decontamination
 params.decon_run_on_contigs = false       // Run on initial contig assemblies (before Hi-C mapping)
@@ -108,7 +104,7 @@ params.decon_container_engine = 'singularity'
 params.decon_make_blobtools_evidence = true
 
 // ============================================================================
-// Evidence generation settings
+// Evidence generation settings (FLATTENED)
 // ============================================================================
 params.evidence_map_preset = 'map-hifi'
 params.evidence_diamond_max_target_seqs = 1
@@ -116,13 +112,11 @@ params.evidence_diamond_evalue = 1e-25
 params.evidence_blob_min_contig_len = 1000
 
 // ============================================================================
-// BACKWARD COMPATIBILITY LAYER (OPTIONAL)
+// BACKWARD COMPATIBILITY LAYER
 // ============================================================================
-// If you want to keep the old nested structure working internally,
-// you can create these derived values. This allows your workflow code
-// to stay unchanged while supporting both old and new parameter styles.
+// Reconstruct nested structures for internal workflow code
+// This must come AFTER all the flattened parameters are defined above
 
-// Reconstruct nested structures for internal use
 params.gxdb = [
     dir: params.gxdb_dir,
     profile: params.gxdb_profile,
@@ -157,6 +151,18 @@ params.evidence = [
     diamond_evalue: params.evidence_diamond_evalue,
     blob_min_contig_len: params.evidence_blob_min_contig_len
 ]
+
+// Print pipeline header
+log.info """\
+    =========================================
+    GENOME ASSEMBLY PIPELINE
+    =========================================
+    Sample sheet : ${params.sample_sheet}
+    Output dir   : ${params.outdir}
+    Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
+    =========================================
+    """
+    .stripIndent()
 
 /*
 ========================================================================================
