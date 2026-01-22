@@ -50,13 +50,22 @@ workflow GENERATE_DECONTAM_EVIDENCE {
             tuple(sample_id, haplotype_id, clean_fasta)
         }
         .combine(hifi_reads, by: 0)
-        .map { sample_id, haplotype_id, clean_fasta, hifi_fastq ->
-            // Use [] instead of tuple() to allow Nextflow to unpack into 3 separate inputs
-            [clean_fasta, hifi_fastq, params.evidence.map_preset ?: 'map-hifi']
-        }
-        .set { ch_mapping_input }
+        .set { ch_combined }
     
-    MAP_READS_MINIMAP2(ch_mapping_input)
+    // Split into separate channels for each input
+    ch_combined
+        .map { sample_id, haplotype_id, clean_fasta, hifi_fastq -> clean_fasta }
+        .set { ch_assembly }
+    
+    ch_combined
+        .map { sample_id, haplotype_id, clean_fasta, hifi_fastq -> hifi_fastq }
+        .set { ch_reads }
+    
+    ch_combined
+        .map { sample_id, haplotype_id, clean_fasta, hifi_fastq -> params.evidence.map_preset ?: 'map-hifi' }
+        .set { ch_preset }
+    
+    MAP_READS_MINIMAP2(ch_assembly, ch_reads, ch_preset)
     
     // Restore haplotype_id for BAM output
     decontaminated
@@ -72,16 +81,25 @@ workflow GENERATE_DECONTAM_EVIDENCE {
     decontaminated
         .map { haplotype_id, clean_fasta -> tuple(haplotype_id, clean_fasta) }
         .combine(Channel.value(diamond_db))
-        .map { haplotype_id, clean_fasta, dmnd ->
-            // Use [] for unpacking into separate inputs
-            [clean_fasta, 
-             dmnd,
-             params.evidence.diamond_max_target_seqs ?: 1,
-             params.evidence.diamond_evalue ?: 1e-25]
-        }
-        .set { ch_diamond_input }
+        .set { ch_diamond_combined }
     
-    DIAMOND_BLASTX(ch_diamond_input)
+    ch_diamond_combined
+        .map { haplotype_id, clean_fasta, dmnd -> clean_fasta }
+        .set { ch_diamond_assembly }
+    
+    ch_diamond_combined
+        .map { haplotype_id, clean_fasta, dmnd -> dmnd }
+        .set { ch_diamond_db }
+    
+    ch_diamond_combined
+        .map { haplotype_id, clean_fasta, dmnd -> params.evidence.diamond_max_target_seqs ?: 1 }
+        .set { ch_diamond_max_seqs }
+    
+    ch_diamond_combined
+        .map { haplotype_id, clean_fasta, dmnd -> params.evidence.diamond_evalue ?: 1e-25 }
+        .set { ch_diamond_evalue }
+    
+    DIAMOND_BLASTX(ch_diamond_assembly, ch_diamond_db, ch_diamond_max_seqs, ch_diamond_evalue)
     
     // Restore haplotype_id for DIAMOND output
     decontaminated
@@ -99,17 +117,29 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .join(ch_diamond_with_id, by: 0)
         .join(ch_bam_with_id, by: 0)
         .combine(Channel.value(taxdump_dir))
-        .map { haplotype_id, clean_fasta, hits, bam, taxdump ->
-            // Use [] for unpacking into separate inputs
-            [clean_fasta, 
-             hits, 
-             bam, 
-             taxdump,
-             params.evidence.blob_min_contig_len ?: 1000]
-        }
-        .set { ch_blob_input }
+        .set { ch_blob_combined }
     
-    BLOBTOOLS_CREATE(ch_blob_input)
+    ch_blob_combined
+        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> clean_fasta }
+        .set { ch_blob_assembly }
+    
+    ch_blob_combined
+        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> hits }
+        .set { ch_blob_hits }
+    
+    ch_blob_combined
+        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> bam }
+        .set { ch_blob_bam }
+    
+    ch_blob_combined
+        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> taxdump }
+        .set { ch_blob_taxdump }
+    
+    ch_blob_combined
+        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> params.evidence.blob_min_contig_len ?: 1000 }
+        .set { ch_blob_min_len }
+    
+    BLOBTOOLS_CREATE(ch_blob_assembly, ch_blob_hits, ch_blob_bam, ch_blob_taxdump, ch_blob_min_len)
     
     // Restore haplotype_id for blobtools output
     decontaminated
@@ -135,17 +165,29 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .join(ch_plots_with_id, by: 0)
         .join(decontaminated, by: 0)
         .join(contaminants, by: 0)
-        .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta ->
-            // Use [] for unpacking into separate inputs
-            [action_report,
-             taxonomy_report,
-             plots_dir,
-             clean_fasta,
-             contam_fasta]
-        }
-        .set { ch_report_input }
+        .set { ch_report_combined }
     
-    FCS_BLOB_EVIDENCE_REPORT(ch_report_input)
+    ch_report_combined
+        .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta -> action_report }
+        .set { ch_report_action }
+    
+    ch_report_combined
+        .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta -> taxonomy_report }
+        .set { ch_report_taxonomy }
+    
+    ch_report_combined
+        .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta -> plots_dir }
+        .set { ch_report_plots }
+    
+    ch_report_combined
+        .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta -> clean_fasta }
+        .set { ch_report_clean }
+    
+    ch_report_combined
+        .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta -> contam_fasta }
+        .set { ch_report_contam }
+    
+    FCS_BLOB_EVIDENCE_REPORT(ch_report_action, ch_report_taxonomy, ch_report_plots, ch_report_clean, ch_report_contam)
     
     // Restore haplotype_id for report outputs
     decontaminated
