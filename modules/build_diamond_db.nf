@@ -28,6 +28,7 @@ process BUILD_DIAMOND_DB {
     script:
     """
     set -euo pipefail
+    set -o pipefail  # Ensure pipe failures are caught
     
     # Ensure target directory exists
     mkdir -p "${db_dir}"
@@ -44,42 +45,101 @@ process BUILD_DIAMOND_DB {
         echo "[BUILD_DIAMOND_DB] Target location: ${db_dir}"
         echo "[BUILD_DIAMOND_DB] FASTA URL: ${fasta_url}"
         echo "[BUILD_DIAMOND_DB] Taxonmap URL: ${taxonmap_url}"
+        echo ""
+        echo "WARNING: This will download ~80GB (compressed) and uncompress to ~250GB"
+        echo "         Final database will be ~120GB. Ensure sufficient disk space!"
+        echo ""
         
-        # Download FASTA directly to target directory
-        echo "[BUILD_DIAMOND_DB] Downloading protein sequences..."
+        # Download FASTA with better error handling
+        echo "[BUILD_DIAMOND_DB] Downloading protein sequences (this will take hours)..."
+        echo "[BUILD_DIAMOND_DB] Started: \$(date)"
+        
         if [[ "${fasta_url}" == *.gz ]]; then
-            curl -L "${fasta_url}" | gunzip > "${db_dir}/${db_name}.fasta"
+            # Use -f to fail on HTTP errors, --progress-bar for visibility
+            if ! curl -f -L --progress-bar "${fasta_url}" | gunzip > "${db_dir}/${db_name}.fasta"; then
+                echo "[BUILD_DIAMOND_DB] ERROR: FASTA download failed!" >&2
+                rm -f "${db_dir}/${db_name}.fasta"
+                exit 1
+            fi
         else
-            curl -L -o "${db_dir}/${db_name}.fasta" "${fasta_url}"
+            if ! curl -f -L --progress-bar -o "${db_dir}/${db_name}.fasta" "${fasta_url}"; then
+                echo "[BUILD_DIAMOND_DB] ERROR: FASTA download failed!" >&2
+                rm -f "${db_dir}/${db_name}.fasta"
+                exit 1
+            fi
         fi
         
-        # Download taxonmap
-        echo "[BUILD_DIAMOND_DB] Downloading taxonomy mapping..."
-        if [[ "${taxonmap_url}" == *.gz ]]; then
-            curl -L "${taxonmap_url}" | gunzip > "${db_dir}/${db_name}.taxonmap"
-        else
-            curl -L -o "${db_dir}/${db_name}.taxonmap" "${taxonmap_url}"
+        # Check downloaded file size
+        FASTA_SIZE=\$(stat -c%s "${db_dir}/${db_name}.fasta" 2>/dev/null || stat -f%z "${db_dir}/${db_name}.fasta" 2>/dev/null || echo 0)
+        FASTA_SIZE_GB=\$(echo "scale=2; \${FASTA_SIZE}/1024/1024/1024" | bc)
+        echo "[BUILD_DIAMOND_DB] Downloaded FASTA size: \${FASTA_SIZE_GB} GB"
+        
+        # Sanity check - nr.fasta should be at least 200 GB
+        if [ "\${FASTA_SIZE}" -lt 200000000000 ]; then
+            echo "[BUILD_DIAMOND_DB] ERROR: FASTA file too small (\${FASTA_SIZE_GB} GB)!" >&2
+            echo "[BUILD_DIAMOND_DB] Expected at least 200 GB for NCBI nr" >&2
+            echo "[BUILD_DIAMOND_DB] Download may have been interrupted" >&2
+            rm -f "${db_dir}/${db_name}.fasta"
+            exit 1
         fi
+        
+        echo "[BUILD_DIAMOND_DB] FASTA download complete: \$(date)"
+        
+        # Download taxonmap with better error handling
+        echo "[BUILD_DIAMOND_DB] Downloading taxonomy mapping..."
+        echo "[BUILD_DIAMOND_DB] Started: \$(date)"
+        
+        if [[ "${taxonmap_url}" == *.gz ]]; then
+            if ! curl -f -L --progress-bar "${taxonmap_url}" | gunzip > "${db_dir}/${db_name}.taxonmap"; then
+                echo "[BUILD_DIAMOND_DB] ERROR: Taxonmap download failed!" >&2
+                rm -f "${db_dir}/${db_name}.taxonmap"
+                exit 1
+            fi
+        else
+            if ! curl -f -L --progress-bar -o "${db_dir}/${db_name}.taxonmap" "${taxonmap_url}"; then
+                echo "[BUILD_DIAMOND_DB] ERROR: Taxonmap download failed!" >&2
+                rm -f "${db_dir}/${db_name}.taxonmap"
+                exit 1
+            fi
+        fi
+        
+        TAXONMAP_SIZE=\$(stat -c%s "${db_dir}/${db_name}.taxonmap" 2>/dev/null || stat -f%z "${db_dir}/${db_name}.taxonmap" 2>/dev/null || echo 0)
+        TAXONMAP_SIZE_GB=\$(echo "scale=2; \${TAXONMAP_SIZE}/1024/1024/1024" | bc)
+        echo "[BUILD_DIAMOND_DB] Downloaded taxonmap size: \${TAXONMAP_SIZE_GB} GB"
+        echo "[BUILD_DIAMOND_DB] Taxonmap download complete: \$(date)"
         
         # Build DIAMOND database directly in target directory
-        echo "[BUILD_DIAMOND_DB] Building database (this may take several hours)..."
-        diamond makedb \
+        echo ""
+        echo "[BUILD_DIAMOND_DB] Building DIAMOND database (this will take many hours)..."
+        echo "[BUILD_DIAMOND_DB] Started: \$(date)"
+        echo "[BUILD_DIAMOND_DB] Using ${task.cpus} threads"
+        echo ""
+        
+        if ! diamond makedb \
             --in "${db_dir}/${db_name}.fasta" \
             --db "${db_dir}/${db_name}" \
             --taxonmap "${db_dir}/${db_name}.taxonmap" \
             --taxonnodes "${taxdump_dir}/nodes.dmp" \
             --taxonnames "${taxdump_dir}/names.dmp" \
-            --threads ${task.cpus}
+            --threads ${task.cpus}; then
+            echo "[BUILD_DIAMOND_DB] ERROR: DIAMOND makedb failed!" >&2
+            exit 1
+        fi
+        
+        echo "[BUILD_DIAMOND_DB] DIAMOND makedb complete: \$(date)"
         
         # Cleanup intermediate files (keep only .dmnd)
+        echo "[BUILD_DIAMOND_DB] Cleaning up intermediate files..."
         rm -f "${db_dir}/${db_name}.fasta"
         rm -f "${db_dir}/${db_name}.taxonmap"
         
         # Mark as complete
         date -Is > "\${SENTINEL}"
         
+        echo ""
         echo "[BUILD_DIAMOND_DB] Database build complete: \${DMND}"
         ls -lh "\${DMND}"
+        echo ""
         
     else
         echo "[BUILD_DIAMOND_DB] DIAMOND database already exists: \${DMND}"
