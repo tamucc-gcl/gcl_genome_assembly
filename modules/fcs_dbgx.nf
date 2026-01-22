@@ -4,29 +4,26 @@ process FCS_DB_GET {
 
   input:
     val gxdb_manifest
-    path gxdb_dir
+    val gxdb_dir        // ← Changed from 'path' to 'val'
     val force_download
 
   output:
-    path "${gxdb_dir}", emit: out_dir
+    val "${gxdb_dir}", emit: out_dir  // ← Changed from 'path' to 'val'
 
   script:
   """
   set -euo pipefail
 
-  # Resolve the actual path (follow symlinks)
-  ACTUAL_DIR=\$(readlink -f "${gxdb_dir}" 2>/dev/null || echo "${gxdb_dir}")
+  # Now gxdb_dir is just a string path, not a staged file
+  mkdir -p "${gxdb_dir}"
   
-  # Create the actual directory
-  mkdir -p "\${ACTUAL_DIR}"
-  
-  SENTINEL="\${ACTUAL_DIR}/.gxdb_ready"
+  SENTINEL="${gxdb_dir}/.gxdb_ready"
 
-  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "\$(ls -A "\${ACTUAL_DIR}" 2>/dev/null || true)" ]; then
+  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "\$(ls -A "${gxdb_dir}" 2>/dev/null || true)" ]; then
     echo "[FCS_DB_GET] Downloading GXDB using manifest: ${gxdb_manifest}"
-    echo "[FCS_DB_GET] Target directory: \${ACTUAL_DIR}"
+    echo "[FCS_DB_GET] Target directory: ${gxdb_dir}"
     
-    cd "\${ACTUAL_DIR}"
+    cd "${gxdb_dir}"
     
     # Download manifest file
     echo "Downloading manifest..."
@@ -66,9 +63,9 @@ process FCS_DB_GET {
     echo "[FCS_DB_GET] Database download complete. Files:"
     ls -lh *.gx* 2>/dev/null || ls -lh
   else
-    echo "[FCS_DB_GET] GXDB already present at \${ACTUAL_DIR}; skipping download."
+    echo "[FCS_DB_GET] GXDB already present at ${gxdb_dir}; skipping download."
     echo "Existing files:"
-    ls -lh "\${ACTUAL_DIR}" 2>/dev/null || echo "Directory is empty or inaccessible"
+    ls -lh "${gxdb_dir}"
   fi
   """
 }

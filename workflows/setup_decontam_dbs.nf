@@ -36,12 +36,12 @@ workflow SETUP_DECONTAM_DBS {
             ? 'https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/test-only/test-only.manifest'
             : 'https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/latest/all.manifest'
     )
-    def gxdb_dir_path   = file(params.gxdb?.dir ?: './db/fcs-gx')
+    def gxdb_dir_path = file(params.gxdb?.dir ?: './db/fcs-gx')
     def gxdb_force = (params.gxdb?.force ?: false) as boolean
 
     // Create channels for the inputs
     ch_gxdb_manifest = Channel.value(gxdb_manifest)
-    ch_gxdb_dir = Channel.value(gxdb_dir_path)
+    ch_gxdb_dir = Channel.value(gxdb_dir_path.toString())  // ← Convert to string
     ch_gxdb_force = Channel.value(gxdb_force)
 
     // Call the process
