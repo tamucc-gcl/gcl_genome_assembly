@@ -24,7 +24,7 @@ include { BUILD_DIAMOND_DB }   from '../modules/build_diamond_db.nf'
 
 workflow SETUP_DECONTAM_DBS {
     main:
-    
+    /*
     // DEBUG
     log.info """
     ================================================================================
@@ -35,7 +35,7 @@ workflow SETUP_DECONTAM_DBS {
     params.diamond.dmnd: ${params.diamond?.dmnd}
     ================================================================================
     """
-    
+    */
 
     /*
     ========================================================================================
