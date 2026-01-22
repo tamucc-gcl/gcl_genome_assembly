@@ -25,7 +25,7 @@ include { FCS_CLEAN_GENOME } from '../modules/fcs_clean_genome.nf'
 workflow DECONTAMINATE_ASSEMBLY {
     take:
     assemblies      // channel: tuple(haplotype_id, assembly_fasta)
-    gxdb_dir        // value: FCS-GX database directory
+    gxdb_dir        // channel: already a channel from SETUP_DECONTAM_DBS
     
     main:
     
@@ -61,7 +61,7 @@ workflow DECONTAMINATE_ASSEMBLY {
     ========================================================================================
     */
     ch_cleaned_input
-        .combine(Channel.value(gxdb_dir))
+        .combine(gxdb_dir)  // ✅ FIXED: No Channel.value() wrapper
         .map { haplotype_id, assembly_fasta, gxdb ->
             tuple(assembly_fasta,
                   params.decon?.source_taxid ?: 7898,
