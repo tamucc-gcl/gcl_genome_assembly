@@ -14,7 +14,7 @@ process FCS_DB_GET {
   """
   set -euo pipefail
 
-  command -v fcs.py >/dev/null 2>&1 || { echo "ERROR: fcs.py not found in PATH"; exit 127; }
+  command -v run_gx.py >/dev/null 2>&1 || { echo "ERROR: run_gx.py not found in PATH"; exit 127; }
 
   mkdir -p "${gxdb_dir}"
 
@@ -23,7 +23,7 @@ process FCS_DB_GET {
 
   if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ -z "\$(ls -A "${gxdb_dir}" 2>/dev/null || true)" ]; then
     echo "[FCS_DB_GET] Downloading GXDB using manifest: ${gxdb_manifest}"
-    fcs.py db get --mft "${gxdb_manifest}" --dir "${gxdb_dir}"
+    run_gx.py db get --mft "${gxdb_manifest}" --dir "${gxdb_dir}"
     date -Is > "\${SENTINEL}"
   else
     echo "[FCS_DB_GET] GXDB already present at ${gxdb_dir}; skipping download."

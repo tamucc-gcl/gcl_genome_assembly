@@ -16,15 +16,15 @@ process FCS_GX_SCREEN {
 
   script:
   """
-  command -v fcs.py >/dev/null 2>&1 || { echo "ERROR: fcs.py not found in PATH"; exit 127; }
+  command -v run_gx.py >/dev/null 2>&1 || { echo "ERROR: run_gx.py not found in PATH"; exit 127; }
 
   mkdir -p gx_out
 
   export GX_NUM_CORES=${task.cpus}
 
-  # If your input is gzipped fasta, fcs.py can handle it (as shown in docs),
+  # If your input is gzipped fasta, run_gx.py can handle it (as shown in docs),
   # but plain fasta is fine too.
-  fcs.py screen genome \
+  run_gx.py screen genome \
     --fasta ${assembly_fa} \
     --out-dir gx_out \
     --gx-db ${gxdb_dir} \

@@ -13,11 +13,11 @@ process FCS_CLEAN_GENOME {
 
   script:
   """
-  command -v fcs.py >/dev/null 2>&1 || { echo "ERROR: fcs.py not found in PATH"; exit 127; }
+  command -v run_gx.py >/dev/null 2>&1 || { echo "ERROR: run_gx.py not found in PATH"; exit 127; }
 
-  # fcs.py clean genome reads from stdin in the canonical example
+  # run_gx.py clean genome reads from stdin in the canonical example
   cat ${assembly_fa} \\
-    | fcs.py clean genome \\
+    | run_gx.py clean genome \\
         --action-report ${action_report} \\
         --output decontaminated.fasta \\
         --contam-fasta-out contaminants.fasta \\
