@@ -29,6 +29,7 @@ process HIFIASM {
         -l 3 \\
         -s 0.55 \\
         --n-hap 2 \\
+        --telo-m CCCTAA \\
         --h1 ${hic_r1} \\
         --h2 ${hic_r2} \\
         ${hifi_fastq} \\
