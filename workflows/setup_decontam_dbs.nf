@@ -36,13 +36,19 @@ workflow SETUP_DECONTAM_DBS {
             ? 'https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/test-only/test-only.manifest'
             : 'https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/latest/all.manifest'
     )
-    def gxdb_dir   = file(params.gxdb?.dir ?: './db/fcs-gx')
+    def gxdb_dir_path   = file(params.gxdb?.dir ?: './db/fcs-gx')
     def gxdb_force = (params.gxdb?.force ?: false) as boolean
 
+    // Create channels for the inputs
+    ch_gxdb_manifest = Channel.value(gxdb_manifest)
+    ch_gxdb_dir = Channel.value(gxdb_dir_path)
+    ch_gxdb_force = Channel.value(gxdb_force)
+
+    // Call the process
     FCS_DB_GET(
-        gxdb_manifest,
-        gxdb_dir,
-        gxdb_force
+        ch_gxdb_manifest,
+        ch_gxdb_dir,
+        ch_gxdb_force
     )
 
     /*
@@ -52,13 +58,17 @@ workflow SETUP_DECONTAM_DBS {
     */
     if (params.decon?.make_blobtools_evidence ?: false) {
         
-        def taxdump_dir = file(params.diamond?.taxdump_dir ?: './db/taxdump')
+        def taxdump_dir_path = file(params.diamond?.taxdump_dir ?: './db/taxdump')
         def taxdump_force = (params.diamond?.force ?: false) as boolean
+        
+        // Create channels
+        ch_taxdump_dir = Channel.value(taxdump_dir_path)
+        ch_taxdump_force = Channel.value(taxdump_force)
         
         // Always ensure taxdump exists (needed by both DIAMOND and BlobTools)
         DOWNLOAD_TAXDUMP(
-            taxdump_dir,
-            taxdump_force
+            ch_taxdump_dir,
+            ch_taxdump_force
         )
         
         // Check if user provided pre-built DIAMOND database
@@ -98,12 +108,12 @@ workflow SETUP_DECONTAM_DBS {
             }
             
             BUILD_DIAMOND_DB(
-                diamond_dir,
-                diamond_name,
-                fasta_url,
-                taxonmap_url,
+                Channel.value(diamond_dir),
+                Channel.value(diamond_name),
+                Channel.value(fasta_url),
+                Channel.value(taxonmap_url),
                 DOWNLOAD_TAXDUMP.out.taxdump_dir,
-                diamond_force
+                Channel.value(diamond_force)
             )
             
             diamond_db_out = BUILD_DIAMOND_DB.out.dmnd
