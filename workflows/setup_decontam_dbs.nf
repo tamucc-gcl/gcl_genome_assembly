@@ -39,7 +39,7 @@ workflow SETUP_DECONTAM_DBS {
     def gxdb_dir   = file(params.gxdb?.dir ?: './db/fcs-gx')
     def gxdb_force = (params.gxdb?.force ?: false) as boolean
 
-    gxdb = FCS_DB_GET(
+    FCS_DB_GET(
         gxdb_manifest,
         gxdb_dir,
         gxdb_force
@@ -118,7 +118,7 @@ workflow SETUP_DECONTAM_DBS {
     }
 
     emit:
-    gxdb_dir = gxdb.out_dir
+    gxdb_dir = FCS_DB_GET.out.out_dir
     diamond_db = diamond_db_out
     taxdump_dir = taxdump_out
 }
