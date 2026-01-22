@@ -25,6 +25,18 @@ include { BUILD_DIAMOND_DB }   from '../modules/build_diamond_db.nf'
 workflow SETUP_DECONTAM_DBS {
     main:
     
+    // DEBUG
+    log.info """
+    ================================================================================
+    SETUP_DECONTAM_DBS DEBUG
+    ================================================================================
+    params.decon.make_blobtools_evidence: ${params.decon?.make_blobtools_evidence}
+    Check result: ${params.decon?.make_blobtools_evidence ?: false}
+    params.diamond.dmnd: ${params.diamond?.dmnd}
+    ================================================================================
+    """
+    
+
     /*
     ========================================================================================
         FCS-GX Database Setup
