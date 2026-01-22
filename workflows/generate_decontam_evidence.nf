@@ -51,9 +51,8 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         }
         .combine(hifi_reads, by: 0)
         .map { sample_id, haplotype_id, clean_fasta, hifi_fastq ->
-            tuple(clean_fasta, 
-                  hifi_fastq,
-                  params.evidence_map_preset ?: 'map-hifi')  // Removed cpus parameter
+            // Use [] instead of tuple() to allow Nextflow to unpack into 3 separate inputs
+            [clean_fasta, hifi_fastq, params.evidence.map_preset ?: 'map-hifi']
         }
         .set { ch_mapping_input }
     
@@ -64,6 +63,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .map { haplotype_id, clean_fasta -> haplotype_id }
         .combine(MAP_READS_MINIMAP2.out.bam)
         .set { ch_bam_with_id }
+    
     /*
     ========================================================================================
         STEP 2: DIAMOND BLASTX (Taxonomy Evidence)
@@ -73,10 +73,11 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .map { haplotype_id, clean_fasta -> tuple(haplotype_id, clean_fasta) }
         .combine(Channel.value(diamond_db))
         .map { haplotype_id, clean_fasta, dmnd ->
-            tuple(clean_fasta, 
-                  dmnd,
-                  params.evidence?.diamond_max_target_seqs ?: 1,
-                  params.evidence?.diamond_evalue ?: 1e-25)
+            // Use [] for unpacking into separate inputs
+            [clean_fasta, 
+             dmnd,
+             params.evidence.diamond_max_target_seqs ?: 1,
+             params.evidence.diamond_evalue ?: 1e-25]
         }
         .set { ch_diamond_input }
     
@@ -99,11 +100,12 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .join(ch_bam_with_id, by: 0)
         .combine(Channel.value(taxdump_dir))
         .map { haplotype_id, clean_fasta, hits, bam, taxdump ->
-            tuple(clean_fasta, 
-                  hits, 
-                  bam, 
-                  taxdump,
-                  params.evidence?.blob_min_contig_len ?: 1000)
+            // Use [] for unpacking into separate inputs
+            [clean_fasta, 
+             hits, 
+             bam, 
+             taxdump,
+             params.evidence.blob_min_contig_len ?: 1000]
         }
         .set { ch_blob_input }
     
@@ -134,11 +136,12 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .join(decontaminated, by: 0)
         .join(contaminants, by: 0)
         .map { haplotype_id, action_report, taxonomy_report, plots_dir, clean_fasta, contam_fasta ->
-            tuple(action_report,
-                  taxonomy_report,
-                  plots_dir,
-                  clean_fasta,
-                  contam_fasta)
+            // Use [] for unpacking into separate inputs
+            [action_report,
+             taxonomy_report,
+             plots_dir,
+             clean_fasta,
+             contam_fasta]
         }
         .set { ch_report_input }
     
