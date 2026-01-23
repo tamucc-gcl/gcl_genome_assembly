@@ -1,6 +1,10 @@
 process FCS_GX_SCREEN {
   tag "fcs_gx_screen"
   label 'fcs' 
+  
+  publishDir "${params.outdir}/contig/decontam", 
+    mode: params.publish_dir_mode,
+    saveAs: { filename -> filename.startsWith('gx_out/') ? null : filename }
 
   input:
     path assembly_fa
@@ -8,8 +12,8 @@ process FCS_GX_SCREEN {
     val gxdb_dir
 
   output:
-    path "gx_out/*.fcs_gx_report.txt", emit: action_report
-    path "gx_out/*.taxonomy.rpt",      emit: taxonomy_report
+    path "*.fcs_gx_report.txt", emit: action_report
+    path "*.taxonomy.rpt",      emit: taxonomy_report
     path "gx_out/fcs_gx_stdout.log",   emit: stdout_log
 
   script:
@@ -36,5 +40,9 @@ process FCS_GX_SCREEN {
     --gx-db "\${DB_PREFIX}" \\
     --tax-id ${source_taxid} \\
     | tee gx_out/fcs_gx_stdout.log
+  
+  # Move output files to working directory for publishing
+  mv gx_out/*.fcs_gx_report.txt . || true
+  mv gx_out/*.taxonomy.rpt . || true
   """
 }
