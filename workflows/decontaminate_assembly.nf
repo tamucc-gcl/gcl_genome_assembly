@@ -57,22 +57,18 @@ workflow DECONTAMINATE_ASSEMBLY {
     
     /*
     ========================================================================================
-        STEP 2: FCS-GX Screening (keep haplotype_id throughout)
+        STEP 2: FCS-GX Screening (Parallel Across All Haplotypes)
     ========================================================================================
     */
-    ch_cleaned_input
-        .combine(Channel.value(params.decon?.source_taxid ?: 7898))
-        .combine(gxdb_dir)
-        .set { ch_gx_input }
-    
-    // We'll need a modified FCS_GX_SCREEN that accepts haplotype_id
-    // For now, extract just files, then match back by position
+    // Extract just the assembly files for FCS_GX_SCREEN
     ch_cleaned_input
         .map { haplotype_id, assembly_fasta -> assembly_fasta }
         .set { ch_assembly_files }
     
+    // Create source_taxid channel
     ch_source_taxid = Channel.value(params.decon?.source_taxid ?: 7898)
     
+    // Call FCS_GX_SCREEN with separate inputs
     FCS_GX_SCREEN(
         ch_assembly_files,
         ch_source_taxid,
@@ -81,42 +77,57 @@ workflow DECONTAMINATE_ASSEMBLY {
     
     /*
     ========================================================================================
-        STEP 3: Restore haplotype IDs and prepare for cleaning
+        STEP 3: Prepare for FCS_CLEAN_GENOME - restore haplotype_id
     ========================================================================================
     */
+    // Collect haplotype IDs in order
     ch_cleaned_input
-        .map { haplotype_id, assembly_fasta -> haplotype_id }
-        .collect()
-        .set { ch_haplotype_ids_list }
+        .toList()
+        .map { list -> list.collect { it[0] } }  // Extract just the haplotype_ids
+        .set { ch_haplotype_ids }
     
-    // Match action reports with assemblies by position
+    // Collect assemblies in order
     ch_cleaned_input
-        .collect()
-        .combine(FCS_GX_SCREEN.out.action_report.collect())
-        .flatMap { assemblies, reports ->
-            assemblies.withIndex().collect { asm, idx ->
-                tuple(asm[0], asm[1], reports[idx])  // (haplotype_id, assembly, action_report)
-            }
+        .toList()
+        .map { list -> list.collect { it[1] } }  // Extract just the assembly files
+        .set { ch_assembly_files_list }
+    
+    // Collect action reports in order
+    FCS_GX_SCREEN.out.action_report
+        .toList()
+        .set { ch_action_reports }
+    
+    // Combine all three lists and create tuples
+    ch_haplotype_ids
+        .combine(ch_assembly_files_list)
+        .combine(ch_action_reports)
+        .flatMap { ids, assemblies, reports ->
+            // Zip them together: [(id1, asm1, rpt1), (id2, asm2, rpt2), ...]
+            [ids, assemblies, reports].transpose()
         }
         .set { ch_clean_input }
     
     FCS_CLEAN_GENOME(ch_clean_input)
     
-    // Match taxonomy reports
+    /*
+    ========================================================================================
+        STEP 4: Restore haplotype_id for taxonomy reports
+    ========================================================================================
+    */
     FCS_GX_SCREEN.out.taxonomy_report
-        .collect()
-        .combine(ch_haplotype_ids_list)
+        .toList()
+        .combine(ch_haplotype_ids)
         .flatMap { reports, ids ->
-            reports.withIndex().collect { report, idx -> tuple(ids[idx], report) }
+            [ids, reports].transpose()
         }
         .set { ch_taxonomy_with_id }
     
-    // Match action reports
+    // Action reports - match with IDs
     FCS_GX_SCREEN.out.action_report
-        .collect()
-        .combine(ch_haplotype_ids_list)
+        .toList()
+        .combine(ch_haplotype_ids)
         .flatMap { reports, ids ->
-            reports.withIndex().collect { report, idx -> tuple(ids[idx], report) }
+            [ids, reports].transpose()
         }
         .set { ch_action_with_id }
     
