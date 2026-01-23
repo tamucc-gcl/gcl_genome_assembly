@@ -2,6 +2,18 @@
 ========================================================================================
     DECONTAMINATE ASSEMBLY WORKFLOW
 ========================================================================================
+    Purpose:
+    - Screen assemblies for contaminants using NCBI FCS-GX
+    - Optional: adapter/vector removal with FCS-adaptor
+    - Clean genomes by removing identified contaminants
+    - Fully parallelized across haplotypes
+    
+    Design:
+    - Takes pre-prepared databases as input
+    - Each haplotype processes independently
+    - Returns both clean and contaminant sequences
+    - Can be applied to contigs OR scaffolds
+========================================================================================
 */
 
 nextflow.enable.dsl=2
