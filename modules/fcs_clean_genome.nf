@@ -18,7 +18,7 @@ process FCS_CLEAN_GENOME {
   # Nextflow automatically wraps this in singularity exec
   /app/bin/action_report \\
     --fasta ${assembly_fa} \\
-    --action-report ${action_report} \\
+    --in ${action_report} \\
     --output decontaminated.fasta \\
     --contam-fasta-out contaminants.fasta \\
     | tee clean_stdout.log
