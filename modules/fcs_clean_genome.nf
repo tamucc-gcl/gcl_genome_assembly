@@ -1,43 +1,44 @@
 process FCS_CLEAN_GENOME {
-  tag "fcs_clean"
+  tag "${haplotype_id}"
   label 'fcs' 
+  
+  publishDir "${params.outdir}/contig/decontam", mode: params.publish_dir_mode
 
   input:
-    path assembly_fa
-    path action_report
+    tuple val(haplotype_id), path(assembly_fa), path(action_report)
 
   output:
-    path "decontaminated.fasta", emit: decontaminated_fasta
-    path "contaminants.fasta",   emit: contaminants_fasta
-    path "clean_stdout.log",     emit: stdout_log
+    tuple val(haplotype_id), path("${haplotype_id}.decontaminated.fasta"), emit: decontaminated_fasta
+    tuple val(haplotype_id), path("${haplotype_id}.contaminants.fasta"),   emit: contaminants_fasta
+    path "${haplotype_id}.clean_stdout.log", emit: stdout_log
 
   script:
   """
   set -euo pipefail
 
   # List available scripts for debugging
-  echo "Available FCS scripts:" > clean_stdout.log
-  ls -la /app/bin/ >> clean_stdout.log 2>&1 || true
-  echo "---" >> clean_stdout.log
+  echo "Available FCS scripts:" > ${haplotype_id}.clean_stdout.log
+  ls -la /app/bin/ >> ${haplotype_id}.clean_stdout.log 2>&1 || true
+  echo "---" >> ${haplotype_id}.clean_stdout.log
 
   # Try the official script with various possible names
   CLEANED=false
   
   for script in /app/bin/clean_fasta.py /app/bin/fcs_clean.py /app/bin/apply_fcs_gx.py; do
     if [ -f "\${script}" ]; then
-      echo "Using script: \${script}" | tee -a clean_stdout.log
+      echo "Using script: \${script}" | tee -a ${haplotype_id}.clean_stdout.log
       python3 "\${script}" \\
         --action-report ${action_report} \\
         --input ${assembly_fa} \\
-        --output decontaminated.fasta \\
-        --contam-output contaminants.fasta \\
-        2>&1 | tee -a clean_stdout.log && CLEANED=true && break
+        --output ${haplotype_id}.decontaminated.fasta \\
+        --contam-output ${haplotype_id}.contaminants.fasta \\
+        2>&1 | tee -a ${haplotype_id}.clean_stdout.log && CLEANED=true && break
     fi
   done
 
   # Fallback if no official script found
   if [ "\${CLEANED}" = "false" ]; then
-    echo "No official FCS cleanup script found, using manual parser" | tee -a clean_stdout.log
+    echo "No official FCS cleanup script found, using manual parser" | tee -a ${haplotype_id}.clean_stdout.log
     
     python3 << 'PYEOF'
 import sys
@@ -97,16 +98,16 @@ clean_seqs = {k: v for k, v in all_seqs.items() if k not in exclude_seqs}
 contam_seqs = {k: v for k, v in all_seqs.items() if k in exclude_seqs}
 
 # Write outputs
-write_fasta(clean_seqs, "decontaminated.fasta")
-write_fasta(contam_seqs, "contaminants.fasta")
+write_fasta(clean_seqs, "${haplotype_id}.decontaminated.fasta")
+write_fasta(contam_seqs, "${haplotype_id}.contaminants.fasta")
 
 print(f"Clean sequences: {len(clean_seqs)}", file=sys.stderr)
 print(f"Contaminated sequences: {len(contam_seqs)}", file=sys.stderr)
 PYEOF
 
-    echo "Manual cleanup completed" | tee -a clean_stdout.log
-    echo "Clean sequences: \$(grep -c '^>' decontaminated.fasta || echo 0)" | tee -a clean_stdout.log
-    echo "Contaminated sequences: \$(grep -c '^>' contaminants.fasta || echo 0)" | tee -a clean_stdout.log
+    echo "Manual cleanup completed" | tee -a ${haplotype_id}.clean_stdout.log
+    echo "Clean sequences: \$(grep -c '^>' ${haplotype_id}.decontaminated.fasta || echo 0)" | tee -a ${haplotype_id}.clean_stdout.log
+    echo "Contaminated sequences: \$(grep -c '^>' ${haplotype_id}.contaminants.fasta || echo 0)" | tee -a ${haplotype_id}.clean_stdout.log
   fi
   """
 }

@@ -190,6 +190,7 @@ include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
@@ -372,6 +373,28 @@ workflow {
         DECONTAMINATE_ASSEMBLY(
             ch_contigs_for_decontam,
             ch_gxdb_dir
+        )
+        
+        // QC on decontaminated assemblies
+        // Re-pair haplotypes by sample for QC
+        DECONTAMINATE_ASSEMBLY.out.decontaminated
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_decontam_paired }
+        
+        ASSEMBLY_QC_CONTIG_DECONTAM(
+            ch_decontam_paired,
+            BAM_TO_FASTQ.out,
+            'contig_decontam'
         )
         
         // Optional: Generate evidence for decontamination decisions
