@@ -2,18 +2,6 @@
 ========================================================================================
     DECONTAMINATE ASSEMBLY WORKFLOW
 ========================================================================================
-    Purpose:
-    - Screen assemblies for contaminants using NCBI FCS-GX
-    - Optional: adapter/vector removal with FCS-adaptor
-    - Clean genomes by removing identified contaminants
-    - Fully parallelized across haplotypes
-    
-    Design:
-    - Takes pre-prepared databases as input
-    - Each haplotype processes independently
-    - Returns both clean and contaminant sequences
-    - Can be applied to contigs OR scaffolds
-========================================================================================
 */
 
 nextflow.enable.dsl=2
@@ -65,6 +53,11 @@ workflow DECONTAMINATE_ASSEMBLY {
         .map { haplotype_id, assembly_fasta -> assembly_fasta }
         .set { ch_assembly_files }
     
+    // Store haplotype_id order for later matching
+    ch_cleaned_input
+        .map { haplotype_id, assembly_fasta -> haplotype_id }
+        .set { ch_haplotype_ids }
+    
     // Create source_taxid channel
     ch_source_taxid = Channel.value(params.decon?.source_taxid ?: 7898)
     
@@ -77,58 +70,28 @@ workflow DECONTAMINATE_ASSEMBLY {
     
     /*
     ========================================================================================
-        STEP 3: Prepare for FCS_CLEAN_GENOME - restore haplotype_id
+        STEP 3: Restore haplotype_id using merge operator
     ========================================================================================
     */
-    // Collect haplotype IDs in order
-    ch_cleaned_input
-        .toList()
-        .map { list -> list.collect { it[0] } }  // Extract just the haplotype_ids
-        .set { ch_haplotype_ids }
-    
-    // Collect assemblies in order
-    ch_cleaned_input
-        .toList()
-        .map { list -> list.collect { it[1] } }  // Extract just the assembly files
-        .set { ch_assembly_files_list }
-    
-    // Collect action reports in order
-    FCS_GX_SCREEN.out.action_report
-        .toList()
-        .set { ch_action_reports }
-    
-    // Combine all three lists and create tuples
+    // Merge haplotype_ids with assembly files and action reports
+    // merge() combines channels element-by-element in emission order
     ch_haplotype_ids
-        .combine(ch_assembly_files_list)
-        .combine(ch_action_reports)
-        .flatMap { ids, assemblies, reports ->
-            // Zip them together: [(id1, asm1, rpt1), (id2, asm2, rpt2), ...]
-            [ids, assemblies, reports].transpose()
-        }
+        .merge(ch_assembly_files, FCS_GX_SCREEN.out.action_report)
         .set { ch_clean_input }
     
     FCS_CLEAN_GENOME(ch_clean_input)
     
     /*
     ========================================================================================
-        STEP 4: Restore haplotype_id for taxonomy reports
+        STEP 4: Merge haplotype_ids with other outputs
     ========================================================================================
     */
-    FCS_GX_SCREEN.out.taxonomy_report
-        .toList()
-        .combine(ch_haplotype_ids)
-        .flatMap { reports, ids ->
-            [ids, reports].transpose()
-        }
+    ch_haplotype_ids
+        .merge(FCS_GX_SCREEN.out.taxonomy_report)
         .set { ch_taxonomy_with_id }
     
-    // Action reports - match with IDs
-    FCS_GX_SCREEN.out.action_report
-        .toList()
-        .combine(ch_haplotype_ids)
-        .flatMap { reports, ids ->
-            [ids, reports].transpose()
-        }
+    ch_haplotype_ids
+        .merge(FCS_GX_SCREEN.out.action_report)
         .set { ch_action_with_id }
     
     emit:
