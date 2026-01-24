@@ -152,6 +152,9 @@ RSCRIPT
     Note:
     - The bedgraph output is derived from window counts (not per-base depth).
       It is primarily for quick visualization of broad coverage patterns.
+    
+    FIXED: Ensures consistent chromosome sorting between windows.bed and ends.bed
+           using bedtools sort with .fai reference to prevent sorting mismatches.
 ========================================================================================
 */
 
@@ -178,13 +181,14 @@ process HIC_COVERAGE_FROM_PAIRS {
     # Calculate coverage in windows (read-ends per window)
     samtools faidx ${assembly_fasta}
 
-    # Create windows across the genome
+    # Create windows across the genome and sort by .fai order
     bedtools makewindows \\
         -g ${assembly_fasta}.fai \\
         -w ${window_size} \\
-        > windows.bed
+    | bedtools sort -i - -faidx ${assembly_fasta}.fai \\
+    > windows.bed
 
-    # Build a BED of read-ends from pairs (both ends)
+    # Build a BED of read-ends from pairs (both ends), sorted by .fai order
     zcat ${pairs_gz} \\
       | awk 'BEGIN{OFS="\\t"} /^#/ {next} {
           # end1
@@ -194,7 +198,7 @@ process HIC_COVERAGE_FROM_PAIRS {
           s2=\$5-1; if (s2<0) s2=0
           print \$4, s2, \$5
         }' \\
-      | sort -k1,1 -k2,2n \\
+      | bedtools sort -i - -faidx ${assembly_fasta}.fai \\
       > ends.bed
 
     # Calculate coverage per window
