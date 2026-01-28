@@ -397,20 +397,6 @@ workflow {
             'contig_decontam'
         )
         
-        // Optional: Generate evidence for decontamination decisions
-        // This runs in parallel with Hi-C mapping preparation
-        if (params.decon.make_blobtools_evidence) {
-            GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY.out.contaminants,
-                DECONTAMINATE_ASSEMBLY.out.action_report,
-                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
-                BAM_TO_FASTQ.out,
-                ch_diamond_db,
-                ch_taxdump_dir
-            )
-        }
-        
         // Use decontaminated assemblies for downstream Hi-C mapping
         // Need to add sample_id back for joining with Hi-C reads
         DECONTAMINATE_ASSEMBLY.out.decontaminated
@@ -564,21 +550,7 @@ workflow {
             SCAFFOLD_HIC.out.scaffolds,
             ch_gxdb_dir
         )
-        
-        // Optional: Generate evidence for scaffold decontamination
-        // This runs in parallel with scaffold QC
-        if (params.decon.make_blobtools_evidence) {
-            GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY.out.contaminants,
-                DECONTAMINATE_ASSEMBLY.out.action_report,
-                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
-                BAM_TO_FASTQ.out,
-                ch_diamond_db,
-                ch_taxdump_dir
-            )
-        }
-        
+
         // Store final decontaminated scaffolds
         ch_final_scaffolds = DECONTAMINATE_ASSEMBLY.out.decontaminated
     } else {
@@ -603,6 +575,43 @@ workflow {
         "gapfilled"
     )
     */
+
+    /*
+    ========================================================================================
+        Generate Optional Decontamination Evidence
+    ========================================================================================
+    */
+    if (params.decon.run_on_contigs) {
+        // Optional: Generate evidence for decontamination decisions
+        // This runs in parallel with Hi-C mapping preparation
+        if (params.decon.make_blobtools_evidence) {
+            GENERATE_DECONTAM_EVIDENCE(
+                DECONTAMINATE_ASSEMBLY.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY.out.contaminants,
+                DECONTAMINATE_ASSEMBLY.out.action_report,
+                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                BAM_TO_FASTQ.out,
+                ch_diamond_db,
+                ch_taxdump_dir
+            )
+        }
+    }
+
+  if (params.decon.run_on_scaffolds) {
+        // Optional: Generate evidence for scaffold decontamination
+        // This runs in parallel with scaffold QC
+        if (params.decon.make_blobtools_evidence) {
+            GENERATE_DECONTAM_EVIDENCE(
+                DECONTAMINATE_ASSEMBLY.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY.out.contaminants,
+                DECONTAMINATE_ASSEMBLY.out.action_report,
+                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                BAM_TO_FASTQ.out,
+                ch_diamond_db,
+                ch_taxdump_dir
+            )
+        }
+  }
 }
 
 /*
