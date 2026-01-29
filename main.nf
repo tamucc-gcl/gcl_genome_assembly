@@ -335,11 +335,22 @@ workflow {
     
     HIFIASM(ch_fastq_all)
 
+    // Prepare individual haplotype channel for downstream steps
+    HIFIASM.out.assemblies
+        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+            [
+                tuple("${sample_id}_hap1", hap1_fasta),
+                tuple("${sample_id}_hap2", hap2_fasta)
+            ]
+        }
+        .set { ch_haplotypes_split }
+
     /*
     ========================================================================================
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies
     ========================================================================================
     */
+    
     if (params.correct_contigs) {
         // Prepare correction parameters for contig stage
         def contig_correction_params = [
@@ -350,14 +361,7 @@ workflow {
             max_assembly_error_size: params.contig_correction_max_assembly_error_size
         ]
 
-        // Split assemblies into individual haplotypes for correction
-        HIFIASM.out.assemblies
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", hap1_fasta),
-                    tuple("${sample_id}_hap2", hap2_fasta)
-                ]
-            }
+        ch_haplotypes_split
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(haplotype_id, sample_id, fasta)
@@ -370,23 +374,10 @@ workflow {
         
         CORRECT_MISASSEMBLIES_CONTIG(ch_contigs_for_correction)
         
-        // Use corrected assemblies for downstream steps
-        // Store them in channel format for both decontamination and Hi-C mapping
-        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
-            .map { haplotype_id, fasta ->
-                tuple(haplotype_id, fasta)
-            }
-            .set { ch_contigs_for_decontam_or_hic }
+        ch_contigs_for_decontam_or_hic = CORRECT_MISASSEMBLIES_CONTIG.out.corrected
     } else {
         // Use original assemblies if correction not requested
-        HIFIASM.out.assemblies
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", hap1_fasta),
-                    tuple("${sample_id}_hap2", hap2_fasta)
-                ]
-            }
-            .set { ch_contigs_for_decontam_or_hic }
+        ch_contigs_for_decontam_or_hic = ch_haplotypes_split
     }
 
     /*
@@ -477,6 +468,10 @@ workflow {
     // Run Hi-C scaffolding
     SCAFFOLD_HIC(ch_scaffolding_input)
 
+    // FIXED: Split scaffolds ONCE, outside the conditional
+    SCAFFOLD_HIC.out.scaffolds
+        .set { ch_scaffolds_split }
+
     /*
     ========================================================================================
         STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies
@@ -493,7 +488,7 @@ workflow {
         ]
 
         // Correct scaffolds using HiFi reads
-        SCAFFOLD_HIC.out.scaffolds
+        ch_scaffolds_split
             .map { haplotype_id, scaffold ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(haplotype_id, sample_id, scaffold)
@@ -507,15 +502,10 @@ workflow {
         CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffolds_for_correction)
         
         // Use corrected scaffolds for downstream steps
-        CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
-            .map { haplotype_id, fasta ->
-                tuple(haplotype_id, fasta)
-            }
-            .set { ch_scaffolds_for_decontam_or_final }
+        ch_scaffolds_for_decontam_or_final = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
     } else {
         // Use original scaffolds if correction not requested
-        SCAFFOLD_HIC.out.scaffolds
-            .set { ch_scaffolds_for_decontam_or_final }
+        ch_scaffolds_for_decontam_or_final = ch_scaffolds_split
     }
 
     /*
