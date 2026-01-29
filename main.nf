@@ -335,30 +335,13 @@ workflow {
     
     HIFIASM(ch_fastq_all)
 
-    // split assmblies into haplotypes for downstream steps
-    HIFIASM.out.assemblies
-    .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-        [
-            tuple("${sample_id}_hap1", hap1_fasta),
-            tuple("${sample_id}_hap2", hap2_fasta)
-        ]
-    }
-    .set { ch_haplotypes_raw }
-
-    // Duplicate channel for correction and direct use
-    ch_haplotypes_raw
-        .multiMap { haplotype_id, fasta ->
-            for_correction: tuple(haplotype_id, fasta)
-            for_direct_use: tuple(haplotype_id, fasta)
-        }
-        .set { ch_haplotypes_branched }
-
     /*
     ========================================================================================
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies
     ========================================================================================
     */
     if (params.correct_contigs) {
+        // Prepare correction parameters for contig stage
         def contig_correction_params = [
             min_depth: params.contig_correction_min_depth,
             min_contig_length: params.contig_correction_min_contig_length,
@@ -367,7 +350,14 @@ workflow {
             max_assembly_error_size: params.contig_correction_max_assembly_error_size
         ]
 
-        ch_haplotypes_branched.for_correction
+        // Split assemblies into individual haplotypes for correction
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(haplotype_id, sample_id, fasta)
@@ -380,9 +370,23 @@ workflow {
         
         CORRECT_MISASSEMBLIES_CONTIG(ch_contigs_for_correction)
         
-        ch_contigs_for_decontam_or_hic = CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+        // Use corrected assemblies for downstream steps
+        // Store them in channel format for both decontamination and Hi-C mapping
+        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+            .map { haplotype_id, fasta ->
+                tuple(haplotype_id, fasta)
+            }
+            .set { ch_contigs_for_decontam_or_hic }
     } else {
-        ch_contigs_for_decontam_or_hic = ch_haplotypes_branched.for_direct_use
+        // Use original assemblies if correction not requested
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
+            .set { ch_contigs_for_decontam_or_hic }
     }
 
     /*
