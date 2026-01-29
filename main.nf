@@ -192,6 +192,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
@@ -200,7 +201,8 @@ include { HIC_SCAFFOLD_QC } from './workflows/hic_scaffold_qc.nf'
 
 // DECONTAMINATION MODULAR WORKFLOWS
 include { SETUP_DECONTAM_DBS } from './workflows/setup_decontam_dbs.nf'
-include { DECONTAMINATE_ASSEMBLY } from './workflows/decontaminate_assembly.nf'
+include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_CONTIG } from './workflows/decontaminate_assembly.nf'
+include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_SCAFFOLD } from './workflows/decontaminate_assembly.nf'
 include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evidence.nf'
 
 /*
@@ -276,22 +278,10 @@ workflow {
         }
     )
 
-    /*
-    ========================================================================================
-        STEP 2: QC Raw Hi-C Reads
-    ========================================================================================
-    */
-    HIC_QC_RAW(
-        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
-            tuple(sample_id, hic_r1, hic_r2)
-        },
-        "raw"
-    )
-
     
     /*
     ========================================================================================
-        STEP 3: Trim Hi-C Reads
+        STEP 2: Trim Hi-C Reads
     ========================================================================================
     */
     TRIM_HIC(
@@ -299,30 +289,10 @@ workflow {
             tuple(sample_id, hic_r1, hic_r2)
         }
     )
-    
 
     /*
     ========================================================================================
-        STEP 4: QC Trimmed Hi-C Reads
-    ========================================================================================
-    */
-    HIC_QC_TRIMMED(
-        TRIM_HIC.out.trimmed_reads,
-        "trimmed"
-    )
-    
-    /*
-    ========================================================================================
-        STEP 5: QC HiFi Reads - runs after converting BAM -> FASTQ
-    ========================================================================================
-    */
-    HIFI_QC(
-        BAM_TO_FASTQ.out
-    )
-
-    /*
-    ========================================================================================
-        STEP 6: Combine HiFi FASTQ with trimmed Hi-C reads
+        STEP 3: Combine HiFi FASTQ with trimmed Hi-C reads
     ========================================================================================
     */
     TRIM_HIC.out.trimmed_reads
@@ -334,7 +304,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 7: Assemble with Hifiasm
+        STEP 4: Assemble with Hifiasm
     ========================================================================================
     */
     
@@ -342,18 +312,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 8: QC Assembled Genomes
-    ========================================================================================
-    */
-    ASSEMBLY_QC_INITIAL(
-        HIFIASM.out.assemblies,
-        BAM_TO_FASTQ.out,
-        'contig'
-    )
-
-    /*
-    ========================================================================================
-        STEP 8.5: Optional Decontamination of Contig Assemblies
+        STEP 5: Optional Decontamination of Contig Assemblies
         Runs in parallel with Hi-C mapping preparation
         Databases were already set up in STEP 0 (parallel with assembly)
     ========================================================================================
@@ -370,36 +329,15 @@ workflow {
             .set { ch_contigs_for_decontam }
         
         // Run decontamination (parallel across all haplotypes)
-        DECONTAMINATE_ASSEMBLY(
+        DECONTAMINATE_ASSEMBLY_CONTIG(
             ch_contigs_for_decontam,
             ch_gxdb_dir
         )
         
-        // QC on decontaminated assemblies
-        // Re-pair haplotypes by sample for QC
-        DECONTAMINATE_ASSEMBLY.out.decontaminated
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, fasta)
-            }
-            .groupTuple()
-            .map { sample_id, hap_nums, fastas ->
-                // Sort by haplotype number to ensure hap1, hap2 order
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_decontam_paired }
-        
-        ASSEMBLY_QC_CONTIG_DECONTAM(
-            ch_decontam_paired,
-            BAM_TO_FASTQ.out,
-            'contig_decontam'
-        )
         
         // Use decontaminated assemblies for downstream Hi-C mapping
         // Need to add sample_id back for joining with Hi-C reads
-        DECONTAMINATE_ASSEMBLY.out.decontaminated
+        DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(haplotype_id, sample_id, fasta)
@@ -419,7 +357,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 9: Map Hi-C to Assemblies (contigs or decontaminated contigs)
+        STEP 6: Map Hi-C to Assemblies (contigs or decontaminated contigs)
     ========================================================================================
     */
     // Combine each haplotype with its corresponding trimmed Hi-C reads
@@ -443,22 +381,10 @@ workflow {
         }
         .set { ch_assemblies_for_qc }
 
+
     /*
     ========================================================================================
-        STEP 10: Hi-C Mapping QC on Raw BAMs (MODULAR - RUNS IN PARALLEL)
-    ========================================================================================
-    */
-    //skip for development
-    /*
-    HIC_QC_FROM_BAM_RAW(
-        MAP_HIC_TO_ASSEMBLY.out.bam,
-        ch_assemblies_for_qc,
-        "raw"
-    )
-    */
-    /*
-    ========================================================================================
-        STEP 11: Filter Hi-C BAM Files (PARALLEL WITH RAW QC)
+        STEP 7: Filter Hi-C BAM Files
     ========================================================================================
     */
     
@@ -472,19 +398,7 @@ workflow {
     
     /*
     ========================================================================================
-        STEP 12A: Hi-C Mapping QC on Filtered BAMs (MODULAR - PARALLEL WITH SCAFFOLDING!)
-    ========================================================================================
-    */
-    
-    HIC_QC_FROM_BAM_FILTERED(
-        FILTER_HIC_BAM.out.bam,
-        ch_assemblies_for_qc,
-        "filtered"
-    )
-    
-    /*
-    ========================================================================================
-        STEP 12B: Scaffold with Hi-C (PARALLEL WITH FILTERED CONTIG QC!)
+        STEP 8: Scaffold with Hi-C (PARALLEL WITH FILTERED CONTIG QC!)
     ========================================================================================
     */
     
@@ -498,21 +412,153 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 13: Hi-C Mapping QC on Scaffolds (MODULAR - LIFTOVER + QC)
+        STEP 9: Optional Decontamination of Scaffolded Assemblies
+        Runs after scaffolding is complete
+        Databases were already set up in STEP 0
     ========================================================================================
     */
+    if (params.decon.run_on_scaffolds) {
+        // Decontaminate scaffolds (parallel across all haplotypes)
+        DECONTAMINATE_ASSEMBLY_SCAFFOLD(
+            SCAFFOLD_HIC.out.scaffolds,
+            ch_gxdb_dir
+        )
+
+        // Store final decontaminated scaffolds
+        ch_decontam_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
+    } else {
+        // Use original scaffolds if decontamination not requested
+        ch_decontam_scaffolds = SCAFFOLD_HIC.out.scaffolds
+    }
     
-    // Use pairs.gz from filtered contig QC and lift to scaffold coordinates
-    HIC_SCAFFOLD_QC(
-        HIC_QC_FROM_BAM_FILTERED.out.pairs,
-        SCAFFOLD_HIC.out.agp,
-        SCAFFOLD_HIC.out.scaffolds,
-        "filtered"
+
+    /*
+    ========================================================================================
+        STEP 15: Identify and Break misassemblies (FUTURE)
+    ========================================================================================
+    */
+    // 1. use inspector to identify and break misassemblies
+    // 2. Assembly QC of broken assemblies
+    // 3. summary outputs of misassemblies broken
+
+    /*
+    ========================================================================================
+        STEP 16: Rescaffold broken assemblies (FUTURE)
+    ========================================================================================
+    */
+    // 1. remap Hi-C reads to broken assemblies
+    // 2. scaffold again with YaHS
+    // 3. Assembly QC of rescaffolded assemblies
+    /*
+    ========================================================================================
+        STEP 17: Gap Filling
+    ========================================================================================
+    */
+    // 1. gap fill with HiFi reads using tgs gap closer
+    // 2. Assembly QC of gap-filled assemblies
+    // 3. contact-map based QC of gap-filled assemblies
+    
+    /*
+    ========================================================================================
+        STEP 18: Finalization
+    ========================================================================================
+    */
+    // 1. Generate final QC reports
+    //   - join all assembly QC summaries
+    // 2. Dotplots of final assemblies vs each other (hap1 vs hap2)
+    // 3. 
+
+    /*
+    ========================================================================================
+        QC Steps
+    ========================================================================================
+    */
+
+    /*
+    ========================================================================================
+        Sequencing QC
+    ========================================================================================
+    */
+    /*
+    ========================================================================================
+        QC Raw Hi-C Reads
+    ========================================================================================
+    */
+    HIC_QC_RAW(
+        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
+            tuple(sample_id, hic_r1, hic_r2)
+        },
+        "raw"
     )
 
     /*
     ========================================================================================
-        STEP 14: QC Scaffolded Genomes
+        QC HiFi Reads
+    ========================================================================================
+    */
+    HIFI_QC(
+        BAM_TO_FASTQ.out
+    )
+
+    /*
+    ========================================================================================
+        QC Trimmed Hi-C Reads
+    ========================================================================================
+    */
+    HIC_QC_TRIMMED(
+        TRIM_HIC.out.trimmed_reads,
+        "trimmed"
+    )
+    
+    /*
+    ========================================================================================
+        Assembly QC
+    ========================================================================================
+    */
+
+    /*
+    ========================================================================================
+        QC Contig Genomes Assemblies
+    ========================================================================================
+    */
+    ASSEMBLY_QC_INITIAL(
+        HIFIASM.out.assemblies,
+        BAM_TO_FASTQ.out,
+        'contig'
+    )
+
+    /*
+    ========================================================================================
+        QC Contig Decontaminated Genome Assemblies
+    ========================================================================================
+    */
+    if (params.decon.run_on_contigs) {
+        // QC on decontaminated assemblies
+        // Re-pair haplotypes by sample for QC
+        DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_decontam_paired }
+
+        ASSEMBLY_QC_CONTIG_DECONTAM(
+            ch_decontam_paired,
+            BAM_TO_FASTQ.out,
+            'contig_decontam'
+        )
+    }
+
+    /*
+    ========================================================================================
+        QC Scaffolded Genomes
     ========================================================================================
     */
     // Re-pair scaffolded haplotypes by sample
@@ -539,43 +585,79 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 14.5: Optional Decontamination of Scaffolded Assemblies
-        Runs after scaffolding is complete
-        Databases were already set up in STEP 0
+        QC Scaffold Decontaminated Genome Assemblies
     ========================================================================================
     */
     if (params.decon.run_on_scaffolds) {
-        // Decontaminate scaffolds (parallel across all haplotypes)
-        DECONTAMINATE_ASSEMBLY(
-            SCAFFOLD_HIC.out.scaffolds,
-            ch_gxdb_dir
-        )
+        // QC on decontaminated assemblies
+        // Re-pair haplotypes by sample for QC
+        DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_decontam_scaffold_paired }
 
-        // Store final decontaminated scaffolds
-        ch_final_scaffolds = DECONTAMINATE_ASSEMBLY.out.decontaminated
-    } else {
-        // Use original scaffolds if decontamination not requested
-        ch_final_scaffolds = SCAFFOLD_HIC.out.scaffolds
+        ASSEMBLY_QC_SCAFFOLD_DECONTAM(
+            ch_decontam_scaffold_paired,
+            BAM_TO_FASTQ.out,
+            'scaffold_decontam'
+        )
     }
-    
+
     /*
     ========================================================================================
-        FUTURE: Gap Filling and Finalization
+        Hi-C Mapping QC
     ========================================================================================
     */
     /*
-    // Example of using modular QC on gap-filled assemblies:
-    
-    GAP_FILLING(ch_gapfill_input)
-    
-    // Reuse scaffold pairs for gap-filled assembly QC (no remapping!)
-    HIC_QC_FROM_PAIRS(
-        HIC_SCAFFOLD_QC.out.lifted_pairs,
-        GAP_FILLING.out.gapfilled_assemblies,
-        "gapfilled"
+    ========================================================================================
+        Hi-C Mapping QC on Raw BAMs
+    ========================================================================================
+    */
+    //skip for development
+    /*
+    HIC_QC_FROM_BAM_RAW(
+        MAP_HIC_TO_ASSEMBLY.out.bam,
+        ch_assemblies_for_qc,
+        "raw"
     )
     */
-
+    /*
+    ========================================================================================
+         Hi-C Mapping QC on Filtered BAMs & contig (decontam if that option chosen) assembly
+    ========================================================================================
+    */
+    //skip for development
+    /*
+    HIC_QC_FROM_BAM_FILTERED(
+        FILTER_HIC_BAM.out.bam,
+        ch_assemblies_for_qc,
+        "filtered"
+    )
+    */
+    /*
+    ========================================================================================
+        Hi-C Mapping QC on Scaffolds (MODULAR - LIFTOVER + QC)
+    ========================================================================================
+    */
+    //skip for development
+    /*
+    // Use pairs.gz from filtered contig QC and lift to scaffold coordinates
+    HIC_SCAFFOLD_QC(
+        HIC_QC_FROM_BAM_FILTERED.out.pairs,
+        SCAFFOLD_HIC.out.agp,
+        SCAFFOLD_HIC.out.scaffolds,
+        "filtered"
+    )
+    */
     /*
     ========================================================================================
         Generate Optional Decontamination Evidence
