@@ -111,5 +111,5 @@ workflow DECONTAMINATE_ASSEMBLY {
     contaminants = FCS_CLEAN_GENOME.out.contaminants_fasta      // tuple(haplotype_id, fasta)
     action_report = ch_action_with_id                           // tuple(haplotype_id, report)
     taxonomy_report = ch_taxonomy_with_id                       // tuple(haplotype_id, report)
-    stdout_log = FCS_GX_SCREEN.out.stdout_log
+    //stdout_log = FCS_GX_SCREEN.out.stdout_log
 }
