@@ -176,12 +176,21 @@ params.evidence = [
 ]
 
 // ============================================================================
-// COMPUTE CONDITIONAL PARAMETERS (MUST BE AFTER ALL PARAM DEFINITIONS)
+// COMPUTE CONDITIONAL PARAMETERS - MUST BE AFTER ALL DEFINITIONS
 // ============================================================================
 // Determine if second round of scaffolding should run
 // Logic: Run round 2 if scaffold correction OR decontamination is enabled (unless explicitly disabled)
 if (params.run_scaffold_round2 == null) {
-    params.run_scaffold_round2 = params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds
+    // Compute default based on whether scaffold-level correction/decon is enabled
+    params.run_scaffold_round2 = (params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds)
+    
+    // Debug output
+    log.debug """
+    Scaffold Round 2 Auto-Computation:
+      - inspector_run_on_scaffolds: ${params.inspector_run_on_scaffolds}
+      - decon_run_on_scaffolds: ${params.decon_run_on_scaffolds}
+      - Computed run_scaffold_round2: ${params.run_scaffold_round2}
+    """.stripIndent()
 }
 
 // Print pipeline header
