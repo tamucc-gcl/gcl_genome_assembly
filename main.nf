@@ -40,13 +40,21 @@ params.publish_dir_mode = 'link'
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
 
-// Misassembly correction parameters (Inspector)
-params.inspector_run_on_contigs = false
-params.inspector_min_depth = null  // default: 20% of average depth
-params.inspector_min_contig_length = 10000
-params.inspector_min_contig_length_assemblyerror = 1000000
-params.inspector_min_assembly_error_size = 50
-params.inspector_max_assembly_error_size = 4000000
+// Misassembly correction parameters (Inspector) - CONTIGS
+params.inspector_run_on_contigs = true
+params.inspector_contig_min_depth = null  // default: 20% of average depth
+params.inspector_contig_min_contig_length = 10000
+params.inspector_contig_min_contig_length_assemblyerror = 1000000
+params.inspector_contig_min_assembly_error_size = 50
+params.inspector_contig_max_assembly_error_size = 4000000
+
+// Misassembly correction parameters (Inspector) - SCAFFOLDS
+params.inspector_run_on_scaffolds = true
+params.inspector_scaffold_min_depth = null  // default: 20% of average depth
+params.inspector_scaffold_min_contig_length = 10000
+params.inspector_scaffold_min_contig_length_assemblyerror = 10000000  // Higher threshold for scaffolds
+params.inspector_scaffold_min_assembly_error_size = 50
+params.inspector_scaffold_max_assembly_error_size = 10000000  // Higher threshold for scaffolds
 
 // Hi-C mapping and QC parameters
 params.hic_coverage_window = 100000
@@ -64,8 +72,8 @@ params.yahs_min_mapq = 1
 params.yahs_resolutions = '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
 params.yahs_rounds_per_resolution = null
 params.yahs_enzyme = null
-params.yahs_no_contig_ec = true
-params.yahs_no_scaffold_ec = true
+params.yahs_no_contig_ec = false
+params.yahs_no_scaffold_ec = false
 params.bwa_mem2_hic_args = null
 params.scaffold_min_size = 10000000
 
@@ -98,7 +106,7 @@ params.diamond_force = false
 // Decontamination control (FLATTENED)
 // ============================================================================
 // When to run decontamination
-params.decon_run_on_contigs = false       // Run on initial contig assemblies (before Hi-C mapping)
+params.decon_run_on_contigs = true       // Run on initial contig assemblies (before Hi-C mapping)
 params.decon_run_on_scaffolds = false     // Run on scaffolded assemblies (after Hi-C scaffolding)
 
 // Core settings
@@ -168,7 +176,7 @@ log.info """\
     =========================================
     Sample sheet : ${params.sample_sheet}
     Output dir   : ${params.outdir}
-    Inspector    : ${params.inspector_run_on_contigs ? 'Enabled (contigs)' : 'Disabled'}
+    Inspector    : ${params.inspector_run_on_contigs ? 'Contigs' : ''}${params.inspector_run_on_scaffolds ? ' Scaffolds' : ''}${!params.inspector_run_on_contigs && !params.inspector_run_on_scaffolds ? 'Disabled' : ''}
     Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
     =========================================
     """
@@ -203,6 +211,7 @@ include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
@@ -226,6 +235,7 @@ include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
+include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
@@ -348,13 +358,13 @@ workflow {
             }
             .combine(BAM_TO_FASTQ.out, by: 0)
             .map { sample_id, haplotype_id, fasta, hifi_fastq ->
-                // Create correction parameters map
+                // Create correction parameters map for CONTIGS
                 def correction_params = [
-                    min_depth: params.inspector_min_depth,
-                    min_contig_length: params.inspector_min_contig_length,
-                    min_contig_length_assemblyerror: params.inspector_min_contig_length_assemblyerror,
-                    min_assembly_error_size: params.inspector_min_assembly_error_size,
-                    max_assembly_error_size: params.inspector_max_assembly_error_size
+                    min_depth: params.inspector_contig_min_depth,
+                    min_contig_length: params.inspector_contig_min_contig_length,
+                    min_contig_length_assemblyerror: params.inspector_contig_min_contig_length_assemblyerror,
+                    min_assembly_error_size: params.inspector_contig_min_assembly_error_size,
+                    max_assembly_error_size: params.inspector_contig_max_assembly_error_size
                 ]
                 tuple(haplotype_id, fasta, hifi_fastq, "contig", correction_params)
             }
@@ -469,23 +479,63 @@ workflow {
 
     /*
     ========================================================================================
+        STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies (Inspector)
+        Runs after scaffolding, before scaffold decontamination if enabled
+        Uses HiFi reads to identify and break structural errors in scaffolds
+    ========================================================================================
+    */
+    if (params.inspector_run_on_scaffolds) {
+        // Combine each scaffolded haplotype with its HiFi reads for correction
+        SCAFFOLD_HIC.out.scaffolds
+            .map { haplotype_id, scaffold ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(sample_id, haplotype_id, scaffold)
+            }
+            .combine(BAM_TO_FASTQ.out, by: 0)
+            .map { sample_id, haplotype_id, scaffold, hifi_fastq ->
+                // Create correction parameters map for SCAFFOLDS
+                def correction_params = [
+                    min_depth: params.inspector_scaffold_min_depth,
+                    min_contig_length: params.inspector_scaffold_min_contig_length,
+                    min_contig_length_assemblyerror: params.inspector_scaffold_min_contig_length_assemblyerror,
+                    min_assembly_error_size: params.inspector_scaffold_min_assembly_error_size,
+                    max_assembly_error_size: params.inspector_scaffold_max_assembly_error_size
+                ]
+                tuple(haplotype_id, scaffold, hifi_fastq, "scaffold", correction_params)
+            }
+            .set { ch_scaffold_correction_input }
+        
+        // Run misassembly correction on scaffolds
+        CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffold_correction_input)
+        
+        // Use corrected scaffolds for downstream processing
+        ch_scaffolds_for_decontam = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+        
+    } else {
+        // Use original scaffolds if correction not requested
+        ch_scaffolds_for_decontam = SCAFFOLD_HIC.out.scaffolds
+    }
+
+    /*
+    ========================================================================================
         STEP 9: Optional Decontamination of Scaffolded Assemblies
-        Runs after scaffolding is complete
+        Runs after scaffolding (and optional correction) is complete
         Databases were already set up in STEP 0
+        Works on either original scaffolds OR corrected scaffolds (if Inspector was run)
     ========================================================================================
     */
     if (params.decon.run_on_scaffolds) {
         // Decontaminate scaffolds (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_SCAFFOLD(
-            SCAFFOLD_HIC.out.scaffolds,
+            ch_scaffolds_for_decontam,
             ch_gxdb_dir
         )
 
         // Store final decontaminated scaffolds
-        ch_decontam_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
+        ch_final_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
     } else {
-        // Use original scaffolds if decontamination not requested
-        ch_decontam_scaffolds = SCAFFOLD_HIC.out.scaffolds
+        // Use corrected or original scaffolds (depending on Inspector setting)
+        ch_final_scaffolds = ch_scaffolds_for_decontam
     }
     
 
@@ -667,6 +717,34 @@ workflow {
         BAM_TO_FASTQ.out,
         'scaffold'
     )
+
+    /*
+    ========================================================================================
+        QC Corrected Scaffold Genomes Assemblies (if Inspector was run on scaffolds)
+    ========================================================================================
+    */
+    if (params.inspector_run_on_scaffolds) {
+        // Re-pair corrected scaffolds by sample for QC
+        CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_scaffold_corrected_paired }
+
+        ASSEMBLY_QC_SCAFFOLD_CORRECTED(
+            ch_scaffold_corrected_paired,
+            BAM_TO_FASTQ.out,
+            'scaffold_corrected'
+        )
+    }
 
     /*
     ========================================================================================
