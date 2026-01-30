@@ -81,7 +81,7 @@ params.scaffold_min_size = 10000000
 
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
-params.run_scaffold_round2 = null  // Will be computed below if null
+//params.run_scaffold_round2 = null  // Will be computed below if null
 
 // ============================================================================
 // Database base directory
@@ -180,17 +180,9 @@ params.evidence = [
 // ============================================================================
 // Determine if second round of scaffolding should run
 // Logic: Run round 2 if scaffold correction OR decontamination is enabled (unless explicitly disabled)
-if (params.run_scaffold_round2 == null) {
-    // Compute default based on whether scaffold-level correction/decon is enabled
-    params.run_scaffold_round2 = (params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds)
-    
-    // Debug output
-    log.debug """
-    Scaffold Round 2 Auto-Computation:
-      - inspector_run_on_scaffolds: ${params.inspector_run_on_scaffolds}
-      - decon_run_on_scaffolds: ${params.decon_run_on_scaffolds}
-      - Computed run_scaffold_round2: ${params.run_scaffold_round2}
-    """.stripIndent()
+if (!params.containsKey('run_scaffold_round2') || params.run_scaffold_round2 == null) {
+    // Only compute if not explicitly set by user
+    params.run_scaffold_round2 = params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds
 }
 
 // Print pipeline header
