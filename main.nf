@@ -537,6 +537,13 @@ workflow {
         
         // Run misassembly correction on scaffolds
         CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffold_correction_input)
+        
+        // Use corrected scaffolds for downstream processing
+        ch_scaffolds_for_decontam = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+        
+    } else {
+        // Use original scaffolds if correction not requested
+        ch_scaffolds_for_decontam = SCAFFOLD_HIC_ROUND1.out.scaffolds
     }
 
     /*
@@ -567,7 +574,7 @@ workflow {
         // Store final decontaminated scaffolds
         ch_final_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
     } else {
-        // Decontamination disabled - determine which scaffolds to use as final
+        // Decontamination disabled - determine which scaffolds to use
         if (params.inspector_run_on_scaffolds) {
             // Use corrected scaffolds
             ch_final_scaffolds = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
