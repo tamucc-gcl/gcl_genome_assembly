@@ -580,16 +580,18 @@ workflow {
         Can be explicitly disabled via --run_scaffold_round2 false
     ========================================================================================
     */
+    // Initialize the channel before the conditional
+    ch_final_scaffolds_round2 = Channel.empty()
+
     if (params.run_scaffold_round2) {
         
         log.info "[INFO] Running second round of scaffolding (scaffold correction or decontamination was performed)"
         
         /*
         ========================================================================================
-            STEP 10: Map Hi-C to Final Scaffolds (corrected/decontaminated if those options chosen)
+            STEP 10: Map Hi-C to Final Scaffolds
         ========================================================================================
         */
-        // Extract sample_id from haplotype_id and combine with trimmed Hi-C reads
         ch_final_scaffolds
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
@@ -601,16 +603,13 @@ workflow {
             }
             .set { ch_hic_scaffold_mapping_input }
         
-        // Map Hi-C reads to final scaffolds
         MAP_HIC_TO_SCAFFOLD(ch_hic_scaffold_mapping_input)
 
         /*
         ========================================================================================
-            STEP 11: Filter Hi-C BAM Files mapped to final scaffolds
+            STEP 11: Filter Hi-C BAM Files
         ========================================================================================
         */
-        
-        // Combine BAM files with scaffolds for filtering
         MAP_HIC_TO_SCAFFOLD.out.bam
             .join(ch_final_scaffolds)
             .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
@@ -618,18 +617,13 @@ workflow {
             }
             .set { ch_bam_with_scaffold }
         
-        // Filter BAM files to remove invalid pairs and duplicates
         FILTER_HIC_BAM_SCAFFOLD(ch_bam_with_scaffold)
 
         /*
         ========================================================================================
-            STEP 12: Second Round of Scaffolding (Iterative Improvement)
-            Uses filtered Hi-C BAM from corrected/decontaminated scaffolds
-            This allows YaHS to potentially improve scaffolding based on the corrected structure
+            STEP 12: Second Round of Scaffolding
         ========================================================================================
         */
-        
-        // Prepare input for second scaffolding: (haplotype_id, filtered_bam, bai, scaffold_fasta, round)
         FILTER_HIC_BAM_SCAFFOLD.out.bam
             .join(ch_final_scaffolds)
             .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
@@ -637,7 +631,6 @@ workflow {
             }
             .set { ch_second_scaffolding_input }
         
-        // Run second round of Hi-C scaffolding (reusing same module with different round parameter)
         SCAFFOLD_HIC_ROUND2(ch_second_scaffolding_input)
         
         // Store final scaffolds from second round
@@ -645,9 +638,7 @@ workflow {
         
     } else {
         log.info "[INFO] Skipping second round of scaffolding (no scaffold correction or decontamination)"
-        
-        // Create empty channel for round 2 scaffolds when not running
-        ch_final_scaffolds_round2 = Channel.empty()
+        // ch_final_scaffolds_round2 already initialized to Channel.empty() above
     }
 
     /*
