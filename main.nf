@@ -555,6 +555,15 @@ workflow {
     ========================================================================================
     */
     if (params.decon.run_on_scaffolds) {
+        // Determine which scaffolds to decontaminate
+        if (params.inspector_run_on_scaffolds) {
+            // Use corrected scaffolds
+            ch_scaffolds_for_decontam = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+        } else {
+            // Use original scaffolds
+            ch_scaffolds_for_decontam = SCAFFOLD_HIC_ROUND1.out.scaffolds
+        }
+        
         // Decontaminate scaffolds (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_SCAFFOLD(
             ch_scaffolds_for_decontam,
@@ -565,10 +574,15 @@ workflow {
         // Store final decontaminated scaffolds
         ch_final_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
     } else {
-        // Use corrected or original scaffolds (depending on Inspector setting)
-        ch_final_scaffolds = ch_scaffolds_for_decontam
+        // Decontamination disabled - determine which scaffolds to use
+        if (params.inspector_run_on_scaffolds) {
+            // Use corrected scaffolds
+            ch_final_scaffolds = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+        } else {
+            // Use original scaffolds
+            ch_final_scaffolds = SCAFFOLD_HIC_ROUND1.out.scaffolds
+        }
     }
-    
     /*
     ========================================================================================
         STEP 10-12: Conditional Second Round of Scaffolding
