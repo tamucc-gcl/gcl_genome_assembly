@@ -41,6 +41,7 @@ params.publish_dir_mode = 'link'
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
+params.merqury_k = 21  // k-mer size for meryl database
 
 // Misassembly correction parameters (Inspector) - CONTIGS
 params.inspector_run_on_contigs = true
@@ -759,6 +760,7 @@ workflow {
     ASSEMBLY_QC_INITIAL(
         HIFIASM.out.assemblies,
         BAM_TO_FASTQ.out,
+        BUILD_MERYL_DB.out.meryl_db,
         'contig'
     )
 
@@ -786,6 +788,7 @@ workflow {
         ASSEMBLY_QC_CONTIG_CORRECTED(
             ch_corrected_paired,
             BAM_TO_FASTQ.out,
+            BUILD_MERYL_DB.out.meryl_db,
             'contig_corrected'
         )
     }
@@ -815,6 +818,7 @@ workflow {
         ASSEMBLY_QC_CONTIG_DECONTAM(
             ch_decontam_paired,
             BAM_TO_FASTQ.out,
+            BUILD_MERYL_DB.out.meryl_db,
             'contig_decontam'
         )
     }
@@ -843,6 +847,7 @@ workflow {
     ASSEMBLY_QC_SCAFFOLD(
         ch_scaffolds_paired,
         BAM_TO_FASTQ.out,
+        BUILD_MERYL_DB.out.meryl_db,
         'scaffold'
     )
 
@@ -870,6 +875,7 @@ workflow {
         ASSEMBLY_QC_SCAFFOLD_CORRECTED(
             ch_scaffold_corrected_paired,
             BAM_TO_FASTQ.out,
+            BUILD_MERYL_DB.out.meryl_db,
             'scaffold_corrected'
         )
     }
@@ -899,6 +905,7 @@ workflow {
         ASSEMBLY_QC_SCAFFOLD_DECONTAM(
             ch_decontam_scaffold_paired,
             BAM_TO_FASTQ.out,
+            BUILD_MERYL_DB.out.meryl_db,
             'scaffold_decontam'
         )
     }
@@ -928,6 +935,7 @@ workflow {
         ASSEMBLY_QC_SCAFFOLD_ROUND2(
             ch_scaffolds_round2_paired,
             BAM_TO_FASTQ.out,
+            BUILD_MERYL_DB.out.meryl_db,
             'scaffold_round2'
         )
     }
@@ -956,6 +964,7 @@ workflow {
     ASSEMBLY_QC_GAP_FILLED(
         ch_gap_filled_paired,
         BAM_TO_FASTQ.out,
+        BUILD_MERYL_DB.out.meryl_db,
         'gap_filled'
     )
 
