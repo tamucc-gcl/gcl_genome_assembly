@@ -313,6 +313,7 @@ workflow {
     ========================================================================================
     */
     BAM_TO_FASTQ.out
+        .view { "BAM_TO_FASTQ OUTPUT: $it" }
         .tap { ch_hifi_for_hifiasm }
         .tap { ch_hifi_for_hifi_qc }
         .tap { ch_hifi_for_contig_correction }
@@ -359,6 +360,7 @@ workflow {
 
     // Prepare individual haplotype channel for downstream steps
     HIFIASM.out.assemblies
+        .view { "HIFIASM OUTPUT: $it" }
         .flatMap { sample_id, hap1_fasta, hap2_fasta ->
             [
                 tuple("${sample_id}_hap1", hap1_fasta),
