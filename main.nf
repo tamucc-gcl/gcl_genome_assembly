@@ -303,28 +303,6 @@ workflow {
         }
     )
 
-    /*
-    ========================================================================================
-        CRITICAL FIX: Create independent channel copies for multiple consumers
-        
-        This ensures all consumers get the data independently, even with -resume.
-        The .tap() operator creates a copy for each consumer, preventing race conditions
-        where channel items might be consumed by one operator before others can access them.
-    ========================================================================================
-    */
-    BAM_TO_FASTQ.out
-        .tap { ch_hifi_for_hifiasm }
-        .tap { ch_hifi_for_hifi_qc }
-        .tap { ch_hifi_for_contig_correction }
-        .tap { ch_hifi_for_scaffold_correction }
-        .tap { ch_hifi_for_assembly_qc_initial }
-        .tap { ch_hifi_for_assembly_qc_contig_corrected }
-        .tap { ch_hifi_for_assembly_qc_contig_decontam }
-        .tap { ch_hifi_for_assembly_qc_scaffold }
-        .tap { ch_hifi_for_assembly_qc_scaffold_corrected }
-        .tap { ch_hifi_for_assembly_qc_scaffold_decontam }
-        .set { ch_hifi_sink }  // Final sink (not used, but completes the chain)
-
     
     /*
     ========================================================================================
@@ -343,7 +321,7 @@ workflow {
     ========================================================================================
     */
     TRIM_HIC.out.trimmed_reads
-        .join(ch_hifi_for_hifiasm)
+        .join(BAM_TO_FASTQ.out)
         .map { sample_id, hic_r1_trim, hic_r2_trim, hifi_fastq ->
             tuple(sample_id, hifi_fastq, hic_r1_trim, hic_r2_trim)
         }
@@ -357,22 +335,11 @@ workflow {
     
     HIFIASM(ch_fastq_all)
 
-    // Prepare individual haplotype channel for downstream steps
-    HIFIASM.out.assemblies
-        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-            [
-                tuple("${sample_id}_hap1", hap1_fasta),
-                tuple("${sample_id}_hap2", hap2_fasta)
-            ]
-        }
-        .set { ch_haplotypes_split }
-
     /*
     ========================================================================================
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies
     ========================================================================================
     */
-    
     if (params.correct_contigs) {
         // Prepare correction parameters for contig stage
         def contig_correction_params = [
@@ -383,12 +350,19 @@ workflow {
             max_assembly_error_size: params.contig_correction_max_assembly_error_size
         ]
 
-        ch_haplotypes_split
+        // Split assemblies into individual haplotypes for correction
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(haplotype_id, sample_id, fasta)
             }
-            .combine(ch_hifi_for_contig_correction, by: 1)
+            .combine(BAM_TO_FASTQ.out, by: 1)
             .map { sample_id, haplotype_id, fasta, hifi_reads ->
                 tuple(haplotype_id, fasta, hifi_reads, "contig", contig_correction_params)
             }
@@ -396,10 +370,23 @@ workflow {
         
         CORRECT_MISASSEMBLIES_CONTIG(ch_contigs_for_correction)
         
-        ch_contigs_for_decontam_or_hic = CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+        // Use corrected assemblies for downstream steps
+        // Store them in channel format for both decontamination and Hi-C mapping
+        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+            .map { haplotype_id, fasta ->
+                tuple(haplotype_id, fasta)
+            }
+            .set { ch_contigs_for_decontam_or_hic }
     } else {
         // Use original assemblies if correction not requested
-        ch_contigs_for_decontam_or_hic = ch_haplotypes_split
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
+            .set { ch_contigs_for_decontam_or_hic }
     }
 
     /*
@@ -490,10 +477,6 @@ workflow {
     // Run Hi-C scaffolding
     SCAFFOLD_HIC(ch_scaffolding_input)
 
-    // FIXED: Split scaffolds ONCE, outside the conditional
-    SCAFFOLD_HIC.out.scaffolds
-        .set { ch_scaffolds_split }
-
     /*
     ========================================================================================
         STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies
@@ -510,12 +493,12 @@ workflow {
         ]
 
         // Correct scaffolds using HiFi reads
-        ch_scaffolds_split
+        SCAFFOLD_HIC.out.scaffolds
             .map { haplotype_id, scaffold ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(haplotype_id, sample_id, scaffold)
             }
-            .combine(ch_hifi_for_scaffold_correction, by: 1)
+            .combine(BAM_TO_FASTQ.out, by: 1)
             .map { sample_id, haplotype_id, scaffold, hifi_reads ->
                 tuple(haplotype_id, scaffold, hifi_reads, "scaffold", scaffold_correction_params)
             }
@@ -524,10 +507,15 @@ workflow {
         CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffolds_for_correction)
         
         // Use corrected scaffolds for downstream steps
-        ch_scaffolds_for_decontam_or_final = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+        CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+            .map { haplotype_id, fasta ->
+                tuple(haplotype_id, fasta)
+            }
+            .set { ch_scaffolds_for_decontam_or_final }
     } else {
         // Use original scaffolds if correction not requested
-        ch_scaffolds_for_decontam_or_final = ch_scaffolds_split
+        SCAFFOLD_HIC.out.scaffolds
+            .set { ch_scaffolds_for_decontam_or_final }
     }
 
     /*
@@ -607,7 +595,9 @@ workflow {
         QC HiFi Reads
     ========================================================================================
     */
-    HIFI_QC(ch_hifi_for_hifi_qc)
+    HIFI_QC(
+        BAM_TO_FASTQ.out
+    )
 
     /*
     ========================================================================================
@@ -632,7 +622,7 @@ workflow {
     */
     ASSEMBLY_QC_INITIAL(
         HIFIASM.out.assemblies,
-        ch_hifi_for_assembly_qc_initial,
+        BAM_TO_FASTQ.out,
         'contig'
     )
 
@@ -660,7 +650,7 @@ workflow {
 
         ASSEMBLY_QC_CONTIG_CORRECTED(
             ch_corrected_contig_paired,
-            ch_hifi_for_assembly_qc_contig_corrected,
+            BAM_TO_FASTQ.out,
             'contig_corrected'
         )
     }
@@ -689,7 +679,7 @@ workflow {
 
         ASSEMBLY_QC_CONTIG_DECONTAM(
             ch_decontam_paired,
-            ch_hifi_for_assembly_qc_contig_decontam,
+            BAM_TO_FASTQ.out,
             'contig_decontam'
         )
     }
@@ -717,7 +707,7 @@ workflow {
 
     ASSEMBLY_QC_SCAFFOLD(
         ch_scaffolds_paired,
-        ch_hifi_for_assembly_qc_scaffold,
+        BAM_TO_FASTQ.out,
         'scaffold'
     )
 
@@ -745,7 +735,7 @@ workflow {
 
         ASSEMBLY_QC_SCAFFOLD_CORRECTED(
             ch_corrected_scaffold_paired,
-            ch_hifi_for_assembly_qc_scaffold_corrected,
+            BAM_TO_FASTQ.out,
             'scaffold_corrected'
         )
     }
@@ -775,7 +765,7 @@ workflow {
 
         ASSEMBLY_QC_SCAFFOLD_DECONTAM(
             ch_decontam_scaffold_paired,
-            ch_hifi_for_assembly_qc_scaffold_decontam,
+            BAM_TO_FASTQ.out,
             'scaffold_decontam'
         )
     }
@@ -836,11 +826,11 @@ workflow {
         // This runs in parallel with Hi-C mapping preparation
         if (params.decon.make_blobtools_evidence) {
             GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants,
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.action_report,
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.taxonomy_report,
-                ch_hifi_for_hifi_qc,  // Reuse one of the tap channels
+                DECONTAMINATE_ASSEMBLY.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY.out.contaminants,
+                DECONTAMINATE_ASSEMBLY.out.action_report,
+                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                BAM_TO_FASTQ.out,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
@@ -852,11 +842,11 @@ workflow {
         // This runs in parallel with scaffold QC
         if (params.decon.make_blobtools_evidence) {
             GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants,
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.action_report,
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.taxonomy_report,
-                ch_hifi_for_hifi_qc,  // Reuse one of the tap channels
+                DECONTAMINATE_ASSEMBLY.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY.out.contaminants,
+                DECONTAMINATE_ASSEMBLY.out.action_report,
+                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                BAM_TO_FASTQ.out,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
