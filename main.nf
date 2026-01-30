@@ -485,7 +485,6 @@ workflow {
             tuple(haplotype_id, stage, bam, bai, assembly_fasta)
         }
         .set { ch_bam_with_assembly }
-        .set { ch_bam_with_assembly }
     
     // Filter BAM files to remove invalid pairs and duplicates
     FILTER_HIC_BAM(ch_bam_with_assembly)
