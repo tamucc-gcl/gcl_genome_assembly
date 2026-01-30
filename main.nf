@@ -13,6 +13,7 @@ nextflow.enable.dsl=2
     - Maximum parallelization
     - Reusable QC workflows as "functions"
     - Clear separation of concerns
+    - Optional misassembly correction (Inspector)
     - Optional decontamination at multiple stages
 ========================================================================================
 */
@@ -38,6 +39,14 @@ params.publish_dir_mode = 'link'
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
+
+// Misassembly correction parameters (Inspector)
+params.inspector_run_on_contigs = false
+params.inspector_min_depth = null  // default: 20% of average depth
+params.inspector_min_contig_length = 10000
+params.inspector_min_contig_length_assemblyerror = 1000000
+params.inspector_min_assembly_error_size = 50
+params.inspector_max_assembly_error_size = 4000000
 
 // Hi-C mapping and QC parameters
 params.hic_coverage_window = 100000
@@ -159,6 +168,7 @@ log.info """\
     =========================================
     Sample sheet : ${params.sample_sheet}
     Output dir   : ${params.outdir}
+    Inspector    : ${params.inspector_run_on_contigs ? 'Enabled (contigs)' : 'Disabled'}
     Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
     =========================================
     """
@@ -190,6 +200,7 @@ include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
@@ -214,6 +225,7 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
+include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
@@ -312,13 +324,13 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 5: Optional Decontamination of Contig Assemblies
-        Runs in parallel with Hi-C mapping preparation
-        Databases were already set up in STEP 0 (parallel with assembly)
+        STEP 4.5: Optional Misassembly Correction of Contig Assemblies (Inspector)
+        Runs before decontamination if enabled
+        Uses HiFi reads to identify and break structural errors
     ========================================================================================
     */
-    if (params.decon.run_on_contigs) {
-        // Split assemblies into individual haplotypes for decontamination
+    if (params.inspector_run_on_contigs) {
+        // Split assemblies into individual haplotypes for correction
         HIFIASM.out.assemblies
             .flatMap { sample_id, hap1_fasta, hap2_fasta ->
                 [
@@ -326,11 +338,58 @@ workflow {
                     tuple("${sample_id}_hap2", hap2_fasta)
                 ]
             }
-            .set { ch_contigs_for_decontam }
+            .set { ch_contigs_for_correction }
         
+        // Combine each haplotype with its HiFi reads for correction
+        ch_contigs_for_correction
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(sample_id, haplotype_id, fasta)
+            }
+            .combine(BAM_TO_FASTQ.out, by: 0)
+            .map { sample_id, haplotype_id, fasta, hifi_fastq ->
+                // Create correction parameters map
+                def correction_params = [
+                    min_depth: params.inspector_min_depth,
+                    min_contig_length: params.inspector_min_contig_length,
+                    min_contig_length_assemblyerror: params.inspector_min_contig_length_assemblyerror,
+                    min_assembly_error_size: params.inspector_min_assembly_error_size,
+                    max_assembly_error_size: params.inspector_max_assembly_error_size
+                ]
+                tuple(haplotype_id, fasta, hifi_fastq, "contig", correction_params)
+            }
+            .set { ch_correction_input }
+        
+        // Run misassembly correction
+        CORRECT_MISASSEMBLIES_CONTIG(ch_correction_input)
+        
+        // Use corrected assemblies for downstream processing
+        ch_assemblies_for_decontam = CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+        
+    } else {
+        // Use original assemblies if correction not requested
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
+            .set { ch_assemblies_for_decontam }
+    }
+
+    /*
+    ========================================================================================
+        STEP 5: Optional Decontamination of Contig Assemblies
+        Runs in parallel with Hi-C mapping preparation
+        Databases were already set up in STEP 0 (parallel with assembly)
+        Works on either original contigs OR corrected contigs (if Inspector was run)
+    ========================================================================================
+    */
+    if (params.decon.run_on_contigs) {
         // Run decontamination (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_CONTIG(
-            ch_contigs_for_decontam,
+            ch_assemblies_for_decontam,
             ch_gxdb_dir
         )
         
@@ -344,13 +403,11 @@ workflow {
             }
             .set { ch_individual_haplotypes }
     } else {
-        // Use original assemblies if decontamination not requested
-        HIFIASM.out.assemblies
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", sample_id, hap1_fasta),
-                    tuple("${sample_id}_hap2", sample_id, hap2_fasta)
-                ]
+        // Use corrected or original assemblies (depending on Inspector setting)
+        ch_assemblies_for_decontam
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(haplotype_id, sample_id, fasta)
             }
             .set { ch_individual_haplotypes }
     }
@@ -529,6 +586,34 @@ workflow {
 
     /*
     ========================================================================================
+        QC Corrected Contig Genomes Assemblies (if Inspector was run)
+    ========================================================================================
+    */
+    if (params.inspector_run_on_contigs) {
+        // Re-pair corrected haplotypes by sample for QC
+        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_corrected_paired }
+
+        ASSEMBLY_QC_CONTIG_CORRECTED(
+            ch_corrected_paired,
+            BAM_TO_FASTQ.out,
+            'contig_corrected'
+        )
+    }
+
+    /*
+    ========================================================================================
         QC Contig Decontaminated Genome Assemblies
     ========================================================================================
     */
@@ -668,10 +753,10 @@ workflow {
         // This runs in parallel with Hi-C mapping preparation
         if (params.decon.make_blobtools_evidence) {
             GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY.out.contaminants,
-                DECONTAMINATE_ASSEMBLY.out.action_report,
-                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants,
+                DECONTAMINATE_ASSEMBLY_CONTIG.out.action_report,
+                DECONTAMINATE_ASSEMBLY_CONTIG.out.taxonomy_report,
                 BAM_TO_FASTQ.out,
                 ch_diamond_db,
                 ch_taxdump_dir
@@ -679,21 +764,21 @@ workflow {
         }
     }
 
-  if (params.decon.run_on_scaffolds) {
+    if (params.decon.run_on_scaffolds) {
         // Optional: Generate evidence for scaffold decontamination
         // This runs in parallel with scaffold QC
         if (params.decon.make_blobtools_evidence) {
             GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY.out.contaminants,
-                DECONTAMINATE_ASSEMBLY.out.action_report,
-                DECONTAMINATE_ASSEMBLY.out.taxonomy_report,
+                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
+                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants,
+                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.action_report,
+                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.taxonomy_report,
                 BAM_TO_FASTQ.out,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
         }
-  }
+    }
 }
 
 /*
