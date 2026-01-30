@@ -358,16 +358,18 @@ workflow {
                     tuple("${sample_id}_hap2", hap2_fasta)
                 ]
             }
+            // make sample_id the FIRST element so it can join BAM_TO_FASTQ.out cleanly
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(haplotype_id, sample_id, fasta)
+                tuple(sample_id, haplotype_id, fasta)
             }
-            .combine(BAM_TO_FASTQ.out, by: 1)
+            .join(BAM_TO_FASTQ.out)   // joins on sample_id (element 0)
             .map { sample_id, haplotype_id, fasta, hifi_reads ->
                 tuple(haplotype_id, fasta, hifi_reads, "contig", contig_correction_params)
             }
             .set { ch_contigs_for_correction }
         
+        ch_contigs_for_correction.view { "CONTIG_CORR_INPUT: $it" }
         CORRECT_MISASSEMBLIES_CONTIG(ch_contigs_for_correction)
         
         // Use corrected assemblies for downstream steps
@@ -496,14 +498,15 @@ workflow {
         SCAFFOLD_HIC.out.scaffolds
             .map { haplotype_id, scaffold ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(haplotype_id, sample_id, scaffold)
+                tuple(sample_id, haplotype_id, scaffold)
             }
-            .combine(BAM_TO_FASTQ.out, by: 1)
+            .join(BAM_TO_FASTQ.out)   // joins on sample_id (element 0)
             .map { sample_id, haplotype_id, scaffold, hifi_reads ->
                 tuple(haplotype_id, scaffold, hifi_reads, "scaffold", scaffold_correction_params)
             }
             .set { ch_scaffolds_for_correction }
         
+        ch_scaffolds_for_correction.view { "SCAFFOLD_CORR_INPUT: $it" }
         CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffolds_for_correction)
         
         // Use corrected scaffolds for downstream steps
