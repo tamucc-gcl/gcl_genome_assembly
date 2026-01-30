@@ -13,7 +13,7 @@ process BUILD_MERYL_DB {
     tag "${sample_id}"
     label 'merqury'
     
-    publishDir "${params.outdir}/meryl_db", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/meryl_db", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), path(hifi_fastq)

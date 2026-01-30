@@ -2,13 +2,15 @@
 ========================================================================================
     HI-C SCAFFOLDING MODULE (YaHS) - UNIFIED FOR ALL ROUNDS
 ========================================================================================
-    Input : filtered Hi-C BAM (valid pairs) + BAI + assembly FASTA + round identifier
+    Input : filtered Hi-C BAM (valid pairs) + BAI + assembly FASTA + round identifier + round_params
     Output: scaffolded FASTA + final AGP + YaHS BIN + log
     
     The round parameter controls output directory and file naming:
     - round = "round1" or "" → scaffolding/yahs/
     - round = "round2" → scaffolding/yahs_round2/
     - round = "roundN" → scaffolding/yahs_roundN/
+    
+    The round_params map contains all YaHS parameters for this specific round
 ========================================================================================
 */
 
@@ -20,7 +22,7 @@ process SCAFFOLD_HIC {
         mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(bam), path(bai), path(assembly_fasta), val(round)
+    tuple val(haplotype_id), path(bam), path(bai), path(assembly_fasta), val(round), val(round_params)
 
     output:
     tuple val(haplotype_id), path("${haplotype_id}${round && round != 'round1' ? '_' + round : ''}_scaffolds.fa"), emit: scaffolds
@@ -29,17 +31,14 @@ process SCAFFOLD_HIC {
     tuple val(haplotype_id), path("${haplotype_id}${round && round != 'round1' ? '_' + round : ''}.yahs.log"), emit: log
 
     script:
-    def min_contig_len    = params.yahs_min_contig_length ?: 10000
-    def min_mapq          = params.yahs_min_mapq ?: 1
-
-    // YaHS expects comma-separated resolutions; default mirrors YaHS docs
-    def resolutions       = params.yahs_resolutions ?: '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
-
-    // Optional knobs
-    def rounds_per_res    = params.yahs_rounds_per_resolution ?: null   // corresponds to -R if set
-    def enzyme            = params.yahs_enzyme ?: null                  // corresponds to -e if set
-    def no_contig_ec      = params.yahs_no_contig_ec ? true : false
-    def no_scaffold_ec    = params.yahs_no_scaffold_ec ? true : false
+    // Extract parameters from round_params map
+    def min_contig_len    = round_params.min_contig_length ?: 10000
+    def min_mapq          = round_params.min_mapq ?: 1
+    def resolutions       = round_params.resolutions ?: '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
+    def rounds_per_res    = round_params.rounds_per_resolution ?: null
+    def enzyme            = round_params.enzyme ?: null
+    def no_contig_ec      = round_params.no_contig_ec ? true : false
+    def no_scaffold_ec    = round_params.no_scaffold_ec ? true : false
 
     // Use a prefix that includes round identifier if present
     def round_suffix = round && round != 'round1' ? "_${round}" : ""
@@ -86,6 +85,14 @@ process SCAFFOLD_HIC {
     echo "[YAHS ${round ?: 'round1'}] Starting scaffolding for ${haplotype_id}"
     echo "[YAHS ${round ?: 'round1'}] Input assembly: ${assembly_fasta}"
     echo "[YAHS ${round ?: 'round1'}] Hi-C BAM: ${bam}"
+    echo "[YAHS ${round ?: 'round1'}] Parameters:"
+    echo "  min_contig_length: ${min_contig_len}"
+    echo "  min_mapq: ${min_mapq}"
+    echo "  resolutions: ${resolutions}"
+    echo "  rounds_per_resolution: ${rounds_per_res ?: 'default'}"
+    echo "  enzyme: ${enzyme ?: 'none'}"
+    echo "  no_contig_ec: ${no_contig_ec}"
+    echo "  no_scaffold_ec: ${no_scaffold_ec}"
     
     yahs "${assembly_fasta}" "${bam}" "\${yahs_args[@]}" 2>&1 | tee "${haplotype_id}${round_suffix}.yahs.log"
 

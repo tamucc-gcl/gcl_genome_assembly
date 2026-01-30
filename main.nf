@@ -69,16 +69,23 @@ params.hic_balance = false
 params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
 
-// Hi-C scaffolding parameters (YaHS)
-params.yahs_min_contig_length = 10000
-params.yahs_min_mapq = 1
-params.yahs_resolutions = '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
-params.yahs_rounds_per_resolution = null
-params.yahs_enzyme = null
-params.yahs_no_contig_ec = false
-params.yahs_no_scaffold_ec = false
-params.bwa_mem2_hic_args = null
-params.scaffold_min_size = 10000000
+// Hi-C scaffolding parameters (YaHS) - ROUND 1
+params.yahs_round1_min_contig_length = 50000
+params.yahs_round1_min_mapq = 10
+params.yahs_round1_resolutions = '20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000'
+params.yahs_round1_rounds_per_resolution = null
+params.yahs_round1_enzyme = null
+params.yahs_round1_no_contig_ec = false
+params.yahs_round1_no_scaffold_ec = false
+
+// Hi-C scaffolding parameters (YaHS) - ROUND 2
+params.yahs_round2_min_contig_length = 100000
+params.yahs_round2_min_mapq = 20
+params.yahs_round2_resolutions = '50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000'
+params.yahs_round2_rounds_per_resolution = null
+params.yahs_round2_enzyme = null
+params.yahs_round2_no_contig_ec = false
+params.yahs_round2_no_scaffold_ec = true
 
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
@@ -174,6 +181,29 @@ params.evidence = [
     diamond_max_target_seqs: params.evidence_diamond_max_target_seqs,
     diamond_evalue: params.evidence_diamond_evalue,
     blob_min_contig_len: params.evidence_blob_min_contig_len
+]
+
+// ============================================================================
+// BACKWARD COMPATIBILITY LAYER - YaHS parameters
+// ============================================================================
+params.yahs_round1 = [
+    min_contig_length: params.yahs_round1_min_contig_length,
+    min_mapq: params.yahs_round1_min_mapq,
+    resolutions: params.yahs_round1_resolutions,
+    rounds_per_resolution: params.yahs_round1_rounds_per_resolution,
+    enzyme: params.yahs_round1_enzyme,
+    no_contig_ec: params.yahs_round1_no_contig_ec,
+    no_scaffold_ec: params.yahs_round1_no_scaffold_ec
+]
+
+params.yahs_round2 = [
+    min_contig_length: params.yahs_round2_min_contig_length,
+    min_mapq: params.yahs_round2_min_mapq,
+    resolutions: params.yahs_round2_resolutions,
+    rounds_per_resolution: params.yahs_round2_rounds_per_resolution,
+    enzyme: params.yahs_round2_enzyme,
+    no_contig_ec: params.yahs_round2_no_contig_ec,
+    no_scaffold_ec: params.yahs_round2_no_scaffold_ec
 ]
 
 // ============================================================================
@@ -495,11 +525,11 @@ workflow {
     ========================================================================================
     */
     
-    // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta, round)
+    // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta, round, round_params)
     FILTER_HIC_BAM.out.bam
         .join(ch_assemblies_for_qc)
         .map { haplotype_id, stage, bam, bai, assembly_fasta ->
-            tuple(haplotype_id, bam, bai, assembly_fasta, "round1")
+            tuple(haplotype_id, bam, bai, assembly_fasta, "round1", params.yahs_round1)
         }
         .set { ch_scaffolding_round1_input }
     
@@ -628,11 +658,11 @@ workflow {
         ========================================================================================
         */
         
-        // Prepare input for second scaffolding: (haplotype_id, filtered_bam, bai, scaffold_fasta, round)
+        // Prepare input for second scaffolding: (haplotype_id, filtered_bam, bai, scaffold_fasta, round, round_params)
         FILTER_HIC_BAM_SCAFFOLD.out.bam
             .join(ch_final_scaffolds)
             .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
-                tuple(haplotype_id, bam, bai, scaffold_fasta, "round2")
+                tuple(haplotype_id, bam, bai, scaffold_fasta, "round2", params.yahs_round2)
             }
             .set { ch_second_scaffolding_input }
         
