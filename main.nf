@@ -135,18 +135,6 @@ params.evidence_diamond_evalue = 1e-25
 params.evidence_blob_min_contig_len = 1000
 
 // ============================================================================
-// COMPUTE CONDITIONAL PARAMETERS
-// ============================================================================
-// Determine if second round of scaffolding should run
-// Logic: Run round 2 if scaffold correction OR decontamination is enabled (unless explicitly disabled)
-def should_run_round2 = params.run_scaffold_round2 != null ? 
-    params.run_scaffold_round2 : 
-    (params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds)
-
-// Override the parameter with computed value
-params.run_scaffold_round2 = should_run_round2
-
-// ============================================================================
 // BACKWARD COMPATIBILITY LAYER
 // ============================================================================
 // Reconstruct nested structures for internal workflow code
@@ -186,6 +174,15 @@ params.evidence = [
     diamond_evalue: params.evidence_diamond_evalue,
     blob_min_contig_len: params.evidence_blob_min_contig_len
 ]
+
+// ============================================================================
+// COMPUTE CONDITIONAL PARAMETERS (MUST BE AFTER ALL PARAM DEFINITIONS)
+// ============================================================================
+// Determine if second round of scaffolding should run
+// Logic: Run round 2 if scaffold correction OR decontamination is enabled (unless explicitly disabled)
+if (params.run_scaffold_round2 == null) {
+    params.run_scaffold_round2 = params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds
+}
 
 // Print pipeline header
 log.info """\
