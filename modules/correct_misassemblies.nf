@@ -24,17 +24,19 @@ process CORRECT_MISASSEMBLIES {
     tag "${haplotype_id}"
     label 'misassembly_correction'
     
-    publishDir "${params.outdir}/misassembly_correction/${stage}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/${stage}/misassembly_correction", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly_fasta), path(hifi_reads), val(stage), val(correction_params)
     
     output:
-    tuple val(haplotype_id), path("${haplotype_id}_corrected.fa"), emit: corrected
+    tuple val(haplotype_id), path("${haplotype_id}_corrected.fasta"), emit: corrected
     tuple val(haplotype_id), path("${haplotype_id}_read_to_contig.bam"), emit: bam
-    tuple val(haplotype_id), path("${haplotype_id}_structural_error.bed"), emit: errors
+    tuple val(haplotype_id), path("${haplotype_id}_structural_error.bed"), emit: structural_errors
+    tuple val(haplotype_id), path("${haplotype_id}_small_scale_error.bed"), emit: small_scale_errors
     tuple val(haplotype_id), path("${haplotype_id}_summary_statistics.txt"), emit: stats
-    tuple val(haplotype_id), path("${haplotype_id}_inspector"), emit: inspector_dir
+    tuple val(haplotype_id), path("${haplotype_id}_inspector_report.txt"), emit: inspector_report
+    //tuple val(haplotype_id), path("${haplotype_id}_inspector"), emit: inspector_dir
     
     script:
     // Extract parameters for this stage
@@ -95,10 +97,10 @@ process CORRECT_MISASSEMBLIES {
     
     # Corrected assembly
     if [ -f ${haplotype_id}_inspector/contig_corrected.fa ]; then
-        mv ${haplotype_id}_inspector/contig_corrected.fa ${haplotype_id}_corrected.fa
+        mv ${haplotype_id}_inspector/contig_corrected.fa ${haplotype_id}_corrected.fasta
     else
         echo "[WARNING] No corrections made - using original assembly"
-        cp ${assembly_fasta} ${haplotype_id}_corrected.fa
+        cp ${assembly_fasta} ${haplotype_id}_corrected.fasta
     fi
     
     # Read-to-contig alignment BAM
@@ -114,6 +116,14 @@ process CORRECT_MISASSEMBLIES {
     else
         # Create empty BED if no errors found
         echo "# No structural errors detected" > ${haplotype_id}_structural_error.bed
+    fi
+
+    # Small scale error BED
+    if [ -f ${haplotype_id}_inspector/small_scale_error.bed ]; then
+        mv ${haplotype_id}_inspector/small_scale_error.bed ${haplotype_id}_small_scale_error.bed
+    else
+        # Create empty BED if no errors found
+        echo "# No small scale errors detected" > ${haplotype_id}_small_scale_error.bed
     fi
     
     # Summary statistics
@@ -172,7 +182,6 @@ Corrected assembly: ${haplotype_id}_corrected.fa
 Structural errors: ${haplotype_id}_structural_error.bed
 Read alignment: ${haplotype_id}_read_to_contig.bam
 Summary stats: ${haplotype_id}_summary_statistics.txt
-Full inspector output: ${haplotype_id}_inspector/
 
 ================================================================================
 ASSEMBLY STATISTICS
@@ -187,17 +196,15 @@ fi)
 
 Corrected assembly:
 \$(if command -v seqkit &> /dev/null; then
-    seqkit stats ${haplotype_id}_corrected.fa
+    seqkit stats ${haplotype_id}_corrected.fasta
 else
-    echo "Number of sequences: \$(grep -c '^>' ${haplotype_id}_corrected.fa)"
-    echo "Total length: \$(grep -v '^>' ${haplotype_id}_corrected.fa | tr -d '\\n' | wc -c)"
+    echo "Number of sequences: \$(grep -c '^>' ${haplotype_id}_corrected.fasta)"
+    echo "Total length: \$(grep -v '^>' ${haplotype_id}_corrected.fasta | tr -d '\\n' | wc -c)"
 fi)
 
 ================================================================================
 EOF
-    
-    # Add report to inspector directory
-    cp ${haplotype_id}_inspector_report.txt ${haplotype_id}_inspector/
+
     """
     
     stub:
