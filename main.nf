@@ -254,6 +254,7 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 */
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
+include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
@@ -698,6 +699,15 @@ workflow {
         QC Steps
     ========================================================================================
     */
+
+    /*
+    ========================================================================================
+        BUILD MERYL DATABASE (Once per sample)
+        Runs in parallel with trimming and assembly
+        Reused across ALL assembly QC steps for dramatic speedup
+    ========================================================================================
+    */
+    BUILD_MERYL_DB(BAM_TO_FASTQ.out)
 
     /*
     ========================================================================================

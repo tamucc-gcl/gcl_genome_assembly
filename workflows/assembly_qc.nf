@@ -1,10 +1,10 @@
 /*
 ========================================================================================
-    ASSEMBLY QC SUBWORKFLOW
+    ASSEMBLY QC SUBWORKFLOW (OPTIMIZED)
 ========================================================================================
     Comprehensive QC for phased genome assemblies
     - QUAST: per-sample (both haplotypes)
-    - MERQURY: per-sample (both haplotypes)
+    - MERQURY: per-sample (both haplotypes) - uses pre-built meryl database
     - BUSCO: per-haplotype
     - MAPPING: per-haplotype (map HiFi reads back to assembly)
     - COMBINE_QC: aggregate and visualize all QC metrics
@@ -23,7 +23,8 @@ workflow ASSEMBLY_QC {
     take:
     assemblies   // channel: tuple(sample_id, hap1_fasta, hap2_fasta)
     hifi_reads   // channel: tuple(sample_id, hifi_fastq)
-    qc_label    // value/channel: label for output subfolder (e.g. 'contig' or 'scaffold')
+    meryl_db     // channel: tuple(sample_id, meryl_db) - PRE-BUILT k-mer database
+    qc_label     // value/channel: label for output subfolder (e.g. 'contig' or 'scaffold')
     
     main:
     
@@ -36,12 +37,18 @@ workflow ASSEMBLY_QC {
     
     /*
     ========================================================================================
-        MERQURY - Run on both haplotypes per sample with HiFi reads
+        MERQURY - Run on both haplotypes per sample with pre-built meryl database
+        OPTIMIZATION: No longer builds k-mer database - uses pre-computed one
     ========================================================================================
     */
-    MERQURY(
-        assemblies.join(hifi_reads)
-    )
+    assemblies
+        .join(meryl_db)
+        .map { sample_id, hap1_fasta, hap2_fasta, meryl_db ->
+            tuple(sample_id, hap1_fasta, hap2_fasta, meryl_db)
+        }
+        .set { ch_merqury_input }
+    
+    MERQURY(ch_merqury_input)
     
     /*
     ========================================================================================
@@ -143,11 +150,5 @@ workflow ASSEMBLY_QC {
     COMBINE_ASSEMBLY_QC(ch_all_qc_labeled)
     
     emit:
-    //quast_results = QUAST.out.results
-    //merqury_results = MERQURY.out.results
-    //busco_results = BUSCO.out.results
-    //mapping_results = MAPPING_QC.out.results
-    //combined_report = COMBINE_ASSEMBLY_QC.out.report
-    //combined_plots = COMBINE_ASSEMBLY_QC.out.plots
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary
 }
