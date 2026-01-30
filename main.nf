@@ -55,10 +55,46 @@ params.yahs_min_mapq = 1
 params.yahs_resolutions = '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
 params.yahs_rounds_per_resolution = null
 params.yahs_enzyme = null
-params.yahs_no_contig_ec = true
-params.yahs_no_scaffold_ec = true
+params.yahs_no_contig_ec = false
+params.yahs_no_scaffold_ec = false
 params.bwa_mem2_hic_args = null
 params.scaffold_min_size = 10000000
+
+// Misassembly correction parameters
+params.correct_contigs = true     // Run correction on contig assemblies
+params.correct_scaffolds = true   // Run correction on scaffolded assemblies
+
+// Contig correction parameters
+params.contig_correction_min_depth = null  // null = use Inspector default (20% of average depth)
+params.contig_correction_min_contig_length = 10000
+params.contig_correction_min_contig_length_assemblyerror = 1000000
+params.contig_correction_min_assembly_error_size = 50
+params.contig_correction_max_assembly_error_size = 4000000
+
+// Scaffold correction parameters (often need different thresholds)
+params.scaffold_correction_min_depth = null  // null = use Inspector default (20% of average depth)
+params.scaffold_correction_min_contig_length = 10000
+params.scaffold_correction_min_contig_length_assemblyerror = 10000000  // Higher for scaffolds
+params.scaffold_correction_min_assembly_error_size = 50
+params.scaffold_correction_max_assembly_error_size = 10000000  // Higher for scaffolds
+
+// ============================================================================
+// Decontamination control (FLATTENED)
+// ============================================================================
+// When to run decontamination
+params.decon_run_on_contigs = true       // Run on initial contig assemblies (before Hi-C mapping)
+params.decon_run_on_scaffolds = false     // Run on scaffolded assemblies (after Hi-C scaffolding)
+
+// Core settings
+params.decon_source_taxid = 7898          // Actinopterygii; set your species taxid when possible
+
+// Optional: adapter/vector removal
+params.decon_run_fcs_adaptor = false      // Requires FCS-adaptor containers; enable only if configured
+params.decon_fcsadaptor_mode = 'euk'      // 'euk' or 'prok'
+params.decon_container_engine = 'singularity'
+
+// Optional: generate evidence (coverage + taxonomy + blobtools plots)
+params.decon_make_blobtools_evidence = true
 
 // ============================================================================
 // Database base directory
@@ -84,24 +120,6 @@ params.diamond_profile = 'custom'    // 'custom' (recommended)
 params.diamond_fasta_url = "https://ftp.ncbi.nlm.nih.gov/blast/db/FASTA/nr.gz"
 params.diamond_taxonmap_url = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/accession2taxid/prot.accession2taxid.FULL.gz"
 params.diamond_force = false
-
-// ============================================================================
-// Decontamination control (FLATTENED)
-// ============================================================================
-// When to run decontamination
-params.decon_run_on_contigs = false       // Run on initial contig assemblies (before Hi-C mapping)
-params.decon_run_on_scaffolds = false     // Run on scaffolded assemblies (after Hi-C scaffolding)
-
-// Core settings
-params.decon_source_taxid = 7898          // Actinopterygii; set your species taxid when possible
-
-// Optional: adapter/vector removal
-params.decon_run_fcs_adaptor = false      // Requires FCS-adaptor containers; enable only if configured
-params.decon_fcsadaptor_mode = 'euk'      // 'euk' or 'prok'
-params.decon_container_engine = 'singularity'
-
-// Optional: generate evidence (coverage + taxonomy + blobtools plots)
-params.decon_make_blobtools_evidence = true
 
 // ============================================================================
 // Evidence generation settings (FLATTENED)
@@ -159,6 +177,7 @@ log.info """\
     =========================================
     Sample sheet : ${params.sample_sheet}
     Output dir   : ${params.outdir}
+    Misassembly correction: ${params.correct_contigs ? 'Contigs' : ''}${params.correct_scaffolds ? ' Scaffolds' : ''}${!params.correct_contigs && !params.correct_scaffolds ? 'Disabled' : ''}
     Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
     =========================================
     """
@@ -189,9 +208,13 @@ include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
 include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
+
+
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
@@ -217,6 +240,8 @@ include { HIFIASM } from './modules/hifiasm.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
+include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
+include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
 
 
 /*
@@ -312,13 +337,20 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 5: Optional Decontamination of Contig Assemblies
-        Runs in parallel with Hi-C mapping preparation
-        Databases were already set up in STEP 0 (parallel with assembly)
+        STEP 4.5: Optional Misassembly Correction of Contig Assemblies
     ========================================================================================
     */
-    if (params.decon.run_on_contigs) {
-        // Split assemblies into individual haplotypes for decontamination
+    if (params.correct_contigs) {
+        // Prepare correction parameters for contig stage
+        def contig_correction_params = [
+            min_depth: params.contig_correction_min_depth,
+            min_contig_length: params.contig_correction_min_contig_length,
+            min_contig_length_assemblyerror: params.contig_correction_min_contig_length_assemblyerror,
+            min_assembly_error_size: params.contig_correction_min_assembly_error_size,
+            max_assembly_error_size: params.contig_correction_max_assembly_error_size
+        ]
+
+        // Split assemblies into individual haplotypes for correction
         HIFIASM.out.assemblies
             .flatMap { sample_id, hap1_fasta, hap2_fasta ->
                 [
@@ -326,11 +358,48 @@ workflow {
                     tuple("${sample_id}_hap2", hap2_fasta)
                 ]
             }
-            .set { ch_contigs_for_decontam }
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(haplotype_id, sample_id, fasta)
+            }
+            .combine(BAM_TO_FASTQ.out, by: 1)
+            .map { sample_id, haplotype_id, fasta, hifi_reads ->
+                tuple(haplotype_id, fasta, hifi_reads, "contig", contig_correction_params)
+            }
+            .set { ch_contigs_for_correction }
         
+        CORRECT_MISASSEMBLIES_CONTIG(ch_contigs_for_correction)
+        
+        // Use corrected assemblies for downstream steps
+        // Store them in channel format for both decontamination and Hi-C mapping
+        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+            .map { haplotype_id, fasta ->
+                tuple(haplotype_id, fasta)
+            }
+            .set { ch_contigs_for_decontam_or_hic }
+    } else {
+        // Use original assemblies if correction not requested
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
+            .set { ch_contigs_for_decontam_or_hic }
+    }
+
+    /*
+    ========================================================================================
+        STEP 5: Optional Decontamination of Contig Assemblies
+        Runs in parallel with Hi-C mapping preparation
+        Databases were already set up in STEP 0 (parallel with assembly)
+    ========================================================================================
+    */
+    if (params.decon.run_on_contigs) {
         // Run decontamination (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_CONTIG(
-            ch_contigs_for_decontam,
+            ch_contigs_for_decontam_or_hic,
             ch_gxdb_dir
         )
         
@@ -345,12 +414,10 @@ workflow {
             .set { ch_individual_haplotypes }
     } else {
         // Use original assemblies if decontamination not requested
-        HIFIASM.out.assemblies
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", sample_id, hap1_fasta),
-                    tuple("${sample_id}_hap2", sample_id, hap2_fasta)
-                ]
+        ch_contigs_for_decontam_or_hic
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(haplotype_id, sample_id, fasta)
             }
             .set { ch_individual_haplotypes }
     }
@@ -412,6 +479,47 @@ workflow {
 
     /*
     ========================================================================================
+        STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies
+    ========================================================================================
+    */
+    if (params.correct_scaffolds) {
+        // Prepare correction parameters for scaffold stage
+        def scaffold_correction_params = [
+            min_depth: params.scaffold_correction_min_depth,
+            min_contig_length: params.scaffold_correction_min_contig_length,
+            min_contig_length_assemblyerror: params.scaffold_correction_min_contig_length_assemblyerror,
+            min_assembly_error_size: params.scaffold_correction_min_assembly_error_size,
+            max_assembly_error_size: params.scaffold_correction_max_assembly_error_size
+        ]
+
+        // Correct scaffolds using HiFi reads
+        SCAFFOLD_HIC.out.scaffolds
+            .map { haplotype_id, scaffold ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(haplotype_id, sample_id, scaffold)
+            }
+            .combine(BAM_TO_FASTQ.out, by: 1)
+            .map { sample_id, haplotype_id, scaffold, hifi_reads ->
+                tuple(haplotype_id, scaffold, hifi_reads, "scaffold", scaffold_correction_params)
+            }
+            .set { ch_scaffolds_for_correction }
+        
+        CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffolds_for_correction)
+        
+        // Use corrected scaffolds for downstream steps
+        CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+            .map { haplotype_id, fasta ->
+                tuple(haplotype_id, fasta)
+            }
+            .set { ch_scaffolds_for_decontam_or_final }
+    } else {
+        // Use original scaffolds if correction not requested
+        SCAFFOLD_HIC.out.scaffolds
+            .set { ch_scaffolds_for_decontam_or_final }
+    }
+
+    /*
+    ========================================================================================
         STEP 9: Optional Decontamination of Scaffolded Assemblies
         Runs after scaffolding is complete
         Databases were already set up in STEP 0
@@ -420,26 +528,17 @@ workflow {
     if (params.decon.run_on_scaffolds) {
         // Decontaminate scaffolds (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_SCAFFOLD(
-            SCAFFOLD_HIC.out.scaffolds,
+            ch_scaffolds_for_decontam_or_final,
             ch_gxdb_dir
         )
 
-        // Store final decontaminated scaffolds
-        ch_decontam_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
+        // Store final scaffolds
+        ch_final_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
     } else {
-        // Use original scaffolds if decontamination not requested
-        ch_decontam_scaffolds = SCAFFOLD_HIC.out.scaffolds
+        // Use scaffolds (corrected or original) without decontamination
+        ch_final_scaffolds = ch_scaffolds_for_decontam_or_final
     }
     
-
-    /*
-    ========================================================================================
-        STEP 15: Identify and Break misassemblies (FUTURE)
-    ========================================================================================
-    */
-    // 1. use inspector to identify and break misassemblies
-    // 2. Assembly QC of broken assemblies
-    // 3. summary outputs of misassemblies broken
 
     /*
     ========================================================================================
@@ -529,6 +628,35 @@ workflow {
 
     /*
     ========================================================================================
+        QC Contig misassembly corrected Genome Assemblies
+    ========================================================================================
+    */
+    if (params.correct_contigs) {
+        // QC on misassembly corrected assemblies
+        // Re-pair haplotypes by sample for QC
+        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_corrected_contig_paired }
+
+        ASSEMBLY_QC_CONTIG_CORRECTED(
+            ch_corrected_contig_paired,
+            BAM_TO_FASTQ.out,
+            'contig_corrected'
+        )
+    }
+
+    /*
+    ========================================================================================
         QC Contig Decontaminated Genome Assemblies
     ========================================================================================
     */
@@ -582,6 +710,36 @@ workflow {
         BAM_TO_FASTQ.out,
         'scaffold'
     )
+
+    /*
+    ========================================================================================
+        QC Scaffold Misassembled Corrected Genome Assemblies
+    ========================================================================================
+    */
+    if (params.correct_scaffolds) {
+        // QC on misassembly corrected assemblies
+        // Re-pair haplotypes by sample for QC
+        CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, fastas ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_corrected_scaffold_paired }
+
+        ASSEMBLY_QC_SCAFFOLD_CORRECTED(
+            ch_corrected_scaffold_paired,
+            BAM_TO_FASTQ.out,
+            'scaffold_corrected'
+        )
+    }
+
 
     /*
     ========================================================================================
