@@ -12,7 +12,12 @@
     - Takes pre-prepared databases as input
     - Each haplotype processes independently
     - Returns both clean and contaminant sequences
-    - Can be applied to contigs OR scaffolds
+    - Can be applied to contigs OR scaffolds (controlled by stage parameter)
+    - Stage parameter controls output directory organization
+    
+    Usage:
+    - DECONTAMINATE_ASSEMBLY(assemblies, gxdb_dir, "contig")  // For contig decontamination
+    - DECONTAMINATE_ASSEMBLY(assemblies, gxdb_dir, "scaffold") // For scaffold decontamination
 ========================================================================================
 */
 
@@ -26,6 +31,7 @@ workflow DECONTAMINATE_ASSEMBLY {
     take:
     assemblies      // channel: tuple(haplotype_id, assembly_fasta)
     gxdb_dir        // channel: already a channel from SETUP_DECONTAM_DBS
+    stage           // string: "contig" or "scaffold" for output directory organization
     
     main:
     
@@ -36,14 +42,19 @@ workflow DECONTAMINATE_ASSEMBLY {
     */
     if (params.decon?.run_fcs_adaptor ?: false) {
         assemblies
-            .map { haplotype_id, assembly_fasta ->
-                tuple(assembly_fasta,
-                      params.decon?.fcsadaptor_mode ?: 'euk',
-                      params.decon?.container_engine ?: 'singularity')
-            }
-            .set { ch_adaptor_input }
+            .map { haplotype_id, assembly_fasta -> assembly_fasta }
+            .set { ch_assembly_files_adaptor }
         
-        FCS_ADAPTOR(ch_adaptor_input)
+        ch_adaptor_mode = Channel.value(params.decon?.fcsadaptor_mode ?: 'euk')
+        ch_adaptor_engine = Channel.value(params.decon?.container_engine ?: 'singularity')
+        ch_adaptor_stage = Channel.value(stage)
+        
+        FCS_ADAPTOR(
+            ch_assembly_files_adaptor,
+            ch_adaptor_mode,
+            ch_adaptor_engine,
+            ch_adaptor_stage
+        )
         
         // Restore haplotype_id after adaptor cleaning
         assemblies
@@ -70,25 +81,30 @@ workflow DECONTAMINATE_ASSEMBLY {
         .map { haplotype_id, assembly_fasta -> haplotype_id }
         .set { ch_haplotype_ids }
     
-    // Create source_taxid channel
+    // Create source_taxid and stage channels
     ch_source_taxid = Channel.value(params.decon?.source_taxid ?: 7898)
+    ch_stage = Channel.value(stage)
     
     // Call FCS_GX_SCREEN with separate inputs
     FCS_GX_SCREEN(
         ch_assembly_files,
         ch_source_taxid,
-        gxdb_dir
+        gxdb_dir,
+        ch_stage
     )
     
     /*
     ========================================================================================
-        STEP 3: Restore haplotype_id using merge operator
+        STEP 3: Restore haplotype_id and add stage using merge operator
     ========================================================================================
     */
     // Merge haplotype_ids with assembly files and action reports
     // merge() combines channels element-by-element in emission order
     ch_haplotype_ids
         .merge(ch_assembly_files, FCS_GX_SCREEN.out.action_report)
+        .map { haplotype_id, assembly_fasta, action_report ->
+            tuple(haplotype_id, assembly_fasta, action_report, stage)
+        }
         .set { ch_clean_input }
     
     FCS_CLEAN_GENOME(ch_clean_input)

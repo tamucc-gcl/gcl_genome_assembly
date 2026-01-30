@@ -17,26 +17,27 @@
       - Uses bwa-mem2 (much faster than bwa mem)
       - Uses Hi-C appropriate flags: -5SP
       - pairtools parse REQUIRES qname-collated input
+      - Stage parameter controls publishDir but not filenames
 ========================================================================================
 */
 
 process MAP_HIC_TO_ASSEMBLY {
-    tag "${haplotype_id}"
+    tag "${haplotype_id}_${stage}"
     label 'map_hic'
 
-    publishDir "${params.outdir}/bam/hic/raw",
+    publishDir "${params.outdir}/bam/hic/${stage}/raw",
         mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(assembly_fasta), path(hic_r1), path(hic_r2)
+    tuple val(haplotype_id), path(assembly_fasta), path(hic_r1), path(hic_r2), val(stage)
 
     output:
-    tuple val(haplotype_id),
+    tuple val(haplotype_id), val(stage),
           path("${haplotype_id}.sorted.bam"),
           path("${haplotype_id}.sorted.bam.bai"),
           emit: bam
 
-    tuple val(haplotype_id),
+    tuple val(haplotype_id), val(stage),
           path("${haplotype_id}_mapping_stats.txt"),
           emit: stats
 

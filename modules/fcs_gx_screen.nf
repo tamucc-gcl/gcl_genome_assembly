@@ -2,7 +2,7 @@ process FCS_GX_SCREEN {
   tag "fcs_gx_screen"
   label 'fcs' 
   
-  publishDir "${params.outdir}/contig/decontam", 
+  publishDir "${params.outdir}/${stage}/decontam", 
     mode: params.publish_dir_mode,
     saveAs: { filename -> filename.startsWith('gx_out/') ? null : filename }
 
@@ -10,6 +10,7 @@ process FCS_GX_SCREEN {
     path assembly_fa
     val source_taxid
     val gxdb_dir
+    val stage
 
   output:
     path "*.fcs_gx_report.txt", emit: action_report

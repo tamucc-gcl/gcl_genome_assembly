@@ -16,22 +16,24 @@
     - Streams pairsam -> samtools sort directly
     - Uses TMPDIR for sorting scratch space
     - Uses pairtools multithreading where supported
+    
+    Stage parameter controls publishDir but not filenames
 ========================================================================================
 */
 
 process FILTER_HIC_BAM {
-    tag "${haplotype_id}"
+    tag "${haplotype_id}_${stage}"
     label 'filter_hic_bam'
 
-    publishDir "${params.outdir}/bam/hic/filtered", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/bam/hic/${stage}/filtered", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(bam), path(bai), path(assembly_fasta)
+    tuple val(haplotype_id), val(stage), path(bam), path(bai), path(assembly_fasta)
 
     output:
-    tuple val(haplotype_id), path("${haplotype_id}.filtered.sorted.bam"), path("${haplotype_id}.filtered.sorted.bam.bai"), emit: bam
-    tuple val(haplotype_id), path("${haplotype_id}_filtering_stats.txt"), emit: stats
-    tuple val(haplotype_id), path("${haplotype_id}.pairs.gz"), emit: pairs
+    tuple val(haplotype_id), val(stage), path("${haplotype_id}.filtered.sorted.bam"), path("${haplotype_id}.filtered.sorted.bam.bai"), emit: bam
+    tuple val(haplotype_id), val(stage), path("${haplotype_id}_filtering_stats.txt"), emit: stats
+    tuple val(haplotype_id), val(stage), path("${haplotype_id}.pairs.gz"), emit: pairs
 
     script:
     """
@@ -112,7 +114,7 @@ process FILTER_HIC_BAM {
 
     {
       echo "================================================================================"
-      echo "Hi-C BAM Filtering Statistics for ${haplotype_id}"
+      echo "Hi-C BAM Filtering Statistics for ${haplotype_id} (${stage})"
       echo "Generated: \$(date)"
       echo "pairtools version: \$(pairtools --version 2>/dev/null || echo 'unknown')"
       echo "samtools version:  \$(samtools --version | head -n 1)"

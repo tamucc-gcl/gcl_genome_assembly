@@ -15,6 +15,8 @@ nextflow.enable.dsl=2
     - Clear separation of concerns
     - Optional misassembly correction (Inspector)
     - Optional decontamination at multiple stages
+    - Conditional iterative scaffolding (second round only when beneficial)
+    - Gap filling using TGSGapCloser
 ========================================================================================
 */
 
@@ -77,6 +79,10 @@ params.yahs_no_scaffold_ec = false
 params.bwa_mem2_hic_args = null
 params.scaffold_min_size = 10000000
 
+// Scaffolding round control
+// If not explicitly set, default to true if scaffold correction OR decontamination is enabled
+params.run_scaffold_round2 = null  // Will be computed below if null
+
 // ============================================================================
 // Database base directory
 // ============================================================================
@@ -129,6 +135,18 @@ params.evidence_diamond_evalue = 1e-25
 params.evidence_blob_min_contig_len = 1000
 
 // ============================================================================
+// COMPUTE CONDITIONAL PARAMETERS
+// ============================================================================
+// Determine if second round of scaffolding should run
+// Logic: Run round 2 if scaffold correction OR decontamination is enabled (unless explicitly disabled)
+def should_run_round2 = params.run_scaffold_round2 != null ? 
+    params.run_scaffold_round2 : 
+    (params.inspector_run_on_scaffolds || params.decon_run_on_scaffolds)
+
+// Override the parameter with computed value
+params.run_scaffold_round2 = should_run_round2
+
+// ============================================================================
 // BACKWARD COMPATIBILITY LAYER
 // ============================================================================
 // Reconstruct nested structures for internal workflow code
@@ -178,6 +196,8 @@ log.info """\
     Output dir   : ${params.outdir}
     Inspector    : ${params.inspector_run_on_contigs ? 'Contigs' : ''}${params.inspector_run_on_scaffolds ? ' Scaffolds' : ''}${!params.inspector_run_on_contigs && !params.inspector_run_on_scaffolds ? 'Disabled' : ''}
     Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
+    Scaffold Round 2: ${params.run_scaffold_round2 ? 'Enabled' : 'Disabled'}
+    Gap Filling  : Enabled
     =========================================
     """
     .stripIndent()
@@ -207,12 +227,16 @@ include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
 include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
+
+// Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_ROUND2 } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_GAP_FILLED } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
@@ -237,14 +261,12 @@ include { HIFIASM } from './modules/hifiasm.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
+include { MAP_HIC_TO_ASSEMBLY as MAP_HIC_TO_SCAFFOLD } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
-include { SCAFFOLD_HIC } from './modules/scaffold_hic.nf'
-
-
-/*
+include { FILTER_HIC_BAM as FILTER_HIC_BAM_SCAFFOLD } from './modules/filter_hic_bam.nf'
+include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
+include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
-include { QC_FINAL } from './modules/qc_final.nf'
-*/
 
 
 /*
@@ -400,7 +422,8 @@ workflow {
         // Run decontamination (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_CONTIG(
             ch_assemblies_for_decontam,
-            ch_gxdb_dir
+            ch_gxdb_dir,
+            "contig"
         )
         
         
@@ -434,7 +457,7 @@ workflow {
         }
         .combine(TRIM_HIC.out.trimmed_reads, by: 0)
         .map { sample_id, haplotype_id, fasta, hic_r1, hic_r2 ->
-            tuple(haplotype_id, fasta, hic_r1, hic_r2)
+            tuple(haplotype_id, fasta, hic_r1, hic_r2, "contig")
         }
         .set { ch_hic_mapping_input }
     
@@ -458,6 +481,10 @@ workflow {
     // Combine BAM files with assemblies for filtering
     MAP_HIC_TO_ASSEMBLY.out.bam
         .join(ch_assemblies_for_qc)
+        .map { haplotype_id, stage, bam, bai, assembly_fasta ->
+            tuple(haplotype_id, stage, bam, bai, assembly_fasta)
+        }
+        .set { ch_bam_with_assembly }
         .set { ch_bam_with_assembly }
     
     // Filter BAM files to remove invalid pairs and duplicates
@@ -465,17 +492,20 @@ workflow {
     
     /*
     ========================================================================================
-        STEP 8: Scaffold with Hi-C (PARALLEL WITH FILTERED CONTIG QC!)
+        STEP 8: First Round of Scaffolding with Hi-C
     ========================================================================================
     */
     
-    // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta)
+    // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta, round)
     FILTER_HIC_BAM.out.bam
         .join(ch_assemblies_for_qc)
-        .set { ch_scaffolding_input }
+        .map { haplotype_id, stage, bam, bai, assembly_fasta ->
+            tuple(haplotype_id, bam, bai, assembly_fasta, "round1")
+        }
+        .set { ch_scaffolding_round1_input }
     
-    // Run Hi-C scaffolding
-    SCAFFOLD_HIC(ch_scaffolding_input)
+    // Run first round of Hi-C scaffolding
+    SCAFFOLD_HIC_ROUND1(ch_scaffolding_round1_input)
 
     /*
     ========================================================================================
@@ -486,7 +516,7 @@ workflow {
     */
     if (params.inspector_run_on_scaffolds) {
         // Combine each scaffolded haplotype with its HiFi reads for correction
-        SCAFFOLD_HIC.out.scaffolds
+        SCAFFOLD_HIC_ROUND1.out.scaffolds
             .map { haplotype_id, scaffold ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(sample_id, haplotype_id, scaffold)
@@ -513,7 +543,7 @@ workflow {
         
     } else {
         // Use original scaffolds if correction not requested
-        ch_scaffolds_for_decontam = SCAFFOLD_HIC.out.scaffolds
+        ch_scaffolds_for_decontam = SCAFFOLD_HIC_ROUND1.out.scaffolds
     }
 
     /*
@@ -528,7 +558,8 @@ workflow {
         // Decontaminate scaffolds (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_SCAFFOLD(
             ch_scaffolds_for_decontam,
-            ch_gxdb_dir
+            ch_gxdb_dir,
+            "scaffold"
         )
 
         // Store final decontaminated scaffolds
@@ -538,36 +569,126 @@ workflow {
         ch_final_scaffolds = ch_scaffolds_for_decontam
     }
     
+    /*
+    ========================================================================================
+        STEP 10-12: Conditional Second Round of Scaffolding
+        Only runs if:
+        - Inspector correction on scaffolds is enabled, OR
+        - Decontamination on scaffolds is enabled, OR
+        - Explicitly enabled via --run_scaffold_round2 true
+        
+        Can be explicitly disabled via --run_scaffold_round2 false
+    ========================================================================================
+    */
+    if (params.run_scaffold_round2) {
+        
+        log.info "[INFO] Running second round of scaffolding (scaffold correction or decontamination was performed)"
+        
+        /*
+        ========================================================================================
+            STEP 10: Map Hi-C to Final Scaffolds (corrected/decontaminated if those options chosen)
+        ========================================================================================
+        */
+        // Extract sample_id from haplotype_id and combine with trimmed Hi-C reads
+        ch_final_scaffolds
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(sample_id, haplotype_id, fasta)
+            }
+            .combine(TRIM_HIC.out.trimmed_reads, by: 0)
+            .map { sample_id, haplotype_id, fasta, hic_r1, hic_r2 ->
+                tuple(haplotype_id, fasta, hic_r1, hic_r2, "scaffold")
+            }
+            .set { ch_hic_scaffold_mapping_input }
+        
+        // Map Hi-C reads to final scaffolds
+        MAP_HIC_TO_SCAFFOLD(ch_hic_scaffold_mapping_input)
+
+        /*
+        ========================================================================================
+            STEP 11: Filter Hi-C BAM Files mapped to final scaffolds
+        ========================================================================================
+        */
+        
+        // Combine BAM files with scaffolds for filtering
+        MAP_HIC_TO_SCAFFOLD.out.bam
+            .join(ch_final_scaffolds)
+            .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
+                tuple(haplotype_id, stage, bam, bai, scaffold_fasta)
+            }
+            .set { ch_bam_with_scaffold }
+        
+        // Filter BAM files to remove invalid pairs and duplicates
+        FILTER_HIC_BAM_SCAFFOLD(ch_bam_with_scaffold)
+
+        /*
+        ========================================================================================
+            STEP 12: Second Round of Scaffolding (Iterative Improvement)
+            Uses filtered Hi-C BAM from corrected/decontaminated scaffolds
+            This allows YaHS to potentially improve scaffolding based on the corrected structure
+        ========================================================================================
+        */
+        
+        // Prepare input for second scaffolding: (haplotype_id, filtered_bam, bai, scaffold_fasta, round)
+        FILTER_HIC_BAM_SCAFFOLD.out.bam
+            .join(ch_final_scaffolds)
+            .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
+                tuple(haplotype_id, bam, bai, scaffold_fasta, "round2")
+            }
+            .set { ch_second_scaffolding_input }
+        
+        // Run second round of Hi-C scaffolding (reusing same module with different round parameter)
+        SCAFFOLD_HIC_ROUND2(ch_second_scaffolding_input)
+        
+        // Store final scaffolds from second round
+        ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds
+        
+    } else {
+        log.info "[INFO] Skipping second round of scaffolding (no scaffold correction or decontamination)"
+        
+        // Create empty channel for round 2 scaffolds when not running
+        ch_final_scaffolds_round2 = Channel.empty()
+    }
 
     /*
     ========================================================================================
-        STEP 15: Identify and Break misassemblies (FUTURE)
+        STEP 13: Gap Filling
+        Fills gaps in final scaffolded assemblies using HiFi reads
+        Operates on the final scaffold output from either:
+        - Round 2 scaffolding (if round 2 was run)
+        - Decontaminated scaffolds (if decontamination on scaffolds was run)
+        - Corrected scaffolds (if correction on scaffolds was run)
+        - Original scaffolds (from round 1)
     ========================================================================================
     */
-    // 1. use inspector to identify and break misassemblies
-    // 2. Assembly QC of broken assemblies
-    // 3. summary outputs of misassemblies broken
-
-    /*
-    ========================================================================================
-        STEP 16: Rescaffold broken assemblies (FUTURE)
-    ========================================================================================
-    */
-    // 1. remap Hi-C reads to broken assemblies
-    // 2. scaffold again with YaHS
-    // 3. Assembly QC of rescaffolded assemblies
-    /*
-    ========================================================================================
-        STEP 17: Gap Filling
-    ========================================================================================
-    */
-    // 1. gap fill with HiFi reads using tgs gap closer
-    // 2. Assembly QC of gap-filled assemblies
-    // 3. contact-map based QC of gap-filled assemblies
     
+    // Determine which scaffolds to gap fill based on what was run
+    if (params.run_scaffold_round2) {
+        // Use round 2 scaffolds
+        ch_scaffolds_for_gap_filling = ch_final_scaffolds_round2
+    } else {
+        // Use round 1 final scaffolds (corrected/decontaminated if those options were chosen)
+        ch_scaffolds_for_gap_filling = ch_final_scaffolds
+    }
+    
+    // Combine scaffolds with HiFi reads for gap filling
+    ch_scaffolds_for_gap_filling
+        .map { haplotype_id, scaffold ->
+            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+            tuple(sample_id, haplotype_id, scaffold)
+        }
+        .combine(BAM_TO_FASTQ.out, by: 0)
+        .map { sample_id, haplotype_id, scaffold, hifi_fastq ->
+            tuple(haplotype_id, scaffold, hifi_fastq)
+        }
+        .set { ch_gap_filling_input }
+    
+    // Run gap filling
+    GAP_FILLING(ch_gap_filling_input)
+
     /*
     ========================================================================================
-        STEP 18: Finalization
+        STEP 14: Finalization
     ========================================================================================
     */
     // 1. Generate final QC reports
@@ -693,11 +814,11 @@ workflow {
 
     /*
     ========================================================================================
-        QC Scaffolded Genomes
+        QC Scaffolded Genomes (Round 1)
     ========================================================================================
     */
     // Re-pair scaffolded haplotypes by sample
-    SCAFFOLD_HIC.out.scaffolds
+    SCAFFOLD_HIC_ROUND1.out.scaffolds
         .map { haplotype_id, scaffold ->
             // Extract sample_id and haplotype number
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
@@ -774,6 +895,62 @@ workflow {
             'scaffold_decontam'
         )
     }
+
+    /*
+    ========================================================================================
+        QC Second Round Scaffolded Genomes (Conditional - only if round 2 was run)
+    ========================================================================================
+    */
+    if (params.run_scaffold_round2) {
+        // Re-pair second-round scaffolded haplotypes by sample
+        ch_final_scaffolds_round2
+            .map { haplotype_id, scaffold ->
+                // Extract sample_id and haplotype number
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, scaffold)
+            }
+            .groupTuple()
+            .map { sample_id, hap_nums, scaffolds ->
+                // Sort by haplotype number to ensure hap1, hap2 order
+                def sorted = [hap_nums, scaffolds].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_scaffolds_round2_paired }
+
+        ASSEMBLY_QC_SCAFFOLD_ROUND2(
+            ch_scaffolds_round2_paired,
+            BAM_TO_FASTQ.out,
+            'scaffold_round2'
+        )
+    }
+
+    /*
+    ========================================================================================
+        QC Gap-Filled Genomes
+    ========================================================================================
+    */
+    // Re-pair gap-filled haplotypes by sample
+    GAP_FILLING.out.filled_assembly
+        .map { haplotype_id, assembly ->
+            // Extract sample_id and haplotype number
+            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+            def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+            tuple(sample_id, hap_num, assembly)
+        }
+        .groupTuple()
+        .map { sample_id, hap_nums, assemblies ->
+            // Sort by haplotype number to ensure hap1, hap2 order
+            def sorted = [hap_nums, assemblies].transpose().sort { it[0] }
+            tuple(sample_id, sorted[0][1], sorted[1][1])
+        }
+        .set { ch_gap_filled_paired }
+
+    ASSEMBLY_QC_GAP_FILLED(
+        ch_gap_filled_paired,
+        BAM_TO_FASTQ.out,
+        'gap_filled'
+    )
 
     /*
     ========================================================================================

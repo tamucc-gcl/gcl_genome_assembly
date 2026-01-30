@@ -5,6 +5,7 @@ process FCS_ADAPTOR {
     path assembly_fa
     val mode          // 'euk' or 'prok'
     val engine        // 'singularity' or 'docker'
+    val stage         // 'contig' or 'scaffold'
 
   output:
     path "fcsadaptor/cleaned.fasta", emit: cleaned_fasta
