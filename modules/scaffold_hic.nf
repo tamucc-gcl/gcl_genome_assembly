@@ -18,7 +18,7 @@ process SCAFFOLD_HIC {
     tag "${haplotype_id}_${round ?: 'round1'}"
     label 'scaffold_hic'
 
-    publishDir "${params.outdir}/scaffolding/yahs${round && round != 'round1' ? '_' + round : ''}/", 
+    publishDir "${params.outdir}/scaffold/yahs${round && round != 'round1' ? '_' + round : ''}/", 
         mode: params.publish_dir_mode
 
     input:
