@@ -113,6 +113,10 @@ workflow ASSEMBLY_QC {
             tuple(sample_id, haplotype_id, results)
         }
         .groupTuple()
+        .map { sample_id, haplotype_ids, results_list ->
+            def pairs = [haplotype_ids, results_list].transpose().sort { it[0] }  // stable order
+            tuple(sample_id, pairs.collect{it[0]}, pairs.collect{it[1]})
+        }
         .set { ch_busco_by_sample }
     
     MAPPING_QC.out.results
@@ -121,6 +125,10 @@ workflow ASSEMBLY_QC {
             tuple(sample_id, haplotype_id, results)
         }
         .groupTuple()
+        .map { sample_id, haplotype_ids, results_list ->
+            def pairs = [haplotype_ids, results_list].transpose().sort { it[0] }  // stable order
+            tuple(sample_id, pairs.collect{it[0]}, pairs.collect{it[1]})
+        }
         .set { ch_mapping_by_sample }
     
     // Combine all QC results per sample

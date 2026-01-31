@@ -35,6 +35,13 @@ workflow DECONTAMINATE_ASSEMBLY {
     
     main:
     
+    // Helper: extract "..._hap1" or "..._hap2" from a filename
+    def hapKeyFromFile = { f ->
+        def m = (f.getName() =~ /(.+_hap[12])/)
+        assert m.find() : "Could not extract haplotype_id from filename: ${f.getName()}"
+        m.group(1)
+    }
+
     /*
     ========================================================================================
         STEP 1: Optional Adapter/Vector Screening
@@ -55,11 +62,15 @@ workflow DECONTAMINATE_ASSEMBLY {
             ch_adaptor_engine,
             ch_adaptor_stage
         )
-        
-        // Restore haplotype_id after adaptor cleaning
+
+        // Restore haplotype_id after adaptor cleaning (KEYED, not order-based)
+        def ch_adaptor_cleaned_by_hap = FCS_ADAPTOR.out.cleaned_fasta
+            .map { cleaned_fa -> tuple(hapKeyFromFile(cleaned_fa), cleaned_fa) }
+
         assemblies
-            .map { haplotype_id, assembly_fasta -> haplotype_id }
-            .combine(FCS_ADAPTOR.out.cleaned_fasta)
+            .map { haplotype_id, assembly_fasta -> tuple(haplotype_id, assembly_fasta) }
+            .join(ch_adaptor_cleaned_by_hap)
+            .map { haplotype_id, orig_fa, cleaned_fa -> tuple(haplotype_id, cleaned_fa) }
             .set { ch_cleaned_input }
     } else {
         // Skip adaptor step - use original assemblies
@@ -76,11 +87,6 @@ workflow DECONTAMINATE_ASSEMBLY {
         .map { haplotype_id, assembly_fasta -> assembly_fasta }
         .set { ch_assembly_files }
     
-    // Store haplotype_id order for later matching
-    ch_cleaned_input
-        .map { haplotype_id, assembly_fasta -> haplotype_id }
-        .set { ch_haplotype_ids }
-    
     // Create source_taxid and stage channels
     ch_source_taxid = Channel.value(params.decon?.source_taxid ?: 7898)
     ch_stage = Channel.value(stage)
@@ -95,17 +101,26 @@ workflow DECONTAMINATE_ASSEMBLY {
     
     /*
     ========================================================================================
-        STEP 3: Restore haplotype_id and add stage using merge operator
+        STEP 3: Key action reports by haplotype_id and join safely
     ========================================================================================
     */
-    // Merge haplotype_ids with assembly files and action reports
-    // merge() combines channels element-by-element in emission order
-    ch_haplotype_ids
-        .merge(ch_assembly_files, FCS_GX_SCREEN.out.action_report)
+    // Key action reports by haplotype_id derived from the report filename
+    def ch_action_by_hap = FCS_GX_SCREEN.out.action_report
+        .map { ar -> tuple(hapKeyFromFile(ar), ar) }
+
+    // Join cleaned input (already keyed by haplotype_id) to the correct action report
+    ch_cleaned_input
+        .join(ch_action_by_hap)
         .map { haplotype_id, assembly_fasta, action_report ->
             tuple(haplotype_id, assembly_fasta, action_report, stage)
         }
         .set { ch_clean_input }
+
+    ch_clean_input = ch_clean_input.map { hap, fa, report, stg ->
+        assert report.getName().contains(hap) :
+            "Mismatch: ${hap} paired with ${report.getName()}"
+        tuple(hap, fa, report, stg)
+    }
     
     FCS_CLEAN_GENOME(ch_clean_input)
     
@@ -114,13 +129,11 @@ workflow DECONTAMINATE_ASSEMBLY {
         STEP 4: Merge haplotype_ids with other outputs
     ========================================================================================
     */
-    ch_haplotype_ids
-        .merge(FCS_GX_SCREEN.out.taxonomy_report)
-        .set { ch_taxonomy_with_id }
-    
-    ch_haplotype_ids
-        .merge(FCS_GX_SCREEN.out.action_report)
-        .set { ch_action_with_id }
+    def ch_taxonomy_with_id = FCS_GX_SCREEN.out.taxonomy_report
+        .map { tr -> tuple(hapKeyFromFile(tr), tr) }
+
+    def ch_action_with_id = FCS_GX_SCREEN.out.action_report
+        .map { ar -> tuple(hapKeyFromFile(ar), ar) }
     
     emit:
     decontaminated = FCS_CLEAN_GENOME.out.decontaminated_fasta  // tuple(haplotype_id, fasta)
