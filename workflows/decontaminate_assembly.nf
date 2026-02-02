@@ -1,19 +1,24 @@
 /*
 ========================================================================================
-    DECONTAMINATE ASSEMBLY WORKFLOW
+    DECONTAMINATE ASSEMBLY WORKFLOW (FIXED FOR CACHING)
 ========================================================================================
     Purpose:
     - Screen assemblies for contaminants using NCBI FCS-GX
     - Optional: adapter/vector removal with FCS-adaptor
     - Clean genomes by removing identified contaminants
-    - Fully parallelized across haplotypes
+    - Fully parallelized across haplotypes with proper sample independence
     
     Design:
     - Takes pre-prepared databases as input
-    - Each haplotype processes independently
+    - Each haplotype processes independently (CRITICAL FOR CACHING)
     - Returns both clean and contaminant sequences
     - Can be applied to contigs OR scaffolds (controlled by stage parameter)
     - Stage parameter controls output directory organization
+    
+    CACHING FIX:
+    - Maintains haplotype_id throughout the workflow
+    - Each sample processed completely independently
+    - Adding new samples won't invalidate cache for existing samples
     
     Usage:
     - DECONTAMINATE_ASSEMBLY(assemblies, gxdb_dir, "contig")  // For contig decontamination
@@ -35,41 +40,28 @@ workflow DECONTAMINATE_ASSEMBLY {
     
     main:
     
-    // Helper: extract "..._hap1" or "..._hap2" from a filename
-    def hapKeyFromFile = { f ->
-        def m = (f.getName() =~ /(.+_hap[12])/)
-        assert m.find() : "Could not extract haplotype_id from filename: ${f.getName()}"
-        m.group(1)
-    }
-
     /*
     ========================================================================================
         STEP 1: Optional Adapter/Vector Screening
+        CACHING FIX: Process each haplotype independently
     ========================================================================================
     */
     if (params.decon?.run_fcs_adaptor ?: false) {
+        // Process each assembly file independently - maintain haplotype_id
         assemblies
-            .map { haplotype_id, assembly_fasta -> assembly_fasta }
-            .set { ch_assembly_files_adaptor }
+            .map { haplotype_id, assembly_fasta ->
+                tuple(haplotype_id, assembly_fasta, params.decon?.fcsadaptor_mode ?: 'euk', params.decon?.container_engine ?: 'singularity', stage)
+            }
+            .set { ch_adaptor_input }
         
-        ch_adaptor_mode = Channel.value(params.decon?.fcsadaptor_mode ?: 'euk')
-        ch_adaptor_engine = Channel.value(params.decon?.container_engine ?: 'singularity')
-        ch_adaptor_stage = Channel.value(stage)
+        FCS_ADAPTOR(ch_adaptor_input)
         
-        FCS_ADAPTOR(
-            ch_assembly_files_adaptor,
-            ch_adaptor_mode,
-            ch_adaptor_engine,
-            ch_adaptor_stage
-        )
-
-        // Restore haplotype_id after adaptor cleaning (KEYED, not order-based)
-        def ch_adaptor_cleaned_by_hap = FCS_ADAPTOR.out.cleaned_fasta
-            .map { cleaned_fa -> tuple(hapKeyFromFile(cleaned_fa), cleaned_fa) }
-
+        // Restore haplotype_id with cleaned assemblies
         assemblies
             .map { haplotype_id, assembly_fasta -> tuple(haplotype_id, assembly_fasta) }
-            .join(ch_adaptor_cleaned_by_hap)
+            .join(
+                FCS_ADAPTOR.out.cleaned_fasta.map { haplotype_id, cleaned -> tuple(haplotype_id, cleaned) }
+            )
             .map { haplotype_id, orig_fa, cleaned_fa -> tuple(haplotype_id, cleaned_fa) }
             .set { ch_cleaned_input }
     } else {
@@ -80,65 +72,38 @@ workflow DECONTAMINATE_ASSEMBLY {
     /*
     ========================================================================================
         STEP 2: FCS-GX Screening (Parallel Across All Haplotypes)
+        CACHING FIX: Each haplotype processes completely independently
     ========================================================================================
     */
-    // Extract just the assembly files for FCS_GX_SCREEN
+    // Prepare input for FCS_GX_SCREEN - each haplotype gets its own process invocation
     ch_cleaned_input
-        .map { haplotype_id, assembly_fasta -> assembly_fasta }
-        .set { ch_assembly_files }
+        .combine(Channel.value(params.decon?.source_taxid ?: 7898))
+        .combine(gxdb_dir)
+        .combine(Channel.value(stage))
+        .set { ch_fcs_gx_input }
     
-    // Create source_taxid and stage channels
-    ch_source_taxid = Channel.value(params.decon?.source_taxid ?: 7898)
-    ch_stage = Channel.value(stage)
-    
-    // Call FCS_GX_SCREEN with separate inputs
-    FCS_GX_SCREEN(
-        ch_assembly_files,
-        ch_source_taxid,
-        gxdb_dir,
-        ch_stage
-    )
+    // Each assembly screened independently - critical for caching
+    FCS_GX_SCREEN(ch_fcs_gx_input)
     
     /*
     ========================================================================================
-        STEP 3: Key action reports by haplotype_id and join safely
+        STEP 3: Clean Genome (Remove Contaminants)
+        CACHING FIX: Join by haplotype_id to maintain independence
     ========================================================================================
     */
-    // Key action reports by haplotype_id derived from the report filename
-    def ch_action_by_hap = FCS_GX_SCREEN.out.action_report
-        .map { ar -> tuple(hapKeyFromFile(ar), ar) }
-
-    // Join cleaned input (already keyed by haplotype_id) to the correct action report
+    // Join cleaned assemblies with their corresponding action reports by haplotype_id
     ch_cleaned_input
-        .join(ch_action_by_hap)
+        .join(FCS_GX_SCREEN.out.action_report, by: 0)
         .map { haplotype_id, assembly_fasta, action_report ->
             tuple(haplotype_id, assembly_fasta, action_report, stage)
         }
         .set { ch_clean_input }
-
-    ch_clean_input = ch_clean_input.map { hap, fa, report, stg ->
-        assert report.getName().contains(hap) :
-            "Mismatch: ${hap} paired with ${report.getName()}"
-        tuple(hap, fa, report, stg)
-    }
     
     FCS_CLEAN_GENOME(ch_clean_input)
-    
-    /*
-    ========================================================================================
-        STEP 4: Merge haplotype_ids with other outputs
-    ========================================================================================
-    */
-    def ch_taxonomy_with_id = FCS_GX_SCREEN.out.taxonomy_report
-        .map { tr -> tuple(hapKeyFromFile(tr), tr) }
-
-    def ch_action_with_id = FCS_GX_SCREEN.out.action_report
-        .map { ar -> tuple(hapKeyFromFile(ar), ar) }
     
     emit:
     decontaminated = FCS_CLEAN_GENOME.out.decontaminated_fasta  // tuple(haplotype_id, fasta)
     contaminants = FCS_CLEAN_GENOME.out.contaminants_fasta      // tuple(haplotype_id, fasta)
-    action_report = ch_action_with_id                           // tuple(haplotype_id, report)
-    taxonomy_report = ch_taxonomy_with_id                       // tuple(haplotype_id, report)
-    //stdout_log = FCS_GX_SCREEN.out.stdout_log
+    action_report = FCS_GX_SCREEN.out.action_report             // tuple(haplotype_id, report)
+    taxonomy_report = FCS_GX_SCREEN.out.taxonomy_report         // tuple(haplotype_id, report)
 }

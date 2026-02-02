@@ -1,15 +1,14 @@
 process FCS_ADAPTOR {
-  tag "fcs_adaptor"
+  tag "${haplotype_id}"  // ← ADDED: Tag with haplotype_id
+
+  publishDir "${params.outdir}/${stage}/adaptor", mode: params.publish_dir_mode
 
   input:
-    path assembly_fa
-    val mode          // 'euk' or 'prok'
-    val engine        // 'singularity' or 'docker'
-    val stage         // 'contig' or 'scaffold'
+    tuple val(haplotype_id), path(assembly_fa), val(mode), val(engine), val(stage)  // ← CHANGED: Tuple input
 
   output:
-    path "fcsadaptor/cleaned.fasta", emit: cleaned_fasta
-    path "fcsadaptor", emit: out_dir
+    tuple val(haplotype_id), path("${haplotype_id}.cleaned.fasta"), emit: cleaned_fasta  // ← CHANGED: Tuple output
+    tuple val(haplotype_id), path("fcsadaptor"),                    emit: out_dir
 
   script:
   """
@@ -29,6 +28,6 @@ process FCS_ADAPTOR {
   # (FCS-adaptor produces a cleaned fasta in its output dir)
   ls -1 fcsadaptor/output/*.fa* | head -n 1 > /tmp/_cleaned_path.txt
   CLEANED=\$(cat /tmp/_cleaned_path.txt)
-  cp "\$CLEANED" fcsadaptor/cleaned.fasta
+  cp "\$CLEANED" ${haplotype_id}.cleaned.fasta
   """
 }

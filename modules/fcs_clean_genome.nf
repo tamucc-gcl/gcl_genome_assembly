@@ -15,7 +15,7 @@ process FCS_CLEAN_GENOME {
   """
   set -euo pipefail
 
-    /app/bin/gx clean-genome \\
+  /app/bin/gx clean-genome \\
     --action-report ${action_report} \\
     --input ${assembly_fa} \\
     --output ${haplotype_id}.decontaminated.fasta \\

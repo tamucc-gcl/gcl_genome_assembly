@@ -1,21 +1,18 @@
 process FCS_GX_SCREEN {
-  tag "fcs_gx_screen"
+  tag "${haplotype_id}"  // ← ADDED: Tag with haplotype_id for clarity
   label 'fcs' 
   
-  publishDir "${params.outdir}/${stage}/decontam", 
+  publishDir "${params.outdir}/${stage}/decontam",
     mode: params.publish_dir_mode,
     saveAs: { filename -> filename.startsWith('gx_out/') ? null : filename }
 
   input:
-    path assembly_fa
-    val source_taxid
-    val gxdb_dir
-    val stage
+    tuple val(haplotype_id), path(assembly_fa), val(source_taxid), val(gxdb_dir), val(stage)  // ← CHANGED: Tuple input
 
   output:
-    path "*.fcs_gx_report.txt", emit: action_report
-    path "*.taxonomy.rpt",      emit: taxonomy_report
-    path "gx_out/fcs_gx_stdout.log",   emit: stdout_log
+    tuple val(haplotype_id), path("*.fcs_gx_report.txt"), emit: action_report      // ← ADDED: haplotype_id in output
+    tuple val(haplotype_id), path("*.taxonomy.rpt"),      emit: taxonomy_report    // ← ADDED: haplotype_id in output
+    tuple val(haplotype_id), path("gx_out/fcs_gx_stdout.log"), emit: stdout_log   // ← ADDED: haplotype_id in output
 
   script:
   """
@@ -33,6 +30,7 @@ process FCS_GX_SCREEN {
   fi
   
   echo "Using GX database: \${DB_PREFIX}"
+  echo "Processing haplotype: ${haplotype_id}"
 
   # Nextflow automatically wraps this in singularity exec
   /app/bin/run_gx \\
@@ -43,7 +41,8 @@ process FCS_GX_SCREEN {
     | tee gx_out/fcs_gx_stdout.log
   
   # Move output files to working directory for publishing
-  mv gx_out/*.fcs_gx_report.txt . || true
-  mv gx_out/*.taxonomy.rpt . || true
+  # Add haplotype_id to filenames for clarity
+  mv gx_out/*.fcs_gx_report.txt ${haplotype_id}.fcs_gx_report.txt || true
+  mv gx_out/*.taxonomy.rpt ${haplotype_id}.taxonomy.rpt || true
   """
 }
