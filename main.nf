@@ -60,6 +60,7 @@ params.inspector_scaffold_min_assembly_error_size = 50
 params.inspector_scaffold_max_assembly_error_size = 10000000  // Higher threshold for scaffolds
 
 // Hi-C mapping and QC parameters
+params.bwa_mem2_hic_args = "" // Additional arguments for bwa-mem2 Hi-C mapping
 params.hic_coverage_window = 100000
 params.hic_min_mapq = 30
 params.hic_resolutions = "1000000,500000,100000,50000,10000"
