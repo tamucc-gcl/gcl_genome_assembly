@@ -71,7 +71,7 @@ params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
 
 // Hi-C scaffolding parameters (YaHS) - ROUND 1
-params.yahs_round1_min_contig_length = 50000
+params.yahs_round1_min_contig_length = 20000
 params.yahs_round1_min_mapq = 10
 params.yahs_round1_resolutions = '20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000'
 params.yahs_round1_rounds_per_resolution = null
