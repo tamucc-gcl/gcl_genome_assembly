@@ -29,23 +29,42 @@ workflow ASSEMBLY_QC {
     assemblies   // channel: tuple(sample_id, hap1_fasta, hap2_fasta)
     hifi_reads   // channel: tuple(sample_id, hifi_fastq)
     meryl_db     // channel: tuple(sample_id, meryl_db)
-    qc_label     // value/channel: label for output subfolder
+    qc_label     // value: label for output subfolder (e.g. 'contig' or 'scaffold')
     
     main:
+    
+    /*
+    ========================================================================================
+        CRITICAL: Tag each sample with qc_label IMMEDIATELY
+        This makes (sample_id, qc_label) the stable cache key throughout
+    ========================================================================================
+    */
+    assemblies
+        .map { sample_id, hap1_fasta, hap2_fasta ->
+            tuple(sample_id, qc_label, hap1_fasta, hap2_fasta)
+        }
+        .set { ch_assemblies_tagged }
     
     /*
     ========================================================================================
         QUAST - Run on both haplotypes per sample
     ========================================================================================
     */
-    QUAST(assemblies)
+    QUAST(
+        ch_assemblies_tagged.map { sample_id, label, hap1, hap2 ->
+            tuple(sample_id, hap1, hap2)
+        }
+    )
     
     /*
     ========================================================================================
         MERQURY - Run on both haplotypes per sample with pre-built meryl database
     ========================================================================================
     */
-    assemblies
+    ch_assemblies_tagged
+        .map { sample_id, label, hap1_fasta, hap2_fasta ->
+            tuple(sample_id, hap1_fasta, hap2_fasta)
+        }
         .join(meryl_db)
         .map { sample_id, hap1_fasta, hap2_fasta, meryl_db ->
             tuple(sample_id, hap1_fasta, hap2_fasta, meryl_db)
@@ -59,11 +78,11 @@ workflow ASSEMBLY_QC {
         Split haplotypes for per-haplotype QC
     ========================================================================================
     */
-    assemblies
-        .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+    ch_assemblies_tagged
+        .flatMap { sample_id, label, hap1_fasta, hap2_fasta ->
             [
-                tuple("${sample_id}_hap1", sample_id, hap1_fasta),
-                tuple("${sample_id}_hap2", sample_id, hap2_fasta)
+                tuple("${sample_id}_hap1", sample_id, label, hap1_fasta),
+                tuple("${sample_id}_hap2", sample_id, label, hap2_fasta)
             ]
         }
         .set { ch_individual_haplotypes }
@@ -74,7 +93,7 @@ workflow ASSEMBLY_QC {
     ========================================================================================
     */
     BUSCO(
-        ch_individual_haplotypes.map { haplotype_id, sample_id, fasta ->
+        ch_individual_haplotypes.map { haplotype_id, sample_id, label, fasta ->
             tuple(haplotype_id, fasta)
         }
     )
@@ -85,7 +104,7 @@ workflow ASSEMBLY_QC {
     ========================================================================================
     */
     ch_individual_haplotypes
-        .map { haplotype_id, sample_id, fasta ->
+        .map { haplotype_id, sample_id, label, fasta ->
             tuple(sample_id, haplotype_id, fasta)
         }
         .combine(hifi_reads, by: 0)
@@ -98,76 +117,89 @@ workflow ASSEMBLY_QC {
     
     /*
     ========================================================================================
-        COMBINE QC - Aggregate all results and create plots
+        COMBINE QC - Aggregate all results per (sample_id, qc_label)
         
-        CRITICAL FIX: Use groupTuple(by: 0) instead of groupTuple()
-        - groupTuple() groups ALL samples together (changes when sample count changes)
-        - groupTuple(by: 0) groups only by first element (sample_id) independently
+        KEY INSIGHT: We need to preserve qc_label through all the grouping operations
+        so that COMBINE_ASSEMBLY_QC gets (sample_id, qc_label, ...) as input
     ========================================================================================
     */
     
-    // Collect all QC outputs by sample
-    QUAST.out.results
-        .map { sample_id, results -> tuple(sample_id, results) }
-        .set { ch_quast_by_sample }
+    // Tag QUAST results with qc_label
+    ch_assemblies_tagged
+        .map { sample_id, label, hap1, hap2 -> tuple(sample_id, label) }
+        .join(QUAST.out.results)
+        .map { sample_id, label, results -> tuple(sample_id, label, results) }
+        .set { ch_quast_tagged }
     
-    MERQURY.out.results
-        .map { sample_id, results -> tuple(sample_id, results) }
-        .set { ch_merqury_by_sample }
+    // Tag MERQURY results with qc_label  
+    ch_assemblies_tagged
+        .map { sample_id, label, hap1, hap2 -> tuple(sample_id, label) }
+        .join(MERQURY.out.results)
+        .map { sample_id, label, results -> tuple(sample_id, label, results) }
+        .set { ch_merqury_tagged }
     
-    // BUSCO results - FIX: groupTuple(by: 0) instead of groupTuple()
+    // Collect and tag BUSCO results - groupTuple(by: 0) groups only by sample_id
     BUSCO.out.results
-        .map { haplotype_id, results -> 
+        .map { haplotype_id, results ->
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
             def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1] as Integer
             tuple(sample_id, hap_num, haplotype_id, results)
         }
-        .groupTuple(by: 0)  // ← CRITICAL: Group only by sample_id (index 0)
+        .groupTuple(by: 0, sort: true)  // Group only by sample_id
         .map { sample_id, hap_nums, haplotype_ids, results_list ->
             def pairs = [hap_nums, haplotype_ids, results_list].transpose().sort { it[0] }
             tuple(sample_id, pairs.collect{it[1]}, pairs.collect{it[2]})
         }
-        .set { ch_busco_by_sample }
+        .set { ch_busco_grouped }
     
-    // MAPPING results - FIX: groupTuple(by: 0) instead of groupTuple()
+    // Tag with qc_label
+    ch_assemblies_tagged
+        .map { sample_id, label, hap1, hap2 -> tuple(sample_id, label) }
+        .join(ch_busco_grouped)
+        .map { sample_id, label, haplotype_ids, results ->
+            tuple(sample_id, label, haplotype_ids, results)
+        }
+        .set { ch_busco_tagged }
+    
+    // Collect and tag MAPPING results - groupTuple(by: 0) groups only by sample_id
     MAPPING_QC.out.results
         .map { haplotype_id, results ->
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
             def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1] as Integer
             tuple(sample_id, hap_num, haplotype_id, results)
         }
-        .groupTuple(by: 0)  // ← CRITICAL: Group only by sample_id (index 0)
+        .groupTuple(by: 0, sort: true)  // Group only by sample_id
         .map { sample_id, hap_nums, haplotype_ids, results_list ->
             def pairs = [hap_nums, haplotype_ids, results_list].transpose().sort { it[0] }
             tuple(sample_id, pairs.collect{it[1]}, pairs.collect{it[2]})
         }
-        .set { ch_mapping_by_sample }
+        .set { ch_mapping_grouped }
     
-    // Combine all QC results per sample
-    ch_quast_by_sample
-        .join(ch_merqury_by_sample)
-        .join(ch_busco_by_sample)
-        .join(ch_mapping_by_sample)
-        .set { ch_all_qc }
+    // Tag with qc_label
+    ch_assemblies_tagged
+        .map { sample_id, label, hap1, hap2 -> tuple(sample_id, label) }
+        .join(ch_mapping_grouped)
+        .map { sample_id, label, haplotype_ids, results ->
+            tuple(sample_id, label, haplotype_ids, results)
+        }
+        .set { ch_mapping_tagged }
     
-    // Attach qc_label to each sample
-    assemblies
-        .map { sample_id, hap1_fasta, hap2_fasta -> tuple(sample_id, qc_label) }
-        .set { ch_qc_label_by_sample }
-
-    ch_all_qc
-        .join(ch_qc_label_by_sample)
-        .map { sample_id, quast_results, merqury_results, 
-               haplotype_ids_busco, busco_results, 
-               haplotype_ids_mapping, mapping_results, qc_label ->
-            tuple(sample_id, qc_label,
+    // Join everything with (sample_id, qc_label) as the key
+    ch_quast_tagged
+        .join(ch_merqury_tagged, by: [0, 1])  // Join on both sample_id AND qc_label
+        .join(ch_busco_tagged, by: [0, 1])
+        .join(ch_mapping_tagged, by: [0, 1])
+        .map { sample_id, label, quast_results, merqury_results,
+               haplotype_ids_busco, busco_results,
+               haplotype_ids_mapping, mapping_results ->
+            tuple(sample_id, label,
                   quast_results, merqury_results,
                   haplotype_ids_busco, busco_results,
                   haplotype_ids_mapping, mapping_results)
         }
-        .set { ch_all_qc_labeled }
-        
-    COMBINE_ASSEMBLY_QC(ch_all_qc_labeled)
+        .set { ch_all_qc_final }
+    
+    COMBINE_ASSEMBLY_QC(ch_all_qc_final)
     
     emit:
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary
