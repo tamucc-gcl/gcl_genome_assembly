@@ -13,6 +13,9 @@
     - Each sample processes completely independently
     - No cross-sample channel operations that break cache
     - Adding new samples won't invalidate existing sample caches
+    
+    KEY CHANGE: Use groupTuple with size parameter or remainder:true to avoid
+    blocking on all samples
 ========================================================================================
 */
 
@@ -100,9 +103,11 @@ workflow ASSEMBLY_QC {
     ========================================================================================
         COMBINE QC - Aggregate all results per sample
         
-        KEY FIX: Don't try to "tag" results with qc_label using joins.
-        Instead, map qc_label directly into the tuple when building the final channel.
-        This way each sample can emit its data independently without waiting for others.
+        KEY FIX: Use groupTuple with size:2 since we know each sample has exactly
+        2 haplotypes. This allows each sample to proceed independently without
+        waiting for all samples to complete.
+        
+        This is the critical change for proper caching behavior.
     ========================================================================================
     */
     
@@ -114,28 +119,30 @@ workflow ASSEMBLY_QC {
     MERQURY.out.results
         .set { ch_merqury_by_sample }
     
-    // Group BUSCO results by sample_id (groupTuple with by: 0)
+    // Group BUSCO results by sample_id
+    // KEY: Use size:2 since each sample has exactly 2 haplotypes
     BUSCO.out.results
         .map { haplotype_id, results -> 
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
             def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1] as Integer
             tuple(sample_id, hap_num, haplotype_id, results)
         }
-        .groupTuple(by: 0, sort: true)
+        .groupTuple(by: 0, size: 2, sort: true)
         .map { sample_id, hap_nums, haplotype_ids, results_list ->
             def pairs = [hap_nums, haplotype_ids, results_list].transpose().sort { it[0] }
             tuple(sample_id, pairs.collect{it[1]}, pairs.collect{it[2]})
         }
         .set { ch_busco_by_sample }
     
-    // Group MAPPING results by sample_id (groupTuple with by: 0)
+    // Group MAPPING results by sample_id
+    // KEY: Use size:2 since each sample has exactly 2 haplotypes
     MAPPING_QC.out.results
         .map { haplotype_id, results ->
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
             def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1] as Integer
             tuple(sample_id, hap_num, haplotype_id, results)
         }
-        .groupTuple(by: 0, sort: true)
+        .groupTuple(by: 0, size: 2, sort: true)
         .map { sample_id, hap_nums, haplotype_ids, results_list ->
             def pairs = [hap_nums, haplotype_ids, results_list].transpose().sort { it[0] }
             tuple(sample_id, pairs.collect{it[1]}, pairs.collect{it[2]})
@@ -143,6 +150,7 @@ workflow ASSEMBLY_QC {
         .set { ch_mapping_by_sample }
     
     // Join all results BY SAMPLE_ID ONLY (no qc_label in the join!)
+    // Each sample can now proceed independently
     ch_quast_by_sample
         .join(ch_merqury_by_sample, by: 0)
         .join(ch_busco_by_sample, by: 0)
