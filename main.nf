@@ -808,7 +808,7 @@ workflow {
                 def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
                 tuple(sample_id, hap_num, fasta)
             }
-            .groupTuple(by: 0)
+            .groupTuple(by: 0, size: 2)
             .map { sample_id, hap_nums, fastas ->
                 // Sort by haplotype number to ensure hap1, hap2 order
                 def sorted = [hap_nums, fastas].transpose().sort { it[0] }
@@ -838,7 +838,7 @@ workflow {
                 def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
                 tuple(sample_id, hap_num, fasta)
             }
-            .groupTuple(by: 0)
+            .groupTuple(by: 0, size: 2)
             .map { sample_id, hap_nums, fastas ->
                 // Sort by haplotype number to ensure hap1, hap2 order
                 def sorted = [hap_nums, fastas].transpose().sort { it[0] }
@@ -867,7 +867,7 @@ workflow {
             def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
             tuple(sample_id, hap_num, scaffold)
         }
-        .groupTuple(by: 0)
+        .groupTuple(by: 0, size: 2)
         .map { sample_id, hap_nums, scaffolds ->
             // Sort by haplotype number to ensure hap1, hap2 order
             def sorted = [hap_nums, scaffolds].transpose().sort { it[0] }
@@ -895,7 +895,7 @@ workflow {
                 def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
                 tuple(sample_id, hap_num, fasta)
             }
-            .groupTuple(by: 0)
+            .groupTuple(by: 0, size: 2)
             .map { sample_id, hap_nums, fastas ->
                 // Sort by haplotype number to ensure hap1, hap2 order
                 def sorted = [hap_nums, fastas].transpose().sort { it[0] }
@@ -925,7 +925,7 @@ workflow {
                 def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
                 tuple(sample_id, hap_num, fasta)
             }
-            .groupTuple(by: 0)
+            .groupTuple(by: 0, size: 2)
             .map { sample_id, hap_nums, fastas ->
                 // Sort by haplotype number to ensure hap1, hap2 order
                 def sorted = [hap_nums, fastas].transpose().sort { it[0] }
@@ -955,7 +955,7 @@ workflow {
                 def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
                 tuple(sample_id, hap_num, scaffold)
             }
-            .groupTuple(by: 0)
+            .groupTuple(by: 0, size: 2)
             .map { sample_id, hap_nums, scaffolds ->
                 // Sort by haplotype number to ensure hap1, hap2 order
                 def sorted = [hap_nums, scaffolds].transpose().sort { it[0] }
@@ -984,7 +984,7 @@ workflow {
             def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
             tuple(sample_id, hap_num, assembly)
         }
-        .groupTuple(by: 0)
+        .groupTuple(by: 0, size: 2)
         .map { sample_id, hap_nums, assemblies ->
             // Sort by haplotype number to ensure hap1, hap2 order
             def sorted = [hap_nums, assemblies].transpose().sort { it[0] }
