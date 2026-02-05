@@ -568,13 +568,13 @@ workflow {
 
     // checkpoint: scaffold_space (relabel contigs to scaffolds using AGP; no remapping)
     FILTER_HIC_BAM.out.pairs
-    .join(SCAFFOLD_HIC.out.agp)
-    .join(FILTER_HIC_BAM.out.parse_stats)
-    .join(FILTER_HIC_BAM.out.dedup_stats)
-    .map { hap, stage, pairs_gz, hap2, stage2, agp, hap3, stage3, parse_stats, hap4, stage4, dedup_stats ->
-        tuple(hap, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
-    }
-    .set { ch_hic_pairs_scaffold_space_for_qc }
+        .join(SCAFFOLD_HIC_ROUND1.out.agp)
+        .join(FILTER_HIC_BAM.out.parse_stats)
+        .join(FILTER_HIC_BAM.out.dedup_stats)
+        .map { hap, stage, pairs_gz, hap2, stage2, agp, hap3, stage3, parse_stats, hap4, stage4, dedup_stats ->
+            tuple(hap, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
+        }
+        .set { ch_hic_pairs_scaffold_space_for_qc }
 
     HIC_PAIRS_METRICS_CONTIGSCAF(ch_hic_pairs_scaffold_space_for_qc)
 
