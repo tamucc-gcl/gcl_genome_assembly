@@ -88,6 +88,9 @@ params.yahs_round2_enzyme = null
 params.yahs_round2_no_contig_ec = false
 params.yahs_round2_no_scaffold_ec = true
 
+// Finalization Parameters
+params.make_final_contact_maps = true
+
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
 //params.run_scaffold_round2 = null  // Will be computed below if null
@@ -293,13 +296,19 @@ include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './module
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { MAP_HIC_TO_ASSEMBLY as MAP_HIC_TO_SCAFFOLD } from './modules/map_hic_to_assembly.nf'
+include { MAP_HIC_TO_ASSEMBLY as MAP_HIC_TO_FINAL } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 include { FILTER_HIC_BAM as FILTER_HIC_BAM_SCAFFOLD } from './modules/filter_hic_bam.nf'
+include { FILTER_HIC_BAM as FILTER_HIC_BAM_FINAL } from './modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
 include { QUAST_FINAL } from './modules/quast.nf'
-
+include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIG } from './modules/hic_mapping_metrics.nf'
+include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hic_mapping_metrics.nf'
+include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from './modules/hic_mapping_metrics.nf'
+include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLDSCAF } from './modules/hic_mapping_metrics.nf'
+include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_FINAL } from './modules/hic_mapping_metrics.nf'
 
 /*
 ========================================================================================
@@ -496,6 +505,13 @@ workflow {
     // Map Hi-C reads to assemblies
     MAP_HIC_TO_ASSEMBLY(ch_hic_mapping_input)
 
+    // checkpoint: contig_raw_map (BAM-level only)
+    MAP_HIC_TO_ASSEMBLY.out.bam
+    .map { hap, stage, bam, bai -> tuple(hap, "contig_raw_map", bam, bai) }
+    .set { ch_hic_raw_bam_for_qc }
+
+    HIC_BAM_METRICS_CONTIG(ch_hic_raw_bam_for_qc)
+
     // Prepare assemblies channel for QC (haplotype_id, assembly_fasta)
     ch_individual_haplotypes
         .map { haplotype_id, sample_id, fasta ->
@@ -520,6 +536,18 @@ workflow {
     
     // Filter BAM files to remove invalid pairs and duplicates
     FILTER_HIC_BAM(ch_bam_with_assembly)
+
+    // checkpoint: contig_filtered (pairs-level + retention)
+    FILTER_HIC_BAM.out.pairs
+    .join(FILTER_HIC_BAM.out.parse_stats)
+    .join(FILTER_HIC_BAM.out.dedup_stats)
+    .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+        // no agp at this checkpoint
+        tuple(hap, "contig_filtered", pairs_gz, null, parse_stats, dedup_stats)
+    }
+    .set { ch_hic_pairs_contig_filtered_for_qc }
+
+    HIC_PAIRS_METRICS_CONTIG(ch_hic_pairs_contig_filtered_for_qc)
     
     /*
     ========================================================================================
@@ -537,6 +565,18 @@ workflow {
     
     // Run first round of Hi-C scaffolding
     SCAFFOLD_HIC_ROUND1(ch_scaffolding_round1_input)
+
+    // checkpoint: scaffold_space (relabel contigs to scaffolds using AGP; no remapping)
+    FILTER_HIC_BAM.out.pairs
+    .join(SCAFFOLD_HIC.out.agp)
+    .join(FILTER_HIC_BAM.out.parse_stats)
+    .join(FILTER_HIC_BAM.out.dedup_stats)
+    .map { hap, stage, pairs_gz, hap2, stage2, agp, hap3, stage3, parse_stats, hap4, stage4, dedup_stats ->
+        tuple(hap, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
+    }
+    .set { ch_hic_pairs_scaffold_space_for_qc }
+
+    HIC_PAIRS_METRICS_CONTIGSCAF(ch_hic_pairs_scaffold_space_for_qc)
 
     /*
     ========================================================================================
@@ -635,6 +675,13 @@ workflow {
         // Map Hi-C reads to final scaffolds
         MAP_HIC_TO_SCAFFOLD(ch_hic_scaffold_mapping_input)
 
+        // checkpoint: scaffold_round2_raw_map (BAM-level only)
+        MAP_HIC_TO_SCAFFOLD.out.bam
+            .map { hap, stage, bam, bai -> tuple(hap, "scaffold_round2_raw_map", bam, bai) }
+            .set { ch_hic_scaffold_raw_bam_for_qc }
+
+        HIC_BAM_METRICS_SCAFFOLD(ch_hic_scaffold_raw_bam_for_qc)
+
         /*
         ========================================================================================
             STEP 11: Filter Hi-C BAM Files mapped to final scaffolds
@@ -651,6 +698,19 @@ workflow {
         
         // Filter BAM files to remove invalid pairs and duplicates
         FILTER_HIC_BAM_SCAFFOLD(ch_bam_with_scaffold)
+
+        // checkpoint: scaffold_round2_filtered (pairs-level + retention)
+        FILTER_HIC_BAM_SCAFFOLD.out.pairs
+            .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
+            .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
+            .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+                // already mapped to scaffold1 names, so no AGP needed here
+                tuple(hap, "scaffold_round2_filtered", pairs_gz, null, parse_stats, dedup_stats)
+            }
+        .set { ch_hic_pairs_scaffold_round2_filtered_for_qc }
+
+        HIC_PAIRS_METRICS_SCAFFOLD(ch_hic_pairs_scaffold_round2_filtered_for_qc)
+
 
         /*
         ========================================================================================
@@ -673,6 +733,18 @@ workflow {
         
         // Store final scaffolds from second round
         ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds
+
+        // checkpoint: scaffold_round2_space (relabel scaffold1 -> scaffold2 using ROUND2 AGP; no remapping)
+        FILTER_HIC_BAM_SCAFFOLD.out.pairs
+            .join(SCAFFOLD_HIC_ROUND2.out.agp)
+            .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
+            .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
+            .map { hap, stage, pairs_gz, hap2, stage2, agp, hap3, stage3, parse_stats, hap4, stage4, dedup_stats ->
+                tuple(hap, "scaffold_round2_space", pairs_gz, agp, parse_stats, dedup_stats)
+            }
+            .set { ch_hic_pairs_scaffold_round2_space_for_qc }
+
+        HIC_PAIRS_METRICS_SCAFFOLDSCAF(ch_hic_pairs_scaffold_round2_space_for_qc)
         
     } else {
         log.info "[INFO] Skipping second round of scaffolding (no scaffold correction or decontamination)"
@@ -722,9 +794,51 @@ workflow {
         STEP 14: Finalization
     ========================================================================================
     */
-    // 1. Generate final QC reports
-    //   - join all assembly QC summaries
-    // 2. Dotplots of final assemblies vs each other (hap1 vs hap2)
+    // 1. Contact Maps for Final Assemblies
+    if (params.make_final_contact_maps) {
+        GAP_FILLING.out.filled_assembly
+            .map { haplotype_id, filled_fa ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(sample_id, haplotype_id, filled_fa)
+            }
+            .combine(ch_hic_reads, by: 0)  // ch_hic_reads: tuple(sample_id, hic_r1, hic_r2)
+            .map { sample_id, haplotype_id, filled_fa, hic_r1, hic_r2 ->
+                tuple(haplotype_id, filled_fa, hic_r1, hic_r2, 'final')
+            }
+            .set { ch_final_hic_map_input }
+
+        MAP_HIC_TO_FINAL(ch_final_hic_map_input)
+
+        // Raw mapping QC (lightweight; uses existing BAM output)
+        MAP_HIC_TO_FINAL.out.bam
+            .map { haplotype_id, stage, bam, bai -> tuple(haplotype_id, "final_raw_map", bam, bai) }
+            .set { ch_final_raw_bam_qc }
+
+        HIC_BAM_METRICS_FINAL(ch_final_raw_bam_qc)
+
+        // Join mapped BAMs with the gap-closed FASTA (keyed by haplotype_id)
+        MAP_HIC_TO_FINAL.out.bam
+            .join(GAP_FILLING.out.filled_assembly, by: 0)
+            .map { haplotype_id, stage, bam, bai, hap2, filled_fa ->
+                tuple(haplotype_id, FINAL_STAGE, bam, bai, filled_fa)
+            }
+            .set { ch_final_filter_input }
+
+        FILTER_HIC_BAM_FINAL(ch_final_filter_input)
+
+        FILTER_HIC_BAM_FINAL.out.pairs
+            .join(FILTER_HIC_BAM_FINAL.out.parse_stats)
+            .join(FILTER_HIC_BAM_FINAL.out.dedup_stats)
+            .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+                tuple(hap, "final_filtered", pairs_gz, null, parse_stats, dedup_stats)
+            }
+            .set { ch_final_pairs_qc }
+
+        HIC_PAIRS_METRICS_FINAL(ch_final_pairs_qc)
+    }
+
+    // 2. Final QC Reports
+    // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
     // 3. 
 
     /*
@@ -1032,52 +1146,6 @@ workflow {
         'gap_filled'
     )
 
-    /*
-    ========================================================================================
-        Hi-C Mapping QC
-    ========================================================================================
-    */
-    /*
-    ========================================================================================
-        Hi-C Mapping QC on Raw BAMs
-    ========================================================================================
-    */
-    //skip for development
-    /*
-    HIC_QC_FROM_BAM_RAW(
-        MAP_HIC_TO_ASSEMBLY.out.bam,
-        ch_assemblies_for_qc,
-        "raw"
-    )
-    */
-    /*
-    ========================================================================================
-         Hi-C Mapping QC on Filtered BAMs & contig (decontam if that option chosen) assembly
-    ========================================================================================
-    */
-    //skip for development
-    /*
-    HIC_QC_FROM_BAM_FILTERED(
-        FILTER_HIC_BAM.out.bam,
-        ch_assemblies_for_qc,
-        "filtered"
-    )
-    */
-    /*
-    ========================================================================================
-        Hi-C Mapping QC on Scaffolds (MODULAR - LIFTOVER + QC)
-    ========================================================================================
-    */
-    //skip for development
-    /*
-    // Use pairs.gz from filtered contig QC and lift to scaffold coordinates
-    HIC_SCAFFOLD_QC(
-        HIC_QC_FROM_BAM_FILTERED.out.pairs,
-        SCAFFOLD_HIC.out.agp,
-        SCAFFOLD_HIC.out.scaffolds,
-        "filtered"
-    )
-    */
     /*
     ========================================================================================
         Generate Optional Decontamination Evidence

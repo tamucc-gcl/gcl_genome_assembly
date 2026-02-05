@@ -34,6 +34,8 @@ process FILTER_HIC_BAM {
     tuple val(haplotype_id), val(stage), path("${haplotype_id}.filtered.sorted.bam"), path("${haplotype_id}.filtered.sorted.bam.bai"), emit: bam
     tuple val(haplotype_id), val(stage), path("${haplotype_id}_filtering_stats.txt"), emit: stats
     tuple val(haplotype_id), val(stage), path("${haplotype_id}.pairs.gz"), emit: pairs
+    tuple val(haplotype_id), val(stage), path("${haplotype_id}_parse_stats.txt"), emit: parse_stats
+    tuple val(haplotype_id), val(stage), path("${haplotype_id}_dedup_stats.txt"), emit: dedup_stats
 
     script:
     """

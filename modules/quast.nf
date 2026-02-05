@@ -25,7 +25,8 @@ process QUAST {
         ${hap2_fasta} \\
         --threads ${task.cpus} \\
         --labels ${sample_id}.hap1,${sample_id}.hap2 \\
-        --output-dir ${sample_id}_quast
+        --output-dir ${sample_id}_quast \\
+        --contig-thresholds 10000,50000,100000,500000,1000000,5000000,10000000
     """
     
     stub:
@@ -68,7 +69,8 @@ process QUAST_FINAL {
         ${assemblies} \\
         --threads ${task.cpus} \\
         --labels ${labels_str} \\
-        --output-dir quast_final
+        --output-dir quast_final \\
+        --contig-thresholds 10000,50000,100000,500000,1000000,5000000,10000000
     """
     
     stub:
