@@ -801,7 +801,7 @@ workflow {
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(sample_id, haplotype_id, filled_fa)
             }
-            .combine(ch_hic_reads, by: 0)  // ch_hic_reads: tuple(sample_id, hic_r1, hic_r2)
+            .combine(TRIM_HIC.out.trimmed_reads, by: 0)  // tuple(sample_id, hic_r1, hic_r2)
             .map { sample_id, haplotype_id, filled_fa, hic_r1, hic_r2 ->
                 tuple(haplotype_id, filled_fa, hic_r1, hic_r2, 'final')
             }
