@@ -539,13 +539,13 @@ workflow {
 
     // checkpoint: contig_filtered (pairs-level + retention)
     FILTER_HIC_BAM.out.pairs
-    .join(FILTER_HIC_BAM.out.parse_stats)
-    .join(FILTER_HIC_BAM.out.dedup_stats)
-    .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
-        // no agp at this checkpoint
-        tuple(hap, "contig_filtered", pairs_gz, null, parse_stats, dedup_stats)
-    }
-    .set { ch_hic_pairs_contig_filtered_for_qc }
+        .join(FILTER_HIC_BAM.out.parse_stats)
+        .join(FILTER_HIC_BAM.out.dedup_stats)
+        .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+            // no agp at this checkpoint
+            tuple(hap, "contig_filtered", pairs_gz, null, parse_stats, dedup_stats)
+        }
+        .set { ch_hic_pairs_contig_filtered_for_qc }
 
     HIC_PAIRS_METRICS_CONTIG(ch_hic_pairs_contig_filtered_for_qc)
     

@@ -51,10 +51,12 @@ process HIC_PAIRS_METRICS {
     publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), val(checkpoint), path(pairs_gz)
-    path agp
-    path parse_stats
-    path dedup_stats
+    tuple val(haplotype_id),
+        val(checkpoint),
+        path(pairs_gz),
+        path(agp),
+        path(parse_stats),
+        path(dedup_stats)
 
     output:
     tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}.pairs_metrics.tsv"), emit: metrics
