@@ -53,8 +53,8 @@ process HIC_PAIRS_METRICS {
   input:
     tuple val(haplotype_id), val(checkpoint), path(pairs_gz)
     path agp
-    path parse_stats // from pairtools parse --output-stats
-    path dedup_stats  // from pairtools dedup --output-stats
+    path parse_stats
+    path dedup_stats
 
   output:
     tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}.pairs_metrics.tsv"), emit: metrics
