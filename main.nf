@@ -298,6 +298,7 @@ include { FILTER_HIC_BAM as FILTER_HIC_BAM_SCAFFOLD } from './modules/filter_hic
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
+include { QUAST_FINAL } from './modules/quast.nf'
 
 
 /*
@@ -725,6 +726,38 @@ workflow {
     //   - join all assembly QC summaries
     // 2. Dotplots of final assemblies vs each other (hap1 vs hap2)
     // 3. 
+
+    /*
+    ========================================================================================
+        QUAST Final Comparison - All Gap-Filled Genomes
+    ========================================================================================
+    */
+    // Collect all gap-filled assemblies with their labels for cross-sample comparison
+    GAP_FILLING.out.filled_assembly
+        .map { haplotype_id, assembly ->
+            tuple(haplotype_id, assembly)
+        }
+        .toSortedList { a, b -> a[0] <=> b[0] }  // Sort by haplotype_id for consistent ordering
+        .map { list ->
+            def labels = list.collect { it[0] }
+            def assemblies = list.collect { it[1] }
+            tuple(assemblies, labels)
+        }
+        .set { ch_quast_final_input }
+
+    // Unpack the tuple for QUAST_FINAL
+    ch_quast_final_input
+        .map { assemblies, labels -> assemblies }
+        .set { ch_quast_assemblies }
+
+    ch_quast_final_input
+        .map { assemblies, labels -> labels }
+        .set { ch_quast_labels }
+
+    QUAST_FINAL(
+        ch_quast_assemblies.collect(),
+        ch_quast_labels.flatten().collect()
+    )
 
     /*
     ========================================================================================
