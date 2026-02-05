@@ -66,13 +66,8 @@ process HIC_PAIRS_METRICS {
 
   # Build contig->scaffold map if AGP provided
   # AGP columns: object(1) ... component_id(6)
-  if [[ -s "${agp:-}" ]]; then
-    awk 'BEGIN{FS="\\t"} !/^#/ && \$5 ~ /[NW]/ {print \$6"\\t"\$1}' ${agp} > contig_to_scaffold.tsv
-    HAVE_AGP=1
-  else
-    HAVE_AGP=0
-    : > contig_to_scaffold.tsv
-  fi
+  awk 'BEGIN{FS="\t"} !/^#/ && $5 ~ /[NW]/ {print $6"\t"$1}' "${agp}" > contig_to_scaffold.tsv
+  HAVE_AGP=1 
 
   # Count pairs, cis/trans in contig-space and (optionally) scaffold-space.
   # pairs format (pairtools): readID chr1 pos1 chr2 pos2 ...
