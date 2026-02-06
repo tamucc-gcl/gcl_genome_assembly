@@ -538,10 +538,11 @@ workflow {
     FILTER_HIC_BAM(ch_bam_with_assembly)
 
     // checkpoint: contig_filtered (pairs-level + retention)
+    // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
     FILTER_HIC_BAM.out.pairs
         .join(FILTER_HIC_BAM.out.parse_stats)
         .join(FILTER_HIC_BAM.out.dedup_stats)
-        .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+        .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
             // no agp at this checkpoint
             tuple(hap, "contig_filtered", pairs_gz, null, parse_stats, dedup_stats)
         }
@@ -567,11 +568,12 @@ workflow {
     SCAFFOLD_HIC_ROUND1(ch_scaffolding_round1_input)
 
     // checkpoint: scaffold_space (relabel contigs to scaffolds using AGP; no remapping)
+    // After join: (hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats)
     FILTER_HIC_BAM.out.pairs
         .join(SCAFFOLD_HIC_ROUND1.out.agp)
         .join(FILTER_HIC_BAM.out.parse_stats)
         .join(FILTER_HIC_BAM.out.dedup_stats)
-        .map { hap, stage, pairs_gz, hap2, stage2, agp, hap3, stage3, parse_stats, hap4, stage4, dedup_stats ->
+        .map { hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
             tuple(hap, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
         }
         .set { ch_hic_pairs_scaffold_space_for_qc }
@@ -700,10 +702,11 @@ workflow {
         FILTER_HIC_BAM_SCAFFOLD(ch_bam_with_scaffold)
 
         // checkpoint: scaffold_round2_filtered (pairs-level + retention)
+        // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
         FILTER_HIC_BAM_SCAFFOLD.out.pairs
             .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
-            .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+            .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
                 // already mapped to scaffold1 names, so no AGP needed here
                 tuple(hap, "scaffold_round2_filtered", pairs_gz, null, parse_stats, dedup_stats)
             }
@@ -735,11 +738,12 @@ workflow {
         ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds
 
         // checkpoint: scaffold_round2_space (relabel scaffold1 -> scaffold2 using ROUND2 AGP; no remapping)
+        // After join: (hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats)
         FILTER_HIC_BAM_SCAFFOLD.out.pairs
             .join(SCAFFOLD_HIC_ROUND2.out.agp)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
-            .map { hap, stage, pairs_gz, hap2, stage2, agp, hap3, stage3, parse_stats, hap4, stage4, dedup_stats ->
+            .map { hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
                 tuple(hap, "scaffold_round2_space", pairs_gz, agp, parse_stats, dedup_stats)
             }
             .set { ch_hic_pairs_scaffold_round2_space_for_qc }
@@ -817,19 +821,21 @@ workflow {
         HIC_BAM_METRICS_FINAL(ch_final_raw_bam_qc)
 
         // Join mapped BAMs with the gap-closed FASTA (keyed by haplotype_id)
+        // After join: (haplotype_id, stage, bam, bai, filled_fa)
         MAP_HIC_TO_FINAL.out.bam
             .join(GAP_FILLING.out.filled_assembly, by: 0)
-            .map { haplotype_id, stage, bam, bai, hap2, filled_fa ->
-                tuple(haplotype_id, FINAL_STAGE, bam, bai, filled_fa)
+            .map { haplotype_id, stage, bam, bai, filled_fa ->
+                tuple(haplotype_id, "final", bam, bai, filled_fa)
             }
             .set { ch_final_filter_input }
 
         FILTER_HIC_BAM_FINAL(ch_final_filter_input)
 
+        // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
         FILTER_HIC_BAM_FINAL.out.pairs
             .join(FILTER_HIC_BAM_FINAL.out.parse_stats)
             .join(FILTER_HIC_BAM_FINAL.out.dedup_stats)
-            .map { hap, stage, pairs_gz, hap2, stage2, parse_stats, hap3, stage3, dedup_stats ->
+            .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
                 tuple(hap, "final_filtered", pairs_gz, null, parse_stats, dedup_stats)
             }
             .set { ch_final_pairs_qc }
