@@ -62,14 +62,21 @@ process HIC_PAIRS_METRICS {
     tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}.pairs_metrics.tsv"), emit: metrics
 
     script:
+    // Check if AGP is provided (not empty)
+    def have_agp = agp.size() > 0
     """
     set -euo pipefail
     export LC_ALL=C
 
     # Build contig->scaffold map if AGP provided
     # AGP columns: object(1) ... component_id(6)
-    awk 'BEGIN{FS="\\t"} !/^#/ && \$5 ~ /[NW]/ {print \$6"\\t"\$1}' "${agp}" > contig_to_scaffold.tsv
-    HAVE_AGP=1
+    HAVE_AGP=0
+    if [[ "${have_agp}" == "true" && -s "${agp}" ]]; then
+        awk 'BEGIN{FS="\\t"} !/^#/ && \$5 ~ /[NW]/ {print \$6"\\t"\$1}' "${agp}" > contig_to_scaffold.tsv
+        HAVE_AGP=1
+    else
+        touch contig_to_scaffold.tsv
+    fi
 
     # Count pairs, cis/trans in contig-space and (optionally) scaffold-space.
     # pairs format (pairtools): readID chr1 pos1 chr2 pos2 ...

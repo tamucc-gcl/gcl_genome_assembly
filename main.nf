@@ -539,12 +539,13 @@ workflow {
 
     // checkpoint: contig_filtered (pairs-level + retention)
     // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
+    // Note: No AGP at this checkpoint - pass empty list [] for optional AGP
     FILTER_HIC_BAM.out.pairs
         .join(FILTER_HIC_BAM.out.parse_stats)
         .join(FILTER_HIC_BAM.out.dedup_stats)
         .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-            // no agp at this checkpoint
-            tuple(hap, "contig_filtered", pairs_gz, null, parse_stats, dedup_stats)
+            // no agp at this checkpoint - pass empty list for optional path
+            tuple(hap, "contig_filtered", pairs_gz, [], parse_stats, dedup_stats)
         }
         .set { ch_hic_pairs_contig_filtered_for_qc }
 
@@ -707,8 +708,8 @@ workflow {
             .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
             .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                // already mapped to scaffold1 names, so no AGP needed here
-                tuple(hap, "scaffold_round2_filtered", pairs_gz, null, parse_stats, dedup_stats)
+                // already mapped to scaffold1 names, so no AGP needed here - pass empty list
+                tuple(hap, "scaffold_round2_filtered", pairs_gz, [], parse_stats, dedup_stats)
             }
         .set { ch_hic_pairs_scaffold_round2_filtered_for_qc }
 
@@ -836,7 +837,8 @@ workflow {
             .join(FILTER_HIC_BAM_FINAL.out.parse_stats)
             .join(FILTER_HIC_BAM_FINAL.out.dedup_stats)
             .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                tuple(hap, "final_filtered", pairs_gz, null, parse_stats, dedup_stats)
+                // No AGP for final - pass empty list
+                tuple(hap, "final_filtered", pairs_gz, [], parse_stats, dedup_stats)
             }
             .set { ch_final_pairs_qc }
 
