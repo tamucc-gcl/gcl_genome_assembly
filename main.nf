@@ -309,6 +309,7 @@ include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hi
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from './modules/hic_mapping_metrics.nf'
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLDSCAF } from './modules/hic_mapping_metrics.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_FINAL } from './modules/hic_mapping_metrics.nf'
+include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 
 /*
 ========================================================================================
@@ -845,7 +846,7 @@ workflow {
         HIC_PAIRS_METRICS_FINAL(ch_final_pairs_qc)
     }
 
-    // 2. Final QC Reports
+    // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
     // 3. 
 
@@ -1190,8 +1191,86 @@ workflow {
             )
         }
     }
-}
 
+    /*
+    ========================================================================================
+        FINAL QC COMPILATION
+        Collects all assembly QC summaries and Hi-C metrics into a single report
+    ========================================================================================
+    */
+    
+    // Collect all assembly QC summaries
+    // Start with the ones that always run
+    ch_all_assembly_summaries = ASSEMBLY_QC_INITIAL.out.assembly_summary
+        .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
+        .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
+    
+    // Add conditional assembly QC outputs
+    if (params.inspector_run_on_contigs) {
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
+    }
+    
+    if (params.decon.run_on_contigs) {
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
+    }
+    
+    if (params.inspector_run_on_scaffolds) {
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
+    }
+    
+    if (params.decon.run_on_scaffolds) {
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
+    }
+    
+    if (params.run_scaffold_round2) {
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
+    }
+    
+    // Collect all BAM metrics
+    // Start with ones that always run
+    ch_all_bam_metrics = HIC_BAM_METRICS_CONTIG.out.metrics
+    
+    // Add conditional BAM metrics
+    if (params.run_scaffold_round2) {
+        ch_all_bam_metrics = ch_all_bam_metrics
+            .mix(HIC_BAM_METRICS_SCAFFOLD.out.metrics)
+    }
+    
+    if (params.make_final_contact_maps) {
+        ch_all_bam_metrics = ch_all_bam_metrics
+            .mix(HIC_BAM_METRICS_FINAL.out.metrics)
+    }
+    
+    // Collect all pairs metrics
+    // Start with ones that always run
+    ch_all_pairs_metrics = HIC_PAIRS_METRICS_CONTIG.out.metrics
+        .mix(HIC_PAIRS_METRICS_CONTIGSCAF.out.metrics)
+    
+    // Add conditional pairs metrics
+    if (params.run_scaffold_round2) {
+        ch_all_pairs_metrics = ch_all_pairs_metrics
+            .mix(HIC_PAIRS_METRICS_SCAFFOLD.out.metrics)
+            .mix(HIC_PAIRS_METRICS_SCAFFOLDSCAF.out.metrics)
+    }
+    
+    if (params.make_final_contact_maps) {
+        ch_all_pairs_metrics = ch_all_pairs_metrics
+            .mix(HIC_PAIRS_METRICS_FINAL.out.metrics)
+    }
+    
+    // Compile final QC report
+    // Extract just the TSV files from tuples and collect
+    COMPILE_FINAL_QC(
+        ch_all_assembly_summaries.map { sample_id, tsv -> tsv }.collect(),
+        ch_all_bam_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect(),
+        ch_all_pairs_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect()
+    )
+}
 /*
 ========================================================================================
     WORKFLOW COMPLETION
