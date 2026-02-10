@@ -18,7 +18,7 @@ process HIC_BAM_METRICS {
     tuple val(haplotype_id), val(checkpoint), path(bam), path(bai)
 
     output:
-    tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}.bam_metrics.tsv"), emit: metrics
+    tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}_${checkpoint}.bam_metrics.tsv"), emit: metrics
 
     script:
     """
@@ -40,7 +40,7 @@ process HIC_BAM_METRICS {
     {
         echo -e "haplotype_id\\tcheckpoint\\tbam_total_align\\tbam_mapped_align\\tbam_mapped_pct\\tbam_primary_align\\tbam_primary_mapped\\tbam_primary_mapped_pct"
         echo -e "${haplotype_id}\\t${checkpoint}\\t\$total\\t\$mapped\\t\$mapped_pct\\t\$primary_total\\t\$primary_mapped\\t\$primary_mapped_pct"
-    } > ${haplotype_id}.bam_metrics.tsv
+    } > ${haplotype_id}_${checkpoint}.bam_metrics.tsv
     """
 }
 
@@ -59,7 +59,7 @@ process HIC_PAIRS_METRICS {
         path(dedup_stats)
 
     output:
-    tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}.pairs_metrics.tsv"), emit: metrics
+    tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}_${checkpoint}.pairs_metrics.tsv"), emit: metrics
 
     script:
     // Check if AGP is provided (not empty)
@@ -149,7 +149,7 @@ process HIC_PAIRS_METRICS {
     {
         echo -e "haplotype_id\\tcheckpoint\\tpairs_total\\tcis_pairs_contig\\ttrans_pairs_contig\\ttrans_to_cis_contig\\tcis_pairs_scaffold\\ttrans_pairs_scaffold\\ttrans_to_cis_scaffold\\tparse_total_pairs\\tretention_pct"
         echo -e "${haplotype_id}\\t${checkpoint}\\t\${pairs_kept}\\t\${cis_contig}\\t\${trans_contig}\\t\${tc_contig}\\t\${cis_scaf}\\t\${trans_scaf}\\t\${tc_scaf}\\t\${total_in}\\t\${retention}"
-    } > ${haplotype_id}.pairs_metrics.tsv
+    } > ${haplotype_id}_${checkpoint}.pairs_metrics.tsv
 
     rm -f pairs_metrics.kv contig_to_scaffold.tsv
     """

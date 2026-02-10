@@ -23,7 +23,7 @@ process COMBINE_ASSEMBLY_QC {
           path(mapping_results)
     
     output:
-    tuple val(sample_id), path("${sample_id}_qc_summary.tsv"), emit: summary
+    tuple val(sample_id), val(qc_label), path("${sample_id}_${qc_label}_qc_summary.tsv"), emit: summary
     
     script:
     """
@@ -60,6 +60,7 @@ process COMBINE_ASSEMBLY_QC {
     # Create a manifest file listing all inputs
     cat > ${sample_id}_qc_inputs/manifest.txt <<EOF
 SAMPLE_ID: ${sample_id}
+QC_LABEL: ${qc_label}
 QUAST_DIR: quast
 MERQURY_DIR: merqury
 BUSCO_HAPLOTYPES: ${haplotype_ids_busco.join(',')}
@@ -73,12 +74,13 @@ EOF
     Rscript ${projectDir}/r_scripts/combine_individual_assembly_qc.R \\
         --input_dir ${sample_id}_qc_inputs \\
         --output_dir . \\
-        --sample_id ${sample_id}
+        --sample_id ${sample_id} \\
+        --qc_label ${qc_label}
     """
     
     stub:
     """
     mkdir -p ${sample_id}_qc_inputs
-    touch ${sample_id}_qc_summary.tsv
+    touch ${sample_id}_${qc_label}_qc_summary.tsv
     """
 }

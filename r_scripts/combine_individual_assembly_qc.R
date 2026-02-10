@@ -5,6 +5,7 @@ if(!interactive()){
   input_dir <- NULL
   output_dir <- NULL
   sample_id <- NULL
+  qc_label <- NULL
   
   # Parse arguments
   i <- 1
@@ -18,6 +19,9 @@ if(!interactive()){
     } else if (args[i] == "--sample_id") {
       sample_id <- args[i + 1]
       i <- i + 2
+    } else if (args[i] == "--qc_label") {
+      qc_label <- args[i + 1]
+      i <- i + 2
     } else {
       i <- i + 1
     }
@@ -26,11 +30,13 @@ if(!interactive()){
   input_dir <- 'C:/Users/jdsel/Downloads/summary/Sde-CBau_104_Ex1_qc_inputs'
   output_dir <- 'C:/Users/jdsel/Downloads/summary'
   sample_id <- 'Sde-CBau_104_Ex1'
+  qc_label <- 'contig'
 }
 
-message("Input directory:", input_dir)
-message("Output directory:", output_dir)
-message("Sample ID:", sample_id, "\n")
+message("Input directory: ", input_dir)
+message("Output directory: ", output_dir)
+message("Sample ID: ", sample_id)
+message("QC Label: ", qc_label, "\n")
 
 #### Libraries ####
 library(tidyverse)
@@ -114,8 +120,17 @@ joined_data <- bind_rows(.id = 'analysis',
           quast = quast_out,
           busco = busco_out,
           merqury_qv = qv_out,
-          merqury_completeness = completeness_out)
+          merqury_completeness = completeness_out) %>%
+  # Add sample_id and qc_label columns for downstream joining
+
+  mutate(sample_id = sample_id,
+         qc_label = qc_label,
+         .before = everything())
+
+# Output filename now includes qc_label to prevent collisions
+output_filename <- str_c(sample_id, '_', qc_label, '_qc_summary.tsv')
 
 write_tsv(joined_data,
-          file.path(output_dir, 
-                    str_c(sample_id, '_qc_summary.tsv')))
+          file.path(output_dir, output_filename))
+
+message("Wrote output to: ", file.path(output_dir, output_filename))

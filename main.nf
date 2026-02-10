@@ -848,7 +848,8 @@ workflow {
 
     // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
-    // 3. 
+    // 4. telomere detection in final assemblies
+    // 5. Make report with all QC metrics and final assembly stats for each sample and haplotype
 
     /*
     ========================================================================================
@@ -1266,7 +1267,7 @@ workflow {
     // Compile final QC report
     // Extract just the TSV files from tuples and collect
     COMPILE_FINAL_QC(
-        ch_all_assembly_summaries.map { sample_id, tsv -> tsv }.collect(),
+        ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect(),
         ch_all_bam_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect(),
         ch_all_pairs_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect()
     )
