@@ -69,7 +69,7 @@ params.hic_plot_resolutions = "1000000,500000,100000"
 params.hic_balance = false
 params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
-params.min_scaffold_size = 0  // 0 = include all scaffolds in contact maps; set to e.g. 100000 to include only scaffolds >100kb
+params.scaffold_min_size = 0  // 0 = include all scaffolds in contact maps; set to e.g. 100000 to include only scaffolds >100kb
 
 // Hi-C scaffolding parameters (YaHS) - ROUND 1
 params.yahs_round1_min_contig_length = 20000
