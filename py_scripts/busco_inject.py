@@ -117,3 +117,155 @@ def parse_busco_short_summary_txt(path: Path) -> Dict[str, float]:
 
     if all(v is not None for v in [Cc, Dc, Fc, Mc, n]):
         return {
+            "C": pct(float(Cc), float(n)),
+            "D": pct(float(Dc), float(n)),
+            "F": pct(float(Fc), float(n)),
+            "M": pct(float(Mc), float(n)),
+            "n": int(n),
+        }
+
+    raise ValueError(
+        f"Could not parse BUSCO short_summary TXT: {path}\n"
+        "Tried compact summary line and older tabular summary formats."
+    )
+
+
+def parse_busco_short_summary_json(path: Path) -> Dict[str, float]:
+    """
+    Parse BUSCO short_summary*.json (BUSCO v5).
+
+    BUSCO's JSON keys have varied slightly across versions.
+    We try to locate counts for:
+      complete, duplicated, fragmented, missing, total
+    Then convert to percentages.
+    """
+    obj = read_json(path)
+
+    # Common structure examples (varies):
+    # obj["results"]["complete_busco"] etc
+    # obj["results"]["complete"] etc
+    # obj["results"]["summary"]["complete"] etc
+    # or nested under obj["results"]["lineage_dataset"]["..."]
+    #
+    # We'll search recursively for the first dict that contains the needed fields.
+    wanted_sets = [
+        ("complete", "duplicated", "fragmented", "missing", "total"),
+        ("complete_busco", "duplicated_busco", "fragmented_busco", "missing_busco", "total_busco_groups_searched"),
+        ("Complete", "Duplicated", "Fragmented", "Missing", "Total"),
+    ]
+
+    def iter_dicts(x: Any):
+        if isinstance(x, dict):
+            yield x
+            for v in x.values():
+                yield from iter_dicts(v)
+        elif isinstance(x, list):
+            for v in x:
+                yield from iter_dicts(v)
+
+    found = None
+    found_keys = None
+
+    for d in iter_dicts(obj):
+        for ks in wanted_sets:
+            if all(k in d for k in ks):
+                found = d
+                found_keys = ks
+                break
+        if found:
+            break
+
+    if not found:
+        # Special case: BUSCO sometimes reports complete/single/dup separately
+        # and has "n_markers"/"total" elsewhere. We'll try a second heuristic.
+        # Look for a dict with complete/single-copy/duplicated/fragmented/missing,
+        # plus total (often "n_markers" or similar).
+        raise ValueError(
+            f"Could not find BUSCO summary fields in JSON: {path}\n"
+            "If you paste a small snippet of the JSON top-level keys, I can adapt the parser."
+        )
+
+    c_key, d_key, f_key, m_key, n_key = found_keys
+
+    complete = float(found[c_key])
+    duplicated = float(found[d_key])
+    fragmented = float(found[f_key])
+    missing = float(found[m_key])
+    total = float(found[n_key])
+
+    # Some BUSCO JSONs store percentages already; detect that:
+    # If total is <= 100 and values look like percentages, treat as percent inputs.
+    # Otherwise treat as counts.
+    if total <= 100.0 and (complete <= 100.0 and duplicated <= 100.0 and fragmented <= 100.0 and missing <= 100.0):
+        # Percent inputs; need an integer n somewhere else—try to find it.
+        # If not found, set n to 0 and still inject percents.
+        n = None
+        # common places
+        for d in iter_dicts(obj):
+            for cand in ("n_markers", "total_buscos", "total_busco_groups_searched", "total", "n"):
+                if cand in d and isinstance(d[cand], (int, float)) and float(d[cand]) > 100:
+                    n = int(d[cand])
+                    break
+            if n is not None:
+                break
+        if n is None:
+            n = 0
+        return {
+            "C": round(complete, 3),
+            "D": round(duplicated, 3),
+            "F": round(fragmented, 3),
+            "M": round(missing, 3),
+            "n": int(n),
+        }
+
+    # Count inputs
+    n = int(round(total))
+    return {
+        "C": pct(complete, total),
+        "D": pct(duplicated, total),
+        "F": pct(fragmented, total),
+        "M": pct(missing, total),
+        "n": n,
+    }
+
+
+def parse_busco(path: Path) -> Dict[str, float]:
+    if path.suffix.lower() == ".json":
+        return parse_busco_short_summary_json(path)
+    # .txt or anything else -> treat as text
+    return parse_busco_short_summary_txt(path)
+
+
+def inject_busco(assembly_stats_json: Dict[str, Any], busco: Dict[str, float]) -> Dict[str, Any]:
+    # assembly-stats expects a top-level 'busco' key per docs
+    assembly_stats_json["busco"] = {
+        "C": float(busco["C"]),
+        "D": float(busco["D"]),
+        "F": float(busco["F"]),
+        "M": float(busco["M"]),
+        "n": int(busco["n"]),
+    }
+    return assembly_stats_json
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Inject BUSCO summary into assembly-stats JSON.")
+    ap.add_argument("--assembly-stats", required=True, type=Path, help="assembly-stats JSON from asm2stats.pl")
+    ap.add_argument("--busco", required=True, type=Path, help="BUSCO short_summary*.txt or short_summary*.json")
+    ap.add_argument("--out", required=True, type=Path, help="Output JSON path")
+    args = ap.parse_args()
+
+    asm = read_json(args.assembly_stats)
+    busco = parse_busco(args.busco)
+    asm2 = inject_busco(asm, busco)
+    write_json(args.out, asm2)
+
+    print(
+        "Injected BUSCO into assembly-stats JSON:\n"
+        f"  C={busco['C']}%  D={busco['D']}%  F={busco['F']}%  M={busco['M']}%  n={busco['n']}\n"
+        f"Wrote: {args.out}"
+    )
+
+
+if __name__ == "__main__":
+    main()
