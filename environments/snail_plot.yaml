@@ -1,11 +1,24 @@
 name: plot_assembly_stats
 channels:
   - conda-forge
+  - bioconda
   - defaults
+
 dependencies:
   - python=3.11
   - pip
-  - nodejs
+
+  # headless browser installed directly in env
+  - chromium
+
+  # for rjchallis-assembly-stats helper scripts
   - perl
+
+  # assembly stats tool (bioconda)
+  - rjchallis-assembly-stats
+
+  # optional but useful
+  - jq
+
   - pip:
-      - playwright
+      - pyppeteer
