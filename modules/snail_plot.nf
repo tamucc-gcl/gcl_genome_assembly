@@ -30,7 +30,7 @@ process SNAIL_PLOT {
     output:
     //tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.fasta"), emit: assembly
     //tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_busco"), emit: busco
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.svg"), emit: snail
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_snail.svg"), emit: snail
     
     script:
     """
