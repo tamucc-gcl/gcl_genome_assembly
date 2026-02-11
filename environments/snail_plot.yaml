@@ -1,4 +1,4 @@
-name: plot_assembly_stats
+name: snail_plot
 channels:
   - conda-forge
   - bioconda
@@ -7,18 +7,8 @@ channels:
 dependencies:
   - python=3.11
   - pip
-
-  # headless browser installed directly in env
-  - chromium
-
-  # for rjchallis-assembly-stats helper scripts
   - perl
-
-  # assembly stats tool (bioconda)
   - rjchallis-assembly-stats
-
-  # optional but useful
   - jq
-
   - pip:
-      - pyppeteer
+      - playwright
