@@ -35,7 +35,7 @@ process SCAN_TELOMERES {
     """
     set -euo pipefail
 
-    ${projectDir}/py_scripts/scan_telomeres.py \\
+    python3 ${projectDir}/py_scripts/scan_telomeres.py \\
         ${scaffold_fasta} \\
         --id ${haplotype_id} \\
         --motif ${motif} \\
