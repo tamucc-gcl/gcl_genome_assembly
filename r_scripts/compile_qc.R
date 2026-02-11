@@ -72,6 +72,16 @@ read_all_tsvs <- function(dir_path, file_pattern = "*.tsv") {
   bind_rows(dfs)
 }
 
+plot_dims <- function(plot, base_width = 6, base_height = 5) {
+  build <- ggplot_build(plot)
+  layout <- build$layout$layout
+  
+  ncol <- max(layout$COL)
+  nrow <- max(layout$ROW)
+  
+  list(width = base_width * ncol, height = base_height * nrow)
+}
+
 # =============================================================================
 # Read all input data
 # =============================================================================
@@ -194,6 +204,9 @@ full_qc_data <- bind_rows(fixed_assembly,
                                    'final')) %>%
            fct_drop())
 
+write_csv(full_qc_data,
+          file.path(args$output_dir,
+                    'assembly_qc_metrics.csv'))
 
 #### Summary Plots ####
 trans_cis_plot <- full_qc_data %>%
@@ -207,7 +220,22 @@ trans_cis_plot <- full_qc_data %>%
   labs(shape = 'Haplotype',
        colour = 'Sample',
        y = 'HiC trans:cis ratio',
-       x = 'Assembly Stage')
+       x = 'Assembly Stage') +
+  theme_classic() +
+  theme(panel.background = element_rect(colour = 'black', fill = NA),
+        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
+        # panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.key = element_blank())
+
+trans_cis_dims <- plot_dims(trans_cis_plot)
+ggsave(file.path(args$output_dir,
+                 'trans_cis.png'),
+       plot = trans_cis_plot, 
+       width = trans_cis_dims$width, 
+       height = trans_cis_dims$height)
 
 contigs_plot <- full_qc_data %>%
   filter(str_detect(metric, '# contigs')) %>%
@@ -227,7 +255,23 @@ contigs_plot <- full_qc_data %>%
   labs(shape = 'Haplotype',
        colour = 'Sample',
        y = 'Number of Contigs',
-       x = 'Assembly Stage')
+       x = 'Assembly Stage') +
+  theme_classic() +
+  theme(panel.background = element_rect(colour = 'black', fill = NA),
+        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
+        # panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.key = element_blank(),
+        strip.background = element_blank())
+
+contig_dims <- plot_dims(contigs_plot)
+ggsave(file.path(args$output_dir,
+                 'contig_count.png'),
+       plot = contigs_plot, 
+       width = contig_dims$width, 
+       height = contig_dims$height)
 
 size_plot <- full_qc_data %>%
   filter(str_detect(metric, 'Total length')) %>%
@@ -247,7 +291,23 @@ size_plot <- full_qc_data %>%
   labs(shape = 'Haplotype',
        colour = 'Sample',
        y = 'Assembly Size (bp)',
-       x = 'Assembly Stage')
+       x = 'Assembly Stage') +
+  theme_classic() +
+  theme(panel.background = element_rect(colour = 'black', fill = NA),
+        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
+        # panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.key = element_blank(),
+        strip.background = element_blank())
+
+size_dims <- plot_dims(size_plot)
+ggsave(file.path(args$output_dir,
+                 'contig_length.png'),
+       plot = size_plot, 
+       width = size_dims$width, 
+       height = size_dims$height)
 
 misc_quast_plots <- full_qc_data %>%
   filter(str_detect(metric, 'Largest contig|GC|N[0-9]0|L[0-9]0|auN|s per 100')) %>% 
@@ -267,7 +327,23 @@ misc_quast_plots <- full_qc_data %>%
   labs(shape = 'Haplotype',
        colour = 'Sample',
        y = 'value',
-       x = 'Assembly Stage')
+       x = 'Assembly Stage') +
+  theme_classic() +
+  theme(panel.background = element_rect(colour = 'black', fill = NA),
+        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
+        # panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.key = element_blank(),
+        strip.background = element_blank())
+
+misc_dims <- plot_dims(misc_quast_plots)
+ggsave(file.path(args$output_dir,
+                 'quast_misc.png'),
+       plot = misc_quast_plots, 
+       width = misc_dims$width, 
+       height = misc_dims$height)
 
 busco_plot <- full_qc_data %>%
   filter(analysis == 'busco') %>%
@@ -292,7 +368,23 @@ busco_plot <- full_qc_data %>%
   labs(shape = 'Haplotype',
        colour = 'Sample',
        y = 'BUSCO Gene %',
-       x = 'Assembly Stage')
+       x = 'Assembly Stage') +
+  theme_classic() +
+  theme(panel.background = element_rect(colour = 'black', fill = NA),
+        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
+        # panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.key = element_blank(),
+        strip.background = element_blank())
+
+busco_dims <- plot_dims(busco_plot)
+ggsave(file.path(args$output_dir,
+                 'busco.png'),
+       plot = busco_plot, 
+       width = busco_dims$width, 
+       height = busco_dims$height)
 
 kmer_plot <- full_qc_data %>%
   filter(str_detect(metric, 'qv|kmer_completeness')) %>%
@@ -309,91 +401,22 @@ kmer_plot <- full_qc_data %>%
   labs(shape = 'Haplotype',
        colour = 'Sample',
        y = 'value',
-       x = 'Assembly Stage')
+       x = 'Assembly Stage') +
+  theme_classic() +
+  theme(panel.background = element_rect(colour = 'black', fill = NA),
+        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
+        # panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.key = element_blank(),
+        strip.background = element_blank())
 
-#Need to write outputs
-#need to make markdown file
-
-# Placeholder: Create final report structure
-# This is where you'll implement the actual merging logic
-final_report <- tibble(
-  placeholder = "Replace this with your actual compiled data"
-)
-
-# If we have real data, use it
-if (!is.null(assembly_qc) || !is.null(bam_metrics) || !is.null(pairs_metrics)) {
-  
-  # Example: Simple concatenation of available data
-  # You'll want to customize this based on your specific reporting needs
-  
-  report_sections <- list()
-  
-  if (!is.null(assembly_qc)) {
-    report_sections$assembly <- assembly_qc %>%
-      mutate(metric_type = "assembly_qc")
-  }
-  
-  if (!is.null(bam_metrics)) {
-    report_sections$bam <- bam_metrics %>%
-      mutate(metric_type = "bam_metrics")
-  }
-  
-  if (!is.null(pairs_metrics)) {
-    report_sections$pairs <- pairs_metrics %>%
-      mutate(metric_type = "pairs_metrics")
-  }
-  
-  # For now, just write each section separately
-  # TODO: Implement proper joining/pivoting based on your needs
-  
-  message("\n=== Writing Output ===")
-  
-  # Write individual sections
-  if (!is.null(assembly_qc)) {
-    write_tsv(assembly_qc, file.path(args$output_dir, "assembly_qc_combined.tsv"))
-    message("Wrote assembly_qc_combined.tsv")
-  }
-  
-  if (!is.null(bam_metrics)) {
-    write_tsv(bam_metrics, file.path(args$output_dir, "bam_metrics_combined.tsv"))
-    message("Wrote bam_metrics_combined.tsv")
-  }
-  
-  if (!is.null(pairs_metrics)) {
-    write_tsv(pairs_metrics, file.path(args$output_dir, "pairs_metrics_combined.tsv"))
-    message("Wrote pairs_metrics_combined.tsv")
-  }
-  
-  # Create a simple summary report
-  final_report <- tibble(
-    section = c("assembly_qc", "bam_metrics", "pairs_metrics"),
-    n_records = c(
-      ifelse(is.null(assembly_qc), 0, nrow(assembly_qc)),
-      ifelse(is.null(bam_metrics), 0, nrow(bam_metrics)),
-      ifelse(is.null(pairs_metrics), 0, nrow(pairs_metrics))
-    ),
-    n_files = c(
-      ifelse(is.null(assembly_qc), 0, n_distinct(assembly_qc$source_file)),
-      ifelse(is.null(bam_metrics), 0, n_distinct(bam_metrics$source_file)),
-      ifelse(is.null(pairs_metrics), 0, n_distinct(pairs_metrics$source_file))
-    )
-  )
-}
-
-# =============================================================================
-# Write final report
-# =============================================================================
-output_file <- file.path(args$output_dir, "final_qc_report.tsv")
-write_tsv(final_report, output_file)
-message(sprintf("\nWrote final report to: %s", output_file))
-
-# =============================================================================
-# Optional: Generate HTML report if rmarkdown is available
-# =============================================================================
-# Uncomment and customize if you want HTML output
-# if (requireNamespace("rmarkdown", quietly = TRUE)) {
-#   # Generate HTML report
-#   message("Generating HTML report...")
-# }
+kmer_dims <- plot_dims(kmer_plot)
+ggsave(file.path(args$output_dir,
+                 'kmer.png'),
+       plot = kmer_plot, 
+       width = kmer_dims$width, 
+       height = kmer_dims$height)
 
 message("\n=== QC Compilation Complete ===")

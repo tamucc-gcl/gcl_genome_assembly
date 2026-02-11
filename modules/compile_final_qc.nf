@@ -29,7 +29,9 @@ process COMPILE_FINAL_QC {
     output:
     //path("final_qc_report.tsv"), emit: report
     //path("final_qc_report.html"), emit: html, optional: true
-    path("qc_inputs"), emit: inputs_dir
+    //path("qc_inputs"), emit: inputs_dir
+    path "assembly_qc_metrics.csv",  emit: metrics
+    path "*.png",                     emit: plots
     
     script:
     """
@@ -75,11 +77,11 @@ Pairs metrics files:
 EOF
     
     # Run R script to compile all QC data
-    #Rscript ${projectDir}/r_scripts/compile_qc.R \\
-    #    --assembly_dir qc_inputs/assembly \\
-    #    --bam_dir qc_inputs/bam \\
-    #    --pairs_dir qc_inputs/pairs \\
-    #    --output_dir .
+    Rscript ${projectDir}/r_scripts/compile_qc.R \\
+        --assembly_dir qc_inputs/assembly \\
+        --bam_dir qc_inputs/bam \\
+        --pairs_dir qc_inputs/pairs \\
+        --output_dir .
     """
     
     stub:

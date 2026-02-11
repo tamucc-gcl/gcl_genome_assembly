@@ -1002,9 +1002,6 @@ workflow {
 
     // 6. NCBI output files for GenBank submission (if enabled)
     
-    // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
-    // 7. Make report with all QC metrics and final assembly stats for each sample and haplotype
-
     /*
     ========================================================================================
         QC Steps
@@ -1409,6 +1406,18 @@ workflow {
         .set { ch_snail_plot_final_input }
 
     SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
+
+
+    /*
+    ========================================================================================
+    Markdown results report
+    ========================================================================================
+    */
+    
+    // 1. table with rows for individuals columns are each haplotype snail plot and last column is the within individual pairwise dotplot
+    // 2. summary of all QC metrics (assembly stats, Hi-C mapping stats, pairs stats) in a markdown table
+    // 3. Links to all relevant output files (assemblies, QC reports, contact maps, pairwise alignments, etc)
+
 }
 /*
 ========================================================================================
