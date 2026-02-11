@@ -333,6 +333,7 @@ include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
 include { SCAN_TELOMERES } from './modules/scan_telomeres.nf'
+include { SUMMARY_REPORT } from './modules/summary_report'
 
 /*
 ========================================================================================
@@ -1410,13 +1411,86 @@ workflow {
 
     /*
     ========================================================================================
-    Markdown results report
+        SUMMARY REPORT
     ========================================================================================
     */
-    
-    // 1. table with rows for individuals columns are each haplotype snail plot and last column is the within individual pairwise dotplot
-    // 2. summary of all QC metrics (assembly stats, Hi-C mapping stats, pairs stats) in a markdown table
-    // 3. Links to all relevant output files (assemblies, QC reports, contact maps, pairwise alignments, etc)
+
+    // Collect snail plots - extract just the SVG files from tuples
+    // SNAIL_PLOT_FINAL emits: tuple(haplotype_id, qc_label, snail_svg)
+    ch_snail_plots = SNAIL_PLOT_FINAL.out.snail
+        .map { haplotype_id, qc_label, snail_svg -> snail_svg }
+        .collect()
+
+    // Collect dotplots - extract just the PNG files from tuples
+    // PAIRWISE_ALIGNMENT emits: tuple(hap1_id, hap2_id, dotplot_png)
+    ch_dotplots = Channel.empty()
+    if (params.run_pairwise_alignments) {
+        ch_dotplots = PAIRWISE_ALIGNMENT.out.dotplot
+            .map { hap1_id, hap2_id, dotplot_png -> dotplot_png }
+            .collect()
+    } else {
+        ch_dotplots = Channel.of([])
+    }
+
+    // Collect assembly QC summaries
+    // These come as tuple(sample_id, qc_label, tsv)
+    ch_assembly_summaries = ch_all_assembly_summaries
+        .map { sample_id, qc_label, tsv -> tsv }
+        .collect()
+
+    // Collect BAM metrics
+    // These come as tuple(haplotype_id, checkpoint, tsv)
+    ch_bam_metrics_files = ch_all_bam_metrics
+        .map { haplotype_id, checkpoint, tsv -> tsv }
+        .collect()
+
+    // Collect pairs metrics
+    // These come as tuple(haplotype_id, checkpoint, tsv)
+    ch_pairs_metrics_files = ch_all_pairs_metrics
+        .map { haplotype_id, checkpoint, tsv -> tsv }
+        .collect()
+
+    // Collect contact maps (mcool files)
+    ch_contact_maps = Channel.empty()
+    if (params.make_final_contact_maps) {
+        ch_contact_maps = CONTACT_MAP_FINAL.out.mcool
+            .map { haplotype_id, stage, mcool -> mcool }
+            .collect()
+    } else {
+        ch_contact_maps = Channel.of([])
+    }
+
+    // Collect final assemblies
+    ch_final_assemblies = GAP_FILLING.out.filled_assembly
+        .map { haplotype_id, assembly -> assembly }
+        .collect()
+
+    // QUAST final report directory
+    ch_quast_report = QUAST_FINAL.out.report_dir
+
+    // Collect BUSCO directories (from gap-filled stage)
+    ch_busco_dirs = ASSEMBLY_QC_GAP_FILLED.out.busco_results
+        .map { haplotype_id, busco_dir -> busco_dir }
+        .collect()
+
+    // Collect Merqury results (from gap-filled stage)
+    ch_merqury_results = ASSEMBLY_QC_GAP_FILLED.out.merqury_results
+        .map { sample_id, merqury_dir -> merqury_dir }
+        .collect()
+
+    // Generate the summary report
+    SUMMARY_REPORT(
+        ch_snail_plots,
+        ch_dotplots,
+        ch_assembly_summaries,
+        ch_bam_metrics_files,
+        ch_pairs_metrics_files,
+        ch_contact_maps,
+        ch_final_assemblies,
+        ch_quast_report,
+        ch_busco_dirs,
+        ch_merqury_results
+    )
 
 }
 /*

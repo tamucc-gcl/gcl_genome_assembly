@@ -1,0 +1,16 @@
+# environments/report.yaml
+# Environment for summary report generation
+name: report
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base>=4.2
+  - r-tidyverse
+  - r-argparse
+  - r-knitr
+  - r-kableExtra
+  - r-scales
+  - r-base64enc
+  - r-rmarkdown  # For optional HTML report via Rmd
