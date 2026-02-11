@@ -1,21 +1,81 @@
+#!/usr/bin/env python3
+
+import argparse
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-HTML = Path("snail.html").resolve()
-OUT  = Path("snail.png").resolve()
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(args=["--no-sandbox", "--disable-setuid-sandbox"])
-    page = browser.new_page(viewport={"width": 1200, "height": 1200}, device_scale_factor=2)
+def main():
+    parser = argparse.ArgumentParser(
+        description="Render an assembly-stats snail HTML plot to a static PNG using Playwright."
+    )
+    parser.add_argument(
+        "--html",
+        required=True,
+        help="Input HTML file (e.g. snail.html)"
+    )
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="Output PNG filename (e.g. snail.png)"
+    )
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=1200,
+        help="Viewport width in pixels (default: 1200)"
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=1200,
+        help="Viewport height in pixels (default: 1200)"
+    )
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=2,
+        help="Device scale factor for higher resolution (default: 2)"
+    )
+    parser.add_argument(
+        "--selector",
+        default="#assembly_stats",
+        help="CSS selector to screenshot (default: #assembly_stats)"
+    )
+    parser.add_argument(
+        "--wait-ms",
+        type=int,
+        default=1000,
+        help="Milliseconds to wait after load (default: 1000)"
+    )
 
-    page.goto(HTML.as_uri(), wait_until="networkidle")
-    page.wait_for_timeout(1000)  # let D3 finish
+    args = parser.parse_args()
 
-    el = page.query_selector("#assembly_stats")
-    if el is None:
-        raise SystemExit("ERROR: could not find #assembly_stats in snail.html")
+    html_path = Path(args.html).resolve()
+    out_path = Path(args.out).resolve()
 
-    el.screenshot(path=str(OUT))
-    browser.close()
+    if not html_path.exists():
+        raise SystemExit(f"ERROR: input HTML file does not exist: {html_path}")
 
-print(f"Wrote {OUT}")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--no-sandbox", "--disable-setuid-sandbox"])
+        page = browser.new_page(
+            viewport={"width": args.width, "height": args.height},
+            device_scale_factor=args.scale
+        )
+
+        page.goto(html_path.as_uri(), wait_until="networkidle")
+        page.wait_for_timeout(args.wait_ms)
+
+        el = page.query_selector(args.selector)
+        if el is None:
+            raise SystemExit(f"ERROR: could not find selector '{args.selector}' in {html_path}")
+
+        el.screenshot(path=str(out_path))
+        browser.close()
+
+    print(f"Wrote {out_path}")
+
+
+if __name__ == "__main__":
+    main()
