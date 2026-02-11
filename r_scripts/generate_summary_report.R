@@ -23,6 +23,7 @@ suppressPackageStartupMessages({
 parser <- ArgumentParser(description = "Generate pipeline summary report")
 parser$add_argument("--snail_dir", required = TRUE)
 parser$add_argument("--dotplot_dir", required = TRUE)
+parser$add_argument("--contact_map_dir", required = TRUE)
 parser$add_argument("--assembly_qc_dir", required = TRUE)
 parser$add_argument("--output_dir", required = TRUE)
 parser$add_argument("--outdir_base", default = "results")
@@ -71,8 +72,10 @@ snail_df <- tibble(path = snail_files) %>%
   mutate(
     filename = basename(path),
     # Expected format: {haplotype_id}_{qc_label}_snail.svg
-    haplotype_id = str_extract(filename, "^[^_]+_[^_]+_hap[12]"),
-    qc_label = str_extract(filename, "(?<=_hap[12]_)[^_]+(?=_snail)"),
+    # haplotype_id ends with _hap1 or _hap2
+    # qc_label might contain underscores (e.g., "gap_filled")
+    haplotype_id = str_extract(filename, "^.+_hap[12](?=_)"),
+    qc_label = str_extract(filename, "(?<=_hap[12]_).+(?=_snail)"),
     sample_id = extract_sample_id(haplotype_id),
     hap = extract_haplotype(haplotype_id)
   ) %>%
@@ -91,13 +94,47 @@ dotplot_df <- tibble(path = dotplot_files) %>%
   mutate(
     filename = basename(path),
     # Expected format: {hap1_id}_vs_{hap2_id}_dotplot.png
-    hap1_id = str_extract(filename, "^[^_]+_[^_]+_hap1"),
-    hap2_id = str_extract(filename, "(?<=_vs_)[^_]+_[^_]+_hap2"),
+    # e.g., Sde_CPla_115_hap1_vs_Sde_CPla_115_hap2_dotplot.png
+    hap1_id = str_extract(filename, "^.+_hap1(?=_vs_)"),
+    hap2_id = str_extract(filename, "(?<=_vs_).+_hap2(?=_dotplot)"),
     sample_id = extract_sample_id(hap1_id)
   ) %>%
   filter(!is.na(hap1_id))
 
 message(sprintf("Found %d dotplots", nrow(dotplot_df)))
+
+# =============================================================================
+# 2b. Load and organize contact maps
+# =============================================================================
+message("=== Loading contact maps ===")
+contact_files <- list.files(args$contact_map_dir, pattern = "_contact_map\\.png$", full.names = TRUE)
+
+contact_df <- tibble(path = contact_files) %>%
+  mutate(
+    filename = basename(path),
+    # Expected format: {haplotype_id}_{stage}_{resolution}bp_contact_map.png
+    # e.g., Sde_CPla_115_hap1_final_1000000bp_contact_map.png
+    # haplotype_id ends with _hap1 or _hap2
+    haplotype_id = str_extract(filename, "^.+_hap[12](?=_)"),
+    stage = str_extract(filename, "(?<=_hap[12]_)[a-z_]+(?=_[0-9])"),
+    resolution = str_extract(filename, "[0-9]+(?=bp_contact_map)"),
+    sample_id = extract_sample_id(haplotype_id),
+    hap = extract_haplotype(haplotype_id)
+  ) %>%
+  filter(!is.na(haplotype_id))
+
+# Prefer final stage, highest resolution available
+contact_df <- contact_df %>%
+  mutate(resolution_num = as.numeric(resolution)) %>%
+  group_by(sample_id, hap) %>%
+  # Prefer 'final' stage, then by resolution (lower is better for detail, but 1Mb is good for overview)
+  filter(stage == "final" | stage == first(stage)) %>%
+  # Pick ~1Mb resolution for overview, or closest available
+  slice_min(abs(resolution_num - 1000000), n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+message(sprintf("Found %d contact maps for %d samples", 
+                nrow(contact_df), n_distinct(contact_df$sample_id)))
 
 # =============================================================================
 # 3. Load QC metrics
@@ -139,12 +176,12 @@ message(sprintf("Loaded %d assembly QC records, %d BAM metrics, %d pairs metrics
                 nrow(assembly_qc), nrow(bam_metrics), nrow(pairs_metrics)))
 
 # =============================================================================
-# 4. Build visual comparison table (snail plots + dotplot)
+# 4. Build visual comparison table (snail plots + contact maps + dotplot)
 # =============================================================================
 message("=== Building visual comparison table ===")
 
-# Get unique samples
-samples <- sort(unique(c(snail_df$sample_id, dotplot_df$sample_id)))
+# Get unique samples from all visual outputs
+samples <- sort(unique(c(snail_df$sample_id, dotplot_df$sample_id, contact_df$sample_id)))
 
 # Choose embedding method based on file count
 # Auto-switch to relative paths if >10 samples (avoids multi-MB HTML)
@@ -171,6 +208,10 @@ visual_table_rows <- map_dfr(samples, function(sid) {
   hap1_snail <- snail_df %>% filter(sample_id == sid, hap == "hap1") %>% pull(path) %>% first()
   hap2_snail <- snail_df %>% filter(sample_id == sid, hap == "hap2") %>% pull(path) %>% first()
   
+  # Get hap1 and hap2 contact maps for this sample
+  hap1_contact <- contact_df %>% filter(sample_id == sid, hap == "hap1") %>% pull(path) %>% first()
+  hap2_contact <- contact_df %>% filter(sample_id == sid, hap == "hap2") %>% pull(path) %>% first()
+  
   # Get dotplot for this sample
   dotplot_path <- dotplot_df %>% filter(sample_id == sid) %>% pull(path) %>% first()
   
@@ -178,6 +219,8 @@ visual_table_rows <- map_dfr(samples, function(sid) {
     sample_id = sid,
     hap1_snail_path = hap1_snail %||% NA_character_,
     hap2_snail_path = hap2_snail %||% NA_character_,
+    hap1_contact_path = hap1_contact %||% NA_character_,
+    hap2_contact_path = hap2_contact %||% NA_character_,
     dotplot_path = dotplot_path %||% NA_character_
   )
 })
@@ -216,7 +259,7 @@ html_content <- c(
   '  <title>Genome Assembly Pipeline Summary Report</title>',
   '  <style>',
   '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; background: #f5f5f5; }',
-  '    .container { max-width: 1600px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }',
+  '    .container { max-width: 1800px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }',
   '    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 15px; }',
   '    h2 { color: #34495e; margin-top: 40px; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }',
   '    h3 { color: #7f8c8d; }',
@@ -225,8 +268,9 @@ html_content <- c(
   '    th { background: #3498db; color: white; }',
   '    tr:nth-child(even) { background: #f9f9f9; }',
   '    tr:hover { background: #f1f1f1; }',
-  '    .visual-table img { max-width: 300px; max-height: 300px; border: 1px solid #ddd; border-radius: 4px; }',
-  '    .visual-table td { vertical-align: middle; text-align: center; }',
+  '    .visual-table img { max-width: 250px; max-height: 250px; border: 1px solid #ddd; border-radius: 4px; }',
+  '    .visual-table td { vertical-align: middle; text-align: center; padding: 8px; }',
+  '    .visual-table th { font-size: 0.9em; }',
   '    .metric-good { color: #27ae60; font-weight: bold; }',
   '    .metric-warn { color: #f39c12; font-weight: bold; }',
   '    .metric-bad { color: #e74c3c; font-weight: bold; }',
@@ -260,31 +304,39 @@ html_content <- c(
 # Section 1: Visual comparison table
 html_content <- c(html_content,
   '<h2 id="visual-comparison">1. Visual Comparison</h2>',
-  '<p>Snail plots showing assembly contiguity and BUSCO completeness for each haplotype, ',
-  'plus within-individual pairwise dotplots comparing hap1 vs hap2.</p>',
+  '<p>Snail plots showing assembly contiguity and BUSCO completeness, Hi-C contact maps, ',
+  'and within-individual pairwise dotplots comparing hap1 vs hap2.</p>',
   '<table class="visual-table">',
-  '<thead><tr><th>Sample</th><th>Haplotype 1 Snail Plot</th><th>Haplotype 2 Snail Plot</th><th>Hap1 vs Hap2 Dotplot</th></tr></thead>',
+  '<thead><tr><th>Sample</th><th>Hap1 Snail</th><th>Hap1 Contact Map</th><th>Hap2 Snail</th><th>Hap2 Contact Map</th><th>Hap1 vs Hap2</th></tr></thead>',
   '<tbody>'
 )
 
 for (i in seq_len(nrow(visual_table_rows))) {
   row <- visual_table_rows[i, ]
   
-  hap1_img <- if (!is.na(row$hap1_snail_path) && file.exists(row$hap1_snail_path)) {
+  hap1_snail_img <- if (!is.na(row$hap1_snail_path) && file.exists(row$hap1_snail_path)) {
     sprintf('<img src="%s" alt="hap1 snail">', get_img_src(row$hap1_snail_path))
-  } else { "<em>Not available</em>" }
+  } else { "<em>—</em>" }
   
-  hap2_img <- if (!is.na(row$hap2_snail_path) && file.exists(row$hap2_snail_path)) {
+  hap2_snail_img <- if (!is.na(row$hap2_snail_path) && file.exists(row$hap2_snail_path)) {
     sprintf('<img src="%s" alt="hap2 snail">', get_img_src(row$hap2_snail_path))
-  } else { "<em>Not available</em>" }
+  } else { "<em>—</em>" }
+  
+  hap1_contact_img <- if (!is.na(row$hap1_contact_path) && file.exists(row$hap1_contact_path)) {
+    sprintf('<img src="%s" alt="hap1 contact map">', get_img_src(row$hap1_contact_path))
+  } else { "<em>—</em>" }
+  
+  hap2_contact_img <- if (!is.na(row$hap2_contact_path) && file.exists(row$hap2_contact_path)) {
+    sprintf('<img src="%s" alt="hap2 contact map">', get_img_src(row$hap2_contact_path))
+  } else { "<em>—</em>" }
   
   dotplot_img <- if (!is.na(row$dotplot_path) && file.exists(row$dotplot_path)) {
     sprintf('<img src="%s" alt="dotplot">', get_img_src(row$dotplot_path))
-  } else { "<em>Not available</em>" }
+  } else { "<em>—</em>" }
   
   html_content <- c(html_content,
-    sprintf('<tr><td><strong>%s</strong></td><td>%s</td><td>%s</td><td>%s</td></tr>',
-            row$sample_id, hap1_img, hap2_img, dotplot_img)
+    sprintf('<tr><td><strong>%s</strong></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+            row$sample_id, hap1_snail_img, hap1_contact_img, hap2_snail_img, hap2_contact_img, dotplot_img)
   )
 }
 

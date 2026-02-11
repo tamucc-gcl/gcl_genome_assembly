@@ -1432,6 +1432,20 @@ workflow {
         ch_dotplots = Channel.of([])
     }
 
+    // Collect contact map images (PNG files)
+    // CONTACT_MAP_FINAL emits contact_maps: tuple(haplotype_id, stage, [png_files])
+    ch_contact_map_images = Channel.empty()
+    if (params.make_final_contact_maps) {
+        ch_contact_map_images = CONTACT_MAP_FINAL.out.contact_maps
+            .flatMap { haplotype_id, stage, pngs -> 
+                // pngs might be a list of PNGs at different resolutions
+                pngs instanceof List ? pngs : [pngs]
+            }
+            .collect()
+    } else {
+        ch_contact_map_images = Channel.of([])
+    }
+
     // Collect assembly QC summaries
     // These come as tuple(sample_id, qc_label, tsv)
     ch_assembly_summaries = ch_all_assembly_summaries
@@ -1482,6 +1496,7 @@ workflow {
     SUMMARY_REPORT(
         ch_snail_plots,
         ch_dotplots,
+        ch_contact_map_images,
         ch_assembly_summaries,
         ch_bam_metrics_files,
         ch_pairs_metrics_files,

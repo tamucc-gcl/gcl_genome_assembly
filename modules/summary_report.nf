@@ -14,6 +14,8 @@ process SUMMARY_REPORT {
     tag "summary_report"
     label 'summary_report'
     
+    conda "${projectDir}/environments/report.yaml"
+    
     publishDir "${params.outdir}/reports", mode: params.publish_dir_mode
     
     input:
@@ -21,6 +23,8 @@ process SUMMARY_REPORT {
     path(snail_plots)
     // Dotplots: tuple(hap1_id, hap2_id, dotplot_png)
     path(dotplots)
+    // Contact map images: tuple(haplotype_id, stage, contact_png)
+    path(contact_map_images)
     // Assembly QC summaries: tuple(sample_id, qc_label, summary_tsv)
     path(assembly_summaries)
     // BAM metrics: tuple(haplotype_id, checkpoint, metrics_tsv)
@@ -49,6 +53,7 @@ process SUMMARY_REPORT {
     
     mkdir -p summary_data/snail_plots
     mkdir -p summary_data/dotplots
+    mkdir -p summary_data/contact_maps
     mkdir -p summary_data/qc_metrics
     mkdir -p summary_data/assemblies
     
@@ -60,6 +65,11 @@ process SUMMARY_REPORT {
     # Copy dotplots
     for f in ${dotplots}; do
         [ -f "\$f" ] && cp "\$f" summary_data/dotplots/
+    done
+    
+    # Copy contact map images
+    for f in ${contact_map_images}; do
+        [ -f "\$f" ] && cp "\$f" summary_data/contact_maps/
     done
     
     # Copy QC metrics
@@ -77,6 +87,7 @@ process SUMMARY_REPORT {
     Rscript ${projectDir}/r_scripts/generate_summary_report.R \
         --snail_dir summary_data/snail_plots \
         --dotplot_dir summary_data/dotplots \
+        --contact_map_dir summary_data/contact_maps \
         --assembly_qc_dir summary_data/qc_metrics \
         --output_dir . \
         --outdir_base "${params.outdir}"
