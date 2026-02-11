@@ -26,7 +26,12 @@ process PAIRWISE_ALIGNMENT {
     tag "${haplotype_id1}_vs_${haplotype_id2}"
     label 'pairwise_alignment'
     
-    publishDir "${params.outdir}/pairwise_alignments", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/pairwise_alignments", 
+        mode: params.publish_dir_mode,
+        saveAs: { filename -> 
+            // Only publish paf.gz and log files, skip qc.tsv
+            filename.endsWith('.qc.tsv') ? null : filename
+        }
     
     input:
     tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2)

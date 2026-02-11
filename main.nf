@@ -921,12 +921,6 @@ workflow {
                 skip: 1
             )
     }
-    // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
-    
-    // 4. telomere detection in final assemblies
-    // 5. Snail Plot - after assembly qc
-    // 6. NCBI output files for GenBank submission (if enabled)
-    // 7. Make report with all QC metrics and final assembly stats for each sample and haplotype
 
     /*
     ========================================================================================
@@ -959,6 +953,13 @@ workflow {
         ch_quast_assemblies.collect(),
         ch_quast_labels.flatten().collect()
     )
+
+
+    // 4. telomere detection in final assemblies
+    // 6. NCBI output files for GenBank submission (if enabled)
+    
+    // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
+    // 7. Make report with all QC metrics and final assembly stats for each sample and haplotype
 
     /*
     ========================================================================================

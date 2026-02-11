@@ -48,7 +48,7 @@ process HIC_PAIRS_METRICS {
     tag "${haplotype_id}_${checkpoint}"
     label 'hic_qc'
 
-    publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
+    //publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id),
