@@ -925,7 +925,7 @@ workflow {
             .set { ch_pairwise_input }
         
         // Run pairwise alignments
-        PAIRWISE_ALIGNMENT(ch_pairwise_input)
+        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
         
         // Collect all QC results into a summary table
         PAIRWISE_ALIGNMENT.out.qc
@@ -985,7 +985,7 @@ workflow {
         .map { haplotype_id, telomeres -> telomeres }
         .collectFile(
             name: 'all_telomeres.tsv',
-            storeDir: "${params.outdir}/qc/telomeres",
+            storeDir: "${params.outdir}/telomeres",
             keepHeader: true,
             skip: 1
         )
@@ -995,7 +995,7 @@ workflow {
         .map { haplotype_id, summary -> summary }
         .collectFile(
             name: 'all_telomere_summaries.tsv',
-            storeDir: "${params.outdir}/qc/telomeres",
+            storeDir: "${params.outdir}/telomeres",
             keepHeader: true,
             skip: 1
         )

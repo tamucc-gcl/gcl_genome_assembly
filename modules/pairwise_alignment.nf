@@ -70,7 +70,8 @@ process PAIRWISE_ALIGNMENT {
         }
     
     input:
-    tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2), val(pafr_ready)
+    tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2)
+    val(pafr_ready)
     
     output:
     tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.paf.gz"), emit: paf
