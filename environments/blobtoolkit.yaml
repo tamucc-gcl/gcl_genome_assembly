@@ -1,0 +1,14 @@
+# environments/blobtoolkit.yaml
+name: blobtoolkit
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10
+  - blobtoolkit
+  - pip
+  - pip:
+    - 'setuptools<70'
+    - geckodriver-autoinstaller
+    - 'blobtk>=0.7.9'
