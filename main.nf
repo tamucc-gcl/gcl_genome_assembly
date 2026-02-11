@@ -38,6 +38,9 @@ params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link'
 
+// Assembly parameters
+params.telomere_motif = 'CCCTAA'  // complement/reverse generated automatically. used by hifiasm & telomere scanning
+
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
@@ -100,6 +103,12 @@ params.pairwise_alignment_min_aln_bp = 10000
 params.pairwise_alignment_mode = 'within_sample'         // 'all' = all pairs, 'within_sample' = hap1 vs hap2 only
 params.pairwise_dotplot_width = 10             // Dotplot width in inches
 params.pairwise_dotplot_height = 10            // Dotplot height in inches
+
+// ============================================================================
+// Telomere detection parameters
+// ============================================================================
+params.telomere_window = 10000        // Window size (bp) at each sequence end to search
+params.telomere_min_repeats = 10      // Minimum consecutive motif repeats required
 
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
@@ -323,6 +332,7 @@ include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
+include { SCAN_TELOMERES } from './modules/scan_telomeres.nf'
 
 /*
 ========================================================================================
@@ -960,8 +970,36 @@ workflow {
         ch_quast_labels.flatten().collect()
     )
 
+    /*
+    ========================================================================================
+        Telomere Detection in Final Assemblies
+    ========================================================================================
+    */
+    GAP_FILLING.out.filled_assembly
+        .set { ch_telomere_input }
 
-    // 4. telomere detection in final assemblies
+    SCAN_TELOMERES(ch_telomere_input)
+
+    // Collect all per-scaffold telomere results into single file
+    SCAN_TELOMERES.out.telomeres
+        .map { haplotype_id, telomeres -> telomeres }
+        .collectFile(
+            name: 'all_telomeres.tsv',
+            storeDir: "${params.outdir}/qc/telomeres",
+            keepHeader: true,
+            skip: 1
+        )
+
+    // Collect all summaries into single file
+    SCAN_TELOMERES.out.summary
+        .map { haplotype_id, summary -> summary }
+        .collectFile(
+            name: 'all_telomere_summaries.tsv',
+            storeDir: "${params.outdir}/qc/telomeres",
+            keepHeader: true,
+            skip: 1
+        )
+
     // 6. NCBI output files for GenBank submission (if enabled)
     
     // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
