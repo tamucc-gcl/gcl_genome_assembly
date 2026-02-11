@@ -322,7 +322,6 @@ include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAI
 include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
-include { PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
 include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
 
 /*
@@ -881,7 +880,7 @@ workflow {
         
         // First, run setup to install pafr (runs once, all alignment jobs wait for it)
         SETUP_PAFR()
-        
+
         // Collect all gap-filled assemblies, SORT for deterministic ordering, then generate pairs
         GAP_FILLING.out.filled_assembly
             .toSortedList { a, b -> a[0] <=> b[0] }  // Sort by haplotype_id for reproducible pairs
