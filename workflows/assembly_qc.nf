@@ -170,4 +170,5 @@ workflow ASSEMBLY_QC {
     
     emit:
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary
+    busco_results = BUSCO.out.results
 }

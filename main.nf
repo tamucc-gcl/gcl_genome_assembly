@@ -310,6 +310,7 @@ include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLDSCAF } from './modules/hic_mapping_metrics.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_FINAL } from './modules/hic_mapping_metrics.nf'
 include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
+include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 
 /*
 ========================================================================================
@@ -849,7 +850,9 @@ workflow {
     // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
     // 4. telomere detection in final assemblies
-    // 5. Make report with all QC metrics and final assembly stats for each sample and haplotype
+    // 5. Snail Plot
+    // 6. NCBI output files for GenBank submission (if enabled)
+    // 7. Make report with all QC metrics and final assembly stats for each sample and haplotype
 
     /*
     ========================================================================================
@@ -882,6 +885,22 @@ workflow {
         ch_quast_assemblies.collect(),
         ch_quast_labels.flatten().collect()
     )
+
+    /*
+    ========================================================================================
+    SNAIL PLOTS FOR FINAL ASSEMBLIES
+    ========================================================================================
+    */
+    // Join gap-filled assemblies with their BUSCO results
+    // BUSCO output from ASSEMBLY_QC_GAP_FILLED is per-haplotype
+    GAP_FILLING.out.filled_assembly
+        .join(ASSEMBLY_QC_GAP_FILLED.out.busco_results)
+        .map { haplotype_id, assembly, busco_dir ->
+            tuple(haplotype_id, assembly, busco_dir, "gap_filled")
+        }
+        .set { ch_snail_plot_final_input }
+
+    SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
 
     /*
     ========================================================================================

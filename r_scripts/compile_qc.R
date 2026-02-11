@@ -106,13 +106,213 @@ message("\n=== Processing Data ===")
 # Extract sample_id from haplotype_id for joining
 if (!is.null(bam_metrics)) {
   bam_metrics <- bam_metrics %>%
-    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""))
+    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""),
+           haplotype_id = str_extract(haplotype_id, 'hap[12]'),
+           .before = everything())
 }
 
 if (!is.null(pairs_metrics)) {
   pairs_metrics <- pairs_metrics %>%
-    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""))
+    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""),
+           haplotype_id = str_extract(haplotype_id, 'hap[12]'),
+           .before = everything())
 }
+
+
+#### Join together for nice single output ####
+fixed_assembly <- assembly_qc %>%
+  rename(stage = qc_label) %>%
+  mutate(stage = factor(stage, 
+                        levels = c('contig',
+                                   'contig_corrected',
+                                   'contig_decontam',
+                                   'scaffold',
+                                   'scaffold_corrected',
+                                   'scaffold_round2',
+                                   'gap_filled')) %>%
+           fct_drop(),
+         analysis = case_when(str_detect(analysis, 'merqury') ~ 'merqury',
+                              TRUE ~ analysis)) %>%
+  arrange(stage) %>%
+  select(-source_file)
+
+fixed_bam <- bam_metrics %>%
+  select(-source_file) %>%
+  pivot_longer(cols = where(is.numeric),
+               names_to = 'metric') %>%
+  pivot_wider(names_from = haplotype_id) %>%
+  mutate(stage = case_when(checkpoint == 'contig_raw_map' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
+                           checkpoint == 'scaffold_round2_raw_map' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
+                           checkpoint == 'final_raw_map' ~ 'gap_filled') %>%
+           factor(levels = levels(fixed_assembly$stage)),
+         .keep = 'unused',
+         .before = 'metric') %>%
+  arrange(stage) %>%
+  mutate(analysis = 'mapped_hic')
+
+
+fixed_pairs <- pairs_metrics %>%
+  select(-source_file) %>%
+  pivot_longer(cols = where(is.numeric),
+               names_to = 'metric',
+               values_drop_na = TRUE) %>%
+  pivot_wider(names_from = haplotype_id) %>%
+  filter(!metric %in% c('cis_pairs_scaffold', 'trans_pairs_scaffold', 'trans_to_cis_scaffold')) %>%
+  mutate(metric = str_remove_all(metric, c('_contig|_scaffold')),
+         metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
+                            metric == 'pairs_total' ~ 'retained_pairs',
+                            TRUE ~ metric),
+         stage = case_when(checkpoint == 'contig_filtered' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
+                           checkpoint == 'scaffold_space' ~ levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold'))],
+                           checkpoint == 'scaffold_round2_space' ~ levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold')[-1])],
+                           checkpoint == 'scaffold_round2_filtered' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
+                           checkpoint == 'final_filtered' ~ 'gap_filled') %>%
+           factor(levels = levels(fixed_assembly$stage)),
+         .keep = 'unused',
+         .before = 'metric') %>%
+  arrange(stage) %>%
+  mutate(analysis = 'hic_contact')
+
+full_qc_data <- bind_rows(fixed_assembly,
+          fixed_bam,
+          fixed_pairs) %>%
+  arrange(stage, sample_id) %>%
+  mutate(stage = factor(stage, 
+                        levels = c('contig',
+                                   'contig_corrected',
+                                   'contig_decontam',
+                                   'scaffold',
+                                   'scaffold_corrected',
+                                   'scaffold_round2',
+                                   'gap_filled'),
+                        labels = c('ctg.base', 
+                                   'ctg.cor',
+                                   'ctg.deco',
+                                   'scaf.base',
+                                   'scaf.cor',
+                                   'scaf2',
+                                   'final')) %>%
+           fct_drop())
+
+
+#### Summary Plots ####
+trans_cis_plot <- full_qc_data %>%
+  filter(metric %in% c('trans_to_cis')) %>%
+  pivot_longer(cols = c(hap1, hap2)) %>%
+  ggplot(aes(x = stage, y = value,
+             colour = sample_id,
+             shape = name)) +
+  geom_line(aes(group = interaction(sample_id, name))) +
+  geom_point() +
+  labs(shape = 'Haplotype',
+       colour = 'Sample',
+       y = 'HiC trans:cis ratio',
+       x = 'Assembly Stage')
+
+contigs_plot <- full_qc_data %>%
+  filter(str_detect(metric, '# contigs')) %>%
+  pivot_longer(cols = c(hap1, hap2)) %>%
+  mutate(contig_size = str_extract(metric, '[0-9]+') %>% as.numeric() %>% replace_na(0),
+         metric = str_replace(metric, '[0-9]+', scales::comma(contig_size)),
+         metric = fct_reorder(metric, contig_size)) %>%
+  ggplot(aes(x = stage, y = value,
+             colour = sample_id,
+             shape = name)) +
+  geom_line(aes(group = interaction(sample_id, name))) +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma_format()) +
+  facet_wrap(~metric,
+             scales = 'free_y',
+             ncol = 2) +
+  labs(shape = 'Haplotype',
+       colour = 'Sample',
+       y = 'Number of Contigs',
+       x = 'Assembly Stage')
+
+size_plot <- full_qc_data %>%
+  filter(str_detect(metric, 'Total length')) %>%
+  pivot_longer(cols = c(hap1, hap2)) %>%
+  mutate(contig_size = str_extract(metric, '[0-9]+') %>% as.numeric() %>% replace_na(0),
+         metric = str_replace(metric, '[0-9]+', scales::comma(contig_size)),
+         metric = fct_reorder(metric, contig_size)) %>%
+  ggplot(aes(x = stage, y = value,
+             colour = sample_id,
+             shape = name)) +
+  geom_line(aes(group = interaction(sample_id, name))) +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma_format()) +
+  facet_wrap(~metric,
+             scales = 'free_y',
+             ncol = 2) +
+  labs(shape = 'Haplotype',
+       colour = 'Sample',
+       y = 'Assembly Size (bp)',
+       x = 'Assembly Stage')
+
+misc_quast_plots <- full_qc_data %>%
+  filter(str_detect(metric, 'Largest contig|GC|N[0-9]0|L[0-9]0|auN|s per 100')) %>% 
+  pivot_longer(cols = c(hap1, hap2)) %>%
+  mutate(contig_size = str_extract(metric, '[0-9]+') %>% as.numeric() %>% replace_na(0),
+         metric = str_replace(metric, '[0-9]+', scales::comma(contig_size)),
+         metric = fct_reorder(metric, contig_size)) %>%
+  ggplot(aes(x = stage, y = value,
+             colour = sample_id,
+             shape = name)) +
+  geom_line(aes(group = interaction(sample_id, name))) +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma_format()) +
+  facet_wrap(~metric,
+             scales = 'free_y',
+             ncol = 2) +
+  labs(shape = 'Haplotype',
+       colour = 'Sample',
+       y = 'value',
+       x = 'Assembly Stage')
+
+busco_plot <- full_qc_data %>%
+  filter(analysis == 'busco') %>%
+  pivot_longer(cols = c(hap1, hap2)) %>%
+  mutate(value = value / value[metric == 'total_busco'],
+         .by = c(sample_id, stage, name)) %>%
+  filter(metric != 'total_busco') %>%
+  mutate(metric = factor(metric, levels = c('complete',
+                                            'single', 
+                                            'duplicated',
+                                            'fragmented', 
+                                            'missing'))) %>%
+  ggplot(aes(x = stage, y = value,
+             colour = sample_id,
+             shape = name)) +
+  geom_line(aes(group = interaction(sample_id, name))) +
+  geom_point() +
+  scale_y_continuous(labels = scales::percent_format()) +
+  facet_wrap(~metric,
+             scales = 'free_y',
+             ncol = 2) +
+  labs(shape = 'Haplotype',
+       colour = 'Sample',
+       y = 'BUSCO Gene %',
+       x = 'Assembly Stage')
+
+kmer_plot <- full_qc_data %>%
+  filter(str_detect(metric, 'qv|kmer_completeness')) %>%
+  pivot_longer(cols = c(hap1, hap2, both)) %>%
+  ggplot(aes(x = stage, y = value,
+             colour = sample_id,
+             shape = name)) +
+  geom_line(aes(group = interaction(sample_id, name))) +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma_format()) +
+  facet_wrap(~metric,
+             scales = 'free_y',
+             ncol = 2) +
+  labs(shape = 'Haplotype',
+       colour = 'Sample',
+       y = 'value',
+       x = 'Assembly Stage')
+
+#Need to write outputs
+#need to make markdown file
 
 # Placeholder: Create final report structure
 # This is where you'll implement the actual merging logic

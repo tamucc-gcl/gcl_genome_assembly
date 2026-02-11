@@ -19,7 +19,7 @@ process COMPILE_FINAL_QC {
     tag "compile_final_qc"
     label 'summarize_assembly'
     
-    publishDir "${params.outdir}/qc/final", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly", mode: params.publish_dir_mode
     
     input:
     path(assembly_summaries)  // All assembly QC summary TSVs collected

@@ -51,7 +51,7 @@ process QUAST_FINAL {
     tag "all_samples"
     label 'quast'
     
-    publishDir "${params.outdir}/qc/final", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/assembly", mode: params.publish_dir_mode
     
     input:
     path(assemblies)  // All gap-filled assemblies collected
