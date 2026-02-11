@@ -876,9 +876,9 @@ workflow {
     */
     if (params.run_pairwise_alignments) {
         
-        // Collect all gap-filled assemblies into a list for combination generation
+        // Collect all gap-filled assemblies, SORT for deterministic ordering, then generate pairs
         GAP_FILLING.out.filled_assembly
-            .toList()
+            .toSortedList { a, b -> a[0] <=> b[0] }  // Sort by haplotype_id for reproducible pairs
             .flatMap { assemblies ->
                 def pairs = []
                 
@@ -895,6 +895,7 @@ workflow {
                     }
                 } else {
                     // Generate all unique pairs (i < j to avoid duplicates and self-alignments)
+                    // List is already sorted, so pairs will be deterministic
                     for (int i = 0; i < assemblies.size(); i++) {
                         for (int j = i + 1; j < assemblies.size(); j++) {
                             def (id1, fa1) = assemblies[i]
