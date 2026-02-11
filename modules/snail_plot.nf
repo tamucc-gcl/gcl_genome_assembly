@@ -22,64 +22,47 @@ process SNAIL_PLOT {
     tag "${haplotype_id}"
     label 'snail_plot'
     
-    publishDir "${params.outdir}/qc/snail_plots/${qc_label}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/snail_plots", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly_fasta), path(busco_dir), val(qc_label)
     
     output:
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.fasta"), emit: assembly
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_busco"), emit: busco
+    //tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.fasta"), emit: assembly
+    //tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_busco"), emit: busco
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.svg"), emit: snail
     
     script:
     """
     # Copy assembly with standardized name
-    cp ${assembly_fasta} ${haplotype_id}_${qc_label}.fasta
+    #cp ${assembly_fasta} ${haplotype_id}_${qc_label}.fasta
     
     # Copy BUSCO directory with standardized name
-    cp -r ${busco_dir} ${haplotype_id}_${qc_label}_busco
+    #cp -r ${busco_dir} ${haplotype_id}_${qc_label}_busco
     
-    echo "[SNAIL_PLOT] Staged files for ${haplotype_id} (${qc_label})"
-    echo "[SNAIL_PLOT] Assembly: ${haplotype_id}_${qc_label}.fasta"
-    echo "[SNAIL_PLOT] BUSCO dir: ${haplotype_id}_${qc_label}_busco"
+    #echo "[SNAIL_PLOT] Staged files for ${haplotype_id} (${qc_label})"
+    #echo "[SNAIL_PLOT] Assembly: ${haplotype_id}_${qc_label}.fasta"
+    #echo "[SNAIL_PLOT] BUSCO dir: ${haplotype_id}_${qc_label}_busco"
+
+    # Create the initial dataset from your FASTA
+    blobtools create \
+        --fasta ${assembly_fasta} \
+        my_blobdir
+
+    blobtools add \
+        --busco ${busco_dir}/run_actinopterygii_odb10/full_table.tsv \
+        my_blobdir
+
+    blobtk plot \
+        --blobdir my_blobdir \
+        --view snail \
+        --output ${haplotype_id}_${qc_label}_snail.svg
+
     """
     
     stub:
     """
     touch ${haplotype_id}_${qc_label}.fasta
     mkdir -p ${haplotype_id}_${qc_label}_busco
-    """
-}
-
-/*
-========================================================================================
-    SNAIL PLOT MODULE (Minimal - Assembly Only)
-========================================================================================
-    Stages assembly for snail plot generation without BUSCO data
-========================================================================================
-*/
-
-process SNAIL_PLOT_MINIMAL {
-    tag "${haplotype_id}"
-    label 'snail_plot'
-    
-    publishDir "${params.outdir}/qc/snail_plots/${qc_label}", mode: params.publish_dir_mode
-    
-    input:
-    tuple val(haplotype_id), path(assembly_fasta), val(qc_label)
-    
-    output:
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.fasta"), emit: assembly
-    
-    script:
-    """
-    cp ${assembly_fasta} ${haplotype_id}_${qc_label}.fasta
-    
-    echo "[SNAIL_PLOT] Staged assembly for ${haplotype_id} (${qc_label})"
-    """
-    
-    stub:
-    """
-    touch ${haplotype_id}_${qc_label}.fasta
     """
 }
