@@ -1,0 +1,22 @@
+
+name: pairwise_alignment
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Alignment tools
+  - minimap2
+  - pigz
+  # R and plotting dependencies
+  - r-base>=4.3
+  - r-ggplot2
+  - r-argparse
+  - r-remotes
+  - r-dplyr
+  - r-tibble
+  - r-stringr
+  # Required by pafr (pre-install dependencies so pafr install is fast)
+  - r-rlang
+  - r-withr
+  - r-lifecycle
