@@ -850,7 +850,7 @@ workflow {
     // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
     // 4. telomere detection in final assemblies
-    // 5. Snail Plot
+    // 5. Snail Plot - after assembly qc
     // 6. NCBI output files for GenBank submission (if enabled)
     // 7. Make report with all QC metrics and final assembly stats for each sample and haplotype
 
@@ -885,22 +885,6 @@ workflow {
         ch_quast_assemblies.collect(),
         ch_quast_labels.flatten().collect()
     )
-
-    /*
-    ========================================================================================
-    SNAIL PLOTS FOR FINAL ASSEMBLIES
-    ========================================================================================
-    */
-    // Join gap-filled assemblies with their BUSCO results
-    // BUSCO output from ASSEMBLY_QC_GAP_FILLED is per-haplotype
-    GAP_FILLING.out.filled_assembly
-        .join(ASSEMBLY_QC_GAP_FILLED.out.busco_results)
-        .map { haplotype_id, assembly, busco_dir ->
-            tuple(haplotype_id, assembly, busco_dir, "gap_filled")
-        }
-        .set { ch_snail_plot_final_input }
-
-    SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
 
     /*
     ========================================================================================
@@ -1290,6 +1274,22 @@ workflow {
         ch_all_bam_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect(),
         ch_all_pairs_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect()
     )
+
+    /*
+    ========================================================================================
+    SNAIL PLOTS FOR FINAL ASSEMBLIES
+    ========================================================================================
+    */
+    // Join gap-filled assemblies with their BUSCO results
+    // BUSCO output from ASSEMBLY_QC_GAP_FILLED is per-haplotype
+    GAP_FILLING.out.filled_assembly
+        .join(ASSEMBLY_QC_GAP_FILLED.out.busco_results)
+        .map { haplotype_id, assembly, busco_dir ->
+            tuple(haplotype_id, assembly, busco_dir, "gap_filled")
+        }
+        .set { ch_snail_plot_final_input }
+
+    SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
 }
 /*
 ========================================================================================
