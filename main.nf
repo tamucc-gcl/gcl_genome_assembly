@@ -69,6 +69,7 @@ params.hic_plot_resolutions = "1000000,500000,100000"
 params.hic_balance = false
 params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
+params.min_scaffold_size = 0  // 0 = include all scaffolds in contact maps; set to e.g. 100000 to include only scaffolds >100kb
 
 // Hi-C scaffolding parameters (YaHS) - ROUND 1
 params.yahs_round1_min_contig_length = 20000
@@ -90,6 +91,13 @@ params.yahs_round2_no_scaffold_ec = true
 
 // Finalization Parameters
 params.make_final_contact_maps = true
+
+// Dotplot Params
+arams.run_pairwise_alignments = true
+params.pairwise_alignment_preset = 'asm5'  // minimap2 preset for assembly vs assembly alignment
+params.pairwise_alignment_min_mapq = 5
+params.pairwise_alignment_min_aln_bp = 10000
+params.pairwise_alignment_mode = 'all'         // 'all' = all pairs, 'within_sample' = hap1 vs hap2 only
 
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
@@ -858,8 +866,62 @@ workflow {
         CONTACT_MAP_FINAL(ch_contact_map_final_input)
     }
 
-    // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
+    /*
+    ========================================================================================
+        PAIRWISE GENOME ALIGNMENTS
+        Generates all pairwise alignments for dotplot visualization grid
+    ========================================================================================
+    */
+    if (params.run_pairwise_alignments) {
+        
+        // Collect all gap-filled assemblies into a list for combination generation
+        GAP_FILLING.out.filled_assembly
+            .toList()
+            .flatMap { assemblies ->
+                def pairs = []
+                
+                if (params.pairwise_alignment_mode == 'within_sample') {
+                    // Only compare hap1 vs hap2 within each sample
+                    def grouped = assemblies.groupBy { haplotype_id, fasta ->
+                        haplotype_id.replaceAll(/_hap[12]$/, '')
+                    }
+                    grouped.each { sample_id, haps ->
+                        if (haps.size() == 2) {
+                            def sorted = haps.sort { it[0] }  // Sort by haplotype_id
+                            pairs << tuple(sorted[0][0], sorted[0][1], sorted[1][0], sorted[1][1])
+                        }
+                    }
+                } else {
+                    // Generate all unique pairs (i < j to avoid duplicates and self-alignments)
+                    for (int i = 0; i < assemblies.size(); i++) {
+                        for (int j = i + 1; j < assemblies.size(); j++) {
+                            def (id1, fa1) = assemblies[i]
+                            def (id2, fa2) = assemblies[j]
+                            pairs << tuple(id1, fa1, id2, fa2)
+                        }
+                    }
+                }
+                
+                return pairs
+            }
+            .set { ch_pairwise_input }
+        
+        // Run pairwise alignments
+        PAIRWISE_ALIGNMENT(ch_pairwise_input)
+        
+        // Collect all QC results into a summary table
+        PAIRWISE_ALIGNMENT.out.qc
+            .map { id1, id2, qc_file -> qc_file }
+            .collectFile(
+                name: 'pairwise_alignment_summary.tsv',
+                storeDir: "${params.outdir}/pairwise_alignments",
+                keepHeader: true,
+                skip: 1
+            )
+    }
+    // 2. Final QC Reports - Placed at end of workflow to ensure all assembly and mapping QC metrics are available for compilation
+    
     // 4. telomere detection in final assemblies
     // 5. Snail Plot - after assembly qc
     // 6. NCBI output files for GenBank submission (if enabled)
