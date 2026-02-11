@@ -1,8 +1,8 @@
 /*
 ========================================================================================
-    SNAIL PLOT MODULE (BlobToolKit assembly-stats)
+    SNAIL PLOT MODULE (BlobToolKit)
 ========================================================================================
-    Generates snail plots for assembly visualization using blobtk
+    Generates snail plots for assembly visualization using blobtools2
     
     Input:
     - Assembly FASTA file
@@ -14,7 +14,7 @@
     
     Can be applied to any assembly stage (contigs, scaffolds, gap-filled, etc.)
     
-    Reference: https://assembly-stats.readme.io/docs/getting-started
+    Reference: https://blobtoolkit.genomehubs.org/blobtools2/
 ========================================================================================
 */
 
@@ -29,8 +29,7 @@ process SNAIL_PLOT {
     
     output:
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.snail.png"), emit: snail_plot
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.stats.json"), emit: stats_json
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.snail.svg"), emit: snail_svg, optional: true
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_blobdir"), emit: blobdir
     
     script:
     def busco_lineage = params.busco_lineage ?: 'actinopterygii_odb10'
@@ -63,27 +62,54 @@ process SNAIL_PLOT {
     echo "[SNAIL_PLOT] Haplotype: ${haplotype_id}"
     echo "[SNAIL_PLOT] Stage: ${qc_label}"
     
-    # Run blobtk pipeline to generate snail plot
-    blobtk pipeline \\
+    # Create BlobDir with assembly
+    blobtools create \\
         --fasta ${assembly_fasta} \\
-        --busco \${BUSCO_TABLE} \\
-        --out ${haplotype_id}_${qc_label}
+        ${haplotype_id}_${qc_label}_blobdir
     
-    # Rename outputs to include qc_label
-    # blobtk creates: <prefix>.snail.png, <prefix>.stats.json
-    if [ -f "${haplotype_id}_${qc_label}.snail.png" ]; then
-        echo "[SNAIL_PLOT] Snail plot generated successfully"
+    # Add BUSCO data
+    blobtools add \\
+        --busco \${BUSCO_TABLE} \\
+        ${haplotype_id}_${qc_label}_blobdir
+    
+    # Generate snail plot
+    # blobtools view generates static images
+    blobtools view \\
+        --plot \\
+        --view snail \\
+        --format png \\
+        --out . \\
+        ${haplotype_id}_${qc_label}_blobdir
+    
+    # Find and rename the generated snail plot
+    # blobtools view creates files like: <blobdir_name>.snail.png or snail.png
+    SNAIL_FILE=""
+    if [ -f "${haplotype_id}_${qc_label}_blobdir.snail.png" ]; then
+        SNAIL_FILE="${haplotype_id}_${qc_label}_blobdir.snail.png"
+    elif [ -f "snail.png" ]; then
+        SNAIL_FILE="snail.png"
     else
+        # Search for any snail.png
+        SNAIL_FILE=\$(find . -maxdepth 1 -name "*snail*.png" -type f | head -n 1)
+    fi
+    
+    if [ -z "\${SNAIL_FILE}" ] || [ ! -f "\${SNAIL_FILE}" ]; then
         echo "[ERROR] Snail plot was not generated" >&2
+        echo "[ERROR] Directory contents:" >&2
         ls -la >&2
         exit 1
     fi
+    
+    # Rename to standard output name
+    mv "\${SNAIL_FILE}" "${haplotype_id}_${qc_label}.snail.png"
+    
+    echo "[SNAIL_PLOT] Snail plot generated successfully"
     """
     
     stub:
     """
+    mkdir -p ${haplotype_id}_${qc_label}_blobdir
     touch ${haplotype_id}_${qc_label}.snail.png
-    touch ${haplotype_id}_${qc_label}.stats.json
     """
 }
 
@@ -107,7 +133,7 @@ process SNAIL_PLOT_MINIMAL {
     
     output:
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.snail.png"), emit: snail_plot
-    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.stats.json"), emit: stats_json
+    tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_blobdir"), emit: blobdir
     
     script:
     """
@@ -117,15 +143,43 @@ process SNAIL_PLOT_MINIMAL {
     echo "[SNAIL_PLOT] Haplotype: ${haplotype_id}"
     echo "[SNAIL_PLOT] Stage: ${qc_label}"
     
-    # Run blobtk pipeline without BUSCO
-    blobtk pipeline \\
+    # Create BlobDir with assembly only
+    blobtools create \\
         --fasta ${assembly_fasta} \\
-        --out ${haplotype_id}_${qc_label}
+        ${haplotype_id}_${qc_label}_blobdir
+    
+    # Generate snail plot
+    blobtools view \\
+        --plot \\
+        --view snail \\
+        --format png \\
+        --out . \\
+        ${haplotype_id}_${qc_label}_blobdir
+    
+    # Find and rename the generated snail plot
+    SNAIL_FILE=""
+    if [ -f "${haplotype_id}_${qc_label}_blobdir.snail.png" ]; then
+        SNAIL_FILE="${haplotype_id}_${qc_label}_blobdir.snail.png"
+    elif [ -f "snail.png" ]; then
+        SNAIL_FILE="snail.png"
+    else
+        SNAIL_FILE=\$(find . -maxdepth 1 -name "*snail*.png" -type f | head -n 1)
+    fi
+    
+    if [ -z "\${SNAIL_FILE}" ] || [ ! -f "\${SNAIL_FILE}" ]; then
+        echo "[ERROR] Snail plot was not generated" >&2
+        ls -la >&2
+        exit 1
+    fi
+    
+    mv "\${SNAIL_FILE}" "${haplotype_id}_${qc_label}.snail.png"
+    
+    echo "[SNAIL_PLOT] Snail plot generated successfully"
     """
     
     stub:
     """
+    mkdir -p ${haplotype_id}_${qc_label}_blobdir
     touch ${haplotype_id}_${qc_label}.snail.png
-    touch ${haplotype_id}_${qc_label}.stats.json
     """
 }
