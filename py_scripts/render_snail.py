@@ -58,7 +58,12 @@ def main():
         raise SystemExit(f"ERROR: input HTML file does not exist: {html_path}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--no-sandbox", "--disable-setuid-sandbox"])
+        browser = p.chromium.launch(args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--allow-file-access-from-files",
+            "--disable-web-security"
+        ])
         page = browser.new_page(
             viewport={"width": args.width, "height": args.height},
             device_scale_factor=args.scale
