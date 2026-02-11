@@ -1420,21 +1420,21 @@ workflow {
     ch_snail_plots = SNAIL_PLOT_FINAL.out.snail
         .map { haplotype_id, qc_label, snail_svg -> snail_svg }
         .collect()
+        .ifEmpty([])
 
     // Collect dotplots - extract just the PNG files from tuples
     // PAIRWISE_ALIGNMENT emits: tuple(hap1_id, hap2_id, dotplot_png)
-    ch_dotplots = Channel.empty()
     if (params.run_pairwise_alignments) {
         ch_dotplots = PAIRWISE_ALIGNMENT.out.dotplot
             .map { hap1_id, hap2_id, dotplot_png -> dotplot_png }
             .collect()
+            .ifEmpty([])
     } else {
-        ch_dotplots = Channel.of([])
+        ch_dotplots = Channel.value([])
     }
 
     // Collect contact map images (PNG files)
     // CONTACT_MAP_FINAL emits contact_maps: tuple(haplotype_id, stage, [png_files])
-    ch_contact_map_images = Channel.empty()
     if (params.make_final_contact_maps) {
         ch_contact_map_images = CONTACT_MAP_FINAL.out.contact_maps
             .flatMap { haplotype_id, stage, pngs -> 
@@ -1442,8 +1442,9 @@ workflow {
                 pngs instanceof List ? pngs : [pngs]
             }
             .collect()
+            .ifEmpty([])
     } else {
-        ch_contact_map_images = Channel.of([])
+        ch_contact_map_images = Channel.value([])
     }
 
     // Collect assembly QC summaries (from COMPILE_FINAL_QC)
@@ -1451,26 +1452,31 @@ workflow {
     ch_assembly_summaries = ch_all_assembly_summaries
         .map { sample_id, qc_label, tsv -> tsv }
         .collect()
+        .ifEmpty([])
 
     // Collect BAM metrics
     // These come as tuple(haplotype_id, checkpoint, tsv)
     ch_bam_metrics_files = ch_all_bam_metrics
         .map { haplotype_id, checkpoint, tsv -> tsv }
         .collect()
+        .ifEmpty([])
 
     // Collect pairs metrics
     // These come as tuple(haplotype_id, checkpoint, tsv)
     ch_pairs_metrics_files = ch_all_pairs_metrics
         .map { haplotype_id, checkpoint, tsv -> tsv }
         .collect()
+        .ifEmpty([])
 
     // Collect final assemblies
     ch_final_assemblies = GAP_FILLING.out.filled_assembly
         .map { haplotype_id, assembly -> assembly }
         .collect()
+        .ifEmpty([])
 
     // QUAST final report directory
     ch_quast_report = QUAST_FINAL.out.report_dir
+        .ifEmpty([])
 
     // Generate the summary report
     SUMMARY_REPORT(
