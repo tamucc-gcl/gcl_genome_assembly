@@ -93,7 +93,7 @@ params.yahs_round2_no_scaffold_ec = true
 params.make_final_contact_maps = true
 
 // Dotplot Params
-arams.run_pairwise_alignments = true
+params.run_pairwise_alignments = true
 params.pairwise_alignment_preset = 'asm5'  // minimap2 preset for assembly vs assembly alignment
 params.pairwise_alignment_min_mapq = 5
 params.pairwise_alignment_min_aln_bp = 10000
