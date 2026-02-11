@@ -31,16 +31,10 @@ process SUMMARY_REPORT {
     path(bam_metrics)
     // Pairs metrics: tuple(haplotype_id, checkpoint, metrics_tsv)
     path(pairs_metrics)
-    // Contact maps (mcool files)
-    path(contact_maps)
     // Final assemblies
     path(final_assemblies)
-    // QUAST report directory
+    // QUAST final report directory
     path(quast_report)
-    // BUSCO results directories
-    path(busco_dirs)
-    // Merqury results
-    path(merqury_results)
     
     output:
     path("pipeline_summary_report.html"), emit: html_report

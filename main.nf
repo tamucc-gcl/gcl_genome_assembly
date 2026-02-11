@@ -1446,7 +1446,7 @@ workflow {
         ch_contact_map_images = Channel.of([])
     }
 
-    // Collect assembly QC summaries
+    // Collect assembly QC summaries (from COMPILE_FINAL_QC)
     // These come as tuple(sample_id, qc_label, tsv)
     ch_assembly_summaries = ch_all_assembly_summaries
         .map { sample_id, qc_label, tsv -> tsv }
@@ -1464,16 +1464,6 @@ workflow {
         .map { haplotype_id, checkpoint, tsv -> tsv }
         .collect()
 
-    // Collect contact maps (mcool files)
-    ch_contact_maps = Channel.empty()
-    if (params.make_final_contact_maps) {
-        ch_contact_maps = CONTACT_MAP_FINAL.out.mcool
-            .map { haplotype_id, stage, mcool -> mcool }
-            .collect()
-    } else {
-        ch_contact_maps = Channel.of([])
-    }
-
     // Collect final assemblies
     ch_final_assemblies = GAP_FILLING.out.filled_assembly
         .map { haplotype_id, assembly -> assembly }
@@ -1481,16 +1471,6 @@ workflow {
 
     // QUAST final report directory
     ch_quast_report = QUAST_FINAL.out.report_dir
-
-    // Collect BUSCO directories (from gap-filled stage)
-    ch_busco_dirs = ASSEMBLY_QC_GAP_FILLED.out.busco_results
-        .map { haplotype_id, busco_dir -> busco_dir }
-        .collect()
-
-    // Collect Merqury results (from gap-filled stage)
-    ch_merqury_results = ASSEMBLY_QC_GAP_FILLED.out.merqury_results
-        .map { sample_id, merqury_dir -> merqury_dir }
-        .collect()
 
     // Generate the summary report
     SUMMARY_REPORT(
@@ -1500,11 +1480,8 @@ workflow {
         ch_assembly_summaries,
         ch_bam_metrics_files,
         ch_pairs_metrics_files,
-        ch_contact_maps,
         ch_final_assemblies,
-        ch_quast_report,
-        ch_busco_dirs,
-        ch_merqury_results
+        ch_quast_report
     )
 
 }
