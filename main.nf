@@ -97,7 +97,9 @@ params.run_pairwise_alignments = true
 params.pairwise_alignment_preset = 'asm5'  // minimap2 preset for assembly vs assembly alignment
 params.pairwise_alignment_min_mapq = 5
 params.pairwise_alignment_min_aln_bp = 10000
-params.pairwise_alignment_mode = 'all'         // 'all' = all pairs, 'within_sample' = hap1 vs hap2 only
+params.pairwise_alignment_mode = 'within_sample'         // 'all' = all pairs, 'within_sample' = hap1 vs hap2 only
+params.pairwise_dotplot_width = 10             // Dotplot width in inches
+params.pairwise_dotplot_height = 10            // Dotplot height in inches
 
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
@@ -321,6 +323,7 @@ include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 include { PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
+include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
 
 /*
 ========================================================================================
@@ -875,6 +878,9 @@ workflow {
     ========================================================================================
     */
     if (params.run_pairwise_alignments) {
+        
+        // First, run setup to install pafr (runs once, all alignment jobs wait for it)
+        SETUP_PAFR()
         
         // Collect all gap-filled assemblies, SORT for deterministic ordering, then generate pairs
         GAP_FILLING.out.filled_assembly

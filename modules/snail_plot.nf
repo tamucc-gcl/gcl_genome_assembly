@@ -33,6 +33,7 @@ process SNAIL_PLOT {
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_snail.svg"), emit: snail
     
     script:
+    def busco_lineage = params.busco_lineage ?: 'actinopterygii_odb10'
     """
     # Copy assembly with standardized name
     #cp ${assembly_fasta} ${haplotype_id}_${qc_label}.fasta
@@ -47,14 +48,14 @@ process SNAIL_PLOT {
     # Create the initial dataset from your FASTA
     blobtools create \
         --fasta ${assembly_fasta} \
-        my_blobdir
+        ${haplotype_id}_${qc_label}
 
     blobtools add \
-        --busco ${busco_dir}/run_actinopterygii_odb10/full_table.tsv \
-        my_blobdir
+        --busco ${busco_dir}/run_${busco_lineage}/full_table.tsv \
+        ${haplotype_id}_${qc_label}
 
     blobtk plot \
-        --blobdir my_blobdir \
+        --blobdir ${haplotype_id}_${qc_label} \
         --view snail \
         --output ${haplotype_id}_${qc_label}_snail.svg
 
@@ -62,7 +63,6 @@ process SNAIL_PLOT {
     
     stub:
     """
-    touch ${haplotype_id}_${qc_label}.fasta
-    mkdir -p ${haplotype_id}_${qc_label}_busco
+    touch ${haplotype_id}_${qc_label}_snail.svg
     """
 }

@@ -3,6 +3,7 @@
     PAIRWISE GENOME ALIGNMENT MODULE
 ========================================================================================
     Performs pairwise whole-genome alignment between two assemblies using minimap2
+    and generates a dotplot visualization
     
     Input:
     - haplotype_id1: Identifier for reference assembly
@@ -14,6 +15,7 @@
     - paf: Filtered PAF alignment file (gzipped)
     - qc: QC summary statistics TSV
     - log: Minimap2 log file
+    - dotplot: Dotplot visualization (PNG)
     
     Use cases:
     - Comparing haplotypes within a sample
@@ -22,6 +24,40 @@
 ========================================================================================
 */
 
+/*
+ * One-time setup process to install pafr R package from GitHub
+ * Runs once before any alignment jobs start to avoid race conditions
+ */
+process SETUP_PAFR {
+    tag "setup_pafr"
+    label 'pairwise_alignment'
+    
+    output:
+    val true, emit: ready
+    
+    script:
+    """
+    # Install pafr from GitHub if not already installed
+    Rscript -e '
+    if (!requireNamespace("pafr", quietly = TRUE)) {
+        message("Installing pafr from GitHub...")
+        remotes::install_github("dwinter/pafr", quiet = TRUE, upgrade = "never")
+        message("pafr installation complete")
+    } else {
+        message("pafr already installed")
+    }
+    # Verify installation
+    library(pafr)
+    message("pafr version: ", packageVersion("pafr"))
+    '
+    """
+    
+    stub:
+    """
+    echo "Stub mode - skipping pafr setup"
+    """
+}
+
 process PAIRWISE_ALIGNMENT {
     tag "${haplotype_id1}_vs_${haplotype_id2}"
     label 'pairwise_alignment'
@@ -29,22 +65,25 @@ process PAIRWISE_ALIGNMENT {
     publishDir "${params.outdir}/pairwise_alignments", 
         mode: params.publish_dir_mode,
         saveAs: { filename -> 
-            // Only publish paf.gz and log files, skip qc.tsv
+            // Only publish paf.gz, log, and dotplot files; skip qc.tsv
             filename.endsWith('.qc.tsv') ? null : filename
         }
     
     input:
-    tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2)
+    tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2), val(pafr_ready)
     
     output:
     tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.paf.gz"), emit: paf
     tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.qc.tsv"), emit: qc
     tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.log"), emit: log
+    tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}_dotplot.png"), emit: dotplot
     
     script:
     def preset = params.pairwise_alignment_preset ?: 'asm5'
     def min_mapq = params.pairwise_alignment_min_mapq ?: 5
     def min_aln_bp = params.pairwise_alignment_min_aln_bp ?: 10000
+    def dotplot_width = params.pairwise_dotplot_width ?: 10
+    def dotplot_height = params.pairwise_dotplot_height ?: 10
     def out_prefix = "${haplotype_id1}_vs_${haplotype_id2}"
     """
     set -euo pipefail
@@ -111,6 +150,15 @@ process PAIRWISE_ALIGNMENT {
     if [ ! -s "${out_prefix}.paf.gz" ]; then
         echo "" | pigz -c > "${out_prefix}.paf.gz"
     fi
+    
+    # Generate dotplot
+    Rscript ${projectDir}/r_scripts/dotplot_paf.R \\
+        --paf "${out_prefix}.paf.gz" \\
+        --ref "${haplotype_id1}" \\
+        --query "${haplotype_id2}" \\
+        --output "${out_prefix}_dotplot.png" \\
+        --width ${dotplot_width} \\
+        --height ${dotplot_height}
     """
     
     stub:
@@ -119,5 +167,6 @@ process PAIRWISE_ALIGNMENT {
     touch "${out_prefix}.paf.gz"
     echo -e "ref_id\\tqry_id\\tpreset\\tmin_mapq\\tmin_aln_bp\\tn_align\\tsum_aln_bp\\tsum_match_bp\\tmean_identity\\tmean_dv\\tmean_mapq" > "${out_prefix}.qc.tsv"
     touch "${out_prefix}.log"
+    touch "${out_prefix}_dotplot.png"
     """
 }
