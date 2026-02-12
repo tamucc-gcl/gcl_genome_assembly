@@ -2,12 +2,8 @@
 ========================================================================================
     SUMMARY REPORT MODULE
 ========================================================================================
-    Generates a markdown summary report with:
-    1. Visual table with links to snail plots, contact maps, and dotplots
-    2. QC metrics table from compiled TSVs
-    3. Links to all output files
-    
-    Relies on files already published to params.outdir by other processes
+    Generates a markdown summary report by scanning published output directories.
+    Takes no inputs from other processes - just needs params.outdir.
 ========================================================================================
 */
 
@@ -18,7 +14,7 @@ process SUMMARY_REPORT {
     publishDir "${params.outdir}/reports", mode: params.publish_dir_mode
     
     input:
-    path(qc_inputs_dir)  // From COMPILE_FINAL_QC.out.inputs_dir
+    val(trigger)  // Just a signal that upstream processes are done
     
     output:
     path("pipeline_summary_report.md"), emit: md_report
@@ -27,8 +23,7 @@ process SUMMARY_REPORT {
     script:
     """
     Rscript ${projectDir}/r_scripts/generate_summary_report.R \\
-        --qc_dir ${qc_inputs_dir} \\
-        --outdir_base "${params.outdir}" \\
+        --outdir "${params.outdir}" \\
         --output_dir .
     """
     

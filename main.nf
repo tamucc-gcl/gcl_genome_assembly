@@ -1414,8 +1414,10 @@ workflow {
         SUMMARY REPORT
     ========================================================================================
     */
+    // Use SNAIL_PLOT_FINAL completion as trigger (it runs near the end)
+    // The .collect().map ensures we wait for all snail plots, then emit a single value
     SUMMARY_REPORT(
-        COMPILE_FINAL_QC.out.inputs_dir
+        SNAIL_PLOT_FINAL.out.snail.collect().map { "ready" }
     )
 
 }
