@@ -23,11 +23,36 @@ outdir <- args$outdir
 # Scan for files
 # =============================================================================
 message("=== Scanning output directories ===")
+message(sprintf("Looking in: %s", outdir))
+
+# Debug: show what directories exist
+if (dir.exists(outdir)) {
+  message("Top-level contents:")
+  message(paste("  ", list.files(outdir), collapse = "\n"))
+} else {
+  message("WARNING: outdir does not exist!")
+}
 
 # Get sample IDs from QC TSVs
 qc_dir <- file.path(outdir, "qc/assembly")
+message(sprintf("Looking for QC files in: %s", qc_dir))
+
+if (dir.exists(qc_dir)) {
+  message("QC dir contents:")
+  all_qc_files <- list.files(qc_dir, recursive = TRUE)
+  message(paste("  ", head(all_qc_files, 20), collapse = "\n"))
+  if (length(all_qc_files) > 20) message(sprintf("  ... and %d more", length(all_qc_files) - 20))
+} else {
+  message("WARNING: qc_dir does not exist!")
+}
+
 qc_files <- list.files(qc_dir, pattern = "_qc_summary\\.tsv$", 
                        full.names = TRUE, recursive = TRUE)
+message(sprintf("Found %d QC summary files", length(qc_files)))
+if (length(qc_files) > 0) {
+  message("QC files found:")
+  message(paste("  ", basename(qc_files), collapse = "\n"))
+}
 
 samples <- qc_files %>%
   basename() %>%
