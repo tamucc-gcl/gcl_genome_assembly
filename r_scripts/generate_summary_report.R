@@ -25,41 +25,44 @@ outdir <- args$outdir
 message("=== Scanning output directories ===")
 message(sprintf("Looking in: %s", outdir))
 
-# Debug: show what directories exist
-if (dir.exists(outdir)) {
-  message("Top-level contents:")
-  message(paste("  ", list.files(outdir), collapse = "\n"))
+# Get sample IDs from snail_plots directory (most reliable - these are final outputs)
+snail_dir <- file.path(outdir, "snail_plots")
+message(sprintf("Looking for snail plots in: %s", snail_dir))
+
+if (dir.exists(snail_dir)) {
+  all_snail_files <- list.files(snail_dir)
+  message(sprintf("Snail dir contents (%d files):", length(all_snail_files)))
+  message(paste("  ", all_snail_files, collapse = "\n"))
 } else {
-  message("WARNING: outdir does not exist!")
+  message("WARNING: snail_dir does not exist!")
 }
 
-# Get sample IDs from QC TSVs
-qc_dir <- file.path(outdir, "qc/assembly")
-message(sprintf("Looking for QC files in: %s", qc_dir))
+snail_files <- list.files(snail_dir, pattern = "_snail\\.svg$", full.names = FALSE)
+message(sprintf("Found %d snail plot files", length(snail_files)))
 
-if (dir.exists(qc_dir)) {
-  message("QC dir contents:")
-  all_qc_files <- list.files(qc_dir, recursive = TRUE)
-  message(paste("  ", head(all_qc_files, 20), collapse = "\n"))
-  if (length(all_qc_files) > 20) message(sprintf("  ... and %d more", length(all_qc_files) - 20))
-} else {
-  message("WARNING: qc_dir does not exist!")
-}
+# Extract haplotype IDs from snail plots, then get unique sample IDs
+# Pattern: {sample_id}_hap{1,2}_{label}_snail.svg
+haplotype_ids <- snail_files %>%
+  str_extract("^.+_hap[12](?=_)")
 
-qc_files <- list.files(qc_dir, pattern = "_qc_summary\\.tsv$", 
-                       full.names = TRUE, recursive = TRUE)
-message(sprintf("Found %d QC summary files", length(qc_files)))
-if (length(qc_files) > 0) {
-  message("QC files found:")
-  message(paste("  ", basename(qc_files), collapse = "\n"))
-}
-
-samples <- qc_files %>%
-  basename() %>%
-  str_extract("^[^_]+_[^_]+_[^_]+") %>%
+sample_ids <- haplotype_ids %>%
+  str_replace("_hap[12]$", "") %>%
   unique() %>%
   na.omit() %>%
   sort()
+
+message(sprintf("Found %d samples: %s", length(sample_ids), paste(sample_ids, collapse = ", ")))
+
+# If no snail plots, try to get samples from contact_maps or pairwise_alignments
+if (length(sample_ids) == 0) {
+  contact_dir <- file.path(outdir, "contact_maps")
+  contact_files <- list.files(contact_dir, pattern = "_contact_map\\.png$", full.names = FALSE)
+  haplotype_ids <- contact_files %>% str_extract("^.+_hap[12](?=_)")
+  sample_ids <- haplotype_ids %>% str_replace("_hap[12]$", "") %>% unique() %>% na.omit() %>% sort()
+  message(sprintf("From contact maps - found %d samples", length(sample_ids)))
+}
+
+samples <- sample_ids
 
 message(sprintf("Found %d samples: %s", length(samples), paste(samples, collapse = ", ")))
 
@@ -93,9 +96,16 @@ md <- c(
 
 for (i in seq_len(nrow(visual_data))) {
   row <- visual_data[i, ]
-  md <- c(md, sprintf("| %s | [snail](../snail_plots/%s) | [contact](../contact_maps/%s) | [snail](../snail_plots/%s) | [contact](../contact_maps/%s) | [dotplot](../pairwise_alignments/%s) |",
-                      row$sample_id, row$hap1_snail, row$hap1_contact, 
-                      row$hap2_snail, row$hap2_contact, row$dotplot))
+  
+  hap1_snail_link <- if (!is.na(row$hap1_snail)) sprintf("[snail](../snail_plots/%s)", row$hap1_snail) else "—"
+  hap1_contact_link <- if (!is.na(row$hap1_contact)) sprintf("[contact](../contact_maps/%s)", row$hap1_contact) else "—"
+  hap2_snail_link <- if (!is.na(row$hap2_snail)) sprintf("[snail](../snail_plots/%s)", row$hap2_snail) else "—"
+  hap2_contact_link <- if (!is.na(row$hap2_contact)) sprintf("[contact](../contact_maps/%s)", row$hap2_contact) else "—"
+  dotplot_link <- if (!is.na(row$dotplot)) sprintf("[dotplot](../pairwise_alignments/%s)", row$dotplot) else "—"
+  
+  md <- c(md, sprintf("| %s | %s | %s | %s | %s | %s |",
+                      row$sample_id, hap1_snail_link, hap1_contact_link, 
+                      hap2_snail_link, hap2_contact_link, dotplot_link))
 }
 
 md <- c(md,
@@ -135,9 +145,16 @@ html <- c(
 
 for (i in seq_len(nrow(visual_data))) {
   row <- visual_data[i, ]
+  
+  hap1_snail_cell <- if (!is.na(row$hap1_snail)) sprintf('<img src="../snail_plots/%s">', row$hap1_snail) else "—"
+  hap1_contact_cell <- if (!is.na(row$hap1_contact)) sprintf('<img src="../contact_maps/%s">', row$hap1_contact) else "—"
+  hap2_snail_cell <- if (!is.na(row$hap2_snail)) sprintf('<img src="../snail_plots/%s">', row$hap2_snail) else "—"
+  hap2_contact_cell <- if (!is.na(row$hap2_contact)) sprintf('<img src="../contact_maps/%s">', row$hap2_contact) else "—"
+  dotplot_cell <- if (!is.na(row$dotplot)) sprintf('<img src="../pairwise_alignments/%s">', row$dotplot) else "—"
+  
   html <- c(html, sprintf(
-    '<tr><td><b>%s</b></td><td><img src="../snail_plots/%s"></td><td><img src="../contact_maps/%s"></td><td><img src="../snail_plots/%s"></td><td><img src="../contact_maps/%s"></td><td><img src="../pairwise_alignments/%s"></td></tr>',
-    row$sample_id, row$hap1_snail, row$hap1_contact, row$hap2_snail, row$hap2_contact, row$dotplot))
+    '<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+    row$sample_id, hap1_snail_cell, hap1_contact_cell, hap2_snail_cell, hap2_contact_cell, dotplot_cell))
 }
 
 html <- c(html, "</table></body></html>")
