@@ -21,9 +21,10 @@ process SUMMARY_REPORT {
     path("pipeline_summary_report.html"), emit: html_report
     
     script:
+    def abs_outdir = file(params.outdir).toAbsolutePath()
     """
     Rscript ${projectDir}/r_scripts/generate_summary_report.R \\
-        --outdir "${params.outdir}" \\
+        --outdir "${abs_outdir}" \\
         --output_dir .
     """
     
