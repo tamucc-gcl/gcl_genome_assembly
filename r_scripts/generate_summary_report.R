@@ -97,11 +97,11 @@ md <- c(
 for (i in seq_len(nrow(visual_data))) {
   row <- visual_data[i, ]
   
-  hap1_snail_link <- if (!is.na(row$hap1_snail)) sprintf("[snail](../snail_plots/%s)", row$hap1_snail) else "—"
-  hap1_contact_link <- if (!is.na(row$hap1_contact)) sprintf("[contact](../contact_maps/%s)", row$hap1_contact) else "—"
-  hap2_snail_link <- if (!is.na(row$hap2_snail)) sprintf("[snail](../snail_plots/%s)", row$hap2_snail) else "—"
-  hap2_contact_link <- if (!is.na(row$hap2_contact)) sprintf("[contact](../contact_maps/%s)", row$hap2_contact) else "—"
-  dotplot_link <- if (!is.na(row$dotplot)) sprintf("[dotplot](../pairwise_alignments/%s)", row$dotplot) else "—"
+  hap1_snail_link <- if (!is.na(row$hap1_snail)) sprintf("![snail](../snail_plots/%s)", row$hap1_snail) else "—"
+  hap1_contact_link <- if (!is.na(row$hap1_contact)) sprintf("![contact](../contact_maps/%s)", row$hap1_contact) else "—"
+  hap2_snail_link <- if (!is.na(row$hap2_snail)) sprintf("![snail](../snail_plots/%s)", row$hap2_snail) else "—"
+  hap2_contact_link <- if (!is.na(row$hap2_contact)) sprintf("![contact](../contact_maps/%s)", row$hap2_contact) else "—"
+  dotplot_link <- if (!is.na(row$dotplot)) sprintf("![dotplot](../pairwise_alignments/%s)", row$dotplot) else "—"
   
   md <- c(md, sprintf("| %s | %s | %s | %s | %s | %s |",
                       row$sample_id, hap1_snail_link, hap1_contact_link, 
