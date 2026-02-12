@@ -22,6 +22,7 @@ process HIFIASM {
     tuple val(sample_id), path("${sample_id}.hic.hap2.p_ctg.gfa"), emit: gfa_hap2
     
     script:
+    telomere_motif = params.telomere_motif ?: 'CCCTAA'  // Default to human telomeric repeat if not provided
     """
     hifiasm \\
         -o ${sample_id} \\
@@ -29,7 +30,7 @@ process HIFIASM {
         -l 3 \\
         -s 0.55 \\
         --n-hap 2 \\
-        --telo-m CCCTAA \\
+        --telo-m ${telomere_motif} \\
         --h1 ${hic_r1} \\
         --h2 ${hic_r2} \\
         ${hifi_fastq} \\
