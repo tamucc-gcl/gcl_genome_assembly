@@ -1414,68 +1414,8 @@ workflow {
         SUMMARY REPORT
     ========================================================================================
     */
-
-    // Collect snail plots - extract just the SVG files from tuples
-    // SNAIL_PLOT_FINAL emits: tuple(haplotype_id, qc_label, snail_svg)
-    ch_snail_plots = SNAIL_PLOT_FINAL.out.snail
-        .map { haplotype_id, qc_label, snail_svg -> snail_svg }
-        .collect()
-
-    // Collect dotplots - extract just the PNG files from tuples
-    // PAIRWISE_ALIGNMENT emits: tuple(hap1_id, hap2_id, dotplot_png)
-    if (params.run_pairwise_alignments) {
-        ch_dotplots = PAIRWISE_ALIGNMENT.out.dotplot
-            .map { hap1_id, hap2_id, dotplot_png -> dotplot_png }
-            .collect()
-    } else {
-        ch_dotplots = Channel.value([])
-    }
-
-    // Collect contact map images (PNG files)
-    // CONTACT_MAP_FINAL emits contact_maps: tuple(haplotype_id, stage, [png_files])
-    if (params.make_final_contact_maps) {
-        ch_contact_map_images = CONTACT_MAP_FINAL.out.contact_maps
-            .flatMap { haplotype_id, stage, pngs -> 
-                pngs instanceof List ? pngs : [pngs]
-            }
-            .collect()
-    } else {
-        ch_contact_map_images = Channel.value([])
-    }
-
-    // Collect assembly QC summaries (from COMPILE_FINAL_QC)
-    ch_assembly_summaries = ch_all_assembly_summaries
-        .map { sample_id, qc_label, tsv -> tsv }
-        .collect()
-
-    // Collect BAM metrics
-    ch_bam_metrics_files = ch_all_bam_metrics
-        .map { haplotype_id, checkpoint, tsv -> tsv }
-        .collect()
-
-    // Collect pairs metrics
-    ch_pairs_metrics_files = ch_all_pairs_metrics
-        .map { haplotype_id, checkpoint, tsv -> tsv }
-        .collect()
-
-    // Collect final assemblies
-    ch_final_assemblies = GAP_FILLING.out.filled_assembly
-        .map { haplotype_id, assembly -> assembly }
-        .collect()
-
-    // QUAST final report directory
-    ch_quast_report = QUAST_FINAL.out.report_dir
-
-    // Generate the summary report
     SUMMARY_REPORT(
-        ch_snail_plots,
-        ch_dotplots,
-        ch_contact_map_images,
-        ch_assembly_summaries,
-        ch_bam_metrics_files,
-        ch_pairs_metrics_files,
-        ch_final_assemblies,
-        ch_quast_report
+        COMPILE_FINAL_QC.out.inputs_dir
     )
 
 }

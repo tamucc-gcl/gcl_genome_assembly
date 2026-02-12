@@ -3,30 +3,23 @@
 #' =============================================================================
 #' GENERATE PIPELINE SUMMARY REPORT
 #' =============================================================================
-#' Creates comprehensive HTML and Markdown summary reports with:
-#'   1. Visual table: snail plots (hap1, hap2) + within-sample dotplot per row
-#'   2. QC metrics summary table (assembly, Hi-C mapping, pairs stats)
-#'   3. Assembly QC plots (BUSCO, contiguity, QV)
-#'   4. Links to all output files
+#' Creates markdown and HTML reports with:
+#'   1. Visual table with links to snail plots, contact maps, dotplots
+#'   2. QC metrics table from compiled TSVs
+#'   3. Links to output directories
+#'
+#' Scans published output directories for images
 #' =============================================================================
 
 suppressPackageStartupMessages({
   library(tidyverse)
   library(argparse)
-  library(knitr)
-  library(kableExtra)
 })
 
-# =============================================================================
-# Parse arguments
-# =============================================================================
 parser <- ArgumentParser(description = "Generate pipeline summary report")
-parser$add_argument("--snail_dir", required = TRUE)
-parser$add_argument("--dotplot_dir", required = TRUE)
-parser$add_argument("--contact_map_dir", required = TRUE)
-parser$add_argument("--assembly_qc_dir", required = TRUE)
-parser$add_argument("--output_dir", required = TRUE)
-parser$add_argument("--outdir_base", default = "results")
+parser$add_argument("--qc_dir", required = TRUE, help = "Directory with compiled QC TSVs")
+parser$add_argument("--outdir_base", required = TRUE, help = "Pipeline output base directory")
+parser$add_argument("--output_dir", default = ".", help = "Where to write reports")
 
 args <- parser$parse_args()
 
@@ -34,561 +27,164 @@ args <- parser$parse_args()
 # Helper functions
 # =============================================================================
 extract_sample_id <- function(haplotype_id) {
+
   str_replace(haplotype_id, "_hap[12]$", "")
 }
 
-extract_haplotype <- function(haplotype_id) {
+extract_hap <- function(haplotype_id) {
   str_extract(haplotype_id, "hap[12]$")
 }
 
-img_to_base64 <- function(img_path) {
-  if (!file.exists(img_path)) return("")
-  ext <- tools::file_ext(img_path)
-  mime <- switch(ext,
-    "svg" = "image/svg+xml",
-    "png" = "image/png",
-    "jpg" = "image/jpeg",
-    "jpeg" = "image/jpeg",
-    "application/octet-stream"
-  )
-  raw <- readBin(img_path, "raw", file.info(img_path)$size)
-  b64 <- base64enc::base64encode(raw)
-  sprintf("data:%s;base64,%s", mime, b64)
-}
-
-# Alternative: use relative paths (for smaller HTML files)
-img_relative_path <- function(img_path, base_dir = "summary_data") {
-  if (!file.exists(img_path)) return("")
-  file.path(base_dir, basename(dirname(img_path)), basename(img_path))
-}
-
 # =============================================================================
-# 1. Load and organize snail plots
+# Load QC data and derive sample/haplotype IDs
 # =============================================================================
-message("=== Loading snail plots ===")
-snail_files <- list.files(args$snail_dir, pattern = "\\.(svg|png)$", full.names = TRUE)
+message("=== Loading QC data ===")
 
-snail_df <- tibble(path = snail_files) %>%
-  mutate(
-    filename = basename(path),
-    # Expected format: {haplotype_id}_{qc_label}_snail.svg
-    # haplotype_id ends with _hap1 or _hap2
-    # qc_label might contain underscores (e.g., "gap_filled")
-    haplotype_id = str_extract(filename, "^.+_hap[12](?=_)"),
-    qc_label = str_extract(filename, "(?<=_hap[12]_).+(?=_snail)"),
-    sample_id = extract_sample_id(haplotype_id),
-    hap = extract_haplotype(haplotype_id)
-  ) %>%
-  filter(!is.na(haplotype_id))
+outdir <- args$outdir_base
 
-message(sprintf("Found %d snail plots for %d samples", 
-                nrow(snail_df), n_distinct(snail_df$sample_id)))
+assembly_qc_dir <- file.path(args$qc_dir, "assembly")
+assembly_files <- list.files(assembly_qc_dir, pattern = "\\.tsv$", full.names = TRUE)
 
-# =============================================================================
-# 2. Load and organize dotplots
-# =============================================================================
-message("=== Loading dotplots ===")
-dotplot_files <- list.files(args$dotplot_dir, pattern = "_dotplot\\.png$", full.names = TRUE)
-
-dotplot_df <- tibble(path = dotplot_files) %>%
-  mutate(
-    filename = basename(path),
-    # Expected format: {hap1_id}_vs_{hap2_id}_dotplot.png
-    # e.g., Sde_CPla_115_hap1_vs_Sde_CPla_115_hap2_dotplot.png
-    hap1_id = str_extract(filename, "^.+_hap1(?=_vs_)"),
-    hap2_id = str_extract(filename, "(?<=_vs_).+_hap2(?=_dotplot)"),
-    sample_id = extract_sample_id(hap1_id)
-  ) %>%
-  filter(!is.na(hap1_id))
-
-message(sprintf("Found %d dotplots", nrow(dotplot_df)))
-
-# =============================================================================
-# 2b. Load and organize contact maps
-# =============================================================================
-message("=== Loading contact maps ===")
-contact_files <- list.files(args$contact_map_dir, pattern = "_contact_map\\.png$", full.names = TRUE)
-
-contact_df <- tibble(path = contact_files) %>%
-  mutate(
-    filename = basename(path),
-    # Expected format: {haplotype_id}_{stage}_{resolution}bp_contact_map.png
-    # e.g., Sde_CPla_115_hap1_final_1000000bp_contact_map.png
-    # haplotype_id ends with _hap1 or _hap2
-    haplotype_id = str_extract(filename, "^.+_hap[12](?=_)"),
-    stage = str_extract(filename, "(?<=_hap[12]_)[a-z_]+(?=_[0-9])"),
-    resolution = str_extract(filename, "[0-9]+(?=bp_contact_map)"),
-    sample_id = extract_sample_id(haplotype_id),
-    hap = extract_haplotype(haplotype_id)
-  ) %>%
-  filter(!is.na(haplotype_id))
-
-# Prefer final stage, highest resolution available
-contact_df <- contact_df %>%
-  mutate(resolution_num = as.numeric(resolution)) %>%
-  group_by(sample_id, hap) %>%
-  # Prefer 'final' stage, then by resolution (lower is better for detail, but 1Mb is good for overview)
-  filter(stage == "final" | stage == first(stage)) %>%
-  # Pick ~1Mb resolution for overview, or closest available
-  slice_min(abs(resolution_num - 1000000), n = 1, with_ties = FALSE) %>%
-  ungroup()
-
-message(sprintf("Found %d contact maps for %d samples", 
-                nrow(contact_df), n_distinct(contact_df$sample_id)))
-
-# =============================================================================
-# 3. Load QC metrics
-# =============================================================================
-message("=== Loading QC metrics ===")
-qc_files <- list.files(args$assembly_qc_dir, pattern = "\\.tsv$", full.names = TRUE)
-
-# Read and combine all TSV files
-all_qc <- map_dfr(qc_files, function(f) {
-  tryCatch({
-    df <- read_tsv(f, show_col_types = FALSE)
-    df$source_file <- basename(f)
-    df
-  }, error = function(e) {
-    warning(sprintf("Failed to read %s: %s", f, e$message))
-    NULL
-  })
+assembly_qc <- map_dfr(assembly_files, function(f) {
+  tryCatch(read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
 })
 
-# Parse assembly QC summaries (wide format with hap1, hap2, both columns)
-assembly_qc <- all_qc %>%
-  filter(str_detect(source_file, "qc_summary")) %>%
-  select(-source_file) %>%
-  distinct()
-
-# Parse BAM metrics
-bam_metrics <- all_qc %>%
-  filter(str_detect(source_file, "bam_metrics|hic_bam")) %>%
-  select(-source_file) %>%
-  distinct()
-
-# Parse pairs metrics
-pairs_metrics <- all_qc %>%
-  filter(str_detect(source_file, "pairs_metrics|hic_pairs")) %>%
-  select(-source_file) %>%
-  distinct()
-
-message(sprintf("Loaded %d assembly QC records, %d BAM metrics, %d pairs metrics",
-                nrow(assembly_qc), nrow(bam_metrics), nrow(pairs_metrics)))
-
-# =============================================================================
-# 4. Build visual comparison table (snail plots + contact maps + dotplot)
-# =============================================================================
-message("=== Building visual comparison table ===")
-
-# Get unique samples from all visual outputs
-samples <- sort(unique(c(snail_df$sample_id, dotplot_df$sample_id, contact_df$sample_id)))
-
-# Choose embedding method based on file count
-# Auto-switch to relative paths if >10 samples (avoids multi-MB HTML)
-USE_BASE64 <- length(samples) <= 10
-
-get_img_src <- function(img_path) {
-  if (USE_BASE64) {
-    img_to_base64(img_path)
-  } else {
-    # Copy to output and return relative path
-    out_subdir <- file.path(args$output_dir, "images")
-    dir.create(out_subdir, showWarnings = FALSE, recursive = TRUE)
-    if (file.exists(img_path)) {
-      file.copy(img_path, out_subdir, overwrite = TRUE)
-      file.path("images", basename(img_path))
-    } else {
-      ""
-    }
-  }
-}
-
-visual_table_rows <- map_dfr(samples, function(sid) {
-  # Get hap1 and hap2 snail plots for this sample
-  hap1_snail <- snail_df %>% filter(sample_id == sid, hap == "hap1") %>% pull(path) %>% first()
-  hap2_snail <- snail_df %>% filter(sample_id == sid, hap == "hap2") %>% pull(path) %>% first()
-  
-  # Get hap1 and hap2 contact maps for this sample
-  hap1_contact <- contact_df %>% filter(sample_id == sid, hap == "hap1") %>% pull(path) %>% first()
-  hap2_contact <- contact_df %>% filter(sample_id == sid, hap == "hap2") %>% pull(path) %>% first()
-  
-  # Get dotplot for this sample
-  dotplot_path <- dotplot_df %>% filter(sample_id == sid) %>% pull(path) %>% first()
-  
-  tibble(
-    sample_id = sid,
-    hap1_snail_path = hap1_snail %||% NA_character_,
-    hap2_snail_path = hap2_snail %||% NA_character_,
-    hap1_contact_path = hap1_contact %||% NA_character_,
-    hap2_contact_path = hap2_contact %||% NA_character_,
-    dotplot_path = dotplot_path %||% NA_character_
-  )
-})
-
-# =============================================================================
-# 5. Build QC metrics summary table
-# =============================================================================
-message("=== Building QC metrics summary ===")
-
-# Extract key metrics for final (gap_filled) stage
-final_qc <- assembly_qc %>%
-  filter(str_detect(stage, "gap_filled|final")) %>%
-  select(sample_id, metric, hap1, hap2, both) %>%
-  filter(metric %in% c(
-    "total_length", "n50", "n_scaffolds", "largest_scaffold",
-    "gc_percent", "qv", "kmer_completeness",
-    "complete", "single", "duplicated", "fragmented", "missing"
-  )) %>%
-  pivot_wider(
-    names_from = metric,
-    values_from = c(hap1, hap2, both),
-    names_glue = "{.value}_{metric}"
-  )
-
-# =============================================================================
-# 6. Generate HTML report
-# =============================================================================
-message("=== Generating HTML report ===")
-
-html_content <- c(
-  '<!DOCTYPE html>',
-  '<html lang="en">',
-  '<head>',
-  '  <meta charset="UTF-8">',
-  '  <meta name="viewport" content="width=device-width, initial-scale=1.0">',
-  '  <title>Genome Assembly Pipeline Summary Report</title>',
-  '  <style>',
-  '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; background: #f5f5f5; }',
-  '    .container { max-width: 1800px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }',
-  '    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 15px; }',
-  '    h2 { color: #34495e; margin-top: 40px; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }',
-  '    h3 { color: #7f8c8d; }',
-  '    table { border-collapse: collapse; width: 100%; margin: 20px 0; }',
-  '    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }',
-  '    th { background: #3498db; color: white; }',
-  '    tr:nth-child(even) { background: #f9f9f9; }',
-  '    tr:hover { background: #f1f1f1; }',
-  '    .visual-table img { max-width: 250px; max-height: 250px; border: 1px solid #ddd; border-radius: 4px; }',
-  '    .visual-table td { vertical-align: middle; text-align: center; padding: 8px; }',
-  '    .visual-table th { font-size: 0.9em; }',
-  '    .metric-good { color: #27ae60; font-weight: bold; }',
-  '    .metric-warn { color: #f39c12; font-weight: bold; }',
-  '    .metric-bad { color: #e74c3c; font-weight: bold; }',
-  '    .links-section a { display: block; margin: 5px 0; color: #3498db; }',
-  '    .links-section a:hover { color: #2980b9; }',
-  '    .toc { background: #ecf0f1; padding: 20px; border-radius: 4px; margin-bottom: 30px; }',
-  '    .toc ul { columns: 2; }',
-  '    .toc a { color: #2c3e50; text-decoration: none; }',
-  '    .toc a:hover { text-decoration: underline; }',
-  '    .timestamp { color: #95a5a6; font-size: 0.9em; }',
-  '    code { background: #ecf0f1; padding: 2px 6px; border-radius: 3px; }',
-  '  </style>',
-  '</head>',
-  '<body>',
-  '<div class="container">',
-  sprintf('<h1>🧬 Genome Assembly Pipeline Summary Report</h1>'),
-  sprintf('<p class="timestamp">Generated: %s</p>', format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-  '',
-  '<div class="toc">',
-  '<h3>Table of Contents</h3>',
-  '<ul>',
-  '<li><a href="#visual-comparison">1. Visual Comparison (Snail Plots & Dotplots)</a></li>',
-  '<li><a href="#qc-metrics">2. QC Metrics Summary</a></li>',
-  '<li><a href="#assembly-stats">3. Assembly Statistics</a></li>',
-  '<li><a href="#hic-stats">4. Hi-C Mapping Statistics</a></li>',
-  '<li><a href="#output-links">5. Output File Links</a></li>',
-  '</ul>',
-  '</div>'
-)
-
-# Section 1: Visual comparison table
-html_content <- c(html_content,
-  '<h2 id="visual-comparison">1. Visual Comparison</h2>',
-  '<p>Snail plots showing assembly contiguity and BUSCO completeness, Hi-C contact maps, ',
-  'and within-individual pairwise dotplots comparing hap1 vs hap2.</p>',
-  '<table class="visual-table">',
-  '<thead><tr><th>Sample</th><th>Hap1 Snail</th><th>Hap1 Contact Map</th><th>Hap2 Snail</th><th>Hap2 Contact Map</th><th>Hap1 vs Hap2</th></tr></thead>',
-  '<tbody>'
-)
-
-for (i in seq_len(nrow(visual_table_rows))) {
-  row <- visual_table_rows[i, ]
-  
-  hap1_snail_img <- if (!is.na(row$hap1_snail_path) && file.exists(row$hap1_snail_path)) {
-    sprintf('<img src="%s" alt="hap1 snail">', get_img_src(row$hap1_snail_path))
-  } else { "<em>—</em>" }
-  
-  hap2_snail_img <- if (!is.na(row$hap2_snail_path) && file.exists(row$hap2_snail_path)) {
-    sprintf('<img src="%s" alt="hap2 snail">', get_img_src(row$hap2_snail_path))
-  } else { "<em>—</em>" }
-  
-  hap1_contact_img <- if (!is.na(row$hap1_contact_path) && file.exists(row$hap1_contact_path)) {
-    sprintf('<img src="%s" alt="hap1 contact map">', get_img_src(row$hap1_contact_path))
-  } else { "<em>—</em>" }
-  
-  hap2_contact_img <- if (!is.na(row$hap2_contact_path) && file.exists(row$hap2_contact_path)) {
-    sprintf('<img src="%s" alt="hap2 contact map">', get_img_src(row$hap2_contact_path))
-  } else { "<em>—</em>" }
-  
-  dotplot_img <- if (!is.na(row$dotplot_path) && file.exists(row$dotplot_path)) {
-    sprintf('<img src="%s" alt="dotplot">', get_img_src(row$dotplot_path))
-  } else { "<em>—</em>" }
-  
-  html_content <- c(html_content,
-    sprintf('<tr><td><strong>%s</strong></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-            row$sample_id, hap1_snail_img, hap1_contact_img, hap2_snail_img, hap2_contact_img, dotplot_img)
-  )
-}
-
-html_content <- c(html_content, '</tbody></table>')
-
-# Section 2: QC Metrics Summary
-html_content <- c(html_content,
-  '<h2 id="qc-metrics">2. QC Metrics Summary</h2>',
-  '<p>Key quality metrics for final gap-filled assemblies.</p>'
-)
-
-if (nrow(final_qc) > 0) {
-  # Build metrics table dynamically
-  html_content <- c(html_content,
-    '<table>',
-    '<thead><tr><th>Sample</th><th>Haplotype</th><th>Total Length</th><th>N50</th><th>Scaffolds</th><th>QV</th><th>k-mer Comp.</th><th>BUSCO Complete</th></tr></thead>',
-    '<tbody>'
-  )
-  
-  for (i in seq_len(nrow(final_qc))) {
-    row <- final_qc[i, ]
-    
-    # Hap1 row
-    html_content <- c(html_content,
-      sprintf('<tr><td rowspan="2"><strong>%s</strong></td><td>hap1</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-              row$sample_id,
-              scales::comma(row$hap1_total_length %||% NA),
-              scales::comma(row$hap1_n50 %||% NA),
-              row$hap1_n_scaffolds %||% "—",
-              sprintf("%.1f", row$hap1_qv %||% NA),
-              sprintf("%.1f%%", (row$hap1_kmer_completeness %||% NA) * 100),
-              sprintf("%.1f%%", (row$hap1_complete %||% NA) * 100))
-    )
-    
-    # Hap2 row
-    html_content <- c(html_content,
-      sprintf('<tr><td>hap2</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-              scales::comma(row$hap2_total_length %||% NA),
-              scales::comma(row$hap2_n50 %||% NA),
-              row$hap2_n_scaffolds %||% "—",
-              sprintf("%.1f", row$hap2_qv %||% NA),
-              sprintf("%.1f%%", (row$hap2_kmer_completeness %||% NA) * 100),
-              sprintf("%.1f%%", (row$hap2_complete %||% NA) * 100))
-    )
-  }
-  
-  html_content <- c(html_content, '</tbody></table>')
+# Get unique sample IDs from QC data
+if (nrow(assembly_qc) > 0 && "sample_id" %in% names(assembly_qc)) {
+  samples <- sort(unique(assembly_qc$sample_id))
+  message(sprintf("Found %d samples in QC data: %s", length(samples), paste(samples, collapse = ", ")))
 } else {
-  html_content <- c(html_content, '<p><em>No final QC metrics available.</em></p>')
+  # Try to extract from filenames
+  samples <- assembly_files %>%
+    basename() %>%
+    str_extract("^[^_]+_[^_]+_[^_]+") %>%
+    unique() %>%
+    na.omit()
+  message(sprintf("Extracted %d samples from filenames", length(samples)))
 }
 
-# Section 3: Assembly Statistics (full table)
-html_content <- c(html_content,
-  '<h2 id="assembly-stats">3. Detailed Assembly Statistics</h2>'
-)
-
-if (nrow(assembly_qc) > 0) {
-  # Pivot to long format for display
-  assembly_long <- assembly_qc %>%
-    select(sample_id, stage, metric, hap1, hap2, both) %>%
-    distinct()
-  
-  html_content <- c(html_content,
-    '<details><summary>Click to expand full assembly statistics</summary>',
-    '<table>',
-    '<thead><tr><th>Sample</th><th>Stage</th><th>Metric</th><th>Hap1</th><th>Hap2</th><th>Both</th></tr></thead>',
-    '<tbody>'
+# Build expected filenames based on sample IDs
+# These are relative paths from the reports/ directory
+visual_data <- tibble(sample_id = samples) %>%
+  mutate(
+    hap1_snail = sprintf("%s_hap1_gap_filled_snail.svg", sample_id),
+    hap2_snail = sprintf("%s_hap2_gap_filled_snail.svg", sample_id),
+    hap1_contact = sprintf("%s_hap1_final_1000000bp_contact_map.png", sample_id),
+    hap2_contact = sprintf("%s_hap2_final_1000000bp_contact_map.png", sample_id),
+    dotplot = sprintf("%s_hap1_vs_%s_hap2_dotplot.png", sample_id, sample_id)
   )
-  
-  for (i in seq_len(nrow(assembly_long))) {
-    row <- assembly_long[i, ]
-    html_content <- c(html_content,
-      sprintf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-              row$sample_id, row$stage, row$metric,
-              row$hap1 %||% "—", row$hap2 %||% "—", row$both %||% "—")
-    )
-  }
-  
-  html_content <- c(html_content, '</tbody></table></details>')
-}
 
-# Section 4: Hi-C Statistics
-html_content <- c(html_content,
-  '<h2 id="hic-stats">4. Hi-C Mapping Statistics</h2>'
-)
-
-if (nrow(pairs_metrics) > 0) {
-  html_content <- c(html_content,
-    '<details><summary>Click to expand Hi-C pairs statistics</summary>',
-    '<table>',
-    '<thead><tr>'
-  )
-  
-  # Add column headers
-  col_names <- names(pairs_metrics)
-  for (col in col_names) {
-    html_content <- c(html_content, sprintf('<th>%s</th>', col))
-  }
-  html_content <- c(html_content, '</tr></thead><tbody>')
-  
-  for (i in seq_len(nrow(pairs_metrics))) {
-    html_content <- c(html_content, '<tr>')
-    for (col in col_names) {
-      val <- pairs_metrics[[col]][i]
-      html_content <- c(html_content, sprintf('<td>%s</td>', val %||% "—"))
-    }
-    html_content <- c(html_content, '</tr>')
-  }
-  
-  html_content <- c(html_content, '</tbody></table></details>')
-} else {
-  html_content <- c(html_content, '<p><em>No Hi-C pairs metrics available.</em></p>')
-}
-
-# Section 5: Output file links
-html_content <- c(html_content,
-  '<h2 id="output-links">5. Output File Links</h2>',
-  '<div class="links-section">',
-  '<h3>Final Assemblies</h3>',
-  sprintf('<p>Location: <code>%s/assemblies/gap_filled/</code></p>', args$outdir_base),
-  '',
-  '<h3>QC Reports</h3>',
-  '<ul>',
-  sprintf('<li>Assembly QC: <code>%s/qc/assembly/</code></li>', args$outdir_base),
-  sprintf('<li>Hi-C Mapping QC: <code>%s/qc/hic_mapping/</code></li>', args$outdir_base),
-  sprintf('<li>QUAST Comparison: <code>%s/qc/quast_final/</code></li>', args$outdir_base),
-  '</ul>',
-  '',
-  '<h3>Contact Maps</h3>',
-  sprintf('<p>Location: <code>%s/contact_maps/</code></p>', args$outdir_base),
-  '<p>View .mcool files with <a href="https://higlass.io/">HiGlass</a> or <a href="https://github.com/open2c/cooler">cooler</a></p>',
-  '',
-  '<h3>Pairwise Alignments</h3>',
-  sprintf('<p>Location: <code>%s/pairwise_alignments/</code></p>', args$outdir_base),
-  '',
-  '<h3>Snail Plots</h3>',
-  sprintf('<p>Location: <code>%s/snail_plots/</code></p>', args$outdir_base),
-  '',
-  '<h3>MultiQC Reports</h3>',
-  sprintf('<p>Location: <code>%s/multiqc/</code></p>', args$outdir_base),
-  '</div>'
-)
-
-# Close HTML
-html_content <- c(html_content,
-  '</div>',
-  '</body>',
-  '</html>'
-)
-
-# Write HTML
-html_file <- file.path(args$output_dir, "pipeline_summary_report.html")
-writeLines(html_content, html_file)
-message(sprintf("Wrote HTML report: %s", html_file))
+message(sprintf("Generated links for %d samples", nrow(visual_data)))
 
 # =============================================================================
-# 7. Generate Markdown report
+# Generate Markdown Report
 # =============================================================================
 message("=== Generating Markdown report ===")
 
-md_content <- c(
-  '# Genome Assembly Pipeline Summary Report',
-  '',
-  sprintf('**Generated:** %s', format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-  '',
-  '---',
-  '',
-  '## Table of Contents',
-  '',
-  '1. [Visual Comparison](#visual-comparison)',
-  '2. [QC Metrics Summary](#qc-metrics-summary)',
-  '3. [Assembly Statistics](#assembly-statistics)',
-  '4. [Hi-C Mapping Statistics](#hi-c-mapping-statistics)',
-  '5. [Output File Links](#output-file-links)',
-  '',
-  '---',
-  '',
-  '## Visual Comparison',
-  '',
-  'Snail plots and pairwise dotplots for each sample:',
-  '',
-  '| Sample | Hap1 Snail | Hap2 Snail | Hap1 vs Hap2 Dotplot |',
-  '|--------|------------|------------|----------------------|'
+md <- c(
+  "# Genome Assembly Pipeline Summary Report",
+  "",
+  sprintf("**Generated:** %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+  "",
+  "---",
+  "",
+  "## 1. Visual Comparison",
+  "",
+  "| Sample | Hap1 Snail | Hap1 Contact | Hap2 Snail | Hap2 Contact | Hap1 vs Hap2 |",
+  "|--------|------------|--------------|------------|--------------|--------------|"
 )
 
-for (i in seq_len(nrow(visual_table_rows))) {
-  row <- visual_table_rows[i, ]
-  hap1 <- if (!is.na(row$hap1_snail_path)) basename(row$hap1_snail_path) else "—"
-  hap2 <- if (!is.na(row$hap2_snail_path)) basename(row$hap2_snail_path) else "—"
-  dot <- if (!is.na(row$dotplot_path)) basename(row$dotplot_path) else "—"
+for (i in seq_len(nrow(visual_data))) {
+  row <- visual_data[i, ]
   
-  md_content <- c(md_content,
-    sprintf('| %s | %s | %s | %s |', row$sample_id, hap1, hap2, dot)
-  )
+  md <- c(md, sprintf("| %s | [snail](../snail_plots/%s) | [contact](../contact_maps/%s) | [snail](../snail_plots/%s) | [contact](../contact_maps/%s) | [dotplot](../pairwise_alignments/%s) |",
+                      row$sample_id, row$hap1_snail, row$hap1_contact, 
+                      row$hap2_snail, row$hap2_contact, row$dotplot))
 }
 
-md_content <- c(md_content,
-  '',
-  '---',
-  '',
-  '## QC Metrics Summary',
-  '',
-  '### Final Assembly Quality',
-  ''
-)
+# QC Metrics table
+md <- c(md, "", "---", "", "## 2. QC Metrics Summary", "")
 
-if (nrow(final_qc) > 0) {
-  md_content <- c(md_content,
-    '| Sample | Hap | Total Length | N50 | Scaffolds | QV | k-mer Comp. | BUSCO |',
-    '|--------|-----|-------------|-----|-----------|-----|-------------|-------|'
-  )
+if (nrow(assembly_qc) > 0 && "stage" %in% names(assembly_qc)) {
+  # Get final stage metrics
+  final_qc <- assembly_qc %>%
+    filter(str_detect(stage, "gap_filled|final")) %>%
+    filter(metric %in% c("total_length", "n50", "n_scaffolds", "qv", "kmer_completeness", "complete"))
   
-  for (i in seq_len(nrow(final_qc))) {
-    row <- final_qc[i, ]
-    md_content <- c(md_content,
-      sprintf('| %s | hap1 | %s | %s | %s | %.1f | %.1f%% | %.1f%% |',
-              row$sample_id,
-              scales::comma(row$hap1_total_length %||% NA),
-              scales::comma(row$hap1_n50 %||% NA),
-              row$hap1_n_scaffolds %||% "—",
-              row$hap1_qv %||% NA,
-              (row$hap1_kmer_completeness %||% NA) * 100,
-              (row$hap1_complete %||% NA) * 100),
-      sprintf('| | hap2 | %s | %s | %s | %.1f | %.1f%% | %.1f%% |',
-              scales::comma(row$hap2_total_length %||% NA),
-              scales::comma(row$hap2_n50 %||% NA),
-              row$hap2_n_scaffolds %||% "—",
-              row$hap2_qv %||% NA,
-              (row$hap2_kmer_completeness %||% NA) * 100,
-              (row$hap2_complete %||% NA) * 100)
+  if (nrow(final_qc) > 0) {
+    md <- c(md,
+      "| Sample | Metric | Hap1 | Hap2 |",
+      "|--------|--------|------|------|"
     )
+    
+    for (i in seq_len(nrow(final_qc))) {
+      row <- final_qc[i, ]
+      md <- c(md, sprintf("| %s | %s | %s | %s |",
+                          row$sample_id, row$metric,
+                          row$hap1 %||% "—", row$hap2 %||% "—"))
+    }
   }
+} else {
+  md <- c(md, "*No QC metrics available*")
 }
 
-md_content <- c(md_content,
-  '',
-  '---',
-  '',
-  '## Output File Links',
-  '',
-  sprintf('- **Final Assemblies:** `%s/assemblies/gap_filled/`', args$outdir_base),
-  sprintf('- **Assembly QC:** `%s/qc/assembly/`', args$outdir_base),
-  sprintf('- **Hi-C Mapping QC:** `%s/qc/hic_mapping/`', args$outdir_base),
-  sprintf('- **Contact Maps:** `%s/contact_maps/`', args$outdir_base),
-  sprintf('- **Pairwise Alignments:** `%s/pairwise_alignments/`', args$outdir_base),
-  sprintf('- **Snail Plots:** `%s/snail_plots/`', args$outdir_base),
-  sprintf('- **MultiQC:** `%s/multiqc/`', args$outdir_base)
+# Output links
+md <- c(md,
+  "", "---", "",
+  "## 3. Output File Locations",
+  "",
+  sprintf("- **Final Assemblies:** `%s/assemblies/gap_filled/`", outdir),
+  sprintf("- **Snail Plots:** `%s/snail_plots/`", outdir),
+  sprintf("- **Contact Maps:** `%s/contact_maps/`", outdir),
+  sprintf("- **Pairwise Alignments:** `%s/pairwise_alignments/`", outdir),
+  sprintf("- **Assembly QC:** `%s/qc/assembly/`", outdir),
+  sprintf("- **Hi-C QC:** `%s/qc/hic_mapping/`", outdir),
+  sprintf("- **QUAST Final:** `%s/qc/assembly/quast_final/`", outdir)
 )
 
-# Write markdown
-md_file <- file.path(args$output_dir, "pipeline_summary_report.md")
-writeLines(md_content, md_file)
-message(sprintf("Wrote Markdown report: %s", md_file))
+writeLines(md, file.path(args$output_dir, "pipeline_summary_report.md"))
+message("Wrote pipeline_summary_report.md")
 
-message("\n=== Summary report generation complete ===")
+# =============================================================================
+# Generate simple HTML (just wrap markdown table in basic HTML)
+# =============================================================================
+html <- c(
+  "<!DOCTYPE html>",
+  "<html><head>",
+  "<title>Pipeline Summary Report</title>",
+  "<style>",
+  "body { font-family: sans-serif; max-width: 1400px; margin: 40px auto; padding: 20px; }",
+  "table { border-collapse: collapse; width: 100%; margin: 20px 0; }",
+  "th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }",
+  "th { background: #4a90d9; color: white; }",
+  "tr:nth-child(even) { background: #f9f9f9; }",
+  "a { color: #4a90d9; }",
+  "img { max-width: 250px; max-height: 250px; }",
+  "</style>",
+  "</head><body>",
+  "<h1>Genome Assembly Pipeline Summary Report</h1>",
+  sprintf("<p><em>Generated: %s</em></p>", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+  "<hr>",
+  "<h2>1. Visual Comparison</h2>",
+  "<table>",
+  "<tr><th>Sample</th><th>Hap1 Snail</th><th>Hap1 Contact</th><th>Hap2 Snail</th><th>Hap2 Contact</th><th>Hap1 vs Hap2</th></tr>"
+)
+
+for (i in seq_len(nrow(visual_data))) {
+  row <- visual_data[i, ]
+  
+  html <- c(html, sprintf('<tr><td><strong>%s</strong></td><td><a href="../snail_plots/%s"><img src="../snail_plots/%s"></a></td><td><a href="../contact_maps/%s"><img src="../contact_maps/%s"></a></td><td><a href="../snail_plots/%s"><img src="../snail_plots/%s"></a></td><td><a href="../contact_maps/%s"><img src="../contact_maps/%s"></a></td><td><a href="../pairwise_alignments/%s"><img src="../pairwise_alignments/%s"></a></td></tr>',
+                          row$sample_id, 
+                          row$hap1_snail, row$hap1_snail,
+                          row$hap1_contact, row$hap1_contact,
+                          row$hap2_snail, row$hap2_snail,
+                          row$hap2_contact, row$hap2_contact,
+                          row$dotplot, row$dotplot))
+}
+
+html <- c(html, "</table>", "</body></html>")
+
+writeLines(html, file.path(args$output_dir, "pipeline_summary_report.html"))
+message("Wrote pipeline_summary_report.html")
+
+message("\n=== Done ===")
