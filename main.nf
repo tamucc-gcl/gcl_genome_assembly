@@ -43,7 +43,7 @@ params.telomere_motif = 'CCCTAA'  // complement/reverse generated automatically.
 
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
-params.busco_downloads = '/work/birdlab/GCL/Databases/busco_datasets'
+params.busco_downloads = '/work/birdlab/databases/busco_datasets'
 params.merqury_k = 21  // k-mer size for meryl database
 
 // Misassembly correction parameters (Inspector) - CONTIGS

@@ -15,6 +15,7 @@ process BUSCO {
     
     input:
     tuple val(haplotype_id), path(assembly_fasta)
+    path(busco_db)
     
     output:
     tuple val(haplotype_id), path("${haplotype_id}_busco"), emit: results

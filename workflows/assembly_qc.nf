@@ -23,6 +23,7 @@ nextflow.enable.dsl = 2
 
 include { QUAST } from '../modules/quast.nf'
 include { MERQURY } from '../modules/merqury.nf'
+include { DOWNLOAD_BUSCO_DB } from '../modules/download_busco_db.nf'
 include { BUSCO } from '../modules/busco.nf'
 include { MAPPING_QC } from '../modules/mapping_qc.nf'
 include { COMBINE_ASSEMBLY_QC } from '../modules/combine_assembly_qc.nf'
@@ -36,6 +37,15 @@ workflow ASSEMBLY_QC {
     
     main:
     
+    /*
+    ========================================================================================
+        DOWNLOAD BUSCO DATABASE - Run once before parallel BUSCO processes
+    ========================================================================================
+    */
+
+    DOWNLOAD_BUSCO_DB(params.busco_lineage)
+    
+
     /*
     ========================================================================================
         QUAST - Run on both haplotypes per sample
@@ -79,7 +89,8 @@ workflow ASSEMBLY_QC {
     BUSCO(
         ch_individual_haplotypes.map { haplotype_id, sample_id, fasta ->
             tuple(haplotype_id, fasta)
-        }
+        },
+        DOWNLOAD_BUSCO_DB.out.db
     )
     
     /*
