@@ -39,7 +39,53 @@ params.outdir = './results'
 params.publish_dir_mode = 'link'
 
 // Assembly parameters
-params.telomere_motif = 'CCCTAA'  // complement/reverse generated automatically. used by hifiasm & telomere scanning
+////   Overlap/Error correction:
+params.hifiasm_k = 51 // k-mer length (must be <64) [51]
+params.hifiasm_w = 51 // minimizer window size [51]
+params.hifiasm_f = 37 // number of bits for bloom filter; 0 to disable [37]
+params.hifiasm_D = 5.0 //Drop k-mers occurring >FLOAT*coverage times [5.0]
+params.hifiasm_N = 100 //consider up to max(-D*coverage,-N) overlaps for each oriented read [100]
+params.hifiasm_r = 3 //round of correction [3]
+params.hifiasm_z = 0 //length of adapters that should be removed [0]
+params.hifiasm_maxKOCC = 2000 //employ k-mers occurring <INT times to rescue repetitive overlaps [2000]
+params.hifiasm_hgSize = auto //estimated haploid genome size used for inferring read coverage [auto] (INT(k, m or g))
+//// Assembly
+params.hifiasm_a = 4 // round of assembly cleaning [4]
+params.hifiasm_m = 10000000 // pop bubbles of <INT in size in contig graphs [10000000]
+params.hifiasm_p = 0 // pop bubbles of <INT in size in unitig graphs [0]
+params.hifiasm_n = 3 // remove tip unitigs composed of <=INT reads [3]
+params.hifiasm_x = 0.8 // max overlap drop ratio [0.8]
+params.hifiasm_y = 0.2 // min overlap drop ratio [0.2]
+params.hifiasm_u = 1 // post-join step for contigs which may improve N50; 0 to disable; 1 to enable
+params.hifiasm_homCov = auto // homozygous read coverage [auto]  Int
+params.hifiasm_lowQ = 70 // output contig regions with >=INT% inconsistency in BED format; 0 to disable [70]
+params.hifiasm_bCov =  0 // break contigs at positions with <INT-fold coverage; work with '--m-rate'; 0 to disable [0]
+params.hifiasm_hCov = -1 // break contigs at positions with >INT-fold coverage; work with '--m-rate'; -1 to disable [-1]
+params.hifiasm_mRate = 0.75 //break contigs at positions with >INT-fold coverage; work with '--m-rate'; -1 to disable [-1] only work with '--b-cov' or '--h-cov'[0.75]
+params.hifiasm_primary = false // output a primary assembly and an alternate assembly
+params.hifiasm_ctgN = 3 // remove tip contigs composed of <=INT reads [3]
+////Purge-dups:
+params.hifiasm_l = 3 // purge level. 0: no purging; 1: light; 2/3: aggressive [0 for trio; 3 for unzip]
+params.hifiasm_s = 0.55 // similarity threshold for duplicate haplotigs in read-level [0.75 for -l1/-l2, 0.55 for -l3]
+params.hifiasm_O = 1 // min number of overlapped reads for duplicate haplotigs [1]
+params.hifiasm_purgeMax = auto // coverage upper bound of Purge-dups [auto] Int
+params.hifiasm_nHaplotypes = 2 // number of haplotypes to identify - only works with 1/2
+////Hi-C-partition:
+params.hifiasm_useHiC = true //use hi-c reads in contig assembly?
+params.hifiasm_sBase = 0.5 //similarity threshold for homology detection in base-level; -1 to disable [0.5]; -s for read-level (see <Purge-dups>)
+params.hifiasm_nWeight = 3 //rounds of reweighting Hi-C links [3]
+params.hifiasm_nPerturb = 10000 // rounds of perturbation [10000]
+params.hifiasm_fPerturb = 0.1 // fraction to flip for perturbation [0.1]
+params.hifiasm_lMSjoin = 500000 // detect misjoined unitigs of >=INT in size; 0 to disable [500000]
+////Dual-Scaffolding:
+params.hifiasm_dualScaf = false // output scaffolding
+params.hifiasm_scafGap = 3000000 // max gap size for scaffolding [3000000]
+////Telomere-identification:
+params.telomere_motif = 'CCCTAA'  // telomere motif at 5'-end complement/reverse generated automatically. used by hifiasm (telo-m) & telomere scanning
+params.hifiasm_teloP = 1 // non-telomeric penalty [1]
+params.hifiasm_teloD = 2000 // max drop [2000]
+params.hifiasm_teloS = 500 // min score for telomere reads [500]
+
 
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
@@ -335,6 +381,7 @@ include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf
 include { SCAN_TELOMERES } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
+include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 
 /*
 ========================================================================================
@@ -1420,6 +1467,32 @@ workflow {
 
     SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
 
+    /*
+    ========================================================================================
+        COVERAGE BOOK - HiFi coverage visualization for final assemblies
+    ========================================================================================
+    */
+    include { COVERAGE_BOOK } from './modules/local/coverage_book'
+
+    // ... add this after GAP_FILLING or in the finalization section:
+
+    // Combine gap-filled assemblies with HiFi reads for coverage book
+    GAP_FILLING.out.filled_assembly
+        .map { haplotype_id, filled_fa ->
+            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+            tuple(sample_id, haplotype_id, filled_fa)
+        }
+        .combine(BAM_TO_FASTQ.out, by: 0)
+        .map { sample_id, haplotype_id, filled_fa, hifi_fastq ->
+            def meta = [
+                id: haplotype_id,
+                sample: sample_id
+            ]
+            tuple(meta, filled_fa, hifi_fastq)
+        }
+        .set { ch_coverage_book_input }
+
+    COVERAGE_BOOK(ch_coverage_book_input)
 
     /*
     ========================================================================================

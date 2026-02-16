@@ -1,0 +1,17 @@
+name: coverage_book
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # mapping + BAM handling
+  - minimap2
+  - samtools
+
+  # BAM -> bigWig
+  - deeptools
+
+  # bigWig -> PDF "book"
+  - python >=3.10
+  - pybigwig
+  - numpy
+  - matplotlib
