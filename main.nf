@@ -334,6 +334,7 @@ include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
 include { SCAN_TELOMERES } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
+include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 
 /*
 ========================================================================================
@@ -348,7 +349,7 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 0: Setup Decontamination Databases (if enabled)
+        STEP 0: Setup Decontamination Databases (if enabled) & BUSCO Database
         Runs in parallel with BAM conversion and assembly
         Only executes if decontamination is requested
     ========================================================================================
@@ -376,6 +377,9 @@ workflow {
     }
     */
     
+    DOWNLOAD_BUSCO_DB(params.busco_lineage)
+    ch_busco_db = DOWNLOAD_BUSCO_DB.out.db
+
     /*
     ========================================================================================
         STEP 1: Convert BAM to FASTQ
@@ -1069,6 +1073,7 @@ workflow {
         HIFIASM.out.assemblies,
         BAM_TO_FASTQ.out,
         BUILD_MERYL_DB.out.meryl_db,
+        ch_busco_db,
         'contig'
     )
 
@@ -1097,6 +1102,7 @@ workflow {
             ch_corrected_paired,
             BAM_TO_FASTQ.out,
             BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
             'contig_corrected'
         )
     }
@@ -1127,6 +1133,7 @@ workflow {
             ch_decontam_paired,
             BAM_TO_FASTQ.out,
             BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
             'contig_decontam'
         )
     }
@@ -1156,6 +1163,7 @@ workflow {
         ch_scaffolds_paired,
         BAM_TO_FASTQ.out,
         BUILD_MERYL_DB.out.meryl_db,
+        ch_busco_db,
         'scaffold'
     )
 
@@ -1184,6 +1192,7 @@ workflow {
             ch_scaffold_corrected_paired,
             BAM_TO_FASTQ.out,
             BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
             'scaffold_corrected'
         )
     }
@@ -1214,6 +1223,7 @@ workflow {
             ch_decontam_scaffold_paired,
             BAM_TO_FASTQ.out,
             BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
             'scaffold_decontam'
         )
     }
@@ -1244,6 +1254,7 @@ workflow {
             ch_scaffolds_round2_paired,
             BAM_TO_FASTQ.out,
             BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
             'scaffold_round2'
         )
     }
@@ -1273,6 +1284,7 @@ workflow {
         ch_gap_filled_paired,
         BAM_TO_FASTQ.out,
         BUILD_MERYL_DB.out.meryl_db,
+        ch_busco_db,
         'gap_filled'
     )
 
