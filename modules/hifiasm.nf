@@ -32,6 +32,12 @@ process HIFIASM {
     // HiFi-only default:   *.bp.hap1.p_ctg.gfa / *.bp.hap2.p_ctg.gfa
     // Hi-C (any):          *.hic.hap1.p_ctg.gfa / *.hic.hap2.p_ctg.gfa
     
+    // Handle 'auto' parameters - omit flag entirely for auto behavior
+    hgsize_opt = params.hifiasm_hgSize == 'auto' ? '' : "--hg-size ${params.hifiasm_hgSize}"
+    homcov_opt = params.hifiasm_homCov == 'auto' ? '' : "--hom-cov ${params.hifiasm_homCov}"
+    purgemax_opt = params.hifiasm_purgeMax == 'auto' ? '' : "--purge-max ${params.hifiasm_purgeMax}"
+
+
     use_primary_alt = params.hifiasm_primary && !params.hifiasm_useHiC
     prefix = params.hifiasm_useHiC ? 'hic.' : 'bp.'
     
@@ -50,7 +56,7 @@ process HIFIASM {
         -r ${params.hifiasm_r} \\
         -z ${params.hifiasm_z} \\
         --max-kocc ${params.hifiasm_maxKOCC} \\
-        --hg-size ${params.hifiasm_hgSize} \\
+        ${hgsize_opt} \\
         -a ${params.hifiasm_a} \\
         -m ${params.hifiasm_m} \\
         -p ${params.hifiasm_p} \\
@@ -58,7 +64,7 @@ process HIFIASM {
         -x ${params.hifiasm_x} \\
         -y ${params.hifiasm_y} \\
         -u ${params.hifiasm_u} \\
-        --hom-cov ${params.hifiasm_homCov} \\
+        ${homcov_opt} \\
         --lowQ ${params.hifiasm_lowQ} \\
         --b-cov ${params.hifiasm_bCov} \\
         --h-cov ${params.hifiasm_hCov} \\
@@ -68,7 +74,7 @@ process HIFIASM {
         -l ${params.hifiasm_l} \\
         -s ${params.hifiasm_s} \\
         -O ${params.hifiasm_O} \\
-        --purge-max ${params.hifiasm_purgeMax} \\
+        ${purgemax_opt} \\
         --n-hap ${params.hifiasm_nHaplotypes} \\
         ${dualscaf_flag} \\
         --scaf-gap ${params.hifiasm_scafGap} \\
