@@ -48,7 +48,7 @@ params.hifiasm_N = 100 //consider up to max(-D*coverage,-N) overlaps for each or
 params.hifiasm_r = 3 //round of correction [3]
 params.hifiasm_z = 0 //length of adapters that should be removed [0]
 params.hifiasm_maxKOCC = 2000 //employ k-mers occurring <INT times to rescue repetitive overlaps [2000]
-params.hifiasm_hgSize = auto //estimated haploid genome size used for inferring read coverage [auto] (INT(k, m or g))
+params.hifiasm_hgSize = 'auto' //estimated haploid genome size used for inferring read coverage [auto] (INT(k, m or g))
 //// Assembly
 params.hifiasm_a = 4 // round of assembly cleaning [4]
 params.hifiasm_m = 10000000 // pop bubbles of <INT in size in contig graphs [10000000]
@@ -57,7 +57,7 @@ params.hifiasm_n = 3 // remove tip unitigs composed of <=INT reads [3]
 params.hifiasm_x = 0.8 // max overlap drop ratio [0.8]
 params.hifiasm_y = 0.2 // min overlap drop ratio [0.2]
 params.hifiasm_u = 1 // post-join step for contigs which may improve N50; 0 to disable; 1 to enable
-params.hifiasm_homCov = auto // homozygous read coverage [auto]  Int
+params.hifiasm_homCov = 'auto' // homozygous read coverage [auto]  Int
 params.hifiasm_lowQ = 70 // output contig regions with >=INT% inconsistency in BED format; 0 to disable [70]
 params.hifiasm_bCov =  0 // break contigs at positions with <INT-fold coverage; work with '--m-rate'; 0 to disable [0]
 params.hifiasm_hCov = -1 // break contigs at positions with >INT-fold coverage; work with '--m-rate'; -1 to disable [-1]
@@ -68,7 +68,7 @@ params.hifiasm_ctgN = 3 // remove tip contigs composed of <=INT reads [3]
 params.hifiasm_l = 3 // purge level. 0: no purging; 1: light; 2/3: aggressive [0 for trio; 3 for unzip]
 params.hifiasm_s = 0.55 // similarity threshold for duplicate haplotigs in read-level [0.75 for -l1/-l2, 0.55 for -l3]
 params.hifiasm_O = 1 // min number of overlapped reads for duplicate haplotigs [1]
-params.hifiasm_purgeMax = auto // coverage upper bound of Purge-dups [auto] Int
+params.hifiasm_purgeMax = 'auto' // coverage upper bound of Purge-dups [auto] Int
 params.hifiasm_nHaplotypes = 2 // number of haplotypes to identify - only works with 1/2
 ////Hi-C-partition:
 params.hifiasm_useHiC = true //use hi-c reads in contig assembly?
