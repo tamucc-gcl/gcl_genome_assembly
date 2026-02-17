@@ -1472,9 +1472,6 @@ workflow {
         COVERAGE BOOK - HiFi coverage visualization for final assemblies
     ========================================================================================
     */
-    include { COVERAGE_BOOK } from './modules/local/coverage_book'
-
-    // ... add this after GAP_FILLING or in the finalization section:
 
     // Combine gap-filled assemblies with HiFi reads for coverage book
     GAP_FILLING.out.filled_assembly
