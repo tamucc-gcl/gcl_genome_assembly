@@ -16,16 +16,28 @@ process HIFIASM {
     tuple val(sample_id), path(hifi_fastq), path(hic_r1), path(hic_r2)
     
     output:
-    tuple val(sample_id), path("${sample_id}.hic.hap1.p_ctg.fasta"), path("${sample_id}.hic.hap2.p_ctg.fasta"), emit: assemblies
+    tuple val(sample_id), path("${sample_id}.hap1.p_ctg.fasta"), path("${sample_id}.hap2.p_ctg.fasta"), emit: assemblies
     tuple val(sample_id), path("${sample_id}.hifiasm.log"), emit: log
-    tuple val(sample_id), path("${sample_id}.hic.hap1.p_ctg.gfa"), emit: gfa_hap1
-    tuple val(sample_id), path("${sample_id}.hic.hap2.p_ctg.gfa"), emit: gfa_hap2
+    tuple val(sample_id), path("${sample_id}.hap1.p_ctg.gfa"), emit: gfa_hap1
+    tuple val(sample_id), path("${sample_id}.hap2.p_ctg.gfa"), emit: gfa_hap2
     
     script:
     telomere_motif = params.telomere_motif ?: 'CCCTAA'  // Default to human telomeric repeat if not provided
     primary_flag = params.hifiasm_primary ? '--primary' : ''
     dualscaf_flag = params.hifiasm_dualScaf ? '--dual-scaf' : ''
     hic_opts = params.hifiasm_useHiC ? "--h1 ${hic_r1} --h2 ${hic_r2}" : ''
+
+    // Determine source GFA naming pattern
+    // HiFi-only + primary: *.p_ctg.gfa / *.a_ctg.gfa (no hap1/hap2)
+    // HiFi-only default:   *.bp.hap1.p_ctg.gfa / *.bp.hap2.p_ctg.gfa
+    // Hi-C (any):          *.hic.hap1.p_ctg.gfa / *.hic.hap2.p_ctg.gfa
+    
+    use_primary_alt = params.hifiasm_primary && !params.hifiasm_useHiC
+    prefix = params.hifiasm_useHiC ? 'hic.' : 'bp.'
+    
+    gfa1 = use_primary_alt ? "${sample_id}.p_ctg.gfa" : "${sample_id}.${prefix}hap1.p_ctg.gfa"
+    gfa2 = use_primary_alt ? "${sample_id}.a_ctg.gfa" : "${sample_id}.${prefix}hap2.p_ctg.gfa"
+
     """
     hifiasm \\
         -o ${sample_id} \\
@@ -74,16 +86,20 @@ process HIFIASM {
         2>&1 | tee ${sample_id}.hifiasm.log
     
     # Convert GFA to FASTA
-    gfatools gfa2fa ${sample_id}.hic.hap1.p_ctg.gfa > ${sample_id}.hic.hap1.p_ctg.fasta
-    gfatools gfa2fa ${sample_id}.hic.hap2.p_ctg.gfa > ${sample_id}.hic.hap2.p_ctg.fasta
+    gfatools gfa2fa ${gfa1} > ${sample_id}.hap1.p_ctg.fasta
+    gfatools gfa2fa ${gfa2} > ${sample_id}.hap2.p_ctg.fasta
+
+    # Copy GFAs to standardized names (preserves originals too)
+    cp ${gfa1} ${sample_id}.hap1.p_ctg.gfa
+    cp ${gfa2} ${sample_id}.hap2.p_ctg.gfa
     """
     
     stub:
     """
-    touch ${sample_id}.hic.hap1.p_ctg.fasta
-    touch ${sample_id}.hic.hap2.p_ctg.fasta
+    touch ${sample_id}.hap1.p_ctg.fasta
+    touch ${sample_id}.hap2.p_ctg.fasta
     touch ${sample_id}.hifiasm.log
-    touch ${sample_id}.hic.hap1.p_ctg.gfa
-    touch ${sample_id}.hic.hap2.p_ctg.gfa
+    touch ${sample_id}.hap1.p_ctg.gfa
+    touch ${sample_id}.hap2.p_ctg.gfa
     """
 }
