@@ -156,6 +156,13 @@ params.pairwise_dotplot_height = 10            // Dotplot height in inches
 params.telomere_window = 10000        // Window size (bp) at each sequence end to search
 params.telomere_min_repeats = 10      // Minimum consecutive motif repeats required
 
+// ============================================================================
+// genome book parameters
+// ============================================================================
+params.bin_size = 1000
+params.min_len = 1000000
+params.min_mapq = 5
+
 // Scaffolding round control
 // If not explicitly set, default to true if scaffold correction OR decontamination is enabled
 //params.run_scaffold_round2 = null  // Will be computed below if null
