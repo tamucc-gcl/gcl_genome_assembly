@@ -9,7 +9,7 @@ process COVERAGE_BOOK {
     
     output:
     tuple val(meta), path("*.sorted.bam"), path("*.sorted.bam.bai"), emit: bam
-    tuple val(meta), path("*.cov.1kb.bw"),                           emit: bigwig
+    tuple val(meta), path("*.cov.${params.bin_size}.bw"),                           emit: bigwig
     tuple val(meta), path("*.coverage_book.pdf"),                    emit: pdf
     
     when:
@@ -21,10 +21,6 @@ process COVERAGE_BOOK {
     //def min_len = task.ext.min_len ?: 1000000
     //def min_mapq = task.ext.min_mapq ?: 5
     """
-    bin_size=1000
-    min_len=1000000
-    min_mapq=5
-
     # Index assembly
     samtools faidx ${assembly}
     
@@ -44,19 +40,19 @@ process COVERAGE_BOOK {
     # Generate coverage BigWig
     bamCoverage \\
         -b ${prefix}.sorted.bam \\
-        -o ${prefix}.cov.1kb.bw \\
-        --binSize ${bin_size} \\
+        -o ${prefix}.cov.${params.bin_size}.bw \\
+        --binSize ${params.bin_size} \\
         --numberOfProcessors ${task.cpus} \\
         --ignoreDuplicates \\
-        --minMappingQuality ${min_mapq}
+        --minMappingQuality ${params.min_mapq}
     
     # Generate coverage book PDF
     python3 ${projectDir}/py_scripts/bigwig_genome_book.py \\
-        --bw ${prefix}.cov.1kb.bw \\
+        --bw ${prefix}.cov.${params.bin_size}.bw \\
         --fai ${assembly}.fai \\
         --out_pdf ${prefix}.coverage_book.pdf \\
-        --bin_size ${bin_size} \\
-        --min_len ${min_len}
+        --bin_size ${params.bin_size} \\
+        --min_len ${params.min_len}
     """
     
     stub:
@@ -64,7 +60,7 @@ process COVERAGE_BOOK {
     """
     touch ${prefix}.sorted.bam
     touch ${prefix}.sorted.bam.bai
-    touch ${prefix}.cov.1kb.bw
+    touch ${prefix}.cov.${params.bin_size}.bw
     touch ${prefix}.coverage_book.pdf
     """
 }
