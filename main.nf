@@ -86,6 +86,8 @@ params.hifiasm_teloP = 1 // non-telomeric penalty [1]
 params.hifiasm_teloD = 2000 // max drop [2000]
 params.hifiasm_teloS = 500 // min score for telomere reads [500]
 
+// Purge duplicates parameters
+params.run_purge_dups = false  // Default off - enable with --run_purge_dups true
 
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
@@ -335,6 +337,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_PURGED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
@@ -364,6 +367,7 @@ include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
+include { PURGE_DUPS } from './modules/purge_dups.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
@@ -480,14 +484,67 @@ workflow {
 
     /*
     ========================================================================================
+        STEP 4a: PURGE DUPLICATES (Optional)
+        Remove haplotig duplications from HIFIASM output
+        Only runs if params.run_purge_dups is true
+        Runs BEFORE Inspector correction (if enabled)
+    ========================================================================================
+    */
+    if (params.run_purge_dups) {
+        // Split HIFIASM output into individual haplotypes and join with HiFi reads
+        HIFIASM.out.assemblies
+            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
+                [
+                    tuple("${sample_id}_hap1", hap1_fasta),
+                    tuple("${sample_id}_hap2", hap2_fasta)
+                ]
+            }
+            .map { haplotype_id, assembly ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(sample_id, haplotype_id, assembly)
+            }
+            .combine(BAM_TO_FASTQ.out, by: 0)
+            .map { sample_id, haplotype_id, assembly, hifi_reads ->
+                tuple(haplotype_id, assembly, hifi_reads)
+            }
+            .set { ch_purge_dups_input }
+        
+        PURGE_DUPS(ch_purge_dups_input)
+        
+        // Reconstruct sample-level tuple for downstream compatibility
+        // tuple(sample_id, hap1_fasta, hap2_fasta)
+        PURGE_DUPS.out.purged_assembly
+            .map { haplotype_id, purged_fa ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = haplotype_id.contains('_hap1') ? 1 : 2
+                tuple(sample_id, hap_num, purged_fa)
+            }
+            .groupTuple(by: 0, size: 2)
+            .map { sample_id, hap_nums, fastas ->
+                // Sort to ensure hap1 comes before hap2
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_hifiasm_output }
+        
+    } else {
+        // No purging - pass HIFIASM output directly
+        HIFIASM.out.assemblies
+            .set { ch_hifiasm_output }
+    }
+
+
+    /*
+    ========================================================================================
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies (Inspector)
         Runs before decontamination if enabled
         Uses HiFi reads to identify and break structural errors
+        uses either purged or original assemblies based on params.run_purge_dups
     ========================================================================================
     */
     if (params.inspector_run_on_contigs) {
         // Split assemblies into individual haplotypes for correction
-        HIFIASM.out.assemblies
+        ch_hifiasm_output
             .flatMap { sample_id, hap1_fasta, hap2_fasta ->
                 [
                     tuple("${sample_id}_hap1", hap1_fasta),
@@ -524,7 +581,7 @@ workflow {
         
     } else {
         // Use original assemblies if correction not requested
-        HIFIASM.out.assemblies
+        ch_hifiasm_output
             .flatMap { sample_id, hap1_fasta, hap2_fasta ->
                 [
                     tuple("${sample_id}_hap1", hap1_fasta),
@@ -1133,6 +1190,20 @@ workflow {
 
     /*
     ========================================================================================
+        QC Purged Contig Genomes Assemblies
+    ========================================================================================
+    */
+    if (params.run_purge_dups) {
+        ASSEMBLY_QC_PURGED(
+            ch_hifiasm_output,    // tuple(sample_id, hap1_fasta, hap2_fasta)
+            BAM_TO_FASTQ.out,     // tuple(sample_id, hifi_fastq)
+            MERYL_DB.out,         // tuple(sample_id, meryl_db)
+            ch_busco_db,          // path
+            "contig_purged"       // string
+        )
+    }
+    /*
+    ========================================================================================
         QC Corrected Contig Genomes Assemblies (if Inspector was run)
     ========================================================================================
     */
@@ -1393,6 +1464,11 @@ workflow {
         .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     
     // Add conditional assembly QC outputs
+    if (params.run_purge_dups) {
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_PURGED.out.summary)
+    }
+
     if (params.inspector_run_on_contigs) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
             .mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
