@@ -77,7 +77,18 @@ process PURGE_DUPS {
     cp dups.bed ${haplotype_id}.purge_dups_stats/
     
     echo "=== Step 7: Generating purged assembly ===" | tee -a ${haplotype_id}.purge_dups.log
-    get_seqs -e dups.bed ${assembly}
+    # Check if dups.bed has content
+    if [ -s dups.bed ] && [ \$(wc -l < dups.bed) -gt 0 ]; then
+        get_seqs -e dups.bed ${assembly} || {
+            echo "WARNING: get_seqs failed, copying original assembly" | tee -a ${haplotype_id}.purge_dups.log
+            cp ${assembly} purged.fa
+            touch hap.fa
+        }
+    else
+        echo "No duplications identified, using original assembly" | tee -a ${haplotype_id}.purge_dups.log
+        cp ${assembly} purged.fa
+        touch hap.fa
+    fi
     
     # Rename outputs to include haplotype_id
     mv purged.fa ${haplotype_id}.purged.fa
