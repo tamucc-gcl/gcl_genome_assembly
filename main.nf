@@ -1466,7 +1466,7 @@ workflow {
     // Add conditional assembly QC outputs
     if (params.run_purge_dups) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_PURGED.out.summary)
+            .mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
     }
 
     if (params.inspector_run_on_contigs) {
