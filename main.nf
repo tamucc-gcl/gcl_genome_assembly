@@ -1197,7 +1197,7 @@ workflow {
         ASSEMBLY_QC_PURGED(
             ch_hifiasm_output,    // tuple(sample_id, hap1_fasta, hap2_fasta)
             BAM_TO_FASTQ.out,     // tuple(sample_id, hifi_fastq)
-            MERYL_DB.out,         // tuple(sample_id, meryl_db)
+            BUILD_MERYL_DB.out.meryl_db,        // tuple(sample_id, meryl_db)
             ch_busco_db,          // path
             "contig_purged"       // string
         )
