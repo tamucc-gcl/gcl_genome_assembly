@@ -20,7 +20,7 @@
     Outputs:
     - purged_assembly: Assembly with haplotigs removed
     - haplotigs: Removed haplotig sequences
-    - coverage_stats: Coverage statistics and cutoffs for QC
+    - log: Processing log
 ========================================================================================
 */
 
@@ -36,7 +36,6 @@ process PURGE_DUPS {
     output:
     tuple val(haplotype_id), path("${haplotype_id}.purged.fa"), emit: purged_assembly
     tuple val(haplotype_id), path("${haplotype_id}.haplotigs.fa"), emit: haplotigs
-    tuple val(haplotype_id), path("${haplotype_id}.purge_dups_stats"), emit: stats_dir
     tuple val(haplotype_id), path("${haplotype_id}.purge_dups.log"), emit: log
     
     script:
@@ -45,90 +44,93 @@ process PURGE_DUPS {
     """
     set -euo pipefail
     
-    # Create stats output directory
-    mkdir -p ${haplotype_id}.purge_dups_stats
+    echo "=== purge_dups started ===" | tee ${haplotype_id}.purge_dups.log
+    echo "Working directory: \$(pwd)" | tee -a ${haplotype_id}.purge_dups.log
+    echo "" | tee -a ${haplotype_id}.purge_dups.log
     
-    echo "=== Step 1: Mapping HiFi reads to assembly ===" | tee ${haplotype_id}.purge_dups.log
-    minimap2 -xmap-hifi -t ${minimap_threads} ${assembly} ${hifi_reads} | \\
+    # Copy assembly to local file to avoid potential symlink issues with get_seqs
+    echo "Copying assembly to local file..." | tee -a ${haplotype_id}.purge_dups.log
+    cp ${assembly} assembly.fa
+    
+    echo "=== Step 1: Mapping HiFi reads to assembly ===" | tee -a ${haplotype_id}.purge_dups.log
+    minimap2 -xmap-hifi -t ${minimap_threads} assembly.fa ${hifi_reads} | \\
         pigz -p ${pigz_threads} -c > aligned.paf.gz
+    echo "Mapping complete" | tee -a ${haplotype_id}.purge_dups.log
     
     echo "=== Step 2: Calculating coverage statistics ===" | tee -a ${haplotype_id}.purge_dups.log
     pbcstat aligned.paf.gz 2>&1 | tee -a ${haplotype_id}.purge_dups.log
     
-    # Copy coverage stats to output directory
-    cp PB.stat ${haplotype_id}.purge_dups_stats/
-    cp PB.base.cov ${haplotype_id}.purge_dups_stats/
-    
     echo "=== Step 3: Calculating coverage cutoffs ===" | tee -a ${haplotype_id}.purge_dups.log
-    calcuts PB.stat > cutoffs 2> calcuts.log
-    cat calcuts.log | tee -a ${haplotype_id}.purge_dups.log
-    cp cutoffs ${haplotype_id}.purge_dups_stats/
-    cp calcuts.log ${haplotype_id}.purge_dups_stats/
+    calcuts PB.stat > cutoffs 2>> ${haplotype_id}.purge_dups.log
+    echo "Cutoffs:" | tee -a ${haplotype_id}.purge_dups.log
+    cat cutoffs | tee -a ${haplotype_id}.purge_dups.log
+    echo "" | tee -a ${haplotype_id}.purge_dups.log
     
     echo "=== Step 4: Splitting assembly for self-alignment ===" | tee -a ${haplotype_id}.purge_dups.log
-    split_fa ${assembly} > split.fa
+    split_fa assembly.fa > split.fa
+    echo "Split into \$(grep -c '^>' split.fa) sequences" | tee -a ${haplotype_id}.purge_dups.log
     
     echo "=== Step 5: Self-alignment ===" | tee -a ${haplotype_id}.purge_dups.log
     minimap2 -xasm5 -DP -t ${minimap_threads} split.fa split.fa | \\
         pigz -p ${pigz_threads} -c > split.self.paf.gz
+    echo "Self-alignment complete" | tee -a ${haplotype_id}.purge_dups.log
     
     echo "=== Step 6: Identifying duplications ===" | tee -a ${haplotype_id}.purge_dups.log
-    purge_dups -2 -T cutoffs -c PB.base.cov split.self.paf.gz > dups.bed 2>&1 | \\
-        tee -a ${haplotype_id}.purge_dups.log
-    cp dups.bed ${haplotype_id}.purge_dups_stats/
+    # CRITICAL: stdout goes to dups.bed, stderr (log messages) goes to log file
+    # Do NOT use 2>&1 here or it corrupts the BED file!
+    purge_dups -2 -T cutoffs -c PB.base.cov split.self.paf.gz > dups.bed 2>> ${haplotype_id}.purge_dups.log
+    
+    echo "dups.bed: \$(wc -l < dups.bed) lines" | tee -a ${haplotype_id}.purge_dups.log
+    echo "First 10 lines of dups.bed:" | tee -a ${haplotype_id}.purge_dups.log
+    head -10 dups.bed | tee -a ${haplotype_id}.purge_dups.log
+    echo "" | tee -a ${haplotype_id}.purge_dups.log
     
     echo "=== Step 7: Generating purged assembly ===" | tee -a ${haplotype_id}.purge_dups.log
-    get_seqs -e dups.bed ${assembly}
+    
+    if [ -s dups.bed ] && [ \$(wc -l < dups.bed) -gt 0 ]; then
+        echo "Running: get_seqs -e dups.bed assembly.fa" | tee -a ${haplotype_id}.purge_dups.log
+        get_seqs -e dups.bed assembly.fa 2>&1 | tee -a ${haplotype_id}.purge_dups.log
+        echo "get_seqs completed" | tee -a ${haplotype_id}.purge_dups.log
+    else
+        echo "No duplications identified, using original assembly" | tee -a ${haplotype_id}.purge_dups.log
+        cp assembly.fa purged.fa
+        touch hap.fa
+    fi
+    
+    # Calculate summary statistics
+    echo "" | tee -a ${haplotype_id}.purge_dups.log
+    echo "=== Summary ===" | tee -a ${haplotype_id}.purge_dups.log
+    
+    orig_size=\$(awk '/^>/{if(s)print s; s=0; next} {s+=length}END{print s}' assembly.fa)
+    purged_size=\$(awk '/^>/{if(s)print s; s=0; next} {s+=length}END{print s}' purged.fa)
+    hap_size=\$(awk '/^>/{if(s)print s; s=0; next} {s+=length}END{print s+0}' hap.fa)
+    
+    orig_n=\$(grep -c '^>' assembly.fa)
+    purged_n=\$(grep -c '^>' purged.fa)
+    hap_n=\$(grep -c '^>' hap.fa || echo 0)
+    
+    echo "Original assembly size: \${orig_size}" | tee -a ${haplotype_id}.purge_dups.log
+    echo "Purged assembly size: \${purged_size}" | tee -a ${haplotype_id}.purge_dups.log
+    echo "Haplotigs removed: \${hap_size}" | tee -a ${haplotype_id}.purge_dups.log
+    echo "Original contigs: \${orig_n}" | tee -a ${haplotype_id}.purge_dups.log
+    echo "Purged contigs: \${purged_n}" | tee -a ${haplotype_id}.purge_dups.log
+    echo "Haplotig contigs: \${hap_n}" | tee -a ${haplotype_id}.purge_dups.log
     
     # Rename outputs to include haplotype_id
     mv purged.fa ${haplotype_id}.purged.fa
     mv hap.fa ${haplotype_id}.haplotigs.fa
     
-    # Calculate and log summary statistics
+    # Cleanup large intermediate files
+    rm -f assembly.fa aligned.paf.gz split.fa split.self.paf.gz PB.stat PB.base.cov cutoffs dups.bed
+    
     echo "" | tee -a ${haplotype_id}.purge_dups.log
-    echo "=== Summary ===" | tee -a ${haplotype_id}.purge_dups.log
-    
-    # Original assembly size
-    orig_size=\$(awk '/^>/{if(s)print s; s=0; next} {s+=length}END{print s}' ${assembly})
-    echo "Original assembly size: \${orig_size}" | tee -a ${haplotype_id}.purge_dups.log
-    
-    # Purged assembly size
-    purged_size=\$(awk '/^>/{if(s)print s; s=0; next} {s+=length}END{print s}' ${haplotype_id}.purged.fa)
-    echo "Purged assembly size: \${purged_size}" | tee -a ${haplotype_id}.purge_dups.log
-    
-    # Haplotigs size
-    hap_size=\$(awk '/^>/{if(s)print s; s=0; next} {s+=length}END{print s}' ${haplotype_id}.haplotigs.fa)
-    echo "Haplotigs removed: \${hap_size}" | tee -a ${haplotype_id}.purge_dups.log
-    
-    # Contigs counts
-    orig_n=\$(grep -c '^>' ${assembly})
-    purged_n=\$(grep -c '^>' ${haplotype_id}.purged.fa)
-    hap_n=\$(grep -c '^>' ${haplotype_id}.haplotigs.fa)
-    echo "Original contigs: \${orig_n}" | tee -a ${haplotype_id}.purge_dups.log
-    echo "Purged contigs: \${purged_n}" | tee -a ${haplotype_id}.purge_dups.log
-    echo "Haplotig contigs: \${hap_n}" | tee -a ${haplotype_id}.purge_dups.log
-    
-    # Save summary to stats directory
-    cat > ${haplotype_id}.purge_dups_stats/summary.tsv <<EOF
-haplotype_id\toriginal_size\tpurged_size\thaplotigs_size\toriginal_contigs\tpurged_contigs\thaplotig_contigs
-${haplotype_id}\t\${orig_size}\t\${purged_size}\t\${hap_size}\t\${orig_n}\t\${purged_n}\t\${hap_n}
-EOF
-    
     echo "=== purge_dups completed successfully ===" | tee -a ${haplotype_id}.purge_dups.log
-    
-    # Cleanup intermediate files
-    rm -f aligned.paf.gz split.fa split.self.paf.gz PB.stat PB.base.cov cutoffs dups.bed
     """
     
     stub:
     """
-    mkdir -p ${haplotype_id}.purge_dups_stats
     touch ${haplotype_id}.purged.fa
     touch ${haplotype_id}.haplotigs.fa
     touch ${haplotype_id}.purge_dups.log
-    touch ${haplotype_id}.purge_dups_stats/summary.tsv
-    touch ${haplotype_id}.purge_dups_stats/PB.stat
-    touch ${haplotype_id}.purge_dups_stats/cutoffs
-    touch ${haplotype_id}.purge_dups_stats/dups.bed
     """
 }
