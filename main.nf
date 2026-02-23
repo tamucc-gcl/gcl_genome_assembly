@@ -114,10 +114,10 @@ params.inspector_scaffold_max_assembly_error_size = 10000000  // Higher threshol
 params.bwa_mem2_hic_args = "" // Additional arguments for bwa-mem2 Hi-C mapping
 params.hic_coverage_window = 100000
 params.hic_min_mapq = 30
-params.hic_resolutions = "1000000,500000,100000,50000,10000"
+params.hic_resolutions = "2500000,1000000,500000,250000,100000,50000,25000,10000"
 params.hic_base_bin = "10000"
-params.hic_plot_resolutions = "1000000,500000,100000"
-params.hic_balance = false
+params.hic_plot_resolutions = "1000000,500000,250000,100000"
+params.hic_balance = true
 params.hic_min_mapq_raw = 30
 params.hic_min_mapq_filtered = 1
 params.scaffold_min_size = 0  // 0 = include all scaffolds in contact maps; set to e.g. 100000 to include only scaffolds >100kb
@@ -151,6 +151,11 @@ params.pairwise_alignment_min_aln_bp = 10000
 params.pairwise_alignment_mode = 'within_sample'         // 'all' = all pairs, 'within_sample' = hap1 vs hap2 only
 params.pairwise_dotplot_width = 10             // Dotplot width in inches
 params.pairwise_dotplot_height = 10            // Dotplot height in inches
+
+// Compartments parameters
+params.compartment_resolution = 250000
+params.compartment_min_contig_bp = 5000000
+params.compartment_max_contigs = 30
 
 // ============================================================================
 // Telomere detection parameters
@@ -993,6 +998,13 @@ workflow {
             .set { ch_contact_map_final_input }
 
         CONTACT_MAP_FINAL(ch_contact_map_final_input)
+
+        COMPARTMENTS_PC1(
+            CONTACT_MAP_FINAL.out.mcool,
+            params.compartment_resolution ?: 250000,
+            params.compartment_min_contig_bp ?: 5000000,
+            params.compartment_max_contigs ?: 30
+        )
     }
 
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)

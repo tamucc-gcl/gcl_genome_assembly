@@ -1,0 +1,11 @@
+name: hic_compartments
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - cooler
+  - cooltools
+  - pandas
+  - numpy
+  - matplotlib
