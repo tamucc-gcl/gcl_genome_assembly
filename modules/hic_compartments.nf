@@ -2,7 +2,7 @@ process HIC_COMPARTMENTS {
   tag "${haplotype_id}:${stage}:${resolution}"
   label 'hic_compartments'
 
-  publishDir "${params.outdir}/contact_maps", mode: params.publish_dir_mode
+  publishDir "${params.outdir}/compartments_plot", mode: params.publish_dir_mode
 
   input:
     tuple val(haplotype_id), val(stage), path(mcool)
