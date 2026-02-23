@@ -152,7 +152,7 @@ params.pairwise_alignment_mode = 'within_sample'         // 'all' = all pairs, '
 params.pairwise_dotplot_width = 10             // Dotplot width in inches
 params.pairwise_dotplot_height = 10            // Dotplot height in inches
 
-// Compartments parameters
+// Compartments parameters - only made when contact maps are made and balanced
 params.compartment_resolution = 250000
 params.compartment_min_contig_bp = 5000000
 params.compartment_max_contigs = 30
@@ -398,6 +398,8 @@ include { SCAN_TELOMERES } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
+include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
+
 
 /*
 ========================================================================================
@@ -999,12 +1001,14 @@ workflow {
 
         CONTACT_MAP_FINAL(ch_contact_map_final_input)
 
-        COMPARTMENTS_PC1(
-            CONTACT_MAP_FINAL.out.mcool,
-            params.compartment_resolution ?: 250000,
-            params.compartment_min_contig_bp ?: 5000000,
-            params.compartment_max_contigs ?: 30
-        )
+        if (params.hic_balance ) {
+            HIC_COMPARTMENTS(
+                CONTACT_MAP_FINAL.out.mcool,
+                params.compartment_resolution ?: 250000,
+                params.compartment_min_contig_bp ?: 5000000,
+                params.compartment_max_contigs ?: 30
+            )
+        }
     }
 
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
