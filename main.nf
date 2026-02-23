@@ -157,6 +157,12 @@ params.compartment_resolution = 250000
 params.compartment_min_contig_bp = 5000000
 params.compartment_max_contigs = 30
 
+// TADs parameters
+params.tad_resolution = 50000 // must be in hic_resolutions
+params.tad_window_bp = 500000 // must be in hic_resolutions
+params.tad_min_contig_bp = 5000000
+params.tad_max_contigs = 0    // 0 = no cap
+
 // ============================================================================
 // Telomere detection parameters
 // ============================================================================
@@ -399,7 +405,7 @@ include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
-
+include { HIC_TADS } from './modules/local/hic/tads_book/main'
 
 /*
 ========================================================================================
@@ -1007,6 +1013,14 @@ workflow {
                 params.compartment_resolution ?: 250000,
                 params.compartment_min_contig_bp ?: 5000000,
                 params.compartment_max_contigs ?: 30
+            )
+
+            HIC_TADS(
+                CONTACT_MAP_FINAL.out.mcool,
+                params.tad_resolution ?: 50000,
+                params.tad_window_bp ?: 500000,
+                params.tad_min_contig_bp ?: 5000000,
+                params.tad_max_contigs ?: 0
             )
         }
     }
