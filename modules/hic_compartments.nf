@@ -29,7 +29,7 @@ process HIC_COMPARTMENTS {
   """
   set -euo pipefail
 
-  ${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py \\
+  python ${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py \\
     --mcool ${mcool} \\
     --resolution ${resolution} \\
     --assembly_id "${assembly_label}" \\
