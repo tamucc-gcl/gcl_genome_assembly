@@ -405,7 +405,7 @@ include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
-include { HIC_TADS } from './modules/local/hic/tads_book/main'
+include { HIC_TADS } from './modules/hic_tads.nf'
 
 /*
 ========================================================================================
