@@ -132,6 +132,7 @@ process HIC_CONTACT_MAP {
         --outFileName ${haplotype_id}_${qc_label}_\${res}bp_contact_map.png \\
         --title "${haplotype_id} (${qc_label}) Hi-C Contact Map (\${res} bp)" \\
         --log1p \\
+        --clearMaskedBins \\
         --dpi 200
     done
 
