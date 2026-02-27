@@ -36,7 +36,7 @@ nextflow.enable.dsl=2
 // ============================================================================
 params.sample_sheet = null
 params.outdir = './results'
-params.publish_dir_mode = 'copy'
+params.publish_dir_mode = 'link'
 
 // Assembly parameters
 ////   Overlap/Error correction:
