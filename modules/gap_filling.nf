@@ -23,7 +23,7 @@ process GAP_FILLING {
     tag "${haplotype_id}"
     label 'gap_filling'
     
-    publishDir "${params.outdir}/gap_filling", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/final", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(scaffold_fasta), path(hifi_fastq)

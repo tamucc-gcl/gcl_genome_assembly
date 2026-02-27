@@ -9,8 +9,8 @@
 process COMBINE_ASSEMBLY_QC {
     tag "${sample_id}:${qc_label}"
     label 'summarize_assembly'
-    
-    publishDir "${params.outdir}/qc/assembly/${qc_label}/", mode: params.publish_dir_mode
+    //${qc_label}/
+    publishDir "${params.outdir}/qc/assembly/intermediate/", mode: params.publish_dir_mode
     
     input:
     tuple val(sample_id), 

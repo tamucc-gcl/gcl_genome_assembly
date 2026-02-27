@@ -24,7 +24,7 @@ process CORRECT_MISASSEMBLIES {
     tag "${haplotype_id}"
     label 'misassembly_correction'
     
-    publishDir "${params.outdir}/${stage}/misassembly_correction", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/${stage}/misassembly_correction", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly_fasta), path(hifi_reads), val(stage), val(correction_params)
@@ -40,6 +40,7 @@ process CORRECT_MISASSEMBLIES {
     
     script:
     // Extract parameters for this stage
+    def skip_base = correction_params.skip_baseerror ? "--skip_baseerror" : ""
     def min_depth = correction_params.min_depth ?: ""
     def min_contig_length = correction_params.min_contig_length ?: 10000
     def min_contig_length_assemblyerror = correction_params.min_contig_length_assemblyerror ?: 1000000
@@ -86,6 +87,7 @@ process CORRECT_MISASSEMBLIES {
     
     inspector-correct.py \\
         --inspector ./ \\
+        ${skip_base} \\
         --datatype pacbio-hifi \\
         --outpath ./ \\
         --thread ${task.cpus}

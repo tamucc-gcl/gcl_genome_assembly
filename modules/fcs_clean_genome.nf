@@ -2,7 +2,7 @@ process FCS_CLEAN_GENOME {
   tag "${haplotype_id}"
   label 'fcs' 
   
-  publishDir "${params.outdir}/${stage}/decontam", mode: params.publish_dir_mode
+  publishDir "${params.outdir}/assembly/${stage}/decontam", mode: params.publish_dir_mode
 
   input:
     tuple val(haplotype_id), path(assembly_fa), path(action_report), val(stage)

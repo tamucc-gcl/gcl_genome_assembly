@@ -28,7 +28,7 @@ process PURGE_DUPS {
     tag "${haplotype_id}"
     label 'purge_dups'
     
-    publishDir "${params.outdir}/contig/purge_dups", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/contig/purge_dups", mode: params.publish_dir_mode
     
     input:
     tuple val(haplotype_id), path(assembly), path(hifi_reads)
