@@ -79,7 +79,6 @@ Assembly QC (QUAST, MERQURY, BUSCO, HiFi mapping statistics) is run at every maj
 | Misassembly correction | Inspector |
 | Hi-C processing | pairtools, cooler, HiCExplorer |
 | Decontamination | NCBI FCS-GX (Singularity), FCS-adaptor |
-| Taxonomic evidence | DIAMOND BLASTX, BlobToolKit |
 | Assembly QC | QUAST, MERQURY (meryl), BUSCO |
 | Read QC | FastQC, fastp |
 | Visualization | BlobToolKit (snail plots), pafr (dotplots), R/ggplot2 |
@@ -90,7 +89,7 @@ Assembly QC (QUAST, MERQURY, BUSCO, HiFi mapping statistics) is run at every maj
 - Nextflow ≥ 22.10
 - SLURM scheduler (or local execution)
 - Conda and/or Singularity
-- Sufficient storage for large databases (FCS-GX ~500 GB, DIAMOND nr ~100+ GB)
+- Sufficient storage for large databases (FCS-GX ~500 GB)
 
 ---
 
@@ -122,7 +121,7 @@ nextflow run main.nf \
 
 ### Sample Sheet
 
-A CSV file provided via `--sample_sheet` with four columns (no header row expected by the parser):
+A CSV file with a header row provided via `--sample_sheet`. Rows with any empty column are automatically skipped.
 
 | Column | Description |
 |---|---|
@@ -133,10 +132,14 @@ A CSV file provided via `--sample_sheet` with four columns (no header row expect
 
 **Example `samples.csv`:**
 
+```csv
+sample_id,hifi_bam,hic_r1,hic_r2
+Sde-CBau_104,data/raw_bam/m84066_251218_031205_s4.hifi_reads.bc2064.bam,data/raw_fastq/hic/Sde_CBau_104_R1.fq.gz,data/raw_fastq/hic/Sde_CBau_104_R2.fq.gz
+Sde_CPla_115,data/raw_bam/m84066_260114_212201_s2.hifi_reads.bc2086.bam,data/raw_fastq/hic/Sde_CPla_115_R1.fq.gz,data/raw_fastq/hic/Sde_CPla_115_R2.fq.gz
+Sde_CTlk_101,,data/raw_fastq/hic/Sde_CTlk_101_R1.fq.gz,data/raw_fastq/hic/Sde_CTlk_101_R2.fq.gz
 ```
-Sde_CLim_110,/data/hifi/Sde_CLim_110.hifi.bam,/data/hic/Sde_CLim_110_R1.fastq.gz,/data/hic/Sde_CLim_110_R2.fastq.gz
-Sde_CPla_115,/data/hifi/Sde_CPla_115.hifi.bam,/data/hic/Sde_CPla_115_R1.fastq.gz,/data/hic/Sde_CPla_115_R2.fastq.gz
-```
+
+In the example above, `Sde_CTlk_101` would be skipped because its `hifi_bam` field is empty.
 
 ### Databases
 
@@ -146,8 +149,6 @@ The pipeline can automatically download and cache the following databases. Paths
 |---|---|---|
 | BUSCO lineage | `--busco_lineage` | Lineage dataset name (e.g., `actinopterygii_odb10`, `insecta_odb10`) |
 | FCS-GX | `--gxdb_dir` | NCBI Foreign Contamination Screen database (~500 GB) |
-| DIAMOND | `--diamond_dmnd` | Pre-built `.dmnd` database, or set URLs to build from NCBI nr |
-| NCBI Taxonomy | `--diamond_taxdump_dir` | `taxdump` for DIAMOND and BlobToolKit |
 
 ---
 
@@ -155,7 +156,7 @@ The pipeline can automatically download and cache the following databases. Paths
 
 ### Step 0 — Database Setup
 
-Downloads and prepares decontamination databases (FCS-GX, DIAMOND, NCBI taxonomy) in parallel with read processing. Only runs if decontamination is enabled.
+Downloads and prepares the FCS-GX decontamination database in parallel with read processing. Only runs if decontamination is enabled.
 
 ### Step 1 — BAM to FASTQ Conversion
 
@@ -183,7 +184,7 @@ Uses Inspector to map HiFi reads back to the assembly, identify structural and s
 
 ### Step 5.5 — Decontamination of Contigs *(optional)*
 
-Screens contigs against the NCBI FCS-GX database and removes contaminant sequences. Optionally includes adapter/vector screening with FCS-adaptor. Optionally generates BlobToolKit evidence reports with DIAMOND taxonomy assignments. Controlled by `--decon_run_on_contigs`.
+Screens contigs against the NCBI FCS-GX database and removes contaminant sequences. Optionally includes adapter/vector screening with FCS-adaptor. Controlled by `--decon_run_on_contigs`.
 
 ### Step 6–7 — Hi-C Mapping and Filtering
 
@@ -372,7 +373,6 @@ Both round 1 and round 2 have independent parameter sets.
 | `--decon_run_fcs_adaptor` | `false` | Run FCS-adaptor for adapter/vector screening |
 | `--decon_fcsadaptor_mode` | `euk` | FCS-adaptor mode (`euk` or `prok`) |
 | `--decon_container_engine` | `singularity` | Container engine for FCS tools |
-| `--decon_make_blobtools_evidence` | `true` | Generate BlobToolKit evidence reports |
 
 ### Database Paths
 
@@ -382,23 +382,9 @@ Both round 1 and round 2 have independent parameter sets.
 | `--gxdb_dir` | `${db_base}/fcs-gx` | FCS-GX database directory |
 | `--gxdb_profile` | `all` | FCS-GX profile (`all` or `test-only`) |
 | `--gxdb_force` | `false` | Force re-download of FCS-GX database |
-| `--diamond_dmnd` | `null` | Path to pre-built DIAMOND `.dmnd` database |
-| `--diamond_dir` | `${db_base}/diamond` | DIAMOND database build directory |
-| `--diamond_taxdump_dir` | `${db_base}/ncbi_taxonomy` | NCBI taxdump directory |
-| `--diamond_fasta_url` | NCBI nr FTP | URL for protein FASTA |
-| `--diamond_taxonmap_url` | NCBI accession2taxid FTP | URL for taxonomy mapping |
 | `--busco_lineage` | `actinopterygii_odb10` | BUSCO lineage dataset |
 | `--busco_downloads` | `/work/birdlab/databases/busco` | Local BUSCO dataset cache |
 | `--merqury_k` | `21` | K-mer size for meryl database |
-
-### Evidence Generation
-
-| Parameter | Default | Description |
-|---|---|---|
-| `--evidence_map_preset` | `map-hifi` | minimap2 preset for coverage mapping |
-| `--evidence_diamond_max_target_seqs` | `1` | DIAMOND max target sequences |
-| `--evidence_diamond_evalue` | `1e-25` | DIAMOND E-value threshold |
-| `--evidence_blob_min_contig_len` | `1000` | Min contig length for BlobToolKit |
 
 ### Finalization and Visualization
 
@@ -478,8 +464,6 @@ results/
 ├── coverage_books/                     # HiFi coverage visualizations
 ├── pairwise_alignments/                # Dotplot PNGs and PAF files
 ├── telomeres/                          # Telomere scan results
-├── decontamination/
-│   └── evidence/                       # BlobToolKit evidence reports
 │
 ├── reports/
 │   ├── pipeline_summary_report.md      # Markdown summary with images
@@ -537,7 +521,6 @@ Resource allocation is tiered by process label in `nextflow.config`. Key allocat
 | BUILD_MERYL_DB | 16 | 100 GB → 200 GB | normal → bigmem |
 | Gap Filling | 12 | 150 GB → 343 GB | normal → bigmem |
 | FCS-GX | 32 | 500 GB | ultramem/bigmem |
-| DIAMOND BLASTX | 64 | 700 GB | bigmem |
 | YaHS | 1 | 8 GB | normal |
 | QUAST | 4 | 16 GB | normal |
 | MERQURY | 8 | 20 GB | normal |
