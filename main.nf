@@ -96,7 +96,7 @@ params.merqury_k = 21  // k-mer size for meryl database
 
 // Misassembly correction parameters (Inspector) - CONTIGS
 params.inspector_run_on_contigs = true
-params.inspector_skip_baseerror = true
+params.inspector_contig_skip_baseerror = true
 params.inspector_contig_min_depth = null  // default: 20% of average depth
 params.inspector_contig_min_contig_length = 10000
 params.inspector_contig_min_contig_length_assemblyerror = 1000000
@@ -105,7 +105,7 @@ params.inspector_contig_max_assembly_error_size = 4000000
 
 // Misassembly correction parameters (Inspector) - SCAFFOLDS
 params.inspector_run_on_scaffolds = true
-params.inspector_skip_baseerror = true
+params.inspector_scaffold_skip_baseerror = true
 params.inspector_scaffold_min_depth = null  // default: 20% of average depth
 params.inspector_scaffold_min_contig_length = 10000
 params.inspector_scaffold_min_contig_length_assemblyerror = 10000000  // Higher threshold for scaffolds
@@ -583,7 +583,7 @@ workflow {
                     min_contig_length_assemblyerror: params.inspector_contig_min_contig_length_assemblyerror,
                     min_assembly_error_size: params.inspector_contig_min_assembly_error_size,
                     max_assembly_error_size: params.inspector_contig_max_assembly_error_size,
-                    skip_baseerror: params.inspector_skip_baseerror
+                    skip_baseerror: params.inspector_contig_skip_baseerror
                 ]
                 tuple(haplotype_id, fasta, hifi_fastq, "contig", correction_params)
             }
@@ -760,7 +760,7 @@ workflow {
                     min_contig_length_assemblyerror: params.inspector_scaffold_min_contig_length_assemblyerror,
                     min_assembly_error_size: params.inspector_scaffold_min_assembly_error_size,
                     max_assembly_error_size: params.inspector_scaffold_max_assembly_error_size,
-                    skip_baseerror: params.inspector_skip_baseerror
+                    skip_baseerror: params.inspector_scaffold_skip_baseerror
                 ]
                 tuple(haplotype_id, scaffold, hifi_fastq, "scaffold", correction_params)
             }
