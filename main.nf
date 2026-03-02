@@ -408,6 +408,7 @@ include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
 include { HIC_TADS } from './modules/hic_tads.nf'
+include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
 
 /*
 ========================================================================================
@@ -1567,6 +1568,9 @@ workflow {
         ch_all_bam_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect(),
         ch_all_pairs_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect()
     )
+
+    // Make interactive HTML assembly viewer
+    ASSEMBLY_REPORT(COMPILE_FINAL_QC.out.metrics)
 
     /*
     ========================================================================================
