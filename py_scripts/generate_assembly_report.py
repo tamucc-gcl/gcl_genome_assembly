@@ -5,7 +5,7 @@ generate_assembly_report.py
 Parse assembly QC metrics CSV and generate a self-contained interactive HTML
 report that ranks assemblies by annotation suitability.
 
-Ranking criteria (weighted):
+Ranking criteria (weighted, user-adjustable in report):
   - Contiguity:   N50 (scaffold-level preferred), L50, # contigs
   - Base accuracy: Merqury QV
   - Gene space:   BUSCO complete %
@@ -27,8 +27,6 @@ from collections import defaultdict
 
 # ── Metric extraction helpers ────────────────────────────────────────────────
 
-# Metrics we want to pull, mapped to human-readable names and which
-# column(s) they come from (hap1/hap2/both)
 METRIC_MAP = {
     "quast": {
         "N50":                      {"key": "n50",      "scale": 1e-6, "unit": "Mb"},
@@ -67,11 +65,7 @@ METRIC_MAP = {
 
 
 def parse_metrics(csv_path):
-    """Parse the long-format metrics CSV into a nested dict structure.
-
-    Returns:
-        {sample_id: {stage: {hap1: {metric_key: value}, hap2: {...}, both: {...}}}}
-    """
+    """Parse the long-format metrics CSV into a nested dict structure."""
     data = defaultdict(lambda: defaultdict(lambda: {"hap1": {}, "hap2": {}, "both": {}}))
 
     with open(csv_path) as fh:
@@ -106,7 +100,6 @@ def get_available_stages(data):
     for sid in data:
         stages.update(data[sid].keys())
 
-    # Define preferred ordering
     stage_order = [
         "ctg.base", "ctg.cor", "ctg.deco",
         "scaf.base", "scaf.cor", "scaf2",
@@ -117,98 +110,8 @@ def get_available_stages(data):
     return ordered + remaining
 
 
-def rank_assemblies(data, stage):
-    """Rank assemblies for a given stage. Returns list of (sample_id, score, details)."""
-
-    scores = []
-    for sid in data:
-        if stage not in data[sid]:
-            continue
-
-        rec = data[sid][stage]
-        # Use the better haplotype for ranking, or average
-        results = {}
-        for hap in ["hap1", "hap2"]:
-            h = rec[hap]
-            if not h:
-                continue
-            results[hap] = h
-
-        if not results:
-            continue
-
-        # Score components (0-100 scale each, higher = better)
-        component_scores = {}
-
-        for hap, h in results.items():
-            s = 0
-            weights_total = 0
-
-            # N50 — log scale, bigger is better
-            if "n50" in h:
-                # Range: 1 Mb (bad) to 100 Mb (great)
-                import math
-                n50_score = max(0, min(100,
-                    (math.log10(max(h["n50"], 0.1)) - 0) / (2 - 0) * 100))
-                s += n50_score * 25
-                weights_total += 25
-
-            # QV — higher is better
-            if "qv" in h:
-                # Range: 55 (bad) to 65 (great)
-                qv_score = max(0, min(100, (h["qv"] - 55) / (65 - 55) * 100))
-                s += qv_score * 25
-                weights_total += 25
-
-            # BUSCO complete % — higher is better
-            if "busco_c" in h and "busco_total" in h and h["busco_total"] > 0:
-                busco_pct = h["busco_c"] / h["busco_total"] * 100
-                # Range: 85% (bad) to 95% (great)
-                busco_score = max(0, min(100, (busco_pct - 85) / (95 - 85) * 100))
-                s += busco_score * 20
-                weights_total += 20
-
-            # Contigs — fewer is better
-            if "contigs" in h:
-                # Range: 100 (great) to 3000 (bad), log scale
-                ctg_score = max(0, min(100,
-                    (math.log10(3000) - math.log10(max(h["contigs"], 100)))
-                    / (math.log10(3000) - math.log10(100)) * 100))
-                s += ctg_score * 10
-                weights_total += 10
-
-            # Trans/cis ratio — lower is better (only for scaffolded stages)
-            if "tc_ratio" in h:
-                # Range: 0.3 (great) to 1.8 (bad)
-                tc_score = max(0, min(100, (1.8 - h["tc_ratio"]) / (1.8 - 0.3) * 100))
-                s += tc_score * 15
-                weights_total += 15
-
-            # K-mer completeness (per-hap) — higher is better
-            if "kcomp" in h:
-                kcomp_score = max(0, min(100, (h["kcomp"] - 70) / (82 - 70) * 100))
-                s += kcomp_score * 5
-                weights_total += 5
-
-            if weights_total > 0:
-                component_scores[hap] = s / weights_total
-            else:
-                component_scores[hap] = 0
-
-        # Overall score = average of both haplotypes
-        if component_scores:
-            avg_score = sum(component_scores.values()) / len(component_scores)
-            best_hap = max(component_scores, key=component_scores.get)
-            scores.append((sid, avg_score, best_hap, component_scores))
-
-    # Sort descending by score
-    scores.sort(key=lambda x: x[1], reverse=True)
-    return scores
-
-
 def build_report_data(data, stages):
     """Build the JSON data structure for the HTML report."""
-
     report = {
         "stages": stages,
         "samples": sorted(data.keys()),
@@ -216,19 +119,11 @@ def build_report_data(data, stages):
     }
 
     for stage in stages:
-        ranking = rank_assemblies(data, stage)
-        stage_info = {
-            "ranking": [],
-            "assemblies": {},
-        }
+        stage_info = {"assemblies": {}}
 
-        for rank_idx, (sid, score, best_hap, hap_scores) in enumerate(ranking):
-            stage_info["ranking"].append({
-                "sample_id": sid,
-                "rank": rank_idx + 1,
-                "score": round(score, 2),
-                "best_hap": best_hap,
-            })
+        for sid in data:
+            if stage not in data[sid]:
+                continue
 
             rec = data[sid][stage]
             assembly = {}
@@ -270,12 +165,51 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .container { max-width: 1100px; margin: 0 auto; }
   h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
   .subtitle { font-size: 13px; color: var(--dim); margin-bottom: 20px; }
+
+  /* Controls */
   .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   .controls label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 4px; }
   .btn { padding: 7px 14px; border-radius: 8px; border: 2px solid var(--border); background: var(--surface);
          color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
   .btn:hover { border-color: var(--blue); color: var(--blue); }
   .btn.active { border-color: var(--blue); background: rgba(59,130,246,0.12); color: var(--blue); }
+
+  /* Weights panel */
+  .weights-panel { background: var(--surface); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px;
+                   border: 1px solid var(--border); }
+  .weights-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; cursor: pointer; }
+  .weights-header h3 { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .weights-toggle { font-size: 11px; color: var(--dim); background: var(--bg); padding: 3px 10px; border-radius: 6px;
+                    border: 1px solid var(--border); cursor: pointer; font-weight: 600; }
+  .weights-toggle:hover { color: var(--blue); border-color: var(--blue); }
+  .weights-body { display: none; }
+  .weights-body.open { display: block; }
+  .weights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 20px; }
+  .weight-item { }
+  .weight-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .weight-name { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .weight-val { font-size: 12px; color: var(--blue); font-weight: 700; min-width: 28px; text-align: right; }
+  .weight-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 5px; border-radius: 3px;
+                   background: var(--bg); outline: none; }
+  .weight-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px;
+                                          border-radius: 50%; background: var(--blue); cursor: pointer; border: 2px solid var(--surface); }
+  .weight-slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--blue);
+                                      cursor: pointer; border: 2px solid var(--surface); }
+  .weight-total { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .weight-total-label { font-size: 12px; color: var(--dim); }
+  .weight-total-val { font-size: 13px; font-weight: 700; }
+  .weight-total-val.ok { color: var(--green); }
+  .weight-total-val.warn { color: var(--amber); }
+  .weight-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .weight-reset-btn { font-size: 11px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border);
+                      background: transparent; color: var(--muted); cursor: pointer; font-weight: 600; }
+  .weight-reset-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .weight-preset-btn { font-size: 11px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border);
+                       background: transparent; color: var(--muted); cursor: pointer; font-weight: 600; }
+  .weight-preset-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+  .weight-preset-btn.active-preset { border-color: var(--cyan); color: var(--cyan); background: rgba(6,182,212,0.1); }
+
+  /* Cards and tables */
   .card { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); }
   .card.selected { border-color: var(--sel-color, var(--blue)); }
   .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
@@ -303,8 +237,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .hap-btn { padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent;
              color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.15s; }
   .hap-btn.active { border-color: var(--sel-color, var(--blue)); background: rgba(59,130,246,0.12); color: var(--sel-color, var(--blue)); }
-  .stage-note { font-size: 11px; color: var(--dim); font-style: italic; margin-bottom: 12px; }
-  @media (max-width: 700px) { .metrics-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 700px) { .metrics-grid { grid-template-columns: 1fr; } .weights-grid { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -317,6 +250,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div id="stage-btns"></div>
   </div>
 
+  <div class="weights-panel">
+    <div class="weights-header" onclick="toggleWeights()">
+      <h3>Ranking Weights</h3>
+      <button class="weights-toggle" id="weights-toggle-btn">Show</button>
+    </div>
+    <div class="weights-body" id="weights-body">
+      <div id="presets-row" class="weight-actions" style="margin-bottom:12px;margin-top:0"></div>
+      <div class="weights-grid" id="weights-grid"></div>
+      <div class="weight-total">
+        <span class="weight-total-label">Total weight:</span>
+        <span class="weight-total-val" id="weight-total">100</span>
+      </div>
+      <div class="weight-actions">
+        <button class="weight-reset-btn" onclick="resetWeights()">Reset to defaults</button>
+      </div>
+    </div>
+  </div>
+
   <div id="comparison-table" class="card"></div>
   <div id="detail-card"></div>
 </div>
@@ -326,16 +277,168 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 const REPORT = __REPORT_JSON__;
 
 const RANK_COLORS = ["#22c55e","#3b82f6","#a855f7","#f59e0b","#ef4444","#06b6d4","#fb7185","#a3e635","#818cf8","#fbbf24"];
-const RANK_LABELS = ["★ BEST","STRONG","GOOD","MODERATE","BELOW AVG","POOR","POOR","POOR","POOR","POOR"];
+const RANK_LABELS = ["BEST","STRONG","GOOD","MODERATE","BELOW AVG","POOR","POOR","POOR","POOR","POOR"];
+
+// ── Weight definitions ──
+const WEIGHT_DEFS = [
+  { id: "n50",     name: "N50 (contiguity)",    default: 25, min: 0, max: 50 },
+  { id: "qv",      name: "QV (base accuracy)",  default: 25, min: 0, max: 50 },
+  { id: "busco",   name: "BUSCO complete",       default: 20, min: 0, max: 50 },
+  { id: "tc",      name: "Trans/Cis ratio",      default: 15, min: 0, max: 50 },
+  { id: "contigs", name: "Contig count",          default: 10, min: 0, max: 50 },
+  { id: "kcomp",   name: "K-mer completeness",   default: 5,  min: 0, max: 50 },
+];
+
+const PRESETS = {
+  "Default": { n50: 25, qv: 25, busco: 20, tc: 15, contigs: 10, kcomp: 5 },
+  "Accuracy-first": { n50: 10, qv: 40, busco: 25, tc: 5, contigs: 5, kcomp: 15 },
+  "Contiguity-first": { n50: 40, qv: 15, busco: 15, tc: 15, contigs: 10, kcomp: 5 },
+  "Gene-space-first": { n50: 15, qv: 20, busco: 35, tc: 10, contigs: 10, kcomp: 10 },
+  "Scaffolding-first": { n50: 15, qv: 15, busco: 15, tc: 35, contigs: 10, kcomp: 10 },
+};
+
+let weights = {};
+WEIGHT_DEFS.forEach(w => weights[w.id] = w.default);
 
 let curStage = REPORT.stages.includes("__DEFAULT_STAGE__") ? "__DEFAULT_STAGE__" : REPORT.stages[REPORT.stages.length - 1];
 let curSample = null;
 let curHap = "hap2";
+let weightsOpen = false;
 
 function $(id) { return document.getElementById(id); }
 
+// ── Ranking engine (runs in browser with current weights) ──
+function scoreHaplotype(h, w) {
+  let s = 0, wt = 0;
+
+  if (h.n50 !== undefined && w.n50 > 0) {
+    const v = Math.max(0, Math.min(100, (Math.log10(Math.max(h.n50, 0.1)) - 0) / 2 * 100));
+    s += v * w.n50; wt += w.n50;
+  }
+  if (h.qv !== undefined && w.qv > 0) {
+    const v = Math.max(0, Math.min(100, (h.qv - 55) / 10 * 100));
+    s += v * w.qv; wt += w.qv;
+  }
+  if (h.busco_c !== undefined && h.busco_total > 0 && w.busco > 0) {
+    const pct = h.busco_c / h.busco_total * 100;
+    const v = Math.max(0, Math.min(100, (pct - 85) / 10 * 100));
+    s += v * w.busco; wt += w.busco;
+  }
+  if (h.contigs !== undefined && w.contigs > 0) {
+    const v = Math.max(0, Math.min(100,
+      (Math.log10(3000) - Math.log10(Math.max(h.contigs, 100))) / (Math.log10(3000) - Math.log10(100)) * 100));
+    s += v * w.contigs; wt += w.contigs;
+  }
+  if (h.tc_ratio !== undefined && w.tc > 0) {
+    const v = Math.max(0, Math.min(100, (1.8 - h.tc_ratio) / 1.5 * 100));
+    s += v * w.tc; wt += w.tc;
+  }
+  if (h.kcomp !== undefined && w.kcomp > 0) {
+    const v = Math.max(0, Math.min(100, (h.kcomp - 70) / 12 * 100));
+    s += v * w.kcomp; wt += w.kcomp;
+  }
+
+  return wt > 0 ? s / wt : 0;
+}
+
+function rankAssemblies(sd) {
+  const results = [];
+  for (const sid of Object.keys(sd.assemblies)) {
+    const a = sd.assemblies[sid];
+    const hapScores = {};
+    for (const hap of ["hap1","hap2"]) {
+      const h = a[hap];
+      if (h && Object.keys(h).length > 0) {
+        hapScores[hap] = scoreHaplotype(h, weights);
+      }
+    }
+    if (Object.keys(hapScores).length === 0) continue;
+    const avg = Object.values(hapScores).reduce((a,b)=>a+b,0) / Object.values(hapScores).length;
+    const bestHap = Object.entries(hapScores).sort((a,b)=>b[1]-a[1])[0][0];
+    results.push({ sample_id: sid, score: avg, best_hap: bestHap });
+  }
+  results.sort((a,b) => b.score - a.score);
+  results.forEach((r,i) => r.rank = i + 1);
+  return results;
+}
+
+// ── Weights UI ──
+function toggleWeights() {
+  weightsOpen = !weightsOpen;
+  $("weights-body").classList.toggle("open", weightsOpen);
+  $("weights-toggle-btn").textContent = weightsOpen ? "Hide" : "Show";
+}
+
+function renderWeightsUI() {
+  // Presets
+  const pr = $("presets-row");
+  pr.innerHTML = '<span style="font-size:11px;color:var(--dim);font-weight:600;margin-right:4px">Presets:</span>';
+  for (const [name, vals] of Object.entries(PRESETS)) {
+    const b = document.createElement("button");
+    b.className = "weight-preset-btn";
+    const isActive = WEIGHT_DEFS.every(w => weights[w.id] === vals[w.id]);
+    if (isActive) b.classList.add("active-preset");
+    b.textContent = name;
+    b.onclick = () => { applyPreset(vals); };
+    pr.appendChild(b);
+  }
+
+  // Sliders
+  const grid = $("weights-grid");
+  grid.innerHTML = "";
+  WEIGHT_DEFS.forEach(wd => {
+    const item = document.createElement("div");
+    item.className = "weight-item";
+    item.innerHTML = `
+      <div class="weight-label">
+        <span class="weight-name">${wd.name}</span>
+        <span class="weight-val" id="wv-${wd.id}">${weights[wd.id]}</span>
+      </div>
+      <input type="range" class="weight-slider" id="ws-${wd.id}"
+             min="${wd.min}" max="${wd.max}" value="${weights[wd.id]}" step="1">
+    `;
+    grid.appendChild(item);
+
+    item.querySelector("input").addEventListener("input", function() {
+      weights[wd.id] = parseInt(this.value);
+      $("wv-" + wd.id).textContent = this.value;
+      updateWeightTotal();
+      renderAll();
+      renderWeightsUI(); // refresh preset highlights
+    });
+  });
+
+  updateWeightTotal();
+}
+
+function updateWeightTotal() {
+  const total = WEIGHT_DEFS.reduce((s,w) => s + weights[w.id], 0);
+  const el = $("weight-total");
+  el.textContent = total;
+  el.className = "weight-total-val " + (total === 100 ? "ok" : "warn");
+}
+
+function resetWeights() {
+  applyPreset(PRESETS["Default"]);
+}
+
+function applyPreset(vals) {
+  WEIGHT_DEFS.forEach(w => {
+    weights[w.id] = vals[w.id];
+    const slider = $("ws-" + w.id);
+    if (slider) slider.value = vals[w.id];
+    const display = $("wv-" + w.id);
+    if (display) display.textContent = vals[w.id];
+  });
+  updateWeightTotal();
+  renderAll();
+  renderWeightsUI();
+}
+
+// ── Init ──
 function init() {
   renderStageBtns();
+  renderWeightsUI();
   renderAll();
 }
 
@@ -352,7 +455,6 @@ function renderStageBtns() {
 }
 
 function renderAll() {
-  // Update stage button states
   document.querySelectorAll("#stage-btns .btn").forEach(b => {
     b.classList.toggle("active", b.textContent === curStage);
   });
@@ -360,14 +462,15 @@ function renderAll() {
   const sd = REPORT.stage_data[curStage];
   if (!sd) { $("comparison-table").innerHTML = "<p>No data for this stage.</p>"; $("detail-card").innerHTML = ""; return; }
 
-  if (!curSample && sd.ranking.length > 0) curSample = sd.ranking[0].sample_id;
+  const ranking = rankAssemblies(sd);
+  if (!curSample && ranking.length > 0) curSample = ranking[0].sample_id;
 
-  renderTable(sd);
-  renderDetail(sd);
+  renderTable(sd, ranking);
+  renderDetail(sd, ranking);
 }
 
-function renderTable(sd) {
-  const hasTc = sd.ranking.some(r => {
+function renderTable(sd, ranking) {
+  const hasTc = ranking.some(r => {
     const a = sd.assemblies[r.sample_id];
     return a && (a.hap1.tc_ratio !== undefined || a.hap2.tc_ratio !== undefined);
   });
@@ -377,11 +480,10 @@ function renderTable(sd) {
   if (hasTc) html += `<th>T/C Ratio</th>`;
   html += `<th>Best Hap</th></tr></thead><tbody>`;
 
-  sd.ranking.forEach((r, i) => {
+  ranking.forEach((r, i) => {
     const a = sd.assemblies[r.sample_id];
     const color = RANK_COLORS[Math.min(i, RANK_COLORS.length - 1)];
-    const bh = r.best_hap;
-    const h = a[bh] || {};
+    const h = a[r.best_hap] || {};
     const active = r.sample_id === curSample ? " active" : "";
 
     const tcVal = h.tc_ratio;
@@ -396,7 +498,7 @@ function renderTable(sd) {
     html += `<td>${h.busco_pct !== undefined ? h.busco_pct.toFixed(1) + "%" : "-"}</td>`;
     html += `<td>${h.qv !== undefined ? h.qv.toFixed(1) : "-"}</td>`;
     if (hasTc) html += `<td class="${tcClass}">${tcVal !== undefined ? tcVal.toFixed(3) : "-"}</td>`;
-    html += `<td>${bh}</td>`;
+    html += `<td>${r.best_hap}</td>`;
     html += `</tr>`;
   });
 
@@ -412,29 +514,26 @@ function metricBar(label, value, min, max, color, unit, invert) {
   let pct = invert
     ? Math.max(0, Math.min(100, (max - value) / (max - min) * 100))
     : Math.max(0, Math.min(100, (value - min) / (max - min) * 100));
-
-  const displayVal = Math.abs(value) >= 1000 ? value.toFixed(0) : (Math.abs(value) >= 100 ? value.toFixed(1) : value.toFixed(2));
-
+  const dv = Math.abs(value) >= 1000 ? value.toFixed(0) : (Math.abs(value) >= 100 ? value.toFixed(1) : value.toFixed(2));
   return `<div class="metric-row">
-    <div class="metric-label"><span>${label}</span><span class="metric-value">${displayVal}${unit}</span></div>
+    <div class="metric-label"><span>${label}</span><span class="metric-value">${dv}${unit}</span></div>
     <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
   </div>`;
 }
 
-function renderDetail(sd) {
+function renderDetail(sd, ranking) {
   if (!curSample || !sd.assemblies[curSample]) { $("detail-card").innerHTML = ""; return; }
 
   const a = sd.assemblies[curSample];
-  const ri = sd.ranking.findIndex(r => r.sample_id === curSample);
+  const ri = ranking.findIndex(r => r.sample_id === curSample);
   const rank = ri >= 0 ? ri + 1 : "?";
   const color = RANK_COLORS[Math.min(ri, RANK_COLORS.length - 1)];
-  const label = RANK_LABELS[Math.min(ri, RANK_LABELS.length - 1)];
+  const label = ri === 0 ? "\u2605 " + RANK_LABELS[0] : RANK_LABELS[Math.min(ri, RANK_LABELS.length - 1)];
   const h = a[curHap] || {};
   const both = a.both || {};
 
   let html = `<div class="card selected" style="--sel-color:${color};border-color:${color}40">`;
 
-  // Header
   html += `<div class="sample-header"><div>`;
   html += `<span class="badge" style="background:${color}30;color:${color}">${label}</span>`;
   html += `<div class="sample-name">${curSample}</div></div>`;
@@ -444,7 +543,6 @@ function renderDetail(sd) {
   });
   html += `</div></div>`;
 
-  // Metrics grid
   html += `<div class="metrics-grid"><div>`;
   html += `<div class="metric-section-title">Contiguity</div>`;
   html += metricBar("N50", h.n50, 0, 100, color, " Mb", false);
@@ -455,7 +553,6 @@ function renderDetail(sd) {
   html += `</div><div>`;
   html += `<div class="metric-section-title">Quality</div>`;
   html += metricBar("QV (Merqury)", h.qv, 55, 65, color, "", false);
-
   if (h.busco_c !== undefined && h.busco_total) {
     const bp = (h.busco_c / h.busco_total * 100);
     html += metricBar(`BUSCO complete (${bp.toFixed(1)}%)`, h.busco_c, 3100, 3450, color, "/" + h.busco_total.toFixed(0), false);
@@ -465,7 +562,6 @@ function renderDetail(sd) {
   html += metricBar("HiFi depth", h.hifi_depth, 15, 45, color, "x", false);
   html += `</div></div>`;
 
-  // Scaffolding section (if data exists)
   if (h.tc_ratio !== undefined || both.kcomp !== undefined) {
     html += `<div style="margin-top:16px"><div class="metric-section-title">Scaffolding & Combined</div>`;
     html += `<div class="metrics-grid"><div>`;
@@ -477,7 +573,6 @@ function renderDetail(sd) {
     html += `</div></div></div>`;
   }
 
-  // Summary bar
   html += `<div class="summary-bar">`;
   html += `<span class="hl" style="color:${color}">Total length:</span> ${h.total !== undefined ? (h.total/1000).toFixed(2) + " Gb" : "-"} &nbsp;|&nbsp;`;
   html += `<span class="hl" style="color:${color}">GC:</span> ${h.gc !== undefined ? h.gc.toFixed(2) + "%" : "-"} &nbsp;|&nbsp;`;
@@ -504,7 +599,6 @@ def main():
                         help="Default stage to display (default: final)")
     args = parser.parse_args()
 
-    # Parse
     data = parse_metrics(args.input)
     if not data:
         print("ERROR: No metrics parsed from input CSV", file=sys.stderr)
@@ -518,10 +612,8 @@ def main():
     print(f"Parsed {len(data)} samples across {len(stages)} stages: {', '.join(stages)}",
           file=sys.stderr)
 
-    # Build report data
     report = build_report_data(data, stages)
 
-    # Inject into HTML
     report_json = json.dumps(report, indent=None, separators=(",", ":"))
     html = HTML_TEMPLATE.replace("__REPORT_JSON__", report_json)
     html = html.replace("__DEFAULT_STAGE__", args.report_stage)
@@ -530,13 +622,6 @@ def main():
         fh.write(html)
 
     print(f"Report written to {args.output}", file=sys.stderr)
-
-    # Print ranking summary for the default stage
-    default_stage = args.report_stage if args.report_stage in stages else stages[-1]
-    ranking = rank_assemblies(data, default_stage)
-    print(f"\nRanking for stage '{default_stage}':", file=sys.stderr)
-    for sid, score, best_hap, _ in ranking:
-        print(f"  {score:6.2f}  {sid}  (best: {best_hap})", file=sys.stderr)
 
 
 if __name__ == "__main__":
