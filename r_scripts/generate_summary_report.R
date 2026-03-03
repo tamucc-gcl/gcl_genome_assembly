@@ -189,27 +189,21 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                           "complete", "Largest contig", "GC (%)", "qv",
                           "kmer_completeness"))
 
-  # For diploid-level metrics keep only "both"; for per-hap metrics keep hap1/hap2
-  overview_filtered <- overview_long %>%
-    filter(
-      (metric %in% c("qv", "kmer_completeness") & haplotype == "both") |
-      (!metric %in% c("qv", "kmer_completeness") & haplotype %in% c("hap1", "hap2"))
-    )
-
-  if (nrow(overview_filtered) > 0) {
+  if (nrow(overview_long) > 0) {
     # Format values
-    overview_fmt <- overview_filtered %>%
-      mutate(value_fmt = case_when(
-        metric == "complete"                       ~ percent(value, accuracy = 0.1),
-        metric == "hifi_depth"                     ~ comma(value, accuracy = 0.1),
-        metric == "Total length"                   ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
-        metric %in% c("Largest contig", "auN")     ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
-        metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, scale = 1, accuracy = 0.1),
-        metric == "qv"                             ~ comma(value, accuracy = 0.1),
-        TRUE                                       ~ comma(value, accuracy = 1)
-      ))
+    fmt_value <- function(value, metric) {
+      case_when(
+        metric == "complete"                          ~ percent(value, accuracy = 0.1),
+        metric == "hifi_depth"                        ~ comma(value, accuracy = 0.1),
+        metric == "Total length"                      ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
+        metric %in% c("Largest contig", "auN")        ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
+        metric %in% c("GC (%)", "kmer_completeness")  ~ percent(value, scale = 1, accuracy = 0.1),
+        metric == "qv"                                ~ comma(value, accuracy = 0.1),
+        TRUE                                          ~ comma(value, accuracy = 1)
+      )
+    }
 
-    # Rename metrics for display
+    # Metric display names and order
     metric_display <- c(
       "Total length"       = "Total Length",
       "Largest contig"     = "Largest Scaffold",
@@ -221,24 +215,36 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       "qv"                 = "QV",
       "kmer_completeness"  = "K-mer Completeness"
     )
-
-    # Define display order
     metric_order <- names(metric_display)
 
-    # Build wide table: rows = assemblies (sample+haplotype), columns = metrics
-    overview_wide <- overview_fmt %>%
+    # Diploid-level metrics (single value per sample)
+    diploid_metrics <- c("qv", "kmer_completeness")
+
+    # Per-haplotype metrics: format as "hap1 / hap2" slash notation
+    per_hap <- overview_long %>%
+      filter(!metric %in% diploid_metrics, haplotype %in% c("hap1", "hap2")) %>%
+      mutate(value_fmt = fmt_value(value, metric)) %>%
+      select(sample_id, metric, haplotype, value_fmt) %>%
+      pivot_wider(names_from = haplotype, values_from = value_fmt, values_fill = "—") %>%
+      mutate(combined = paste(hap1, "/", hap2)) %>%
+      select(sample_id, metric, combined)
+
+    # Diploid metrics: single value
+    diploid <- overview_long %>%
+      filter(metric %in% diploid_metrics, haplotype == "both") %>%
+      mutate(combined = fmt_value(value, metric)) %>%
+      select(sample_id, metric, combined)
+
+    # Combine and pivot to wide: rows = samples, columns = metrics
+    overview_wide <- bind_rows(per_hap, diploid) %>%
       mutate(
         metric = factor(metric, levels = metric_order),
-        row_name = case_when(
-          haplotype == "both" ~ paste0(sample_id, " (diploid)"),
-          TRUE ~ paste0(sample_id, " ", haplotype)
-        ),
         metric_label = metric_display[as.character(metric)]
       ) %>%
-      arrange(row_name, metric) %>%
-      select(row_name, metric_label, value_fmt) %>%
-      pivot_wider(names_from = metric_label, values_from = value_fmt, values_fill = "") %>%
-      rename(Assembly = row_name)
+      arrange(sample_id, metric) %>%
+      select(sample_id, metric_label, combined) %>%
+      pivot_wider(names_from = metric_label, values_from = combined, values_fill = "") %>%
+      rename(Sample = sample_id)
 
     md <- c(md, make_markdown_table(overview_wide), "")
   }
