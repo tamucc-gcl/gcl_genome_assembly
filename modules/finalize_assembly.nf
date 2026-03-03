@@ -33,7 +33,7 @@ process FINALIZE_ASSEMBLY {
 
     script:
     """
-    cp input/${assembly_fasta.name} ${haplotype_id}.fasta
+    cp ${assembly_fasta.name} ${haplotype_id}.fasta
     """
 
     stub:
