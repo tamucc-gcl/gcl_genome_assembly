@@ -67,3 +67,60 @@ process SCAN_TELOMERES {
     ' ${haplotype_id}.telomeres.tsv > ${haplotype_id}.telomere_summary.tsv
     """
 }
+
+/*
+========================================================================================
+    COLLECT TELOMERE RESULTS
+========================================================================================
+    Combines per-haplotype telomere detection outputs into single summary files.
+    Replaces anonymous collectFile() calls so outputs are proper Nextflow channels.
+========================================================================================
+*/
+
+process COLLECT_TELOMERE_RESULTS {
+    tag "collect_telomeres"
+    label 'summarize_assembly'
+
+    publishDir "${params.outdir}/telomeres", mode: params.publish_dir_mode
+
+    input:
+    path("summaries/*")    // per-haplotype telomere summary TSVs
+    path("telomeres/*")    // per-haplotype per-scaffold telomere TSVs
+
+    output:
+    path("all_telomere_summaries.tsv"), emit: summary
+    path("all_telomeres.tsv"),          emit: telomeres
+
+    script:
+    """
+    set -euo pipefail
+
+    # --- Combine summary files (header from first, skip headers on rest) ---
+    first_summary=\$(ls summaries/*.tsv 2>/dev/null | head -1)
+    if [[ -n "\$first_summary" ]]; then
+        head -1 "\$first_summary" > all_telomere_summaries.tsv
+        for f in summaries/*.tsv; do
+            tail -n +2 "\$f" >> all_telomere_summaries.tsv
+        done
+    else
+        echo "No telomere summary files found" > all_telomere_summaries.tsv
+    fi
+
+    # --- Combine per-scaffold telomere files ---
+    first_telo=\$(ls telomeres/*.tsv 2>/dev/null | head -1)
+    if [[ -n "\$first_telo" ]]; then
+        head -1 "\$first_telo" > all_telomeres.tsv
+        for f in telomeres/*.tsv; do
+            tail -n +2 "\$f" >> all_telomeres.tsv
+        done
+    else
+        echo "No telomere detail files found" > all_telomeres.tsv
+    fi
+    """
+
+    stub:
+    """
+    touch all_telomere_summaries.tsv
+    touch all_telomeres.tsv
+    """
+}

@@ -171,3 +171,45 @@ process PAIRWISE_ALIGNMENT {
     touch "${out_prefix}_dotplot.png"
     """
 }
+
+/*
+========================================================================================
+    COLLECT PAIRWISE ALIGNMENT RESULTS
+========================================================================================
+    Combines per-pair pairwise alignment QC outputs into a single summary file.
+    Replaces anonymous collectFile() calls so output is a proper Nextflow channel.
+========================================================================================
+*/
+
+process COLLECT_PAIRWISE_RESULTS {
+    tag "collect_pairwise"
+    label 'summarize_assembly'
+
+    publishDir "${params.outdir}/pairwise_alignments", mode: params.publish_dir_mode
+
+    input:
+    path("qc_files/*")    // per-pair QC TSVs from PAIRWISE_ALIGNMENT
+
+    output:
+    path("pairwise_alignment_summary.tsv"), emit: summary
+
+    script:
+    """
+    set -euo pipefail
+
+    first_qc=\$(ls qc_files/*.tsv 2>/dev/null | head -1)
+    if [[ -n "\$first_qc" ]]; then
+        head -1 "\$first_qc" > pairwise_alignment_summary.tsv
+        for f in qc_files/*.tsv; do
+            tail -n +2 "\$f" >> pairwise_alignment_summary.tsv
+        done
+    else
+        echo "No pairwise alignment QC files found" > pairwise_alignment_summary.tsv
+    fi
+    """
+
+    stub:
+    """
+    touch pairwise_alignment_summary.tsv
+    """
+}

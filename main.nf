@@ -402,8 +402,8 @@ include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAI
 include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
-include { SETUP_PAFR; PAIRWISE_ALIGNMENT } from './modules/pairwise_alignment.nf'
-include { SCAN_TELOMERES } from './modules/scan_telomeres.nf'
+include { SETUP_PAFR; PAIRWISE_ALIGNMENT; COLLECT_PAIRWISE_RESULTS } from './modules/pairwise_alignment.nf'
+include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
@@ -1078,17 +1078,19 @@ workflow {
         
         // Run pairwise alignments
         PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
-        
-        // Collect all QC results into a summary table
-        PAIRWISE_ALIGNMENT.out.qc
-            .map { id1, id2, qc_file -> qc_file }
-            .collectFile(
-                name: 'pairwise_alignment_summary.tsv',
-                storeDir: "${params.outdir}/pairwise_alignments",
-                keepHeader: true,
-                skip: 1
-            )
     }
+
+    if (params.run_pairwise_alignments) {
+
+            COLLECT_PAIRWISE_RESULTS(
+                PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
+            )
+            ch_pairwise_summary = COLLECT_PAIRWISE_RESULTS.out.summary
+
+    } else {
+            ch_pairwise_summary = Channel.of(file('NO_PAIRWISE'))
+    }
+
 
     /*
     ========================================================================================
@@ -1132,25 +1134,11 @@ workflow {
 
     SCAN_TELOMERES(ch_telomere_input)
 
-    // Collect all per-scaffold telomere results into single file
-    SCAN_TELOMERES.out.telomeres
-        .map { haplotype_id, telomeres -> telomeres }
-        .collectFile(
-            name: 'all_telomeres.tsv',
-            storeDir: "${params.outdir}/telomeres",
-            keepHeader: true,
-            skip: 1
+    COLLECT_TELOMERE_RESULTS(
+            SCAN_TELOMERES.out.summary.map   { haplotype_id, summary   -> summary   }.collect(),
+            SCAN_TELOMERES.out.telomeres.map { haplotype_id, telomeres -> telomeres }.collect()
         )
 
-    // Collect all summaries into single file
-    SCAN_TELOMERES.out.summary
-        .map { haplotype_id, summary -> summary }
-        .collectFile(
-            name: 'all_telomere_summaries.tsv',
-            storeDir: "${params.outdir}/telomeres",
-            keepHeader: true,
-            skip: 1
-        )
 
     // 6. NCBI output files for GenBank submission (if enabled)
     
@@ -1613,15 +1601,121 @@ workflow {
 
     COVERAGE_BOOK(ch_coverage_book_input)
 
-    /*
-    ========================================================================================
-        SUMMARY REPORT
-    ========================================================================================
-    */
-    // Use SNAIL_PLOT_FINAL completion as trigger (it runs near the end)
-    // The .collect().map ensures we wait for all snail plots, then emit a single value
+    // =========================================================================
+    //  SUMMARY REPORT — Build manifest and call the process
+    //
+    //  The manifest is a TSV with columns: type  id  id2  filename  subdir
+    //
+    //  "subdir" is the publishDir path relative to params.outdir.
+    //  The report publishes to ${params.outdir}/ directly, so the markdown
+    //  references files as subdir/filename (e.g., snail_plots/sample_snail.svg).
+    //
+    //  Verified publishDir paths from each module:
+    //    GAP_FILLING        → ${params.outdir}/assembly/final
+    //    SNAIL_PLOT         → ${params.outdir}/snail_plots
+    //    CONTACT_MAP        → ${params.outdir}/contact_maps
+    //    PAIRWISE_ALIGNMENT → ${params.outdir}/pairwise_alignments
+    //    COMPILE_FINAL_QC   → ${params.outdir}/qc/assembly
+    //    ASSEMBLY_REPORT    → ${params.outdir}/reports
+    //    COLLECT_TELOMERE   → ${params.outdir}/telomeres
+    //    COLLECT_PAIRWISE   → ${params.outdir}/pairwise_alignments
+    // =========================================================================
+
+    // ---- Final genome assemblies ----
+    // GAP_FILLING.out.filled_assembly: tuple(haplotype_id, fasta)
+    // publishDir: ${params.outdir}/assembly/final
+    ch_manifest_assemblies = GAP_FILLING.out.filled_assembly
+        .map { hap_id, fasta ->
+            "assembly\t${hap_id}\t.\t${fasta.name}\tassembly/final"
+        }
+
+    // ---- Snail plots (final) ----
+    // SNAIL_PLOT_FINAL.out.snail: tuple(haplotype_id, qc_label, svg)
+    // publishDir: ${params.outdir}/snail_plots
+    ch_manifest_snails = SNAIL_PLOT_FINAL.out.snail
+        .map { hap_id, qc_label, svg ->
+            "snail\t${hap_id}\t.\t${svg.name}\tsnail_plots"
+        }
+
+    // ---- Contact maps (conditional) ----
+    // CONTACT_MAP_FINAL.out.contact_maps: tuple(haplotype_id, stage, png_files)
+    //   png_files is a glob that may contain multiple PNGs (one per resolution)
+    // publishDir: ${params.outdir}/contact_maps
+    if (params.make_final_contact_maps) {
+        ch_manifest_contact_maps = CONTACT_MAP_FINAL.out.contact_maps
+            .flatMap { hap_id, stage, pngs ->
+                // pngs may be a single file or a list of files from the glob
+                def png_list = pngs instanceof List ? pngs : [pngs]
+                png_list.collect { png ->
+                    "contact_map\t${hap_id}\t.\t${png.name}\tcontact_maps"
+                }
+            }
+    } else {
+        ch_manifest_contact_maps = Channel.empty()
+    }
+
+    // ---- Pairwise dotplots (conditional) ----
+    // PAIRWISE_ALIGNMENT.out.dotplot: tuple(id1, id2, png)
+    // publishDir: ${params.outdir}/pairwise_alignments
+    if (params.run_pairwise_alignments) {
+        ch_manifest_dotplots = PAIRWISE_ALIGNMENT.out.dotplot
+            .map { id1, id2, png ->
+                "dotplot\t${id1}\t${id2}\t${png.name}\tpairwise_alignments"
+            }
+    } else {
+        ch_manifest_dotplots = Channel.empty()
+    }
+
+    // ---- Compiled QC CSV from COMPILE_FINAL_QC ----
+    // COMPILE_FINAL_QC.out.metrics: path(assembly_qc_metrics.csv)
+    // publishDir: ${params.outdir}/qc/assembly
+    ch_manifest_compiled_csv = COMPILE_FINAL_QC.out.metrics
+        .map { csv ->
+            "compiled_qc\t.\t.\t${csv.name}\tqc/assembly"
+        }
+
+    // ---- QC trend plots (PNGs) from COMPILE_FINAL_QC ----
+    // COMPILE_FINAL_QC.out.plots: path("*.png") — collected as a list
+    // publishDir: ${params.outdir}/qc/assembly
+    ch_manifest_qc_plots = COMPILE_FINAL_QC.out.plots
+        .flatten()
+        .map { png ->
+            "qc_plot\t.\t.\t${png.name}\tqc/assembly"
+        }
+
+    // ---- Interactive HTML report from ASSEMBLY_REPORT ----
+    // ASSEMBLY_REPORT.out.report_html: path(assembly_qc_report.html)
+    // publishDir: ${params.outdir}/reports
+    ch_manifest_assembly_report = ASSEMBLY_REPORT.out.report_html
+        .map { html ->
+            "assembly_report_html\t.\t.\t${html.name}\treports"
+        }
+
+    // ---- Combine all manifest entries into a single TSV ----
+    ch_manifest_assemblies
+        .mix(ch_manifest_snails)
+        .mix(ch_manifest_contact_maps)
+        .mix(ch_manifest_dotplots)
+        .mix(ch_manifest_compiled_csv)
+        .mix(ch_manifest_qc_plots)
+        .mix(ch_manifest_assembly_report)
+        .collectFile(
+            name: 'report_manifest.tsv',
+            seed: 'type\tid\tid2\tfilename\tsubdir',
+            newLine: true
+        )
+        .set { ch_report_manifest }
+
+    // ---- Handle optional telomere output ----
+    ch_telomere_for_report = COLLECT_TELOMERE_RESULTS.out.summary
+        .ifEmpty(file('NO_TELOMERES'))
+
+    // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
-        SNAIL_PLOT_FINAL.out.snail.collect().map { "ready" }
+        ch_report_manifest,                         // manifest TSV
+        COMPILE_FINAL_QC.out.metrics,               // assembly_qc_metrics.csv
+        ch_telomere_for_report,                     // telomere summary
+        ch_pairwise_summary                         // pairwise summary
     )
 
 }
