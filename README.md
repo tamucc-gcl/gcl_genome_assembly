@@ -547,9 +547,3 @@ nextflow run main.nf \
   -profile slurm \
   -resume
 ```
-
----
-
-## License
-
-*Add license information here.*
