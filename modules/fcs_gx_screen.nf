@@ -2,7 +2,7 @@ process FCS_GX_SCREEN {
   tag "${haplotype_id}"  // ← ADDED: Tag with haplotype_id for clarity
   label 'fcs' 
   
-  publishDir "${params.outdir}/assembly/${stage}/decontam",
+  publishDir "${params.outdir}/decontam/${stage}",
     mode: params.publish_dir_mode,
     saveAs: { filename -> filename.startsWith('gx_out/') ? null : filename }
 
