@@ -1626,12 +1626,12 @@ workflow {
     //    ASSEMBLY_REPORT    → ${params.outdir}/reports
     // =========================================================================
 
-    // ---- Final compressed genome assemblies ----
-    // FINALIZE_ASSEMBLY.out.assembly: tuple(haplotype_id, fasta_gz)
+    // ---- Final genome assemblies ----
+    // FINALIZE_ASSEMBLY.out.assembly: tuple(haplotype_id, fasta)
     // publishDir: ${params.outdir}/assembly/final
     ch_manifest_assemblies = FINALIZE_ASSEMBLY.out.assembly
-        .map { hap_id, fasta_gz ->
-            "assembly\t${hap_id}\t.\t${fasta_gz.name}\tassembly/final"
+        .map { hap_id, fasta ->
+            "assembly\t${hap_id}\t.\t${fasta.name}\tassembly/final"
         }
 
     // ---- Snail plots (final) ----
@@ -1717,7 +1717,6 @@ workflow {
         ch_telomere_for_report,
         ch_pairwise_summary
     )
-
 }
 /*
 ========================================================================================

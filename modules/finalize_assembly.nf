@@ -2,21 +2,20 @@
 ========================================================================================
     FINALIZE ASSEMBLY MODULE
 ========================================================================================
-    Takes the final assembly (from gap filling or whichever stage is last)
-    and produces a maximally compressed .fasta.gz for distribution.
+    Takes the final assembly from the pipeline (after gap filling) and
+    publishes it to a clean output directory with a standardized filename.
 
-    Uses bgzip (from htslib) for block-gzip compression which is:
-    - Compatible with samtools/htslib tools (random access with .gzi index)
-    - Maximally compressed at the highest compression level
-    - Decompressible with standard gzip/gunzip
+    This module serves as the single collection point for "the final genome"
+    regardless of which optional pipeline steps were run upstream.
+
+    Extend this module with any additional finalization steps as needed
+    (e.g., compression, indexing, header renaming, stats generation).
 
     Input:
     - tuple(haplotype_id, assembly_fasta)
 
     Output:
-    - tuple(haplotype_id, compressed_fasta_gz)  — the .fasta.gz file
-    - tuple(haplotype_id, gzi_index)            — the .fasta.gz.gzi index
-    - tuple(haplotype_id, fai_index)            — the .fasta.gz.fai index
+    - tuple(haplotype_id, final_fasta)
 ========================================================================================
 */
 
@@ -30,29 +29,15 @@ process FINALIZE_ASSEMBLY {
     tuple val(haplotype_id), path(assembly_fasta)
 
     output:
-    tuple val(haplotype_id), path("${haplotype_id}.fasta.gz"),     emit: assembly
-    tuple val(haplotype_id), path("${haplotype_id}.fasta.gz.gzi"), emit: gzi
-    tuple val(haplotype_id), path("${haplotype_id}.fasta.gz.fai"), emit: fai
+    tuple val(haplotype_id), path("${haplotype_id}.fasta"), emit: assembly
 
     script:
     """
-    set -euo pipefail
-
-    # bgzip at max compression level (-l 9), using multiple threads
-    # --stdout so we control the output filename
-    bgzip -c -l 9 --threads ${task.cpus} ${assembly_fasta} > ${haplotype_id}.fasta.gz
-
-    # Create block-gzip index (.gzi) for random access
-    bgzip --reindex ${haplotype_id}.fasta.gz
-
-    # Create fasta index (.fai) — samtools can index bgzipped fastas directly
-    samtools faidx ${haplotype_id}.fasta.gz
+    cp ${assembly_fasta} ${haplotype_id}.fasta
     """
 
     stub:
     """
-    touch ${haplotype_id}.fasta.gz
-    touch ${haplotype_id}.fasta.gz.gzi
-    touch ${haplotype_id}.fasta.gz.fai
+    touch ${haplotype_id}.fasta
     """
 }
