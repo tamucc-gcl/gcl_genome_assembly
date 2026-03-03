@@ -6,14 +6,14 @@
 #' Reads data passed natively via Nextflow channels (no directory scanning).
 #' Produces a Markdown report with:
 #'   - Links to final genome assemblies, compiled QC CSV, interactive HTML report
-#'   - Assembly QC tables (final overview + full final detail)
+#'   - Assembly QC tables (per-haplotype, not averaged)
+#'   - Per-sample visual comparison table (snails, contact maps, within-sample dotplot)
 #'   - QC trend plots from COMPILE_FINAL_QC (collapsible)
-#'   - Cross-stage comparison table (collapsible within the plots section)
-#'   - Snail plots, contact maps, dotplots with proper <img> sizing
+#'   - Cross-stage comparison table (collapsible)
 #'   - Telomere and pairwise alignment summaries (collapsible)
 #'
 #' The report publishes to {outdir}/ directly, so all relative paths are
-#' simply subdir/filename (e.g., snail_plots/sample_hap1_snail.svg).
+#' simply subdir/filename.
 #' =============================================================================
 
 suppressPackageStartupMessages({
@@ -31,7 +31,7 @@ parser$add_argument("--compiled_qc",      required = TRUE, help = "Compiled QC C
 parser$add_argument("--telomere_summary", required = TRUE, help = "Telomere summary TSV (or NO_TELOMERES)")
 parser$add_argument("--pairwise_summary", required = TRUE, help = "Pairwise alignment summary TSV (or NO_PAIRWISE)")
 parser$add_argument("--output",           default = "assembly_report.md", help = "Output markdown file")
-parser$add_argument("--img_width",        default = 600, type = "integer", help = "Image display width in pixels")
+parser$add_argument("--img_width",        default = 500, type = "integer", help = "Image display width in pixels")
 
 args <- parser$parse_args()
 
@@ -56,8 +56,6 @@ make_collapsible <- function(lines, summary_text) {
     "</details>", "")
 }
 
-#' Relative path from report at {outdir}/ to {outdir}/{subdir}/{filename}
-#' Since the report is at the root, this is just subdir/filename
 rel_path <- function(subdir, filename) {
   file.path(subdir, filename)
 }
@@ -114,12 +112,10 @@ md <- c(md,
   "",
   "1. [Final Genome Assemblies](#1-final-genome-assemblies)",
   "2. [Assembly QC Summary](#2-assembly-qc-summary)",
-  "3. [Assembly QC Across Pipeline Stages](#3-assembly-qc-across-pipeline-stages)",
-  "4. [Snail Plots](#4-snail-plots-final-assemblies)",
-  "5. [Contact Maps](#5-contact-maps-final-assemblies)",
-  "6. [Pairwise Dotplots](#6-pairwise-dotplots)",
-  "7. [Telomere Detection](#7-telomere-detection)",
-  "8. [Pairwise Alignment Summary](#8-pairwise-alignment-summary)",
+  "3. [Visual Summary](#3-visual-summary)",
+  "4. [Assembly QC Across Pipeline Stages](#4-assembly-qc-across-pipeline-stages)",
+  "5. [Telomere Detection](#5-telomere-detection)",
+  "6. [Pairwise Alignment Summary](#6-pairwise-alignment-summary)",
   "",
   "---",
   ""
@@ -163,16 +159,16 @@ if (nrow(assemblies) > 0) {
 }
 
 # =============================================================================
-# Section 2: Assembly QC Overview
+# Section 2: Assembly QC Summary — per-haplotype, not averaged
 # =============================================================================
 md <- c(md, "## 2. Assembly QC Summary", "")
 
 if (!is.null(qc_data) && nrow(qc_data) > 0) {
 
-  # --- Compact overview table ---
+  # --- Per-haplotype overview table ---
   md <- c(md, "### Overview (Final Assemblies)", "")
 
-  overview <- qc_data %>%
+  overview_long <- qc_data %>%
     filter(stage == "final") %>%
     pivot_longer(cols = c(hap1, hap2, both),
                  names_to = "haplotype",
@@ -180,26 +176,30 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                  values_drop_na = TRUE) %>%
     filter(metric %in% c("hifi_depth", "Total length", "L90", "auN",
                           "complete", "Largest contig", "GC (%)", "qv",
-                          "kmer_completeness")) %>%
-    mutate(value = case_when(
-      metric %in% c("kmer_completeness", "qv") & haplotype != "both" ~ NA_real_,
-      TRUE ~ value
-    )) %>%
-    summarise(.by = c(sample_id, metric),
-              value = mean(value, na.rm = TRUE)) %>%
-    pivot_wider(names_from = metric, values_from = value)
+                          "kmer_completeness"))
 
-  if (nrow(overview) > 0) {
-    overview <- overview %>%
-      mutate(
-        across(any_of(c("hifi_depth", "L90")),      ~ comma(., accuracy = 1)),
-        across(any_of("Total length"),               ~ comma(., accuracy = 0.01, scale = 1/1e9, suffix = " Gb")),
-        across(any_of(c("Largest contig", "auN")),   ~ comma(., accuracy = 0.1, scale = 1/1e6, suffix = " Mb")),
-        across(any_of("complete"),                   ~ percent(., accuracy = 0.1)),
-        across(any_of(c("GC (%)", "kmer_completeness")), ~ percent(., scale = 1, accuracy = 0.1)),
-        across(any_of("qv"),                         ~ comma(., accuracy = 0.1))
-      ) %>%
-      rename(Sample = sample_id) %>%
+  # For metrics that are diploid-level (qv, kmer_completeness), keep only "both"
+  # For per-haplotype metrics, keep hap1 and hap2
+  overview_filtered <- overview_long %>%
+    filter(
+      (metric %in% c("qv", "kmer_completeness") & haplotype == "both") |
+      (!metric %in% c("qv", "kmer_completeness") & haplotype %in% c("hap1", "hap2"))
+    )
+
+  if (nrow(overview_filtered) > 0) {
+    overview_fmt <- overview_filtered %>%
+      mutate(value_fmt = case_when(
+        analysis == "busco" ~ percent(value, accuracy = 0.1),
+        metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
+        metric == "Total length" ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
+        metric %in% c("Largest contig", "auN") ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
+        metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, scale = 1, accuracy = 0.1),
+        metric == "qv" ~ comma(value, accuracy = 0.1),
+        TRUE ~ comma(value, accuracy = 1)
+      )) %>%
+      select(sample_id, metric, haplotype, value_fmt) %>%
+      pivot_wider(names_from = haplotype, values_from = value_fmt, values_fill = "") %>%
+      rename(Sample = sample_id, Metric = metric) %>%
       rename_with(~ case_when(
         . == "complete"          ~ "BUSCO",
         . == "kmer_completeness" ~ "K-mer Comp.",
@@ -207,7 +207,11 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
         TRUE ~ .
       ))
 
-    md <- c(md, make_markdown_table(overview %>% mutate(across(everything(), as.character))), "")
+    # Blank out repeated sample names
+    overview_fmt <- overview_fmt %>%
+      mutate(Sample = if_else(lag(Sample, default = "") == Sample, "", Sample))
+
+    md <- c(md, make_markdown_table(overview_fmt), "")
   }
 
   # --- Detailed final assembly table (collapsible) ---
@@ -236,183 +240,225 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     md <- c(md,
       make_collapsible(
         make_markdown_table(final_detail),
-        "Click to expand: Detailed final assembly metrics"
+        "Click to expand: All final assembly metrics"
       )
-    )
-  }
-
-  # =============================================================================
-  # Section 3: QC trend plots + cross-stage table
-  # =============================================================================
-  md <- c(md, "## 3. Assembly QC Across Pipeline Stages", "")
-
-  # QC trend plots from COMPILE_FINAL_QC in a collapsible section
-  if (nrow(qc_plots) > 0) {
-    plot_lines <- character()
-    plot_lines <- c(plot_lines, "### QC Trend Plots", "")
-
-    plot_order <- c("busco", "kmer", "quast_misc", "contig_count", "contig_length", "trans_cis")
-    plot_labels <- c(
-      busco = "BUSCO Completeness",
-      kmer = "K-mer QV & Completeness",
-      quast_misc = "QUAST Assembly Metrics",
-      contig_count = "Contig/Scaffold Counts",
-      contig_length = "Assembly Size",
-      trans_cis = "Hi-C Trans:Cis Ratio"
-    )
-
-    ordered_plots <- qc_plots %>%
-      mutate(plot_key = str_remove(filename, "\\.png$")) %>%
-      mutate(order = match(plot_key, plot_order)) %>%
-      arrange(order, filename)
-
-    for (i in seq_len(nrow(ordered_plots))) {
-      row <- ordered_plots[i, ]
-      src <- rel_path(row$subdir, row$filename)
-      label <- plot_labels[row$plot_key]
-      if (is.na(label)) label <- row$plot_key
-
-      plot_lines <- c(plot_lines,
-        sprintf("#### %s", label), "",
-        img_tag(src, label, width = 800), "")
-    }
-
-    # Cross-stage comparison table nested inside plots section
-    cross_stage <- qc_data %>%
-      pivot_longer(cols = c(hap1, hap2, both),
-                   names_to = "haplotype",
-                   values_to = "value",
-                   values_drop_na = TRUE) %>%
-      filter(!(metric %in% c("error_rate", "error_kmer", "total_assembly_kmer") & analysis == "merqury"),
-             !(metric %in% c("kmer_found", "total_hifi_kmer") & analysis == "merqury"),
-             metric != "total_busco",
-             !str_detect(metric, ">=")) %>%
-      mutate(value_fmt = case_when(
-        analysis == "busco" ~ percent(value, accuracy = 0.1),
-        metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
-        metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
-        TRUE ~ comma(value, accuracy = 1)
-      ))
-
-    if (nrow(cross_stage) > 0) {
-      cross_table <- cross_stage %>%
-        select(sample_id, metric, stage, haplotype, value_fmt) %>%
-        pivot_wider(names_from = c(stage, haplotype),
-                    values_from = value_fmt, values_fill = "") %>%
-        select(sample_id, metric,
-               matches("_hap1$"), matches("_hap2$"), matches("_both$")) %>%
-        mutate(sample_id = if_else(lag(sample_id, default = "") == sample_id, "", sample_id)) %>%
-        rename(Sample = sample_id, Metric = metric)
-
-      plot_lines <- c(plot_lines,
-        make_collapsible(
-          c("#### Cross-Stage Metrics Table", "",
-            make_markdown_table(cross_table)),
-          "Click to expand: Assembly metrics across all pipeline stages"
-        )
-      )
-    }
-
-    md <- c(md,
-      make_collapsible(plot_lines,
-                       "Click to expand: QC trend plots and cross-stage comparison")
     )
   }
 }
 
 # =============================================================================
-# Section 4: Snail Plots
+# Section 3: Visual Summary — per-sample table with hap1/hap2 columns
 # =============================================================================
-if (nrow(snail_plots) > 0) {
-  md <- c(md, "## 4. Snail Plots (Final Assemblies)", "")
+md <- c(md,
+  "## 3. Visual Summary",
+  "",
+  "Each row shows one sample with snail plots, contact maps, and the within-sample",
+  "haplotype-vs-haplotype dotplot.",
+  ""
+)
 
-  for (sid in all_sample_ids) {
-    md <- c(md, sprintf("### %s", sid), "")
+# We build an HTML table because markdown tables can't embed images well at
+# controlled sizes, and we need multi-column image layouts.
 
-    sample_snails <- snail_plots %>%
-      filter(str_detect(id, fixed(sid))) %>%
-      arrange(id)
-
-    if (nrow(sample_snails) >= 2) {
-      md <- c(md, "<table><tr>",
-        apply(sample_snails, 1, function(row) {
-          src <- rel_path(row["subdir"], row["filename"])
-          sprintf("<td>%s<br><em>%s</em></td>", img_tag(src, row["id"]), row["id"])
-        }),
-        "</tr></table>", "")
-    } else if (nrow(sample_snails) == 1) {
-      row <- sample_snails[1, ]
-      src <- rel_path(row$subdir, row$filename)
-      md <- c(md, img_tag(src, row$id), "", sprintf("*%s*", row$id), "")
-    }
-  }
+# Pick the best contact map resolution to display (largest resolution = most zoomed out)
+# The filename pattern is {hap_id}_{stage}_{resolution}bp_contact_map.png
+# Pick the one with the largest number (e.g., 1000000bp)
+pick_best_contact_map <- function(cmaps_for_hap) {
+  if (nrow(cmaps_for_hap) == 0) return(NULL)
+  cmaps_for_hap %>%
+    mutate(res = str_extract(filename, "[0-9]+(?=bp_contact_map)") %>% as.numeric()) %>%
+    arrange(desc(res)) %>%
+    slice(1)
 }
 
-# =============================================================================
-# Section 5: Contact Maps
-# =============================================================================
-if (nrow(contact_maps) > 0) {
-  md <- c(md, "## 5. Contact Maps (Final Assemblies)", "")
+has_snails <- nrow(snail_plots) > 0
+has_cmaps  <- nrow(contact_maps) > 0
+has_dots   <- nrow(dotplots) > 0
+
+# Determine which columns to include
+col_headers <- c("Sample")
+if (has_snails) col_headers <- c(col_headers, "Hap1 Snail", "Hap2 Snail")
+if (has_cmaps)  col_headers <- c(col_headers, "Hap1 Contact Map", "Hap2 Contact Map")
+if (has_dots)   col_headers <- c(col_headers, "Hap1 vs Hap2 Dotplot")
+
+if (has_snails || has_cmaps || has_dots) {
+
+  img_w <- args$img_width
+
+  # Start HTML table
+  md <- c(md, "<table>", "<tr>")
+  for (h in col_headers) {
+    md <- c(md, sprintf("  <th>%s</th>", h))
+  }
+  md <- c(md, "</tr>")
 
   for (sid in all_sample_ids) {
-    md <- c(md, sprintf("### %s", sid), "")
+    hap1_id <- paste0(sid, "_hap1")
+    hap2_id <- paste0(sid, "_hap2")
 
-    sample_cmaps <- contact_maps %>%
-      filter(str_detect(id, fixed(sid))) %>%
-      arrange(id, filename)
+    md <- c(md, "<tr>")
 
-    # Group by haplotype so multiple resolutions are together
-    for (hap_id in unique(sample_cmaps$id)) {
-      hap_cmaps <- sample_cmaps %>% filter(id == hap_id)
+    # Sample name
+    md <- c(md, sprintf('  <td><b>%s</b></td>', sid))
 
-      if (nrow(hap_cmaps) > 1) {
-        # Multiple resolutions — show highest res prominently, rest collapsible
-        md <- c(md, sprintf("#### %s", hap_id), "")
-
-        # Show first (or pick a specific resolution) at full size
-        first_row <- hap_cmaps[1, ]
-        src <- rel_path(first_row$subdir, first_row$filename)
-        md <- c(md, img_tag(src, hap_id), "")
-
-        if (nrow(hap_cmaps) > 1) {
-          other_lines <- character()
-          for (j in seq_len(nrow(hap_cmaps))) {
-            row <- hap_cmaps[j, ]
-            src <- rel_path(row$subdir, row$filename)
-            other_lines <- c(other_lines,
-              sprintf("- [%s](%s)", row$filename, src))
-          }
-          md <- c(md,
-            make_collapsible(other_lines,
-                             sprintf("All contact map resolutions for %s", hap_id)))
+    # Snail plots
+    if (has_snails) {
+      for (hid in c(hap1_id, hap2_id)) {
+        snail_row <- snail_plots %>% filter(id == hid)
+        if (nrow(snail_row) > 0) {
+          src <- rel_path(snail_row$subdir[1], snail_row$filename[1])
+          md <- c(md, sprintf('  <td>%s</td>', img_tag(src, hid, width = img_w)))
+        } else {
+          md <- c(md, "  <td>—</td>")
         }
-      } else {
-        row <- hap_cmaps[1, ]
-        src <- rel_path(row$subdir, row$filename)
-        md <- c(md, sprintf("#### %s", hap_id), "",
-          img_tag(src, hap_id), "")
       }
     }
+
+    # Contact maps (pick best resolution)
+    if (has_cmaps) {
+      for (hid in c(hap1_id, hap2_id)) {
+        hap_cmaps <- contact_maps %>% filter(id == hid)
+        best <- pick_best_contact_map(hap_cmaps)
+        if (!is.null(best) && nrow(best) > 0) {
+          src <- rel_path(best$subdir[1], best$filename[1])
+          md <- c(md, sprintf('  <td>%s</td>', img_tag(src, hid, width = img_w)))
+        } else {
+          md <- c(md, "  <td>—</td>")
+        }
+      }
+    }
+
+    # Within-sample dotplot (hap1 vs hap2)
+    if (has_dots) {
+      # Look for dotplot where id==hap1 and id2==hap2 (or vice versa)
+      dot_row <- dotplots %>%
+        filter(
+          (id == hap1_id & id2 == hap2_id) |
+          (id == hap2_id & id2 == hap1_id)
+        )
+      if (nrow(dot_row) > 0) {
+        src <- rel_path(dot_row$subdir[1], dot_row$filename[1])
+        md <- c(md, sprintf('  <td>%s</td>', img_tag(src, paste(hap1_id, "vs", hap2_id), width = img_w)))
+      } else {
+        md <- c(md, "  <td>—</td>")
+      }
+    }
+
+    md <- c(md, "</tr>")
   }
-}
 
-# =============================================================================
-# Section 6: Pairwise Dotplots
-# =============================================================================
-if (nrow(dotplots) > 0) {
-  md <- c(md, "## 6. Pairwise Dotplots", "")
+  md <- c(md, "</table>", "")
 
-  for (i in seq_len(nrow(dotplots))) {
-    row <- dotplots[i, ]
-    src <- rel_path(row$subdir, row$filename)
+  # Link to contact maps folder for all resolutions
+  if (has_cmaps) {
+    cmap_subdir <- contact_maps$subdir[1]
     md <- c(md,
-      sprintf("### %s vs %s", row$id, row$id2), "",
-      img_tag(src, sprintf("Dotplot: %s vs %s", row$id, row$id2)), "")
+      sprintf("All contact map resolutions: [%s/](%s/)", cmap_subdir, cmap_subdir),
+      "")
+  }
+
+  # Link to pairwise alignments folder for cross-sample dotplots
+  if (has_dots) {
+    dot_subdir <- dotplots$subdir[1]
+    n_total <- nrow(dotplots)
+    n_within <- sum(
+      dotplots %>%
+        mutate(s1 = str_replace(id, "_hap[12]$", ""),
+               s2 = str_replace(id2, "_hap[12]$", "")) %>%
+        pull(s1) == dotplots %>%
+        mutate(s2 = str_replace(id2, "_hap[12]$", "")) %>%
+        pull(s2)
+    )
+    n_cross <- n_total - n_within
+
+    if (n_cross > 0) {
+      md <- c(md,
+        sprintf("Additional cross-sample dotplots (%d): [%s/](%s/)",
+                n_cross, dot_subdir, dot_subdir),
+        "")
+    }
   }
 }
 
 # =============================================================================
-# Section 7: Telomere Detection (collapsible)
+# Section 4: QC trend plots + cross-stage table
+# =============================================================================
+if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
+  md <- c(md, "## 4. Assembly QC Across Pipeline Stages", "")
+
+  plot_lines <- character()
+  plot_lines <- c(plot_lines, "### QC Trend Plots", "")
+
+  plot_order <- c("busco", "kmer", "quast_misc", "contig_count", "contig_length", "trans_cis")
+  plot_labels <- c(
+    busco = "BUSCO Completeness",
+    kmer = "K-mer QV & Completeness",
+    quast_misc = "QUAST Assembly Metrics",
+    contig_count = "Contig/Scaffold Counts",
+    contig_length = "Assembly Size",
+    trans_cis = "Hi-C Trans:Cis Ratio"
+  )
+
+  ordered_plots <- qc_plots %>%
+    mutate(plot_key = str_remove(filename, "\\.png$")) %>%
+    mutate(order = match(plot_key, plot_order)) %>%
+    arrange(order, filename)
+
+  for (i in seq_len(nrow(ordered_plots))) {
+    row <- ordered_plots[i, ]
+    src <- rel_path(row$subdir, row$filename)
+    label <- plot_labels[row$plot_key]
+    if (is.na(label)) label <- row$plot_key
+
+    plot_lines <- c(plot_lines,
+      sprintf("#### %s", label), "",
+      img_tag(src, label, width = 800), "")
+  }
+
+  # Cross-stage comparison table
+  cross_stage <- qc_data %>%
+    pivot_longer(cols = c(hap1, hap2, both),
+                 names_to = "haplotype",
+                 values_to = "value",
+                 values_drop_na = TRUE) %>%
+    filter(!(metric %in% c("error_rate", "error_kmer", "total_assembly_kmer") & analysis == "merqury"),
+           !(metric %in% c("kmer_found", "total_hifi_kmer") & analysis == "merqury"),
+           metric != "total_busco",
+           !str_detect(metric, ">=")) %>%
+    mutate(value_fmt = case_when(
+      analysis == "busco" ~ percent(value, accuracy = 0.1),
+      metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
+      metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
+      TRUE ~ comma(value, accuracy = 1)
+    ))
+
+  if (nrow(cross_stage) > 0) {
+    cross_table <- cross_stage %>%
+      select(sample_id, metric, stage, haplotype, value_fmt) %>%
+      pivot_wider(names_from = c(stage, haplotype),
+                  values_from = value_fmt, values_fill = "") %>%
+      select(sample_id, metric,
+             matches("_hap1$"), matches("_hap2$"), matches("_both$")) %>%
+      mutate(sample_id = if_else(lag(sample_id, default = "") == sample_id, "", sample_id)) %>%
+      rename(Sample = sample_id, Metric = metric)
+
+    plot_lines <- c(plot_lines,
+      make_collapsible(
+        c("#### Cross-Stage Metrics Table", "",
+          make_markdown_table(cross_table)),
+        "Click to expand: Assembly metrics across all pipeline stages"
+      )
+    )
+  }
+
+  md <- c(md,
+    make_collapsible(plot_lines,
+                     "Click to expand: QC trend plots and cross-stage comparison")
+  )
+}
+
+# =============================================================================
+# Section 5: Telomere Detection (collapsible)
 # =============================================================================
 telo_path <- args$telomere_summary
 if (!str_detect(basename(telo_path), "NO_TELOMERES") &&
@@ -420,7 +466,7 @@ if (!str_detect(basename(telo_path), "NO_TELOMERES") &&
   telo_data <- tryCatch(read_tsv(telo_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(telo_data) && nrow(telo_data) > 0) {
     md <- c(md,
-      "## 7. Telomere Detection", "",
+      "## 5. Telomere Detection", "",
       make_collapsible(
         make_markdown_table(telo_data %>% mutate(across(everything(), as.character))),
         "Click to expand: Telomere detection summary"
@@ -430,7 +476,7 @@ if (!str_detect(basename(telo_path), "NO_TELOMERES") &&
 }
 
 # =============================================================================
-# Section 8: Pairwise Alignment Summary (collapsible)
+# Section 6: Pairwise Alignment Summary (collapsible)
 # =============================================================================
 pw_path <- args$pairwise_summary
 if (!str_detect(basename(pw_path), "NO_PAIRWISE") &&
@@ -438,7 +484,7 @@ if (!str_detect(basename(pw_path), "NO_PAIRWISE") &&
   pw_data <- tryCatch(read_tsv(pw_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(pw_data) && nrow(pw_data) > 0) {
     md <- c(md,
-      "## 8. Pairwise Alignment Summary", "",
+      "## 6. Pairwise Alignment Summary", "",
       make_collapsible(
         make_markdown_table(pw_data %>% mutate(across(everything(), as.character))),
         "Click to expand: Pairwise alignment metrics"
