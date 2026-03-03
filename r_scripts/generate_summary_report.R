@@ -176,7 +176,8 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
         metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
           . / .[metric == "total_busco"],
         TRUE ~ .
-      ), .by = sample_id)
+      )),
+      .by = sample_id
     )
 
   overview_long <- final_data %>%
@@ -449,7 +450,8 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
         metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
           . / .[metric == "total_busco"],
         TRUE ~ .
-      ), .by = c(sample_id, stage))
+      )),
+      .by = c(sample_id, stage)
     ) %>%
     pivot_longer(cols = c(hap1, hap2, both),
                  names_to = "haplotype",
