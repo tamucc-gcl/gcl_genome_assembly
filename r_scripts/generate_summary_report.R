@@ -141,7 +141,8 @@ if (nrow(compiled_csvs) > 0) {
 if (nrow(report_htmls) > 0) {
   e <- report_htmls[1, ]
   resource_links <- c(resource_links,
-    sprintf("- **Interactive QC report (HTML):** [%s](%s)", e$filename, rel_path(e$subdir, e$filename)))
+    sprintf("- **Interactive QC report (HTML):** [%s](%s) *(download and open in browser)*",
+            e$filename, rel_path(e$subdir, e$filename)))
 }
 if (length(resource_links) > 0) {
   md <- c(md, "### Key Resources", "", resource_links, "")
