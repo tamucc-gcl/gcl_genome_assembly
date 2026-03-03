@@ -26,14 +26,14 @@ process FINALIZE_ASSEMBLY {
     publishDir "${params.outdir}/assembly/final", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(assembly_fasta)
+    tuple val(haplotype_id), path(assembly_fasta, stageAs: 'input/*')
 
     output:
     tuple val(haplotype_id), path("${haplotype_id}.fasta"), emit: assembly
 
     script:
     """
-    cp ${assembly_fasta} ${haplotype_id}.fasta
+    cp input/${assembly_fasta.name} ${haplotype_id}.fasta
     """
 
     stub:
