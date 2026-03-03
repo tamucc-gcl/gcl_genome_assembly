@@ -151,8 +151,15 @@ if (length(resource_links) > 0) {
 if (nrow(assemblies) > 0) {
   asm_table <- assemblies %>%
     arrange(id) %>%
-    mutate(link = sprintf("[%s](%s)", filename, rel_path(subdir, filename))) %>%
-    select(`Haplotype ID` = id, `Assembly File` = link)
+    mutate(
+      sample_id = str_replace(id, "_hap[12]$", ""),
+      hap = str_extract(id, "hap[12]$"),
+      link = sprintf("[%s](%s)", filename, rel_path(subdir, filename))
+    ) %>%
+    select(sample_id, hap, link) %>%
+    pivot_wider(names_from = hap, values_from = link, values_fill = "—") %>%
+    rename(Sample = sample_id, `Haplotype 1` = hap1, `Haplotype 2` = hap2)
+
   md <- c(md, "### Assembly Files", "", make_markdown_table(asm_table), "")
 } else {
   md <- c(md, "*No final assemblies found in manifest.*", "")

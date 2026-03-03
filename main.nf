@@ -410,6 +410,7 @@ include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
 include { HIC_TADS } from './modules/hic_tads.nf'
 include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
+include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 
 /*
 ========================================================================================
@@ -952,6 +953,17 @@ workflow {
     
     // Run gap filling
     GAP_FILLING(ch_gap_filling_input)
+
+    // =========================================================================
+    //  FINALIZE ASSEMBLY — Compress final assemblies to .fasta.gz
+    //
+    //  Downstream processes that need the UNCOMPRESSED fasta (e.g., minimap2
+    //  for pairwise alignments, Hi-C mapping, blobtools) should still use
+    //  GAP_FILLING.out.filled_assembly. Only the report links and the
+    //  published final directory use the compressed version.
+    // =========================================================================
+
+    FINALIZE_ASSEMBLY(GAP_FILLING.out.filled_assembly)
 
     /*
     ========================================================================================
@@ -1604,29 +1616,22 @@ workflow {
     // =========================================================================
     //  SUMMARY REPORT — Build manifest and call the process
     //
-    //  The manifest is a TSV with columns: type  id  id2  filename  subdir
-    //
-    //  "subdir" is the publishDir path relative to params.outdir.
-    //  The report publishes to ${params.outdir}/ directly, so the markdown
-    //  references files as subdir/filename (e.g., snail_plots/sample_snail.svg).
-    //
     //  Verified publishDir paths from each module:
-    //    GAP_FILLING        → ${params.outdir}/assembly/final
+    //    FINALIZE_ASSEMBLY  → ${params.outdir}/assembly/final
+    //    GAP_FILLING        → ${params.outdir}/assembly/scaffold/gap_filling
     //    SNAIL_PLOT         → ${params.outdir}/snail_plots
     //    CONTACT_MAP        → ${params.outdir}/contact_maps
     //    PAIRWISE_ALIGNMENT → ${params.outdir}/pairwise_alignments
     //    COMPILE_FINAL_QC   → ${params.outdir}/qc/assembly
     //    ASSEMBLY_REPORT    → ${params.outdir}/reports
-    //    COLLECT_TELOMERE   → ${params.outdir}/telomeres
-    //    COLLECT_PAIRWISE   → ${params.outdir}/pairwise_alignments
     // =========================================================================
 
-    // ---- Final genome assemblies ----
-    // GAP_FILLING.out.filled_assembly: tuple(haplotype_id, fasta)
+    // ---- Final compressed genome assemblies ----
+    // FINALIZE_ASSEMBLY.out.assembly: tuple(haplotype_id, fasta_gz)
     // publishDir: ${params.outdir}/assembly/final
-    ch_manifest_assemblies = GAP_FILLING.out.filled_assembly
-        .map { hap_id, fasta ->
-            "assembly\t${hap_id}\t.\t${fasta.name}\tassembly/final"
+    ch_manifest_assemblies = FINALIZE_ASSEMBLY.out.assembly
+        .map { hap_id, fasta_gz ->
+            "assembly\t${hap_id}\t.\t${fasta_gz.name}\tassembly/final"
         }
 
     // ---- Snail plots (final) ----
@@ -1639,12 +1644,10 @@ workflow {
 
     // ---- Contact maps (conditional) ----
     // CONTACT_MAP_FINAL.out.contact_maps: tuple(haplotype_id, stage, png_files)
-    //   png_files is a glob that may contain multiple PNGs (one per resolution)
     // publishDir: ${params.outdir}/contact_maps
     if (params.make_final_contact_maps) {
         ch_manifest_contact_maps = CONTACT_MAP_FINAL.out.contact_maps
             .flatMap { hap_id, stage, pngs ->
-                // pngs may be a single file or a list of files from the glob
                 def png_list = pngs instanceof List ? pngs : [pngs]
                 png_list.collect { png ->
                     "contact_map\t${hap_id}\t.\t${png.name}\tcontact_maps"
@@ -1667,7 +1670,6 @@ workflow {
     }
 
     // ---- Compiled QC CSV from COMPILE_FINAL_QC ----
-    // COMPILE_FINAL_QC.out.metrics: path(assembly_qc_metrics.csv)
     // publishDir: ${params.outdir}/qc/assembly
     ch_manifest_compiled_csv = COMPILE_FINAL_QC.out.metrics
         .map { csv ->
@@ -1675,7 +1677,6 @@ workflow {
         }
 
     // ---- QC trend plots (PNGs) from COMPILE_FINAL_QC ----
-    // COMPILE_FINAL_QC.out.plots: path("*.png") — collected as a list
     // publishDir: ${params.outdir}/qc/assembly
     ch_manifest_qc_plots = COMPILE_FINAL_QC.out.plots
         .flatten()
@@ -1684,7 +1685,6 @@ workflow {
         }
 
     // ---- Interactive HTML report from ASSEMBLY_REPORT ----
-    // ASSEMBLY_REPORT.out.report_html: path(assembly_qc_report.html)
     // publishDir: ${params.outdir}/reports
     ch_manifest_assembly_report = ASSEMBLY_REPORT.out.report_html
         .map { html ->
@@ -1712,10 +1712,10 @@ workflow {
 
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
-        ch_report_manifest,                         // manifest TSV
-        COMPILE_FINAL_QC.out.metrics,               // assembly_qc_metrics.csv
-        ch_telomere_for_report,                     // telomere summary
-        ch_pairwise_summary                         // pairwise summary
+        ch_report_manifest,
+        COMPILE_FINAL_QC.out.metrics,
+        ch_telomere_for_report,
+        ch_pairwise_summary
     )
 
 }
