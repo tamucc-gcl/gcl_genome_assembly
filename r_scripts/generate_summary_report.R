@@ -165,11 +165,21 @@ md <- c(md, "## 2. Assembly QC Summary", "")
 
 if (!is.null(qc_data) && nrow(qc_data) > 0) {
 
-  # --- Per-haplotype overview table ---
+  # --- Per-haplotype overview table (wide: metrics as rows, samples as columns) ---
   md <- c(md, "### Overview (Final Assemblies)", "")
 
-  overview_long <- qc_data %>%
+  # First, normalise BUSCO counts to proportions using total_busco
+  final_data <- qc_data %>%
     filter(stage == "final") %>%
+    mutate(
+      across(c(hap1, hap2), ~ case_when(
+        metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
+          . / .[metric == "total_busco"],
+        TRUE ~ .
+      ), .by = sample_id)
+    )
+
+  overview_long <- final_data %>%
     pivot_longer(cols = c(hap1, hap2, both),
                  names_to = "haplotype",
                  values_to = "value",
@@ -178,8 +188,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                           "complete", "Largest contig", "GC (%)", "qv",
                           "kmer_completeness"))
 
-  # For metrics that are diploid-level (qv, kmer_completeness), keep only "both"
-  # For per-haplotype metrics, keep hap1 and hap2
+  # For diploid-level metrics keep only "both"; for per-hap metrics keep hap1/hap2
   overview_filtered <- overview_long %>%
     filter(
       (metric %in% c("qv", "kmer_completeness") & haplotype == "both") |
@@ -187,36 +196,54 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     )
 
   if (nrow(overview_filtered) > 0) {
+    # Format values
     overview_fmt <- overview_filtered %>%
       mutate(value_fmt = case_when(
-        analysis == "busco" ~ percent(value, accuracy = 0.1),
-        metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
-        metric == "Total length" ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
-        metric %in% c("Largest contig", "auN") ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
+        metric == "complete"                       ~ percent(value, accuracy = 0.1),
+        metric == "hifi_depth"                     ~ comma(value, accuracy = 0.1),
+        metric == "Total length"                   ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
+        metric %in% c("Largest contig", "auN")     ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
         metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, scale = 1, accuracy = 0.1),
-        metric == "qv" ~ comma(value, accuracy = 0.1),
-        TRUE ~ comma(value, accuracy = 1)
-      )) %>%
-      select(sample_id, metric, haplotype, value_fmt) %>%
-      pivot_wider(names_from = haplotype, values_from = value_fmt, values_fill = "") %>%
-      rename(Sample = sample_id, Metric = metric) %>%
-      rename_with(~ case_when(
-        . == "complete"          ~ "BUSCO",
-        . == "kmer_completeness" ~ "K-mer Comp.",
-        . == "Largest contig"    ~ "Largest Scaffold",
-        TRUE ~ .
+        metric == "qv"                             ~ comma(value, accuracy = 0.1),
+        TRUE                                       ~ comma(value, accuracy = 1)
       ))
 
-    # Blank out repeated sample names
-    overview_fmt <- overview_fmt %>%
-      mutate(Sample = if_else(lag(Sample, default = "") == Sample, "", Sample))
+    # Rename metrics for display
+    metric_display <- c(
+      "Total length"       = "Total Length",
+      "Largest contig"     = "Largest Scaffold",
+      "auN"                = "auN",
+      "L90"                = "L90",
+      "GC (%)"             = "GC (%)",
+      "hifi_depth"         = "HiFi Depth",
+      "complete"           = "BUSCO Complete",
+      "qv"                 = "QV",
+      "kmer_completeness"  = "K-mer Completeness"
+    )
 
-    md <- c(md, make_markdown_table(overview_fmt), "")
+    # Define display order
+    metric_order <- names(metric_display)
+
+    # Build wide table: rows = assemblies (sample+haplotype), columns = metrics
+    overview_wide <- overview_fmt %>%
+      mutate(
+        metric = factor(metric, levels = metric_order),
+        row_name = case_when(
+          haplotype == "both" ~ paste0(sample_id, " (diploid)"),
+          TRUE ~ paste0(sample_id, " ", haplotype)
+        ),
+        metric_label = metric_display[as.character(metric)]
+      ) %>%
+      arrange(row_name, metric) %>%
+      select(row_name, metric_label, value_fmt) %>%
+      pivot_wider(names_from = metric_label, values_from = value_fmt, values_fill = "") %>%
+      rename(Assembly = row_name)
+
+    md <- c(md, make_markdown_table(overview_wide), "")
   }
 
   # --- Detailed final assembly table (collapsible) ---
-  final_detail <- qc_data %>%
-    filter(stage == "final") %>%
+  final_detail <- final_data %>%
     pivot_longer(cols = c(hap1, hap2, both),
                  names_to = "haplotype",
                  values_to = "value",
@@ -415,8 +442,15 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
       img_tag(src, label, width = 800), "")
   }
 
-  # Cross-stage comparison table
+  # Cross-stage comparison table (normalise BUSCO before formatting)
   cross_stage <- qc_data %>%
+    mutate(
+      across(c(hap1, hap2), ~ case_when(
+        metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
+          . / .[metric == "total_busco"],
+        TRUE ~ .
+      ), .by = c(sample_id, stage))
+    ) %>%
     pivot_longer(cols = c(hap1, hap2, both),
                  names_to = "haplotype",
                  values_to = "value",
