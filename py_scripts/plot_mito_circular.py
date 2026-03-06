@@ -29,7 +29,6 @@ FEATURE_COLOURS = {
     "CDS":    "#E64B35",   # red-orange
     "tRNA":   "#4DBBD5",   # teal
     "rRNA":   "#F9C74F",   # gold
-    "D-loop": "#90BE6D",   # green (control region)
 }
 
 
@@ -47,6 +46,49 @@ def parse_args():
     p.add_argument("--width", type=float, default=10,
                    help="Figure width/height in inches [10]")
     return p.parse_args()
+
+
+def get_label(feature, ftype):
+    """Extract a short display label from a GenBank feature."""
+    if ftype == "CDS":
+        for key in ("gene", "product"):
+            vals = feature.qualifiers.get(key)
+            if vals:
+                return vals[0]
+    elif ftype == "tRNA":
+        for key in ("product", "gene"):
+            vals = feature.qualifiers.get(key)
+            if vals:
+                label = vals[0]
+                # Shorten: "tRNA-Phe" → "F"
+                if "tRNA-" in label:
+                    aa = label.split("tRNA-")[-1]
+                    aa_map = {
+                        "Ala": "A", "Arg": "R", "Asn": "N", "Asp": "D",
+                        "Cys": "C", "Gln": "Q", "Glu": "E", "Gly": "G",
+                        "His": "H", "Ile": "I", "Leu": "L", "Lys": "K",
+                        "Met": "M", "Phe": "F", "Pro": "P", "Ser": "S",
+                        "Thr": "T", "Trp": "W", "Tyr": "Y", "Val": "V",
+                    }
+                    return aa_map.get(aa, aa)
+                return label
+    elif ftype == "rRNA":
+        for key in ("product", "gene"):
+            vals = feature.qualifiers.get(key)
+            if vals:
+                return vals[0]
+    return ""
+
+
+def add_feature_labels(track, features, ftype, fontsize=6):
+    """Add text labels at the midpoint of each feature on the track."""
+    for feat in features:
+        start = int(feat.location.start)
+        end = int(feat.location.end)
+        mid = (start + end) / 2
+        label = get_label(feat, ftype)
+        if label:
+            track.text(label, mid, fontsize=fontsize, orientation="curved")
 
 
 def main():
@@ -67,25 +109,22 @@ def main():
     )
     sector = circos.sectors[0]
 
-    # ── Track 1 (outermost): CDS features + labels ─────────────────────
+    # ── Track 1 (outermost): CDS features ──────────────────────────────
     cds_track = sector.add_track((88, 100))
     cds_track.axis(fc="none", ec="grey", lw=0.3)
 
     cds_features = gbk.extract_features("CDS")
     if cds_features:
-        # Single call: draw arrows AND gene labels together
         cds_track.genomic_features(
             cds_features,
             plotstyle="arrow",
             fc=FEATURE_COLOURS["CDS"],
             ec="black",
             lw=0.3,
-            label_type="gene",
-            label_size=6,
-            label_orientation="curved",
         )
+        add_feature_labels(cds_track, cds_features, "CDS", fontsize=6)
 
-    # ── Track 2: tRNA features + labels ─────────────────────────────────
+    # ── Track 2: tRNA features ──────────────────────────────────────────
     trna_track = sector.add_track((78, 87))
     trna_track.axis(fc="none", ec="grey", lw=0.3)
 
@@ -97,12 +136,10 @@ def main():
             fc=FEATURE_COLOURS["tRNA"],
             ec="black",
             lw=0.3,
-            label_type="product",
-            label_size=5,
-            label_orientation="curved",
         )
+        add_feature_labels(trna_track, trna_features, "tRNA", fontsize=5)
 
-    # ── Track 3: rRNA features + labels ─────────────────────────────────
+    # ── Track 3: rRNA features ──────────────────────────────────────────
     rrna_track = sector.add_track((68, 77))
     rrna_track.axis(fc="none", ec="grey", lw=0.3)
 
@@ -114,10 +151,8 @@ def main():
             fc=FEATURE_COLOURS["rRNA"],
             ec="black",
             lw=0.3,
-            label_type="product",
-            label_size=6,
-            label_orientation="curved",
         )
+        add_feature_labels(rrna_track, rrna_features, "rRNA", fontsize=6)
 
     # ── Track 4 (innermost): GC content ────────────────────────────────
     gc_track = sector.add_track((45, 65))
