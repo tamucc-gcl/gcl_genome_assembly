@@ -29,6 +29,7 @@ process SUMMARY_REPORT {
     path(compiled_qc_csv)       // assembly_qc_metrics.csv from COMPILE_FINAL_QC
     path(telomere_summary)      // all_telomere_summaries.tsv  OR  NO_TELOMERES
     path(pairwise_summary)      // pairwise_alignment_summary.tsv  OR  NO_PAIRWISE
+    path(mito_stats)            // all_mito_stats.tsv or NO_MITO_STATS
 
     output:
     path("assembly_report.md"), emit: report
@@ -40,6 +41,7 @@ process SUMMARY_REPORT {
         --compiled_qc ${compiled_qc_csv} \
         --telomere_summary ${telomere_summary} \
         --pairwise_summary ${pairwise_summary} \
+        --mito_stats ${mito_stats} \
         --output assembly_report.md
     """
 

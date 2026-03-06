@@ -32,6 +32,7 @@ parser$add_argument("--telomere_summary", required = TRUE, help = "Telomere summ
 parser$add_argument("--pairwise_summary", required = TRUE, help = "Pairwise alignment summary TSV (or NO_PAIRWISE)")
 parser$add_argument("--output",           default = "assembly_report.md", help = "Output markdown file")
 parser$add_argument("--img_width",        default = 500, type = "integer", help = "Image display width in pixels")
+parser$add_argument("--mito_stats",       required = TRUE, help = "Mitogenome stats TSV (or NO_MITO_STATS)")
 
 args <- parser$parse_args()
 
@@ -77,6 +78,9 @@ dotplots       <- manifest %>% filter(type == "dotplot")
 qc_plots       <- manifest %>% filter(type == "qc_plot")
 compiled_csvs  <- manifest %>% filter(type == "compiled_qc")
 report_htmls   <- manifest %>% filter(type == "assembly_report_html")
+mito_assemblies <- manifest %>% filter(type == "mitogenome")
+mito_gene_maps  <- manifest %>% filter(type == "mito_gene_map")
+mito_stats_rows <- manifest %>% filter(type == "mito_stats")
 
 all_hap_ids <- assemblies$id %>% sort()
 all_sample_ids <- all_hap_ids %>%
@@ -114,8 +118,9 @@ md <- c(md,
         "2. [Assembly QC Summary](#2-assembly-qc-summary)",
         "3. [Visual Summary](#3-visual-summary)",
         "4. [Assembly QC Across Pipeline Stages](#4-assembly-qc-across-pipeline-stages)",
-        "5. [Telomere Detection](#5-telomere-detection)",
-        "6. [Pairwise Alignment Summary](#6-pairwise-alignment-summary)",
+        "5. [Mitochondrial Genome](#5-mitochondrial-genome)",
+        "6. [Telomere Detection](#6-telomere-detection)",
+        "7. [Pairwise Alignment Summary](#7-pairwise-alignment-summary)",
         "",
         "---",
         ""
@@ -508,7 +513,92 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
 }
 
 # =============================================================================
-# Section 5: Telomere Detection (collapsible)
+# Section 5: Mitochondrial Genome
+# =============================================================================
+generate_mito_section <- function(md, args, manifest) {
+
+  md <- c(md, "## Mitochondrial Genome", "")
+
+  # --- Read mito stats ---
+  mito_stats <- NULL
+  if (!grepl("NO_MITO_STATS", args$mito_stats, fixed = TRUE) &&
+      file.exists(args$mito_stats)) {
+    mito_stats <- tryCatch(
+      read_tsv(args$mito_stats, show_col_types = FALSE),
+      error = function(e) { message("WARNING: Could not read mito stats: ", e$message); NULL }
+    )
+  }
+
+  if (is.null(mito_stats) || nrow(mito_stats) == 0) {
+    md <- c(md, "*No mitochondrial genome assembly data available.*", "")
+    return(md)
+  }
+
+  # --- Summary table ---
+  md <- c(md, "### Assembly Summary", "")
+
+  mito_table <- mito_stats %>%
+    mutate(
+      mitogenome_length = scales::comma(as.numeric(mitogenome_length)),
+      circular = ifelse(tolower(circular) == "yes", "Yes", circular)
+    ) %>%
+    select(
+      Sample = sample_id,
+      `Length (bp)` = mitogenome_length,
+      Circular = circular,
+      Genes = gene_count,
+      tRNAs = trna_count,
+      rRNAs = rrna_count,
+      `Genetic Code` = genetic_code
+    )
+
+  md <- c(md, make_markdown_table(mito_table), "")
+
+  # --- Mitogenome FASTA links ---
+  mito_assemblies <- manifest %>% filter(type == "mitogenome")
+  if (nrow(mito_assemblies) > 0) {
+    md <- c(md, "### Assembly Files", "")
+    for (i in seq_len(nrow(mito_assemblies))) {
+      row <- mito_assemblies[i, ]
+      link <- rel_path(row$subdir, row$filename)
+      md <- c(md, sprintf("- **%s**: [%s](%s)", row$id, row$filename, link))
+    }
+    md <- c(md, "")
+  }
+
+  # --- Gene map images ---
+  mito_gene_maps <- manifest %>% filter(type == "mito_gene_map")
+  if (nrow(mito_gene_maps) > 0) {
+    md <- c(md, "### Gene Maps", "")
+
+    # Group by sample if possible (extract sample_id from filename)
+    for (i in seq_len(nrow(mito_gene_maps))) {
+      row <- mito_gene_maps[i, ]
+      src <- rel_path(row$subdir, row$filename)
+      alt <- sprintf("Mitogenome gene map: %s", row$filename)
+      md <- c(md, img_tag(src, alt, width = args$img_width), "")
+    }
+    md <- c(md, "")
+  }
+
+  # --- Mito filtering stats (how many contigs were removed from nuclear assembly) ---
+  # These come from FILTER_MITO_CONTIGS output, collected via mito_stats manifest
+  mito_stats_files <- manifest %>% filter(type == "mito_stats")
+  if (nrow(mito_stats_files) > 0) {
+    md <- c(md,
+      "### Nuclear Assembly Filtering",
+      "",
+      "Mitochondrial contigs were identified and removed from each haplotype",
+      "assembly prior to purge\\_dups, Inspector, decontamination, and scaffolding.",
+      ""
+    )
+  }
+
+  md
+}
+
+# =============================================================================
+# Section 6: Telomere Detection (collapsible)
 # =============================================================================
 telo_path <- args$telomere_summary
 if (!str_detect(basename(telo_path), "NO_TELOMERES") &&
@@ -516,7 +606,7 @@ if (!str_detect(basename(telo_path), "NO_TELOMERES") &&
   telo_data <- tryCatch(read_tsv(telo_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(telo_data) && nrow(telo_data) > 0) {
     md <- c(md,
-            "## 5. Telomere Detection", "",
+            "## 6. Telomere Detection", "",
             make_collapsible(
               make_markdown_table(telo_data %>% mutate(across(everything(), as.character))),
               "Click to expand: Telomere detection summary"
@@ -534,7 +624,7 @@ if (!str_detect(basename(pw_path), "NO_PAIRWISE") &&
   pw_data <- tryCatch(read_tsv(pw_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(pw_data) && nrow(pw_data) > 0) {
     md <- c(md,
-            "## 6. Pairwise Alignment Summary", "",
+            "## 7. Pairwise Alignment Summary", "",
             make_collapsible(
               make_markdown_table(pw_data %>% mutate(across(everything(), as.character))),
               "Click to expand: Pairwise alignment metrics"

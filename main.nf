@@ -86,6 +86,19 @@ params.hifiasm_teloP = 1 // non-telomeric penalty [1]
 params.hifiasm_teloD = 2000 // max drop [2000]
 params.hifiasm_teloS = 500 // min score for telomere reads [500]
 
+// Mitochondrial genome assembly (MitoHiFi)
+params.mitohifi_species        = null        // REQUIRED: Scientific name (e.g., "Spratelloides delicatulus")
+params.mitohifi_genetic_code   = 2           // NCBI genetic code: 2=vertebrate mito, 5=invertebrate mito
+params.mitohifi_ref_min_length = 14000       // Min reference mitogenome length for findMitoReference.py
+params.mitohifi_perc_identity  = 50          // Min percent identity for read filtering
+params.mitohifi_cov_cutoff     = 'auto'      // Coverage cutoff (auto or integer)
+params.mitohifi_bloom_filter   = false       // Use bloom filter for large read sets
+
+// Mito contig filtering (applied to HIFIASM output)
+params.mitohifi_filter_min_identity = 90     // Min alignment identity to call a contig mitochondrial
+params.mitohifi_filter_min_coverage = 50     // Min query coverage to call a contig mitochondrial
+
+
 // Purge duplicates parameters
 params.run_purge_dups = false  // Default off - enable with --run_purge_dups true
 
@@ -351,6 +364,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_MITO_FILTERED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_PURGED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
@@ -381,6 +395,12 @@ include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
+
+include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
+include { MITOHIFI } from './modules/mitohifi.nf'
+include { FILTER_MITO_CONTIGS as FILTER_MITO_CONTIGS_HAP1 } from './modules/filter_mito_contigs.nf'
+include { FILTER_MITO_CONTIGS as FILTER_MITO_CONTIGS_HAP2 } from './modules/filter_mito_contigs.nf'
+
 include { PURGE_DUPS } from './modules/purge_dups.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
@@ -458,6 +478,14 @@ workflow {
 
     /*
     ========================================================================================
+        STEP 0b: Find Closest Mitochondrial Reference (NCBI)
+        Runs at pipeline start — no dependencies on reads or assembly
+    ========================================================================================
+    */
+    FIND_MITO_REFERENCE(params.mitohifi_species)
+
+    /*
+    ========================================================================================
         STEP 1: Convert BAM to FASTQ
     ========================================================================================
     */
@@ -494,11 +522,78 @@ workflow {
 
     /*
     ========================================================================================
+        STEP 3b: Assemble Mitochondrial Genome (MitoHiFi)
+        Runs concurrently with HIFIASM — both consume HiFi reads independently
+        Depends on: BAM_TO_FASTQ + FIND_MITO_REFERENCE
+    ========================================================================================
+    */
+    MITOHIFI(
+        BAM_TO_FASTQ.out,
+        FIND_MITO_REFERENCE.out.ref_fasta,
+        FIND_MITO_REFERENCE.out.ref_gb
+    )
+
+
+    /*
+    ========================================================================================
         STEP 4: Assemble with Hifiasm
     ========================================================================================
     */
     
     HIFIASM(ch_fastq_all)
+
+    /*
+    ========================================================================================
+        STEP 4a: Remove Mitochondrial Contigs from Nuclear Assembly
+        Runs after HIFIASM (+ optional purge_dups) and after MITOHIFI completes.
+        Filters each haplotype independently using the assembled mitogenome.
+        The filtered assemblies flow into all downstream steps (Inspector,
+        decontamination, scaffolding, etc.)
+    ========================================================================================
+    */
+    HIFIASM.out.assemblies
+        .map { sample_id, hap1_fasta, hap2_fasta ->
+            tuple(sample_id, hap1_fasta)
+        }
+        .combine(
+            MITOHIFI.out.mitogenome.map { sid, mfa -> tuple(sid, mfa) },
+            by: 0
+        )
+        .map { sample_id, hap1_fasta, mito_fa ->
+            tuple("${sample_id}_hap1", hap1_fasta, mito_fa)
+        }
+        .set { ch_mito_filter_hap1_input }
+
+    HIFIASM.out.assemblies
+        .map { sample_id, hap1_fasta, hap2_fasta ->
+            tuple(sample_id, hap2_fasta)
+        }
+        .combine(
+            MITOHIFI.out.mitogenome.map { sid, mfa -> tuple(sid, mfa) },
+            by: 0
+        )
+        .map { sample_id, hap2_fasta, mito_fa ->
+            tuple("${sample_id}_hap2", hap2_fasta, mito_fa)
+        }
+        .set { ch_mito_filter_hap2_input }
+
+    FILTER_MITO_CONTIGS_HAP1(ch_mito_filter_hap1_input)
+    FILTER_MITO_CONTIGS_HAP2(ch_mito_filter_hap2_input)
+
+    // Reconstruct sample-level tuple
+    FILTER_MITO_CONTIGS_HAP1.out.filtered
+        .mix(FILTER_MITO_CONTIGS_HAP2.out.filtered)
+        .map { haplotype_id, fasta ->
+            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+            def hap_num = haplotype_id.contains('_hap1') ? 1 : 2
+            tuple(sample_id, hap_num, fasta)
+        }
+        .groupTuple(by: 0, size: 2)
+        .map { sample_id, hap_nums, fastas ->
+            def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+            tuple(sample_id, sorted[0][1], sorted[1][1])
+        }
+        .set { ch_mito_filtered }
 
     /*
     ========================================================================================
@@ -509,8 +604,7 @@ workflow {
     ========================================================================================
     */
     if (params.run_purge_dups) {
-        // Split HIFIASM output into individual haplotypes and join with HiFi reads
-        HIFIASM.out.assemblies
+        ch_mito_filtered                              // <-- mito-filtered, not HIFIASM.out
             .flatMap { sample_id, hap1_fasta, hap2_fasta ->
                 [
                     tuple("${sample_id}_hap1", hap1_fasta),
@@ -526,11 +620,9 @@ workflow {
                 tuple(haplotype_id, assembly, hifi_reads)
             }
             .set { ch_purge_dups_input }
-        
+
         PURGE_DUPS(ch_purge_dups_input)
-        
-        // Reconstruct sample-level tuple for downstream compatibility
-        // tuple(sample_id, hap1_fasta, hap2_fasta)
+
         PURGE_DUPS.out.purged_assembly
             .map { haplotype_id, purged_fa ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
@@ -539,15 +631,13 @@ workflow {
             }
             .groupTuple(by: 0, size: 2)
             .map { sample_id, hap_nums, fastas ->
-                // Sort to ensure hap1 comes before hap2
                 def sorted = [hap_nums, fastas].transpose().sort { it[0] }
                 tuple(sample_id, sorted[0][1], sorted[1][1])
             }
             .set { ch_hifiasm_output }
-        
+
     } else {
-        // No purging - pass HIFIASM output directly
-        HIFIASM.out.assemblies
+        ch_mito_filtered                              // <-- mito-filtered, not HIFIASM.out
             .set { ch_hifiasm_output }
     }
 
@@ -1226,6 +1316,19 @@ workflow {
 
     /*
     ========================================================================================
+        QC Mito-Filtered Contig Assemblies
+    ========================================================================================
+    */
+    ASSEMBLY_QC_MITO_FILTERED(
+        ch_mito_filtered,
+        BAM_TO_FASTQ.out,
+        BUILD_MERYL_DB.out.meryl_db,
+        ch_busco_db,
+        'contig_mito_filtered'
+    )
+
+    /*
+    ========================================================================================
         QC Purged Contig Genomes Assemblies
     ========================================================================================
     */
@@ -1496,6 +1599,7 @@ workflow {
     // Collect all assembly QC summaries
     // Start with the ones that always run
     ch_all_assembly_summaries = ASSEMBLY_QC_INITIAL.out.assembly_summary
+        .mix(ASSEMBLY_QC_MITO_FILTERED.out.assembly_summary)
         .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
         .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     
@@ -1691,6 +1795,26 @@ workflow {
             "assembly_report_html\t.\t.\t${html.name}\treports"
         }
 
+    // ---- Mitogenome assembly ----
+    // publishDir: ${params.outdir}/mitogenome/${sample_id}
+    ch_manifest_mitogenome = MITOHIFI.out.mitogenome
+        .map { sample_id, fasta ->
+            "mitogenome\t${sample_id}\t.\t${fasta.name}\tmitogenome/${sample_id}"
+        }
+
+    ch_manifest_mito_stats = MITOHIFI.out.stats
+        .map { sample_id, tsv ->
+            "mito_stats\t${sample_id}\t.\t${tsv.name}\tmitogenome/${sample_id}"
+        }
+
+    ch_manifest_mito_gene_map = MITOHIFI.out.gene_map
+        .flatten()
+        .map { png ->
+            // Extract sample_id from filename: sample_id_final_mitogenome*.png
+            def fname = png.name
+            "mito_gene_map\t.\t.\t${fname}\tmitogenome"
+        }
+
     // ---- Combine all manifest entries into a single TSV ----
     ch_manifest_assemblies
         .mix(ch_manifest_snails)
@@ -1699,6 +1823,9 @@ workflow {
         .mix(ch_manifest_compiled_csv)
         .mix(ch_manifest_qc_plots)
         .mix(ch_manifest_assembly_report)
+        .mix(ch_manifest_mitogenome)
+        .mix(ch_manifest_mito_stats)
+        .mix(ch_manifest_mito_gene_map)
         .collectFile(
             name: 'report_manifest.tsv',
             seed: 'type\tid\tid2\tfilename\tsubdir',
@@ -1710,12 +1837,23 @@ workflow {
     ch_telomere_for_report = COLLECT_TELOMERE_RESULTS.out.summary
         .ifEmpty(file('NO_TELOMERES'))
 
+    // Collect mitogenome stats for report
+    ch_mito_stats_for_report = MITOHIFI.out.stats
+        .map { sample_id, tsv -> tsv }
+        .collectFile(
+            name: 'all_mito_stats.tsv',
+            keepHeader: true,
+            skip: 1
+        )
+        .ifEmpty(file('NO_MITO_STATS'))
+
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
         ch_report_manifest,
         COMPILE_FINAL_QC.out.metrics,
         ch_telomere_for_report,
-        ch_pairwise_summary
+        ch_pairwise_summary,
+        ch_mito_stats_for_report 
     )
 }
 /*
