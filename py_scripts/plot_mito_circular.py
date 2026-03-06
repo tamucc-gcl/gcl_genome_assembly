@@ -88,7 +88,7 @@ def add_feature_labels(track, features, ftype, fontsize=6):
         mid = (start + end) / 2
         label = get_label(feat, ftype)
         if label:
-            track.text(label, mid, fontsize=fontsize, orientation="curved")
+            track.text(label, mid, fontsize=fontsize, orientation="vertical")
 
 
 def main():
