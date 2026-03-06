@@ -34,7 +34,7 @@ process MITOHIFI {
     tag "${sample_id}"
     label 'mitohifi'
 
-    publishDir "${params.outdir}/mitogenome/${sample_id}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
 
     input:
     tuple val(sample_id), path(hifi_fastq)
