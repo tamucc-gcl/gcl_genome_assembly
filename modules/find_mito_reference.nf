@@ -22,7 +22,9 @@ process FIND_MITO_REFERENCE {
     tag "${species_name}"
     label 'mitohifi'
 
-    publishDir "${params.outdir}/mitogenome/reference", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/mitogenome", mode: params.publish_dir_mode, saveAs: { filename ->
+        filename == 'mito_reference_info.tsv' ? filename : null
+    }
 
     input:
     val(species_name)
