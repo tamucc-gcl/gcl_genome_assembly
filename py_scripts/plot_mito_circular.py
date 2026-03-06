@@ -19,17 +19,18 @@ from pathlib import Path
 
 from pycirclize import Circos
 from pycirclize.parser import Genbank
+from Bio import SeqIO
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 
 
 # ── Colour palette ──────────────────────────────────────────────────────────
 FEATURE_COLOURS = {
-    "CDS":  "#E64B35",   # red-orange
-    "tRNA": "#4DBBD5",   # teal
-    "rRNA": "#F9C74F",   # gold
-    "D-loop": "#90BE6D", # green (control region)
+    "CDS":    "#E64B35",   # red-orange
+    "tRNA":   "#4DBBD5",   # teal
+    "rRNA":   "#F9C74F",   # gold
+    "D-loop": "#90BE6D",   # green (control region)
 }
-
-DEFAULT_COLOUR = "#B0B0B0"  # grey fallback
 
 
 def parse_args():
@@ -46,28 +47,6 @@ def parse_args():
     p.add_argument("--width", type=float, default=10,
                    help="Figure width/height in inches [10]")
     return p.parse_args()
-
-
-def get_gene_label(feature):
-    """Extract a short display label from a GenBank feature."""
-    for key in ("gene", "product", "locus_tag"):
-        vals = feature.qualifiers.get(key)
-        if vals:
-            label = vals[0]
-            # Shorten tRNA labels: "tRNA-Phe" → "F", etc.
-            if feature.type == "tRNA" and "tRNA-" in label:
-                aa = label.split("tRNA-")[-1]
-                # Standard 3-letter → 1-letter; keep short ones as-is
-                aa_map = {
-                    "Ala": "A", "Arg": "R", "Asn": "N", "Asp": "D",
-                    "Cys": "C", "Gln": "Q", "Glu": "E", "Gly": "G",
-                    "His": "H", "Ile": "I", "Leu": "L", "Lys": "K",
-                    "Met": "M", "Phe": "F", "Pro": "P", "Ser": "S",
-                    "Thr": "T", "Trp": "W", "Tyr": "Y", "Val": "V",
-                }
-                return aa_map.get(aa, aa)
-            return label
-    return ""
 
 
 def main():
@@ -88,28 +67,25 @@ def main():
     )
     sector = circos.sectors[0]
 
-    # ── Track 1 (outermost): CDS features ──────────────────────────────
+    # ── Track 1 (outermost): CDS features + labels ─────────────────────
     cds_track = sector.add_track((88, 100))
     cds_track.axis(fc="none", ec="grey", lw=0.3)
 
     cds_features = gbk.extract_features("CDS")
     if cds_features:
+        # Single call: draw arrows AND gene labels together
         cds_track.genomic_features(
             cds_features,
             plotstyle="arrow",
             fc=FEATURE_COLOURS["CDS"],
             ec="black",
             lw=0.3,
-        )
-        # Labels
-        cds_track.genomic_features(
-            cds_features,
             label_type="gene",
             label_size=6,
             label_orientation="curved",
         )
 
-    # ── Track 2: tRNA features ──────────────────────────────────────────
+    # ── Track 2: tRNA features + labels ─────────────────────────────────
     trna_track = sector.add_track((78, 87))
     trna_track.axis(fc="none", ec="grey", lw=0.3)
 
@@ -121,15 +97,12 @@ def main():
             fc=FEATURE_COLOURS["tRNA"],
             ec="black",
             lw=0.3,
-        )
-        trna_track.genomic_features(
-            trna_features,
             label_type="product",
             label_size=5,
             label_orientation="curved",
         )
 
-    # ── Track 3: rRNA features ──────────────────────────────────────────
+    # ── Track 3: rRNA features + labels ─────────────────────────────────
     rrna_track = sector.add_track((68, 77))
     rrna_track.axis(fc="none", ec="grey", lw=0.3)
 
@@ -141,9 +114,6 @@ def main():
             fc=FEATURE_COLOURS["rRNA"],
             ec="black",
             lw=0.3,
-        )
-        rrna_track.genomic_features(
-            rrna_features,
             label_type="product",
             label_size=6,
             label_orientation="curved",
@@ -154,7 +124,6 @@ def main():
     gc_track.axis(fc="none", ec="grey", lw=0.3)
 
     # Compute GC in sliding windows
-    from Bio import SeqIO
     record = SeqIO.read(gb_path, "genbank")
     seq = str(record.seq).upper()
     window = max(100, genome_size // 200)
@@ -188,9 +157,6 @@ def main():
     )
 
     # ── Legend ───────────────────────────────────────────────────────────
-    import matplotlib.patches as mpatches
-    import matplotlib.pyplot as plt
-
     legend_handles = [
         mpatches.Patch(color=FEATURE_COLOURS["CDS"],  label="CDS"),
         mpatches.Patch(color=FEATURE_COLOURS["tRNA"], label="tRNA"),
