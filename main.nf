@@ -93,6 +93,7 @@ params.mitohifi_ref_min_length = 14000       // Min reference mitogenome length 
 params.mitohifi_perc_identity  = 50          // Min percent identity for read filtering
 params.mitohifi_cov_cutoff     = 'auto'      // Coverage cutoff (auto or integer)
 params.mitohifi_bloom_filter   = false       // Use bloom filter for large read sets
+params.mitohifi_circular_map_dpi = 300
 
 // Mito contig filtering (applied to HIFIASM output)
 params.mitohifi_filter_min_identity = 90     // Min alignment identity to call a contig mitochondrial
@@ -400,6 +401,7 @@ include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
 include { MITOHIFI } from './modules/mitohifi.nf'
 include { FILTER_MITO_CONTIGS as FILTER_MITO_CONTIGS_HAP1 } from './modules/filter_mito_contigs.nf'
 include { FILTER_MITO_CONTIGS as FILTER_MITO_CONTIGS_HAP2 } from './modules/filter_mito_contigs.nf'
+include { MITO_CIRCULAR_MAP } from './modules/mito_circular_map.nf'
 
 include { PURGE_DUPS } from './modules/purge_dups.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
@@ -533,6 +535,7 @@ workflow {
         FIND_MITO_REFERENCE.out.ref_gb
     )
 
+    MITO_CIRCULAR_MAP(MITOHIFI.out.annotation)
 
     /*
     ========================================================================================
@@ -1807,12 +1810,9 @@ workflow {
             "mito_stats\t${sample_id}\t.\t${tsv.name}\tmitogenome/${sample_id}"
         }
 
-    ch_manifest_mito_gene_map = MITOHIFI.out.gene_map
-        .flatten()
-        .map { png ->
-            // Extract sample_id from filename: sample_id_final_mitogenome*.png
-            def fname = png.name
-            "mito_gene_map\t.\t.\t${fname}\tmitogenome"
+    ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
+        .map { sample_id, png ->
+            "mito_gene_map\t${sample_id}\t.\t${png.name}\tassembly/mitogenome/${sample_id}"
         }
 
     // ---- Combine all manifest entries into a single TSV ----
@@ -1825,7 +1825,7 @@ workflow {
         .mix(ch_manifest_assembly_report)
         .mix(ch_manifest_mitogenome)
         .mix(ch_manifest_mito_stats)
-        .mix(ch_manifest_mito_gene_map)
+        .mix(ch_manifest_mito_circular)
         .collectFile(
             name: 'report_manifest.tsv',
             seed: 'type\tid\tid2\tfilename\tsubdir',

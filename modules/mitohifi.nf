@@ -46,7 +46,7 @@ process MITOHIFI {
     tuple val(sample_id), path("${sample_id}_mitogenome.gb"),              emit: annotation
     tuple val(sample_id), path("${sample_id}_mito_stats.tsv"),             emit: stats
     tuple val(sample_id), path("${sample_id}_mito_contigs.fasta"),         emit: contigs_fasta
-    tuple val(sample_id), path("mitohifi_output"),                         emit: output_dir
+    //tuple val(sample_id), path("mitohifi_output"),                         emit: output_dir
     tuple val(sample_id), path("${sample_id}_final_mitogenome*.png"),      emit: gene_map, optional: true
 
     script:
