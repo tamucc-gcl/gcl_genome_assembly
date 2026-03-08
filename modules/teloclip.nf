@@ -68,8 +68,8 @@ process TELOCLIP_EXTEND {
         ${scaffold_fasta} \\
         ${hifi_fastq} \\
     | samtools view -h -F 0x100 -q ${min_mapq} \\
-    | teloclip \\
-        --ref ${scaffold_fasta}.fai \\
+    | teloclip filter \\
+        --ref-idx ${scaffold_fasta}.fai \\
         --motifs ${motif} \\
         --min-clip ${min_clip} \\
         --max-break ${max_break} \\
