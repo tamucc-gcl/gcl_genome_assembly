@@ -1205,21 +1205,40 @@ workflow {
     if (params.run_pairwise_alignments) {
         SETUP_PAFR()
 
+        // Collect all final assemblies, SORT for deterministic ordering, then generate pairs
         ch_final_assembly
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap = haplotype_id.contains('_hap1') ? 'hap1' : 'hap2'
-                tuple(sample_id, hap, haplotype_id, fasta)
-            }
-            .groupTuple(by: [0], size: 2, remainder: true)
-            .filter { it[1].size() == 2 }
-            .map { sample_id, haps, hap_ids, fastas ->
-                def sorted = [haps, hap_ids, fastas].transpose().sort { it[0] }
-                tuple(sorted[0][1], sorted[0][2], sorted[1][1], sorted[1][2])
+            .toSortedList { a, b -> a[0] <=> b[0] }
+            .flatMap { assemblies ->
+                def pairs = []
+
+                if (params.pairwise_alignment_mode == 'within_sample') {
+                    // Only compare hap1 vs hap2 within each sample
+                    def grouped = assemblies.groupBy { haplotype_id, fasta ->
+                        haplotype_id.replaceAll(/_hap[12]$/, '')
+                    }
+                    grouped.each { sample_id, haps ->
+                        if (haps.size() == 2) {
+                            def sorted = haps.sort { it[0] }
+                            pairs << tuple(sorted[0][0], sorted[0][1], sorted[1][0], sorted[1][1])
+                        }
+                    }
+                } else {
+                    // Generate all unique pairs (i < j to avoid duplicates and self-alignments)
+                    for (int i = 0; i < assemblies.size(); i++) {
+                        for (int j = i + 1; j < assemblies.size(); j++) {
+                            def (id1, fa1) = assemblies[i]
+                            def (id2, fa2) = assemblies[j]
+                            pairs << tuple(id1, fa1, id2, fa2)
+                        }
+                    }
+                }
+
+                return pairs
             }
             .set { ch_pairwise_input }
 
-        PAIRWISE_ALIGNMENT(ch_pairwise_input)
+        // FIX: pass SETUP_PAFR.out.ready as second argument
+        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
 
         // Riparian plot input — uses ch_final_assembly
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
