@@ -30,18 +30,20 @@ process SUMMARY_REPORT {
     path(telomere_summary)      // all_telomere_summaries.tsv  OR  NO_TELOMERES
     path(pairwise_summary)      // pairwise_alignment_summary.tsv  OR  NO_PAIRWISE
     path(mito_stats)            // all_mito_stats.tsv or NO_MITO_STATS
+    path(teloclip_stats)        // all_teloclip_stats.tsv or NO_TELOCLIP_STATS
 
     output:
     path("assembly_report.md"), emit: report
 
     script:
     """
-    Rscript ${projectDir}/r_scripts/generate_summary_report.R \
-        --manifest ${report_manifest} \
-        --compiled_qc ${compiled_qc_csv} \
-        --telomere_summary ${telomere_summary} \
-        --pairwise_summary ${pairwise_summary} \
-        --mito_stats ${mito_stats} \
+    Rscript ${projectDir}/r_scripts/generate_summary_report.R \\
+        --manifest ${report_manifest} \\
+        --compiled_qc ${compiled_qc_csv} \\
+        --telomere_summary ${telomere_summary} \\
+        --pairwise_summary ${pairwise_summary} \\
+        --mito_stats ${mito_stats} \\
+        --teloclip_stats ${teloclip_stats} \\
         --output assembly_report.md
     """
 

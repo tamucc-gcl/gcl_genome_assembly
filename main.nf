@@ -81,7 +81,7 @@ params.hifiasm_lMSjoin = 500000 // detect misjoined unitigs of >=INT in size; 0 
 params.hifiasm_dualScaf = false // output scaffolding
 params.hifiasm_scafGap = 3000000 // max gap size for scaffolding [3000000]
 ////Telomere-identification:
-params.telomere_motif = 'CCCTAA'  // telomere motif at 5'-end complement/reverse generated automatically. used by hifiasm (telo-m) & telomere scanning
+// see telomere specific parameters below (used across modules)
 params.hifiasm_teloP = 1 // non-telomeric penalty [1]
 params.hifiasm_teloD = 2000 // max drop [2000]
 params.hifiasm_teloS = 500 // min score for telomere reads [500]
@@ -156,6 +156,7 @@ params.yahs_round2_enzyme = null
 params.yahs_round2_no_contig_ec = false
 params.yahs_round2_no_scaffold_ec = true
 
+
 // Finalization Parameters
 params.make_final_contact_maps = true
 params.report_stage = 'final'
@@ -189,8 +190,25 @@ params.tad_max_contigs = 0    // 0 = no cap
 // ============================================================================
 // Telomere detection parameters
 // ============================================================================
+params.telomere_motif = 'CCCTAA'  // telomere motif at 5'-end complement/reverse generated automatically. used by hifiasm (telo-m) & telomere scanning
 params.telomere_window = 10000        // Window size (bp) at each sequence end to search
 params.telomere_min_repeats = 10      // Minimum consecutive motif repeats required
+
+// Teloclip: telomere extension from soft-clipped HiFi read overhangs
+params.run_teloclip_extend     = true       // Master switch for teloclip extension
+params.teloclip_min_clip       = 1          // Min overhang bases past contig end
+params.teloclip_max_break      = 50         // Max gap between alignment and contig end
+params.teloclip_min_anchor     = 100        // Min anchored alignment length
+params.teloclip_min_mapq       = 20         // Min mapping quality
+params.teloclip_min_overhangs  = 1          // Min supporting overhangs for extension
+params.teloclip_max_homopolymer = 500       // Max homopolymer run in overhang
+
+// tidk: telomere identification toolkit (replaces scan_telomeres.py)
+params.tidk_explore_minimum    = 5          // Min kmer length for explore
+params.tidk_explore_maximum    = 12         // Max kmer length for explore
+params.tidk_search_window      = 10000      // Window size for tidk search
+params.tidk_plot_height        = 200        // SVG subplot height (px)
+params.tidk_plot_width         = 1000       // SVG plot width (px)
 
 // ============================================================================
 // genome book parameters
@@ -380,6 +398,7 @@ include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_CORRECTED } from './workflows/asse
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_ROUND2 } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_GAP_FILLED } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_TELOCLIP } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
@@ -391,6 +410,7 @@ include { SETUP_DECONTAM_DBS } from './workflows/setup_decontam_dbs.nf'
 include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_CONTIG } from './workflows/decontaminate_assembly.nf'
 include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_SCAFFOLD } from './workflows/decontaminate_assembly.nf'
 include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evidence.nf'
+
 
 /*
 ========================================================================================
@@ -421,6 +441,8 @@ include { FILTER_HIC_BAM as FILTER_HIC_BAM_FINAL } from './modules/filter_hic_ba
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
+include { TIDK_EXPLORE; TIDK_SEARCH; TIDK_PLOT; TIDK_SUMMARIZE; COLLECT_TIDK_RESULTS } from './modules/tidk.nf'
+include { TELOCLIP_EXTEND; COLLECT_TELOCLIP_STATS } from './modules/teloclip.nf'
 include { QUAST_FINAL } from './modules/quast.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIG } from './modules/hic_mapping_metrics.nf'
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hic_mapping_metrics.nf'
@@ -432,7 +454,7 @@ include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 include { SETUP_PAFR; PAIRWISE_ALIGNMENT; COLLECT_PAIRWISE_RESULTS } from './modules/pairwise_alignment.nf'
 include { RIPARIAN_PLOT } from './modules/riparian_plot.nf'
-include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
+//include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
@@ -1054,16 +1076,48 @@ workflow {
     // Run gap filling
     GAP_FILLING(ch_gap_filling_input)
 
-    // =========================================================================
-    //  FINALIZE ASSEMBLY — Compress final assemblies to .fasta.gz
-    //
-    //  Downstream processes that need the UNCOMPRESSED fasta (e.g., minimap2
-    //  for pairwise alignments, Hi-C mapping, blobtools) should still use
-    //  GAP_FILLING.out.filled_assembly. Only the report links and the
-    //  published final directory use the compressed version.
-    // =========================================================================
+    /*
+    ========================================================================================
+        STEP 13b: Teloclip — Extend scaffolds with missing telomeres (Optional)
+        Maps raw HiFi reads back to gap-filled scaffolds to find soft-clipped
+        alignments at scaffold ends containing telomeric motifs, then appends
+        the overhang sequence to recover missing telomeres.
+    ========================================================================================
+    */
+    if (params.run_teloclip_extend) {
+        // Combine gap-filled assemblies with HiFi reads (same join pattern as gap filling)
+        GAP_FILLING.out.filled_assembly
+            .map { haplotype_id, filled_fa ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                tuple(sample_id, haplotype_id, filled_fa)
+            }
+            .combine(BAM_TO_FASTQ.out, by: 0)
+            .map { sample_id, haplotype_id, filled_fa, hifi_fastq ->
+                tuple(haplotype_id, filled_fa, hifi_fastq)
+            }
+            .set { ch_teloclip_input }
 
-    FINALIZE_ASSEMBLY(GAP_FILLING.out.filled_assembly)
+        TELOCLIP_EXTEND(ch_teloclip_input)
+
+        // Collect teloclip stats across all haplotypes
+        COLLECT_TELOCLIP_STATS(
+            TELOCLIP_EXTEND.out.stats.map { haplotype_id, stats -> stats }.collect()
+        )
+
+        // The teloclip-extended assembly becomes the "final" assembly
+        ch_final_assembly = TELOCLIP_EXTEND.out.extended_assembly
+        ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats
+
+    } else {
+        // No teloclip — gap-filled assembly IS the final assembly
+        ch_final_assembly = GAP_FILLING.out.filled_assembly
+        ch_teloclip_stats_for_report = Channel.of(file('NO_TELOCLIP'))
+    }
+
+    // =========================================================================
+    //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
+    // =========================================================================
+    FINALIZE_ASSEMBLY(ch_final_assembly)
 
     /*
     ========================================================================================
@@ -1071,55 +1125,53 @@ workflow {
     ========================================================================================
     */
     // 1. Contact Maps for Final Assemblies
+    //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
     if (params.make_final_contact_maps) {
-        GAP_FILLING.out.filled_assembly
-            .map { haplotype_id, filled_fa ->
+        ch_final_assembly
+            .map { haplotype_id, final_fa ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, filled_fa)
+                tuple(sample_id, haplotype_id, final_fa)
             }
-            .combine(TRIM_HIC.out.trimmed_reads, by: 0)  // tuple(sample_id, hic_r1, hic_r2)
-            .map { sample_id, haplotype_id, filled_fa, hic_r1, hic_r2 ->
-                tuple(haplotype_id, filled_fa, hic_r1, hic_r2, 'final')
+            .combine(TRIM_HIC.out.trimmed_reads, by: 0)
+            .map { sample_id, haplotype_id, final_fa, hic_r1, hic_r2 ->
+                tuple(haplotype_id, final_fa, hic_r1, hic_r2, 'final')
             }
             .set { ch_final_hic_map_input }
 
         MAP_HIC_TO_FINAL(ch_final_hic_map_input)
 
-        // Raw mapping QC (lightweight; uses existing BAM output)
+        // (rest of contact map wiring is the same but uses ch_final_assembly
+        //  instead of GAP_FILLING.out.filled_assembly for joins)
+
         MAP_HIC_TO_FINAL.out.bam
             .map { haplotype_id, stage, bam, bai -> tuple(haplotype_id, "final_raw_map", bam, bai) }
             .set { ch_final_raw_bam_qc }
 
         HIC_BAM_METRICS_FINAL(ch_final_raw_bam_qc)
 
-        // Join mapped BAMs with the gap-closed FASTA (keyed by haplotype_id)
-        // After join: (haplotype_id, stage, bam, bai, filled_fa)
         MAP_HIC_TO_FINAL.out.bam
-            .join(GAP_FILLING.out.filled_assembly, by: 0)
-            .map { haplotype_id, stage, bam, bai, filled_fa ->
-                tuple(haplotype_id, "final", bam, bai, filled_fa)
+            .join(ch_final_assembly, by: 0)
+            .map { haplotype_id, stage, bam, bai, final_fa ->
+                tuple(haplotype_id, "final", bam, bai, final_fa)
             }
             .set { ch_final_filter_input }
 
         FILTER_HIC_BAM_FINAL(ch_final_filter_input)
 
-        // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
         FILTER_HIC_BAM_FINAL.out.pairs
             .join(FILTER_HIC_BAM_FINAL.out.parse_stats)
             .join(FILTER_HIC_BAM_FINAL.out.dedup_stats)
             .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                // No AGP for final - pass empty list
                 tuple(hap, "final_filtered", pairs_gz, [], parse_stats, dedup_stats)
             }
             .set { ch_final_pairs_qc }
 
         HIC_PAIRS_METRICS_FINAL(ch_final_pairs_qc)
 
-        // Contact Maps
         FILTER_HIC_BAM_FINAL.out.pairs
-            .join(GAP_FILLING.out.filled_assembly)
-            .map { haplotype_id, stage, pairs_gz, filled_fasta ->
-                tuple(haplotype_id, pairs_gz, filled_fasta, "final")
+            .join(ch_final_assembly)
+            .map { haplotype_id, stage, pairs_gz, final_fasta ->
+                tuple(haplotype_id, pairs_gz, final_fasta, "final")
             }
             .set { ch_contact_map_final_input }
 
@@ -1151,75 +1203,45 @@ workflow {
     ========================================================================================
     */
     if (params.run_pairwise_alignments) {
-        
-        // First, run setup to install pafr (runs once, all alignment jobs wait for it)
         SETUP_PAFR()
 
-        // Collect all gap-filled assemblies, SORT for deterministic ordering, then generate pairs
-        GAP_FILLING.out.filled_assembly
-            .toSortedList { a, b -> a[0] <=> b[0] }  // Sort by haplotype_id for reproducible pairs
-            .flatMap { assemblies ->
-                def pairs = []
-                
-                if (params.pairwise_alignment_mode == 'within_sample') {
-                    // Only compare hap1 vs hap2 within each sample
-                    def grouped = assemblies.groupBy { haplotype_id, fasta ->
-                        haplotype_id.replaceAll(/_hap[12]$/, '')
-                    }
-                    grouped.each { sample_id, haps ->
-                        if (haps.size() == 2) {
-                            def sorted = haps.sort { it[0] }  // Sort by haplotype_id
-                            pairs << tuple(sorted[0][0], sorted[0][1], sorted[1][0], sorted[1][1])
-                        }
-                    }
-                } else {
-                    // Generate all unique pairs (i < j to avoid duplicates and self-alignments)
-                    // List is already sorted, so pairs will be deterministic
-                    for (int i = 0; i < assemblies.size(); i++) {
-                        for (int j = i + 1; j < assemblies.size(); j++) {
-                            def (id1, fa1) = assemblies[i]
-                            def (id2, fa2) = assemblies[j]
-                            pairs << tuple(id1, fa1, id2, fa2)
-                        }
-                    }
-                }
-                
-                return pairs
+        ch_final_assembly
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap = haplotype_id.contains('_hap1') ? 'hap1' : 'hap2'
+                tuple(sample_id, hap, haplotype_id, fasta)
+            }
+            .groupTuple(by: [0], size: 2, remainder: true)
+            .filter { it[1].size() == 2 }
+            .map { sample_id, haps, hap_ids, fastas ->
+                def sorted = [haps, hap_ids, fastas].transpose().sort { it[0] }
+                tuple(sorted[0][1], sorted[0][2], sorted[1][1], sorted[1][2])
             }
             .set { ch_pairwise_input }
-        
-        // Run pairwise alignments
-        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
 
-        // First combine: attach assembly1 by hap_id1
-        // Use combine(by:0) instead of join() because each hap_id appears
-        // in MANY paf tuples but only ONCE in the assembly channel.
+        PAIRWISE_ALIGNMENT(ch_pairwise_input)
+
+        // Riparian plot input — uses ch_final_assembly
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
             .map { hap1, hap2, paf -> tuple(hap1, hap2, paf) }
-            .combine(GAP_FILLING.out.filled_assembly, by: 0)   // [hap1, hap2, paf, fasta1]
+            .combine(ch_final_assembly, by: 0)
 
-        // Second combine: attach assembly2 by hap_id2
         ch_riparian_input = ch_paf_with_asm1
             .map { hap1, hap2, paf, fasta1 -> tuple(hap2, hap1, fasta1, paf) }
-            .combine(GAP_FILLING.out.filled_assembly, by: 0)   // [hap2, hap1, fasta1, paf, fasta2]
+            .combine(ch_final_assembly, by: 0)
             .map { hap2, hap1, fasta1, paf, fasta2 ->
                 tuple(hap1, fasta1, hap2, fasta2, paf)
             }
 
         RIPARIAN_PLOT(ch_riparian_input)
-    }
 
-    if (params.run_pairwise_alignments) {
-
-            COLLECT_PAIRWISE_RESULTS(
-                PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
-            )
-            ch_pairwise_summary = COLLECT_PAIRWISE_RESULTS.out.summary
-
+        COLLECT_PAIRWISE_RESULTS(
+            PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
+        )
+        ch_pairwise_summary = COLLECT_PAIRWISE_RESULTS.out.summary
     } else {
-            ch_pairwise_summary = Channel.of(file('NO_PAIRWISE'))
+        ch_pairwise_summary = Channel.of(file('NO_PAIRWISE'))
     }
-
 
     /*
     ========================================================================================
@@ -1227,11 +1249,9 @@ workflow {
     ========================================================================================
     */
     // Collect all gap-filled assemblies with their labels for cross-sample comparison
-    GAP_FILLING.out.filled_assembly
-        .map { haplotype_id, assembly ->
-            tuple(haplotype_id, assembly)
-        }
-        .toSortedList { a, b -> a[0] <=> b[0] }  // Sort by haplotype_id for consistent ordering
+    ch_final_assembly
+        .map { haplotype_id, assembly -> tuple(haplotype_id, assembly) }
+        .toSortedList { a, b -> a[0] <=> b[0] }
         .map { list ->
             def labels = list.collect { it[0] }
             def assemblies = list.collect { it[1] }
@@ -1239,7 +1259,6 @@ workflow {
         }
         .set { ch_quast_final_input }
 
-    // Unpack the tuple for QUAST_FINAL
     ch_quast_final_input
         .map { assemblies, labels -> assemblies }
         .set { ch_quast_assemblies }
@@ -1258,16 +1277,23 @@ workflow {
         Telomere Detection in Final Assemblies
     ========================================================================================
     */
-    GAP_FILLING.out.filled_assembly
-        .set { ch_telomere_input }
+    // 1. Explore: discover telomere motif de novo
+    TIDK_EXPLORE(ch_final_assembly)
 
-    SCAN_TELOMERES(ch_telomere_input)
+    // 2. Search: windowed telomere repeat quantification
+    TIDK_SEARCH(ch_final_assembly)
 
-    COLLECT_TELOMERE_RESULTS(
-            SCAN_TELOMERES.out.summary.map   { haplotype_id, summary   -> summary   }.collect(),
-            SCAN_TELOMERES.out.telomeres.map { haplotype_id, telomeres -> telomeres }.collect()
-        )
+    // 3. Plot: SVG visualization per haplotype
+    TIDK_PLOT(TIDK_SEARCH.out.search_tsv)
 
+    // 4. Summarize: per-scaffold presence/absence (backward-compatible with old format)
+    TIDK_SUMMARIZE(TIDK_SEARCH.out.search_tsv)
+
+    // 5. Collect all results
+    COLLECT_TIDK_RESULTS(
+        TIDK_SUMMARIZE.out.summary.map   { haplotype_id, summary   -> summary   }.collect(),
+        TIDK_SUMMARIZE.out.telomeres.map { haplotype_id, telomeres -> telomeres }.collect()
+    )
 
     // 6. NCBI output files for GenBank submission (if enabled)
     
@@ -1661,6 +1687,36 @@ workflow {
             .mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
     }
     
+    if (params.run_teloclip_extend) {
+        ch_final_assembly
+            .map { haplotype_id, fasta ->
+                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
+                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
+                tuple(sample_id, hap_num, fasta)
+            }
+            .groupTuple(by: 0, size: 2)
+            .map { sample_id, hap_nums, fastas ->
+                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
+                tuple(sample_id, sorted[0][1], sorted[1][1])
+            }
+            .set { ch_teloclip_assemblies_paired }
+
+        ASSEMBLY_QC_TELOCLIP(
+            ch_teloclip_assemblies_paired,
+            BAM_TO_FASTQ.out,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'teloclip_extended'
+        )
+
+        ch_all_assembly_summaries = ch_all_assembly_summaries
+            .mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
+
+        ch_final_busco = ASSEMBLY_QC_TELOCLIP.out.busco_results
+    } else {
+        ch_final_busco = ASSEMBLY_QC_GAP_FILLED.out.busco_results
+    }
+
     // Collect all BAM metrics
     // Start with ones that always run
     ch_all_bam_metrics = HIC_BAM_METRICS_CONTIG.out.metrics
@@ -1710,16 +1766,15 @@ workflow {
     ========================================================================================
     */
     // Join gap-filled assemblies with their BUSCO results
-    // BUSCO output from ASSEMBLY_QC_GAP_FILLED is per-haplotype
-    GAP_FILLING.out.filled_assembly
-        .join(ASSEMBLY_QC_GAP_FILLED.out.busco_results)
+    // BUSCO output from ASSEMBLY_QC_TELOCLIP is per-haplotype
+    ch_final_assembly
+        .join(ch_final_busco)
         .map { haplotype_id, assembly, busco_dir ->
-            tuple(haplotype_id, assembly, busco_dir, "gap_filled")
+            tuple(haplotype_id, assembly, busco_dir, "final")
         }
         .set { ch_snail_plot_final_input }
 
     SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
-
     /*
     ========================================================================================
         COVERAGE BOOK - HiFi coverage visualization for final assemblies
@@ -1727,18 +1782,18 @@ workflow {
     */
 
     // Combine gap-filled assemblies with HiFi reads for coverage book
-    GAP_FILLING.out.filled_assembly
-        .map { haplotype_id, filled_fa ->
+    ch_final_assembly
+        .map { haplotype_id, final_fa ->
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            tuple(sample_id, haplotype_id, filled_fa)
+            tuple(sample_id, haplotype_id, final_fa)
         }
         .combine(BAM_TO_FASTQ.out, by: 0)
-        .map { sample_id, haplotype_id, filled_fa, hifi_fastq ->
+        .map { sample_id, haplotype_id, final_fa, hifi_fastq ->
             def meta = [
                 id: haplotype_id,
                 sample: sample_id
             ]
-            tuple(meta, filled_fa, hifi_fastq)
+            tuple(meta, final_fa, hifi_fastq)
         }
         .set { ch_coverage_book_input }
 
@@ -1812,6 +1867,13 @@ workflow {
         ch_manifest_riparian = Channel.empty()
     }
 
+    // ---- tidk plot SVGs for manifest ----
+    ch_manifest_tidk_plots = TIDK_PLOT.out.plot
+        .map { hap_id, svg ->
+            "tidk_plot\t${hap_id}\t.\t${svg.name}\ttelomeres/plots"
+        }
+    
+
     // ---- Compiled QC CSV from COMPILE_FINAL_QC ----
     // publishDir: ${params.outdir}/qc/assembly
     ch_manifest_compiled_csv = COMPILE_FINAL_QC.out.metrics
@@ -1863,6 +1925,7 @@ workflow {
         .mix(ch_manifest_mitogenome)
         .mix(ch_manifest_mito_stats)
         .mix(ch_manifest_mito_circular)
+        .mix(ch_manifest_tidk_plots)
         .collectFile(
             name: 'report_manifest.tsv',
             seed: 'type\tid\tid2\tfilename\tsubdir',
@@ -1871,7 +1934,7 @@ workflow {
         .set { ch_report_manifest }
 
     // ---- Handle optional telomere output ----
-    ch_telomere_for_report = COLLECT_TELOMERE_RESULTS.out.summary
+    ch_telomere_for_report = COLLECT_TIDK_RESULTS.out.summary
         .ifEmpty(file('NO_TELOMERES'))
 
     // Collect mitogenome stats for report
@@ -1890,7 +1953,8 @@ workflow {
         COMPILE_FINAL_QC.out.metrics,
         ch_telomere_for_report,
         ch_pairwise_summary,
-        ch_mito_stats_for_report 
+        ch_mito_stats_for_report,
+        ch_teloclip_stats_for_report       
     )
 }
 /*

@@ -141,7 +141,8 @@ fixed_assembly <- assembly_qc %>%
                                    'scaffold',
                                    'scaffold_corrected',
                                    'scaffold_round2',
-                                   'gap_filled')) %>%
+                                   'gap_filled',
+                                   'teloclip_extended')) %>%
            fct_drop(),
          analysis = case_when(str_detect(analysis, 'merqury') ~ 'merqury',
                               TRUE ~ analysis)) %>%
@@ -198,7 +199,8 @@ full_qc_data <- bind_rows(fixed_assembly,
                                    'scaffold',
                                    'scaffold_corrected',
                                    'scaffold_round2',
-                                   'gap_filled'),
+                                   'gap_filled',
+                                   'teloclip_extended'),
                         labels = c('ctg.base',
                                    'ctg.mito',
                                    'ctg.purged',
@@ -207,6 +209,7 @@ full_qc_data <- bind_rows(fixed_assembly,
                                    'scaf.base',
                                    'scaf.cor',
                                    'scaf2',
+                                   'gap_fill',
                                    'final')) %>%
            fct_drop())
 

@@ -2,14 +2,16 @@
 ========================================================================================
     FINALIZE ASSEMBLY MODULE
 ========================================================================================
-    Takes the final assembly from the pipeline (after gap filling) and
-    publishes it to a clean output directory with a standardized filename.
+    Takes the final assembly from the pipeline and publishes it to a clean
+    output directory with a standardized filename.
 
     This module serves as the single collection point for "the final genome"
-    regardless of which optional pipeline steps were run upstream.
+    regardless of which optional pipeline steps were run upstream:
+      - Gap filling only (default)
+      - Gap filling + teloclip extension (if params.run_teloclip_extend)
 
-    Extend this module with any additional finalization steps as needed
-    (e.g., compression, indexing, header renaming, stats generation).
+    The input channel is ch_final_assembly, which is set in main.nf to either
+    TELOCLIP_EXTEND.out.extended_assembly or GAP_FILLING.out.filled_assembly.
 
     Input:
     - tuple(haplotype_id, assembly_fasta)

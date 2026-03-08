@@ -33,6 +33,8 @@ parser$add_argument("--pairwise_summary", required = TRUE, help = "Pairwise alig
 parser$add_argument("--output",           default = "assembly_report.md", help = "Output markdown file")
 parser$add_argument("--img_width",        default = 500, type = "integer", help = "Image display width in pixels")
 parser$add_argument("--mito_stats",       required = TRUE, help = "Mitogenome stats TSV (or NO_MITO_STATS)")
+parser$add_argument("--teloclip_stats",   required = TRUE, help = "Teloclip extension stats TSV (or NO_TELOCLIP)")
+
 
 args <- parser$parse_args()
 
@@ -618,23 +620,208 @@ generate_mito_section <- function(md, args, manifest) {
 # =============================================================================
 # Section 6: Telomere Detection (collapsible)
 # =============================================================================
+# =============================================================================
+# Section 6: Telomere Detection (REPLACEMENT — replaces old Section 6 entirely)
+# =============================================================================
+# This section now includes:
+#   a) Teloclip extension summary (if teloclip was run)
+#   b) tidk telomere presence/absence summary table
+#   c) tidk density SVG plots per haplotype (from manifest)
+# =============================================================================
+
+md <- c(md, "## 6. Telomere Detection", "")
+
+# ---- 6a: Teloclip extension summary ----
+teloclip_path <- args$teloclip_stats
+has_teloclip <- !str_detect(basename(teloclip_path), "NO_TELOCLIP") &&
+  file.exists(teloclip_path) && file.size(teloclip_path) > 0
+
+if (has_teloclip) {
+  teloclip_data <- tryCatch(read_tsv(teloclip_path, show_col_types = FALSE), error = function(e) NULL)
+  if (!is.null(teloclip_data) && nrow(teloclip_data) > 0) {
+
+    # Summarize extensions per haplotype
+    teloclip_summary <- teloclip_data %>%
+      filter(extension_length > 0) %>%
+      group_by(haplotype_id = str_extract(contig, "^[^_]+_[^_]+_hap[12]")) %>%
+      summarise(
+        extensions = n(),
+        total_bp_added = sum(extension_length),
+        mean_extension_bp = round(mean(extension_length)),
+        max_extension_bp = max(extension_length),
+        .groups = "drop"
+      )
+
+    # If the contig names don't contain haplotype_id, try extracting from the
+    # stats file which may already have it as a prefix
+    if (nrow(teloclip_summary) == 0) {
+      # Fallback: summarize across all rows
+      teloclip_summary <- teloclip_data %>%
+        filter(extension_length > 0) %>%
+        summarise(
+          haplotype_id = "all",
+          extensions = n(),
+          total_bp_added = sum(extension_length),
+          mean_extension_bp = round(mean(extension_length)),
+          max_extension_bp = max(extension_length)
+        )
+    }
+
+    md <- c(md,
+      "### Telomere Extension (teloclip)", "",
+      "Soft-clipped HiFi read overhangs containing telomeric motifs were used to",
+      "extend scaffold ends missing telomeric sequence.", ""
+    )
+
+    if (nrow(teloclip_summary) > 0) {
+      tc_table <- teloclip_summary %>%
+        mutate(
+          total_bp_added = scales::comma(total_bp_added),
+          mean_extension_bp = scales::comma(mean_extension_bp),
+          max_extension_bp = scales::comma(max_extension_bp)
+        ) %>%
+        rename(
+          Haplotype = haplotype_id,
+          Extensions = extensions,
+          `Total bp Added` = total_bp_added,
+          `Mean Extension (bp)` = mean_extension_bp,
+          `Max Extension (bp)` = max_extension_bp
+        )
+      md <- c(md, make_markdown_table(tc_table), "")
+    }
+
+    # Collapsible per-contig detail
+    detail_table <- teloclip_data %>%
+      filter(extension_length > 0) %>%
+      mutate(
+        extension_length = scales::comma(extension_length),
+        contig_length = scales::comma(as.numeric(contig_length))
+      ) %>%
+      select(
+        Contig = contig,
+        `Contig Length` = contig_length,
+        End = end,
+        `Extension (bp)` = extension_length,
+        `Overhang Reads` = overhang_count
+      )
+
+    if (nrow(detail_table) > 0) {
+      md <- c(md,
+        make_collapsible(
+          make_markdown_table(detail_table),
+          "Click to expand: Per-contig teloclip extension details"
+        )
+      )
+    }
+  }
+} else {
+  md <- c(md,
+    "*Teloclip extension was not run. Enable with `--run_teloclip_extend true`.*", ""
+  )
+}
+
+# ---- 6b: tidk telomere summary table ----
 telo_path <- args$telomere_summary
-if (!str_detect(basename(telo_path), "NO_TELOMERES") &&
-    file.exists(telo_path) && file.size(telo_path) > 0) {
+has_telo <- !str_detect(basename(telo_path), "NO_TELOMERES") &&
+  file.exists(telo_path) && file.size(telo_path) > 0
+
+if (has_telo) {
   telo_data <- tryCatch(read_tsv(telo_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(telo_data) && nrow(telo_data) > 0) {
     md <- c(md,
-            "## 6. Telomere Detection", "",
-            make_collapsible(
-              make_markdown_table(telo_data %>% mutate(across(everything(), as.character))),
-              "Click to expand: Telomere detection summary"
-            )
+      "### Telomere Presence Summary (tidk)", "",
+      "Telomeric repeat detection across scaffold ends using",
+      "[tidk](https://github.com/tolkit/telomeric-identifier).", ""
     )
+
+    telo_display <- telo_data %>%
+      mutate(
+        total_length = scales::comma(as.numeric(total_length)),
+        pct_with_telomere = paste0(pct_with_telomere, "%")
+      ) %>%
+      rename(
+        Haplotype = haplotype_id,
+        Scaffolds = scaffolds,
+        `Total Length` = total_length,
+        `5' Telo` = telomere_5prime,
+        `3' Telo` = telomere_3prime,
+        Both = telomere_both,
+        `5' Only` = telomere_5prime_only,
+        `3' Only` = telomere_3prime_only,
+        None = telomere_none,
+        `% with Telomere` = pct_with_telomere
+      )
+
+    md <- c(md, make_markdown_table(telo_display), "")
+
+    # Per-scaffold detail in collapsible
+    telo_detail_path <- file.path(dirname(telo_path), "all_telomeres.tsv")
+    if (file.exists(telo_detail_path) && file.size(telo_detail_path) > 0) {
+      telo_detail <- tryCatch(read_tsv(telo_detail_path, show_col_types = FALSE), error = function(e) NULL)
+      if (!is.null(telo_detail) && nrow(telo_detail) > 0) {
+        # Only show scaffolds that HAVE telomeres (to keep it compact)
+        telo_has <- telo_detail %>%
+          filter(telomere_5prime == 1 | telomere_3prime == 1) %>%
+          mutate(
+            length = scales::comma(as.numeric(length)),
+            telomere_5prime = ifelse(telomere_5prime == 1, "Yes", "—"),
+            telomere_3prime = ifelse(telomere_3prime == 1, "Yes", "—"),
+            telomere_both   = ifelse(telomere_both == 1, "Yes", "—")
+          ) %>%
+          rename(
+            Haplotype = haplotype_id, Scaffold = scaffold, Length = length,
+            `5'` = telomere_5prime, `3'` = telomere_3prime, Both = telomere_both
+          )
+
+        if (nrow(telo_has) > 0) {
+          md <- c(md,
+            make_collapsible(
+              make_markdown_table(telo_has),
+              "Click to expand: Scaffolds with detected telomeres"
+            )
+          )
+        }
+      }
+    }
+  }
+} else {
+  md <- c(md, "*No telomere detection data available.*", "")
+}
+
+# ---- 6c: tidk density plots ----
+tidk_plots <- manifest %>% filter(type == "tidk_plot")
+if (nrow(tidk_plots) > 0) {
+  md <- c(md, "### Telomere Density Plots (tidk)", "")
+
+  # Build an HTML table with one column per haplotype within each sample
+  tidk_by_sample <- tidk_plots %>%
+    mutate(
+      sample_id = str_replace(id, "_hap[12]$", ""),
+      hap = str_extract(id, "hap[12]$")
+    ) %>%
+    arrange(sample_id, hap)
+
+  for (sid in unique(tidk_by_sample$sample_id)) {
+    sample_plots <- tidk_by_sample %>% filter(sample_id == sid)
+    md <- c(md, sprintf("**%s**", sid), "")
+
+    for (i in seq_len(nrow(sample_plots))) {
+      row <- sample_plots[i, ]
+      src <- rel_path(row$subdir, row$filename)
+      alt <- sprintf("tidk telomere density: %s", row$id)
+      md <- c(md,
+        sprintf("*%s*", row$hap),
+        img_tag(src, alt, width = args$img_width),
+        ""
+      )
+    }
   }
 }
 
+# ---- End of Section 6 ----
+
 # =============================================================================
-# Section 6: Pairwise Alignment Summary (collapsible)
+# Section 7: Pairwise Alignment Summary (collapsible)
 # =============================================================================
 pw_path <- args$pairwise_summary
 if (!str_detect(basename(pw_path), "NO_PAIRWISE") &&
