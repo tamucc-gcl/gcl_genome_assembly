@@ -8,6 +8,7 @@ dependencies:
   # Alignment tools
   - minimap2
   - pigz
+  - samtools
   # R and plotting dependencies
   - r-base>=4.3
   - r-ggplot2
@@ -16,6 +17,9 @@ dependencies:
   - r-dplyr
   - r-tibble
   - r-stringr
+  # Riparian (ribbon) synteny plots
+  - r-gggenomes
+  - r-rcolorbrewer
   # Required by pafr (pre-install dependencies so pafr install is fast)
   - r-rlang
   - r-withr
