@@ -169,6 +169,12 @@ params.pairwise_alignment_mode = 'within_sample'         // 'all' = all pairs, '
 params.pairwise_dotplot_width = 10             // Dotplot width in inches
 params.pairwise_dotplot_height = 10            // Dotplot height in inches
 
+params.riparian_min_aln_bp = 50000
+params.riparian_min_seq_bp = 1000000
+params.riparian_alpha      = 0.45
+params.riparian_width      = 14
+params.riparian_height     = 6
+
 // Compartments parameters - only made when contact maps are made and balanced
 params.compartment_resolution = 250000
 params.compartment_min_contig_bp = 5000000
@@ -425,6 +431,7 @@ include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 include { SETUP_PAFR; PAIRWISE_ALIGNMENT; COLLECT_PAIRWISE_RESULTS } from './modules/pairwise_alignment.nf'
+include { RIPARIAN_PLOT } from './modules/riparian_plot.nf'
 include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
@@ -1183,6 +1190,23 @@ workflow {
         
         // Run pairwise alignments
         PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
+
+        ch_asm_map = GAP_FILLING.out.filled_assembly  // [hap_id, fasta]
+
+        // First join: attach assembly1 by hap_id1
+        ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
+            .map { hap1, hap2, paf -> tuple(hap1, hap2, paf) }
+            .join(ch_asm_map)                          // [hap1, hap2, paf, fasta1]
+
+        // Second join: attach assembly2 by hap_id2
+        ch_riparian_input = ch_paf_with_asm1
+            .map { hap1, hap2, paf, fasta1 -> tuple(hap2, hap1, fasta1, paf) }
+            .join(ch_asm_map)                          // [hap2, hap1, fasta1, paf, fasta2]
+            .map { hap2, hap1, fasta1, paf, fasta2 ->
+                tuple(hap1, fasta1, hap2, fasta2, paf)
+            }
+
+        RIPARIAN_PLOT(ch_riparian_input)
     }
 
     if (params.run_pairwise_alignments) {
@@ -1776,6 +1800,18 @@ workflow {
         ch_manifest_dotplots = Channel.empty()
     }
 
+    // ---- Pairwise riparian plots (conditional) ----
+    // RIPARIAN_PLOT.out.riparian: tuple(id1, id2, png)
+    // publishDir: ${params.outdir}/pairwise_alignments
+    if (params.run_pairwise_alignments) {
+        ch_manifest_riparian = RIPARIAN_PLOT.out.riparian
+            .map { id1, id2, png ->
+                "riparian\t${id1}\t${id2}\t${png.name}\tpairwise_alignments"
+            }
+    } else {
+        ch_manifest_riparian = Channel.empty()
+    }
+
     // ---- Compiled QC CSV from COMPILE_FINAL_QC ----
     // publishDir: ${params.outdir}/qc/assembly
     ch_manifest_compiled_csv = COMPILE_FINAL_QC.out.metrics
@@ -1820,6 +1856,7 @@ workflow {
         .mix(ch_manifest_snails)
         .mix(ch_manifest_contact_maps)
         .mix(ch_manifest_dotplots)
+        .mix(ch_manifest_riparian)
         .mix(ch_manifest_compiled_csv)
         .mix(ch_manifest_qc_plots)
         .mix(ch_manifest_assembly_report)

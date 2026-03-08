@@ -75,6 +75,7 @@ assemblies     <- manifest %>% filter(type == "assembly")
 snail_plots    <- manifest %>% filter(type == "snail")
 contact_maps   <- manifest %>% filter(type == "contact_map")
 dotplots       <- manifest %>% filter(type == "dotplot")
+riparian_plots <- manifest %>% filter(type == "riparian")
 qc_plots       <- manifest %>% filter(type == "qc_plot")
 compiled_csvs  <- manifest %>% filter(type == "compiled_qc")
 report_htmls   <- manifest %>% filter(type == "assembly_report_html")
@@ -299,8 +300,8 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
 md <- c(md,
         "## 3. Visual Summary",
         "",
-        "Each row shows one sample with snail plots, contact maps, and the within-sample",
-        "haplotype-vs-haplotype dotplot.",
+        "Each row shows one sample with snail plots, contact maps, the within-sample",
+        "haplotype-vs-haplotype dotplot, and riparian (ribbon) synteny plot.",
         ""
 )
 
@@ -321,14 +322,16 @@ pick_best_contact_map <- function(cmaps_for_hap) {
 has_snails <- nrow(snail_plots) > 0
 has_cmaps  <- nrow(contact_maps) > 0
 has_dots   <- nrow(dotplots) > 0
+has_riparian <- nrow(riparian_plots) > 0
 
 # Determine which columns to include
 col_headers <- c("Sample")
 if (has_snails) col_headers <- c(col_headers, "Hap1 Snail", "Hap2 Snail")
 if (has_cmaps)  col_headers <- c(col_headers, "Hap1 Contact Map", "Hap2 Contact Map")
 if (has_dots)   col_headers <- c(col_headers, "Hap1 vs Hap2 Dotplot")
+if (has_riparian) col_headers <- c(col_headers, "Hap1 vs Hap2 Riparian")
 
-if (has_snails || has_cmaps || has_dots) {
+if (has_snails || has_cmaps || has_dots || has_riparian) {
   
   img_w <- args$img_width
   
@@ -391,6 +394,21 @@ if (has_snails || has_cmaps || has_dots) {
       }
     }
     
+    # Within-sample riparian plot (hap1 vs hap2)
+    if (has_riparian) {
+      rip_row <- riparian_plots %>%
+        filter(
+          (id == hap1_id & id2 == hap2_id) |
+          (id == hap2_id & id2 == hap1_id)
+        )
+      if (nrow(rip_row) > 0) {
+        src <- rel_path(rip_row$subdir[1], rip_row$filename[1])
+        md <- c(md, sprintf('  <td>%s</td>', img_tag(src, paste(hap1_id, "vs", hap2_id, "riparian"), width = img_w)))
+      } else {
+        md <- c(md, "  <td>—</td>")
+      }
+    }
+
     md <- c(md, "</tr>")
   }
   
