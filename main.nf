@@ -1191,17 +1191,17 @@ workflow {
         // Run pairwise alignments
         PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
 
-        // First join: attach assembly1 by hap_id1
-        // Reference GAP_FILLING.out directly each time — DSL2 auto-forks
-        // process outputs on each reference, but a variable does NOT fork.
+        // First combine: attach assembly1 by hap_id1
+        // Use combine(by:0) instead of join() because each hap_id appears
+        // in MANY paf tuples but only ONCE in the assembly channel.
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
             .map { hap1, hap2, paf -> tuple(hap1, hap2, paf) }
-            .join(GAP_FILLING.out.filled_assembly)     // [hap1, hap2, paf, fasta1]
+            .combine(GAP_FILLING.out.filled_assembly, by: 0)   // [hap1, hap2, paf, fasta1]
 
-        // Second join: attach assembly2 by hap_id2
+        // Second combine: attach assembly2 by hap_id2
         ch_riparian_input = ch_paf_with_asm1
             .map { hap1, hap2, paf, fasta1 -> tuple(hap2, hap1, fasta1, paf) }
-            .join(GAP_FILLING.out.filled_assembly)     // [hap2, hap1, fasta1, paf, fasta2]
+            .combine(GAP_FILLING.out.filled_assembly, by: 0)   // [hap2, hap1, fasta1, paf, fasta2]
             .map { hap2, hap1, fasta1, paf, fasta2 ->
                 tuple(hap1, fasta1, hap2, fasta2, paf)
             }
