@@ -620,10 +620,7 @@ generate_mito_section <- function(md, args, manifest) {
 # =============================================================================
 # Section 6: Telomere Detection (collapsible)
 # =============================================================================
-# =============================================================================
-# Section 6: Telomere Detection (REPLACEMENT — replaces old Section 6 entirely)
-# =============================================================================
-# This section now includes:
+# This section includes:
 #   a) Teloclip extension summary (if teloclip was run)
 #   b) tidk telomere presence/absence summary table
 #   c) tidk density SVG plots per haplotype (from manifest)

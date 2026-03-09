@@ -28,7 +28,7 @@ process TELOCLIP_EXTEND {
     tag "${haplotype_id}"
     label 'teloclip'
 
-    publishDir "${params.outdir}/assembly/teloclip", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/scaffold/teloclip", mode: params.publish_dir_mode
 
     input:
     tuple val(haplotype_id), path(scaffold_fasta), path(hifi_fastq)
@@ -127,7 +127,7 @@ process COLLECT_TELOCLIP_STATS {
     tag "collect_teloclip"
     label 'summarize_assembly'
 
-    publishDir "${params.outdir}/assembly/teloclip", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/scaffold/teloclip", mode: params.publish_dir_mode
 
     input:
     path("stats/*")
