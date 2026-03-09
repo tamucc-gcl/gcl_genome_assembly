@@ -118,7 +118,7 @@ with open(infile) as fh:
         line = line.rstrip()
 
         # Match contig header: ### scaffold_2
-        m = re.match(r'^### (\S+)', line)
+        m = re.match(r'^### (\\S+)', line)
         if m:
             current_contig = m.group(1)
             original_len = None
@@ -128,14 +128,14 @@ with open(infile) as fh:
             continue
 
         # Original length: 91,837,727
-        m = re.match(r'^\s+Original length:\s+([\d,]+)', line)
+        m = re.match(r'^\\s+Original length:\\s+([\\d,]+)', line)
         if m:
             original_len = int(m.group(1).replace(',', ''))
             continue
 
         # Left extension: +699bp from read ...
         # Right extension: +17884bp from read ...
-        m = re.match(r'^\s+(Left|Right) extension:\s+\+(\d+)bp', line)
+        m = re.match(r'^\\s+(Left|Right) extension:\\s+\\+(\\d+)bp', line)
         if m and original_len is not None:
             end = m.group(1).lower()
             ext_len = int(m.group(2))
@@ -153,7 +153,7 @@ with open(infile) as fh:
 with open(outfile, "w", newline="") as out:
     fields = ["contig", "contig_length", "end", "extension_length",
               "overhang_count", "motif_counts"]
-    w = csv.DictWriter(out, fieldnames=fields, delimiter="\t")
+    w = csv.DictWriter(out, fieldnames=fields, delimiter="\\t")
     w.writeheader()
     w.writerows(rows)
 
