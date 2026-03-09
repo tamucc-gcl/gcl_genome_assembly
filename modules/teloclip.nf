@@ -95,6 +95,70 @@ process TELOCLIP_EXTEND {
             --min-anchor ${min_anchor} \\
             --count-motifs ${motif},\$(echo ${motif} | rev | tr 'ACGTacgt' 'TGCAtgca') \\
             --exclude-outliers
+
+        
+# ---- Step 5: Parse human-readable stats report into TSV ----
+    # teloclip extend --stats-report produces a formatted text report, not TSV.
+    # Convert it to the TSV format expected by generate_summary_report.R
+    mv ${haplotype_id}.teloclip_stats.tsv ${haplotype_id}.teloclip_stats_raw.txt
+
+    python3 <<'PYEOF'
+import re, csv, sys
+
+hap_id = "${haplotype_id}"
+infile  = f"{hap_id}.teloclip_stats_raw.txt"
+outfile = f"{hap_id}.teloclip_stats.tsv"
+
+rows = []
+current_contig = None
+original_len = None
+
+with open(infile) as fh:
+    for line in fh:
+        line = line.rstrip()
+
+        # Match contig header: ### scaffold_2
+        m = re.match(r'^### (\S+)', line)
+        if m:
+            current_contig = m.group(1)
+            original_len = None
+            continue
+
+        if current_contig is None:
+            continue
+
+        # Original length: 91,837,727
+        m = re.match(r'^\s+Original length:\s+([\d,]+)', line)
+        if m:
+            original_len = int(m.group(1).replace(',', ''))
+            continue
+
+        # Left extension: +699bp from read ...
+        # Right extension: +17884bp from read ...
+        m = re.match(r'^\s+(Left|Right) extension:\s+\+(\d+)bp', line)
+        if m and original_len is not None:
+            end = m.group(1).lower()
+            ext_len = int(m.group(2))
+            # Prefix contig with haplotype_id so the R script can extract it
+            contig_name = f"{hap_id}_{current_contig}"
+            rows.append({
+                "contig": contig_name,
+                "contig_length": original_len,
+                "end": end,
+                "extension_length": ext_len,
+                "overhang_count": "NA",
+                "motif_counts": "NA",
+            })
+
+with open(outfile, "w", newline="") as out:
+    fields = ["contig", "contig_length", "end", "extension_length",
+              "overhang_count", "motif_counts"]
+    w = csv.DictWriter(out, fieldnames=fields, delimiter="\t")
+    w.writeheader()
+    w.writerows(rows)
+
+print(f"[TELOCLIP] Parsed {len(rows)} extensions into {outfile}")
+PYEOF
     else
         echo "[TELOCLIP] No overhang reads found — copying input assembly unchanged"
         cp ${scaffold_fasta} ${haplotype_id}.teloclip_extended.fasta
