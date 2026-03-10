@@ -44,10 +44,14 @@ process FILTER_HIC_BAM {
 
     MINQ=${params.hic_min_mapq ?: 30}
 
-    # All temp files go inside the Nextflow work directory — unique per task
-    # attempt and immune to /tmp collisions across concurrent or retried jobs.
-    LOCALTMP="\$PWD/tmp_${haplotype_id}"
+    # Use local scratch for temp files (fast I/O, doesn't fill NFS work partition).
+    # SLURM_JOBID makes the path unique per job; Nextflow task.index guards against
+    # the (rare) case of two tasks sharing a SLURM job.  Cleanup trap ensures stale
+    # files are removed even on failure so retries never hit "File exists".
+    LOCALTMP="/tmp/filter_hic_\${SLURM_JOBID:-\$\$}_${haplotype_id}"
+    rm -rf "\${LOCALTMP}"
     mkdir -p "\${LOCALTMP}"
+    trap 'rm -rf "\${LOCALTMP}"' EXIT
 
     # -------------------------------------------------------------------------
     # 1) Prepare chrom sizes (prefer existing .fai if present)
@@ -171,8 +175,7 @@ process FILTER_HIC_BAM {
       echo "================================================================================"
     } > ${haplotype_id}_filtering_stats.txt
 
-    # Cleanup intermediates
-    rm -rf "\${LOCALTMP}"
+    # Cleanup intermediates (LOCALTMP handled by EXIT trap)
     rm -f ${haplotype_id}.pairsam.gz
     rm -f ${haplotype_id}.dups.pairs.gz
     rm -f chrom.sizes
