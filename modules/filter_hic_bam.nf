@@ -14,9 +14,9 @@
     Speed improvements vs original:
     - Avoids writing gigantic intermediate SAMs and merge steps
     - Streams pairsam -> samtools sort directly
-    - Uses TMPDIR for sorting scratch space
+    - Uses work-directory-local temp to avoid /tmp collisions across tasks/nodes
     - Uses pairtools multithreading where supported
-    
+
     Stage parameter controls publishDir but not filenames
 ========================================================================================
 */
@@ -43,8 +43,11 @@ process FILTER_HIC_BAM {
     export LC_ALL=C
 
     MINQ=${params.hic_min_mapq ?: 30}
-    TMPDIR="\${TMPDIR:-\$PWD}"
-    mkdir -p "${TMPDIR}/${haplotype_id}_tmp"
+
+    # All temp files go inside the Nextflow work directory — unique per task
+    # attempt and immune to /tmp collisions across concurrent or retried jobs.
+    LOCALTMP="\$PWD/tmp_${haplotype_id}"
+    mkdir -p "\${LOCALTMP}"
 
     # -------------------------------------------------------------------------
     # 1) Prepare chrom sizes (prefer existing .fai if present)
@@ -58,7 +61,7 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    samtools collate -T "${TMPDIR}/${haplotype_id}_tmp/collate" -@ ${task.cpus} -O -u ${bam} | \\
+    samtools collate -T "\${LOCALTMP}/collate" -@ ${task.cpus} -O -u ${bam} | \\
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
@@ -70,7 +73,7 @@ process FILTER_HIC_BAM {
         - \\
     | pairtools sort \\
         --nproc ${task.cpus} \\
-        --tmpdir "${TMPDIR}/${haplotype_id}_tmp/collate" \\
+        --tmpdir "\${LOCALTMP}" \\
     | pairtools dedup \\
         --mark-dups \\
         --output-stats ${haplotype_id}_dedup_stats.txt \\
@@ -89,7 +92,7 @@ process FILTER_HIC_BAM {
       --nproc-out ${task.cpus} \\
       ${haplotype_id}.pairsam.gz \\
     | samtools view -@ ${task.cpus} -b - \\
-    | samtools sort -@ ${task.cpus} -T "${TMPDIR}/collate_tmp/${haplotype_id}.tmp" -o ${haplotype_id}.filtered.sorted.bam -
+    | samtools sort -@ ${task.cpus} -T "\${LOCALTMP}/${haplotype_id}.sort" -o ${haplotype_id}.filtered.sorted.bam -
 
     samtools index -@ ${task.cpus} ${haplotype_id}.filtered.sorted.bam
 
@@ -168,15 +171,20 @@ process FILTER_HIC_BAM {
       echo "================================================================================"
     } > ${haplotype_id}_filtering_stats.txt
 
-    # Cleanup
+    # Cleanup intermediates
+    rm -rf "\${LOCALTMP}"
     rm -f ${haplotype_id}.pairsam.gz
+    rm -f ${haplotype_id}.dups.pairs.gz
     rm -f chrom.sizes
     """
+
     stub:
     """
     touch ${haplotype_id}.filtered.sorted.bam
     touch ${haplotype_id}.filtered.sorted.bam.bai
     touch ${haplotype_id}_filtering_stats.txt
     touch ${haplotype_id}.pairs.gz
+    touch ${haplotype_id}_parse_stats.txt
+    touch ${haplotype_id}_dedup_stats.txt
     """
 }
