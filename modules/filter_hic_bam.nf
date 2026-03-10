@@ -44,6 +44,7 @@ process FILTER_HIC_BAM {
 
     MINQ=${params.hic_min_mapq ?: 30}
     TMPDIR="\${TMPDIR:-\$PWD}"
+    mkdir -p "${TMPDIR}/${haplotype_id}_tmp"
 
     # -------------------------------------------------------------------------
     # 1) Prepare chrom sizes (prefer existing .fai if present)
@@ -57,7 +58,7 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    samtools collate -T "${TMPDIR}/collate_tmp" -@ ${task.cpus} -O -u ${bam} | \\
+    samtools collate -T "${TMPDIR}/${haplotype_id}_tmp/collate" -@ ${task.cpus} -O -u ${bam} | \\
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
@@ -69,7 +70,7 @@ process FILTER_HIC_BAM {
         - \\
     | pairtools sort \\
         --nproc ${task.cpus} \\
-        --tmpdir "${TMPDIR}/collate_tmp" \\
+        --tmpdir "${TMPDIR}/${haplotype_id}_tmp/collate" \\
     | pairtools dedup \\
         --mark-dups \\
         --output-stats ${haplotype_id}_dedup_stats.txt \\
