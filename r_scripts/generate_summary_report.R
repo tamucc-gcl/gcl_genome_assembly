@@ -698,8 +698,7 @@ if (has_teloclip) {
         Contig = contig,
         `Contig Length` = contig_length,
         End = end,
-        `Extension (bp)` = extension_length,
-        `Overhang Reads` = overhang_count
+        `Extension (bp)` = extension_length
       )
 
     if (nrow(detail_table) > 0) {

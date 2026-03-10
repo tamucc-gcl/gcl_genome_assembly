@@ -57,7 +57,7 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    samtools collate -@ ${task.cpus} -O -u ${bam} | \\
+    samtools collate -T "${TMPDIR}/collate_tmp" -@ ${task.cpus} -O -u ${bam} | \\
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
@@ -69,7 +69,7 @@ process FILTER_HIC_BAM {
         - \\
     | pairtools sort \\
         --nproc ${task.cpus} \\
-        --tmpdir "\${TMPDIR}" \\
+        --tmpdir "${TMPDIR}/collate_tmp" \\
     | pairtools dedup \\
         --mark-dups \\
         --output-stats ${haplotype_id}_dedup_stats.txt \\
@@ -88,7 +88,7 @@ process FILTER_HIC_BAM {
       --nproc-out ${task.cpus} \\
       ${haplotype_id}.pairsam.gz \\
     | samtools view -@ ${task.cpus} -b - \\
-    | samtools sort -@ ${task.cpus} -T "\${TMPDIR}/${haplotype_id}.tmp" -o ${haplotype_id}.filtered.sorted.bam -
+    | samtools sort -@ ${task.cpus} -T "${TMPDIR}/collate_tmp/${haplotype_id}.tmp" -o ${haplotype_id}.filtered.sorted.bam -
 
     samtools index -@ ${task.cpus} ${haplotype_id}.filtered.sorted.bam
 
