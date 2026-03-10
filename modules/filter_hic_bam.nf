@@ -49,6 +49,14 @@ process FILTER_HIC_BAM {
     # ensures pairtools sort (which reads TMPDIR) doesn't fall back to /tmp.
     export TMPDIR="\$PWD"
 
+    # Thread budget — divide task.cpus across concurrent pipe stages to avoid
+    # over-subscription.  The sort stages are the bottleneck, so they get the
+    # largest share.
+    CPUS=${task.cpus}
+    T_SORT=\$(( CPUS / 2 ))           # pairtools sort / samtools sort
+    T_IO=\$(( (CPUS - T_SORT) / 2 ))  # collate, parse, split, view
+    T_IO=\$(( T_IO > 1 ? T_IO : 2 ))  # minimum 2
+
     # -------------------------------------------------------------------------
     # 1) Prepare chrom sizes (prefer existing .fai if present)
     # -------------------------------------------------------------------------
@@ -61,18 +69,18 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    samtools collate -T "\$PWD/${haplotype_id}_collate" -@ ${task.cpus} -O -u ${bam} | \\
+    samtools collate -T "\$PWD/${haplotype_id}_collate" -@ \${T_IO} -O -u ${bam} | \\
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
         --max-inter-align-gap 30 \\
         --chroms-path chrom.sizes \\
         --output-stats ${haplotype_id}_parse_stats.txt \\
-        --nproc-in  ${task.cpus} \\
-        --nproc-out ${task.cpus} \\
+        --nproc-in  \${T_IO} \\
+        --nproc-out \${T_IO} \\
         - \\
     | pairtools sort \\
-        --nproc ${task.cpus} \\
+        --nproc \${T_SORT} \\
         --tmpdir "\$PWD" \\
     | pairtools dedup \\
         --mark-dups \\
@@ -88,13 +96,13 @@ process FILTER_HIC_BAM {
     pairtools split \\
       --output-pairs ${haplotype_id}.pairs.gz \\
       --output-sam - \\
-      --nproc-in  ${task.cpus} \\
-      --nproc-out ${task.cpus} \\
+      --nproc-in  \${T_IO} \\
+      --nproc-out \${T_IO} \\
       ${haplotype_id}.pairsam.gz \\
-    | samtools view -@ ${task.cpus} -b - \\
-    | samtools sort -@ ${task.cpus} -T "\$PWD/${haplotype_id}.sort" -o ${haplotype_id}.filtered.sorted.bam -
+    | samtools view -@ \${T_IO} -b - \\
+    | samtools sort -@ \${T_SORT} -T "\$PWD/${haplotype_id}.sort" -o ${haplotype_id}.filtered.sorted.bam -
 
-    samtools index -@ ${task.cpus} ${haplotype_id}.filtered.sorted.bam
+    samtools index -@ \${CPUS} ${haplotype_id}.filtered.sorted.bam
 
     # -------------------------------------------------------------------------
     # 4) Optional pair-level stats (pairtools stats) if available
