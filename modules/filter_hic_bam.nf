@@ -44,14 +44,10 @@ process FILTER_HIC_BAM {
 
     MINQ=${params.hic_min_mapq ?: 30}
 
-    # Use local scratch for temp files (fast I/O, doesn't fill NFS work partition).
-    # SLURM_JOBID makes the path unique per job; Nextflow task.index guards against
-    # the (rare) case of two tasks sharing a SLURM job.  Cleanup trap ensures stale
-    # files are removed even on failure so retries never hit "File exists".
-    LOCALTMP="/tmp/filter_hic_\${SLURM_JOBID:-\$\$}_${haplotype_id}"
-    rm -rf "\${LOCALTMP}"
-    mkdir -p "\${LOCALTMP}"
-    trap 'rm -rf "\${LOCALTMP}"' EXIT
+    # Force all temp file defaults onto the scratch-backed working directory.
+    # Nextflow's scratch directive already places $PWD on local NVMe; this
+    # ensures pairtools sort (which reads TMPDIR) doesn't fall back to /tmp.
+    export TMPDIR="\$PWD"
 
     # -------------------------------------------------------------------------
     # 1) Prepare chrom sizes (prefer existing .fai if present)
@@ -65,7 +61,7 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    samtools collate -T "\${LOCALTMP}/collate" -@ ${task.cpus} -O -u ${bam} | \\
+    samtools collate -T "\$PWD/${haplotype_id}_collate" -@ ${task.cpus} -O -u ${bam} | \\
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
@@ -77,7 +73,7 @@ process FILTER_HIC_BAM {
         - \\
     | pairtools sort \\
         --nproc ${task.cpus} \\
-        --tmpdir "\${LOCALTMP}" \\
+        --tmpdir "\$PWD" \\
     | pairtools dedup \\
         --mark-dups \\
         --output-stats ${haplotype_id}_dedup_stats.txt \\
@@ -96,7 +92,7 @@ process FILTER_HIC_BAM {
       --nproc-out ${task.cpus} \\
       ${haplotype_id}.pairsam.gz \\
     | samtools view -@ ${task.cpus} -b - \\
-    | samtools sort -@ ${task.cpus} -T "\${LOCALTMP}/${haplotype_id}.sort" -o ${haplotype_id}.filtered.sorted.bam -
+    | samtools sort -@ ${task.cpus} -T "\$PWD/${haplotype_id}.sort" -o ${haplotype_id}.filtered.sorted.bam -
 
     samtools index -@ ${task.cpus} ${haplotype_id}.filtered.sorted.bam
 
@@ -175,7 +171,7 @@ process FILTER_HIC_BAM {
       echo "================================================================================"
     } > ${haplotype_id}_filtering_stats.txt
 
-    # Cleanup intermediates (LOCALTMP handled by EXIT trap)
+    # Cleanup intermediates
     rm -f ${haplotype_id}.pairsam.gz
     rm -f ${haplotype_id}.dups.pairs.gz
     rm -f chrom.sizes
