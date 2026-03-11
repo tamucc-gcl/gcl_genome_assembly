@@ -32,8 +32,8 @@ process HIC_BAM_METRICS {
     samtools flagstat -@ ${task.cpus} ${bam} > flagstat.txt
 
     total=\$(awk '/in total/ {print \$1}' flagstat.txt)
-    mapped=\$(awk '/mapped \(/ && !/primary/ {print \$1; exit}' flagstat.txt)
-    primary_total=\$(awk '/primary\$/ {print \$1}' flagstat.txt)
+    mapped=\$(awk '/mapped [(]/ && !/primary/ {print \$1; exit}' flagstat.txt)
+    primary_total=\$(grep -m1 -P '^\\d+ \\+ \\d+ primary$' flagstat.txt | awk '{print \$1}')
     primary_mapped=\$(awk '/primary mapped/ {print \$1}' flagstat.txt)
 
     mapped_pct=\$(awk -v m="\$mapped" -v t="\$total" 'BEGIN{ if(t>0) printf("%.4f", 100*m/t); else print "NA"}')
