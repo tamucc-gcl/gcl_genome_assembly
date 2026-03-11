@@ -29,10 +29,12 @@ process HIC_BAM_METRICS {
     # Notes:
     # - "mapped" includes secondary/supp; we also compute primary-only.
     # - For primary-only we exclude 0x100 (secondary) + 0x800 (supp) = 0x900 (2304)
-    total=\$(samtools view -c ${bam})
-    mapped=\$(samtools view -c -F 4 ${bam})
-    primary_total=\$(samtools view -c -F 2304 ${bam})
-    primary_mapped=\$(samtools view -c -F 2308 ${bam})  # 2304 + 4 = exclude secondary/supp + unmapped
+    samtools flagstat -@ ${task.cpus} ${bam} > flagstat.txt
+
+    total=$(awk '/in total/ {print $1}' flagstat.txt)
+    mapped=$(awk '/mapped \(/ && !/primary/ {print $1; exit}' flagstat.txt)
+    primary_total=$(awk '/primary$/ {print $1}' flagstat.txt)
+    primary_mapped=$(awk '/primary mapped/ {print $1}' flagstat.txt)
 
     mapped_pct=\$(awk -v m="\$mapped" -v t="\$total" 'BEGIN{ if(t>0) printf("%.4f", 100*m/t); else print "NA"}')
     primary_mapped_pct=\$(awk -v m="\$primary_mapped" -v t="\$primary_total" 'BEGIN{ if(t>0) printf("%.4f", 100*m/t); else print "NA"}')
