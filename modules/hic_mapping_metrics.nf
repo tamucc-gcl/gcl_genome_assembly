@@ -33,7 +33,7 @@ process HIC_BAM_METRICS {
 
     total=\$(awk '/in total/ {print \$1}' flagstat.txt)
     mapped=\$(awk '/mapped \(/ && !/primary/ {print \$1; exit}' flagstat.txt)
-    primary_total=\$(awk '/primary$/ {print \$1}' flagstat.txt)
+    primary_total=\$(awk '/primary\$/ {print \$1}' flagstat.txt)
     primary_mapped=\$(awk '/primary mapped/ {print \$1}' flagstat.txt)
 
     mapped_pct=\$(awk -v m="\$mapped" -v t="\$total" 'BEGIN{ if(t>0) printf("%.4f", 100*m/t); else print "NA"}')
