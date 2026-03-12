@@ -1929,7 +1929,7 @@ workflow {
 
     ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
         .map { sample_id, png ->
-            "mito_gene_map\t${sample_id}\t.\t${png.name}\tassembly/mitogenome"
+            "mito_gene_map\t${sample_id}\t.\t${png.name}\t/mitogenome"
         }
 
     // ---- Combine all manifest entries into a single TSV ----
