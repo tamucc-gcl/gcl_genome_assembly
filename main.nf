@@ -1919,17 +1919,17 @@ workflow {
     // publishDir: ${params.outdir}/mitogenome/${sample_id}
     ch_manifest_mitogenome = MITOHIFI.out.mitogenome
         .map { sample_id, fasta ->
-            "mitogenome\t${sample_id}\t.\t${fasta.name}\tmitogenome/${sample_id}"
+            "mitogenome\t${sample_id}\t.\t${fasta.name}\tmitogenome"
         }
 
     ch_manifest_mito_stats = MITOHIFI.out.stats
         .map { sample_id, tsv ->
-            "mito_stats\t${sample_id}\t.\t${tsv.name}\tmitogenome/${sample_id}"
+            "mito_stats\t${sample_id}\t.\t${tsv.name}\tmitogenome"
         }
 
     ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
         .map { sample_id, png ->
-            "mito_gene_map\t${sample_id}\t.\t${png.name}\tassembly/mitogenome/${sample_id}"
+            "mito_gene_map\t${sample_id}\t.\t${png.name}\tassembly/mitogenome"
         }
 
     // ---- Combine all manifest entries into a single TSV ----

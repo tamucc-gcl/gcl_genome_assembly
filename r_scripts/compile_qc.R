@@ -130,40 +130,64 @@ if (!is.null(pairs_metrics)) {
 
 
 #### Join together for nice single output ####
+
+# --- 1. Determine pipeline stages present ---
+all_assembly_stages <- unique(assembly_qc$qc_label)
+has_teloclip <- 'teloclip_extended' %in% all_assembly_stages
+last_assembly_stage <- if (has_teloclip) 'teloclip_extended' else 'gap_filled'
+
+message(sprintf("  Teloclip detected: %s", has_teloclip))
+message(sprintf("  Final assembly stage: %s", last_assembly_stage))
+
+# --- 2. Build dynamic stage levels and labels ---
+stage_levels <- c('contig', 'contig_mito_filtered', 'contig_purged',
+                  'contig_corrected', 'contig_decontam',
+                  'scaffold', 'scaffold_corrected', 'scaffold_round2',
+                  'gap_filled')
+
+stage_labels <- c('ctg.base', 'ctg.mito', 'ctg.purged', 'ctg.cor', 'ctg.deco',
+                  'scaf.base', 'scaf.cor', 'scaf2',
+                  'final')  # gap_filled is "final" by default
+
+if (has_teloclip) {
+  # If teloclip ran, gap_filled becomes intermediate and teloclip is "final"
+  stage_labels[length(stage_labels)] <- 'gap_fill'
+  stage_levels <- c(stage_levels, 'teloclip_extended')
+  stage_labels <- c(stage_labels, 'final')
+}
+
+# --- 3. Process assembly QC ---
 fixed_assembly <- assembly_qc %>%
   rename(stage = qc_label) %>%
-  mutate(stage = factor(stage, 
-                        levels = c('contig',
-                                   'contig_mito_filtered',
-                                   'contig_purged',
-                                   'contig_corrected',
-                                   'contig_decontam',
-                                   'scaffold',
-                                   'scaffold_corrected',
-                                   'scaffold_round2',
-                                   'gap_filled',
-                                   'teloclip_extended')) %>%
+  mutate(stage = factor(stage,
+                        levels = stage_levels,
+                        labels = stage_labels) %>%
            fct_drop(),
          analysis = case_when(str_detect(analysis, 'merqury') ~ 'merqury',
                               TRUE ~ analysis)) %>%
   arrange(stage) %>%
   select(-source_file)
 
+# --- 4. Process BAM metrics ---
 fixed_bam <- bam_metrics %>%
   select(-source_file) %>%
   pivot_longer(cols = where(is.numeric),
                names_to = 'metric') %>%
   pivot_wider(names_from = haplotype_id) %>%
-  mutate(stage = case_when(checkpoint == 'contig_raw_map' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
-                           checkpoint == 'scaffold_round2_raw_map' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
-                           checkpoint == 'final_raw_map' ~ 'gap_filled') %>%
+  mutate(stage = case_when(
+           checkpoint == 'contig_raw_map' ~
+             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
+           checkpoint == 'scaffold_round2_raw_map' ~
+             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
+           checkpoint == 'final_raw_map' ~ 'final'
+         ) %>%
            factor(levels = levels(fixed_assembly$stage)),
          .keep = 'unused',
          .before = 'metric') %>%
   arrange(stage) %>%
   mutate(analysis = 'mapped_hic')
 
-
+# --- 5. Process pairs metrics ---
 fixed_pairs <- pairs_metrics %>%
   select(-source_file) %>%
   pivot_longer(cols = where(is.numeric),
@@ -175,47 +199,29 @@ fixed_pairs <- pairs_metrics %>%
          metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
                             metric == 'pairs_total' ~ 'retained_pairs',
                             TRUE ~ metric),
-         stage = case_when(checkpoint == 'contig_filtered' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
-                           checkpoint == 'scaffold_space' ~ levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold'))],
-                           checkpoint == 'scaffold_round2_space' ~ levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold')[-1])],
-                           checkpoint == 'scaffold_round2_filtered' ~ levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
-                           checkpoint == 'final_filtered' ~ 'gap_filled') %>%
+         stage = case_when(
+           checkpoint == 'contig_filtered' ~
+             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
+           checkpoint == 'scaffold_space' ~
+             levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold'))],
+           checkpoint == 'scaffold_round2_space' ~
+             levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold')[-1])],
+           checkpoint == 'scaffold_round2_filtered' ~
+             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
+           checkpoint == 'final_filtered' ~ 'final'
+         ) %>%
            factor(levels = levels(fixed_assembly$stage)),
          .keep = 'unused',
          .before = 'metric') %>%
   arrange(stage) %>%
   mutate(analysis = 'hic_contact')
 
-full_qc_data <- bind_rows(fixed_assembly,
-          fixed_bam,
-          fixed_pairs) %>%
-  arrange(stage, sample_id) %>%
-  mutate(stage = factor(stage, 
-                        levels = c('contig',
-                                   'contig_mito_filtered',
-                                   'contig_purged',
-                                   'contig_corrected',
-                                   'contig_decontam',
-                                   'scaffold',
-                                   'scaffold_corrected',
-                                   'scaffold_round2',
-                                   'gap_filled',
-                                   'teloclip_extended'),
-                        labels = c('ctg.base',
-                                   'ctg.mito',
-                                   'ctg.purged',
-                                   'ctg.cor',
-                                   'ctg.deco',
-                                   'scaf.base',
-                                   'scaf.cor',
-                                   'scaf2',
-                                   'gap_fill',
-                                   'final')) %>%
-           fct_drop())
+# --- 6. Combine and write ---
+full_qc_data <- bind_rows(fixed_assembly, fixed_bam, fixed_pairs) %>%
+  arrange(stage, sample_id)
 
 write_csv(full_qc_data,
-          file.path(args$output_dir,
-                    'assembly_qc_metrics.csv'))
+          file.path(args$output_dir, 'assembly_qc_metrics.csv'))
 
 #### Summary Plots ####
 trans_cis_plot <- full_qc_data %>%

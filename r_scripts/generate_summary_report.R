@@ -535,9 +535,9 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
 # =============================================================================
 # Section 5: Mitochondrial Genome
 # =============================================================================
-# ---- FIX 3: Call the mito section inline instead of defining-but-never-calling
-#             a function. The old code defined generate_mito_section() but never
-#             appended its return value to md. ----
+# This combines the stats table, FASTA links, and gene map images
+# into a single HTML table with one row per sample.
+# =============================================================================
 
 md <- c(md, "## 5. Mitochondrial Genome", "")
 
@@ -553,60 +553,59 @@ if (!grepl("NO_MITO_STATS", args$mito_stats, fixed = TRUE) &&
 if (is.null(mito_stats) || nrow(mito_stats) == 0) {
   md <- c(md, "*No mitochondrial genome assembly data available.*", "")
 } else {
-  # Summary table
-  md <- c(md, "### Assembly Summary", "")
-  
-  mito_table <- mito_stats %>%
-    mutate(
-      mitogenome_length = scales::comma(as.numeric(mitogenome_length)),
-      circular = ifelse(tolower(circular) == "yes", "Yes", circular)
-    ) %>%
-    select(
-      Sample = sample_id,
-      `Length (bp)` = mitogenome_length,
-      Circular = circular,
-      Genes = gene_count,
-      tRNAs = trna_count,
-      rRNAs = rrna_count,
-      `Genetic Code` = genetic_code
-    )
-  
-  md <- c(md, make_markdown_table(mito_table), "")
-  
-  # Mitogenome FASTA links
-  if (nrow(mito_assemblies) > 0) {
-    md <- c(md, "### Assembly Files", "")
-    for (i in seq_len(nrow(mito_assemblies))) {
-      row <- mito_assemblies[i, ]
-      link <- rel_path(row$subdir, row$filename)
-      md <- c(md, sprintf("- **%s**: [%s](%s)", row$id, row$filename, link))
-    }
-    md <- c(md, "")
+
+  # Build a single HTML table: Sample | Gene Map | Length | Circular | Genes | tRNAs | rRNAs | FASTA
+  md <- c(md,
+    "<table>",
+    "<tr>",
+    "  <th>Sample</th>",
+    "  <th>Gene Map</th>",
+    "  <th>Length (bp)</th>",
+    "  <th>Circular</th>",
+    "  <th>Genes</th>",
+    "  <th>tRNAs</th>",
+    "  <th>rRNAs</th>",
+    "  <th>FASTA</th>",
+    "</tr>"
+  )
+
+  for (i in seq_len(nrow(mito_stats))) {
+    row <- mito_stats[i, ]
+    sid <- row$sample_id
+
+    # Gene map image from manifest
+    map_row <- mito_gene_maps %>% filter(id == sid)
+    map_cell <- if (nrow(map_row) > 0) {
+      src <- rel_path(map_row$subdir[1], map_row$filename[1])
+      img_tag(src, paste("Mito gene map:", sid), width = 300)
+    } else { "—" }
+
+    # FASTA link from manifest
+    fasta_row <- mito_assemblies %>% filter(id == sid)
+    fasta_cell <- if (nrow(fasta_row) > 0) {
+      sprintf("[%s](%s)", fasta_row$filename[1],
+              rel_path(fasta_row$subdir[1], fasta_row$filename[1]))
+    } else { "—" }
+
+    # Format stats
+    length_fmt <- scales::comma(as.numeric(row$mitogenome_length))
+    circular_fmt <- ifelse(tolower(row$circular) == "yes", "Yes", row$circular)
+
+    md <- c(md, sprintf(
+      "<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+      sid, map_cell, length_fmt, circular_fmt,
+      row$gene_count, row$trna_count, row$rrna_count, fasta_cell
+    ))
   }
-  
-  # Gene map images
-  if (nrow(mito_gene_maps) > 0) {
-    md <- c(md, "### Gene Maps", "")
-    for (i in seq_len(nrow(mito_gene_maps))) {
-      row <- mito_gene_maps[i, ]
-      src <- rel_path(row$subdir, row$filename)
-      alt <- sprintf("Mitogenome gene map: %s", row$filename)
-      md <- c(md, img_tag(src, alt, width = args$img_width), "")
-    }
-    md <- c(md, "")
-  }
-  
+
+  md <- c(md, "</table>", "")
+
   # Mito filtering note
-  mito_stats_files <- manifest %>% filter(type == "mito_stats")
-  if (nrow(mito_stats_files) > 0) {
-    md <- c(md,
-            "### Nuclear Assembly Filtering",
-            "",
-            "Mitochondrial contigs were identified and removed from each haplotype",
-            "assembly prior to purge\\_dups, Inspector, decontamination, and scaffolding.",
-            ""
-    )
-  }
+  md <- c(md,
+    "Mitochondrial contigs were identified and removed from each haplotype",
+    "assembly prior to purge\\_dups, Inspector, decontamination, and scaffolding.",
+    ""
+  )
 }
 
 # =============================================================================
@@ -670,29 +669,6 @@ if (has_teloclip) {
       md <- c(md, make_markdown_table(tc_table), "")
     }
     
-    # ---- FIX 2: Per-contig detail WITHOUT collapsible wrapper ----
-    detail_table <- teloclip_data %>%
-      filter(extension_length > 0) %>%
-      mutate(
-        haplotype_id = str_remove(contig, "_scaffold_\\d+$"),
-        extension_length = scales::comma(extension_length),
-        contig_length = scales::comma(as.numeric(contig_length))
-      ) %>%
-      arrange(haplotype_id, contig) %>%
-      select(
-        Haplotype = haplotype_id,
-        Contig = contig,
-        `Contig Length` = contig_length,
-        End = end,
-        `Extension (bp)` = extension_length
-      )
-    
-    if (nrow(detail_table) > 0) {
-      md <- c(md,
-              "**Per-contig extension details:**", "",
-              make_markdown_table(detail_table), ""
-      )
-    }
   }
 } else {
   md <- c(md,

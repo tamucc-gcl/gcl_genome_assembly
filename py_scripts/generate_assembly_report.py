@@ -100,10 +100,11 @@ def get_available_stages(data):
     for sid in data:
         stages.update(data[sid].keys())
 
+    # Full pipeline order — must match labels from compile_qc.R
     stage_order = [
-        "ctg.base", "ctg.cor", "ctg.deco",
+        "ctg.base", "ctg.mito", "ctg.purged", "ctg.cor", "ctg.deco",
         "scaf.base", "scaf.cor", "scaf2",
-        "final"
+        "gap_fill", "final"
     ]
     ordered = [s for s in stage_order if s in stages]
     remaining = sorted(stages - set(ordered))
