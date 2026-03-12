@@ -1142,7 +1142,7 @@ workflow {
 
         MAP_HIC_TO_FINAL(ch_final_hic_map_input)
 
-        // (rest of contact map wiring is the same but uses ch_final_assembly
+        // (rest of contact map wiring is the same but uses ch_finalized_assembly
         //  instead of GAP_FILLING.out.filled_assembly for joins)
 
         MAP_HIC_TO_FINAL.out.bam
@@ -1152,7 +1152,7 @@ workflow {
         HIC_BAM_METRICS_FINAL(ch_final_raw_bam_qc)
 
         MAP_HIC_TO_FINAL.out.bam
-            .join(ch_final_assembly, by: 0)
+            .join(ch_finalized_assembly, by: 0)
             .map { haplotype_id, stage, bam, bai, final_fa ->
                 tuple(haplotype_id, "final", bam, bai, final_fa)
             }
@@ -1171,7 +1171,7 @@ workflow {
         HIC_PAIRS_METRICS_FINAL(ch_final_pairs_qc)
 
         FILTER_HIC_BAM_FINAL.out.pairs
-            .join(ch_final_assembly)
+            .join(ch_finalized_assembly)
             .map { haplotype_id, stage, pairs_gz, final_fasta ->
                 tuple(haplotype_id, pairs_gz, final_fasta, "final")
             }
@@ -1208,7 +1208,7 @@ workflow {
         SETUP_PAFR()
 
         // Collect all final assemblies, SORT for deterministic ordering, then generate pairs
-        ch_final_assembly
+        ch_finalized_assembly
             .toSortedList { a, b -> a[0] <=> b[0] }
             .flatMap { assemblies ->
                 def pairs = []
@@ -1245,11 +1245,11 @@ workflow {
         // Riparian plot input — uses ch_final_assembly
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
             .map { hap1, hap2, paf -> tuple(hap1, hap2, paf) }
-            .combine(ch_final_assembly, by: 0)
+            .combine(ch_finalized_assembly, by: 0)
 
         ch_riparian_input = ch_paf_with_asm1
             .map { hap1, hap2, paf, fasta1 -> tuple(hap2, hap1, fasta1, paf) }
-            .combine(ch_final_assembly, by: 0)
+            .combine(ch_finalized_assembly, by: 0)
             .map { hap2, hap1, fasta1, paf, fasta2 ->
                 tuple(hap1, fasta1, hap2, fasta2, paf)
             }
@@ -1270,7 +1270,7 @@ workflow {
     ========================================================================================
     */
     // Collect all gap-filled assemblies with their labels for cross-sample comparison
-    ch_final_assembly
+    ch_finalized_assembly
         .map { haplotype_id, assembly -> tuple(haplotype_id, assembly) }
         .toSortedList { a, b -> a[0] <=> b[0] }
         .map { list ->
@@ -1299,10 +1299,10 @@ workflow {
     ========================================================================================
     */
     // 1. Explore: discover telomere motif de novo
-    TIDK_EXPLORE(ch_final_assembly)
+    TIDK_EXPLORE(ch_finalized_assembly)
 
     // 2. Search: windowed telomere repeat quantification
-    TIDK_SEARCH(ch_final_assembly)
+    TIDK_SEARCH(ch_finalized_assembly)
 
     // 3. Plot: SVG visualization per haplotype
     TIDK_PLOT(TIDK_SEARCH.out.search_tsv)
@@ -1709,7 +1709,7 @@ workflow {
     }
     
     if (params.run_teloclip_extend) {
-        ch_final_assembly
+        ch_finalized_assembly
             .map { haplotype_id, fasta ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
@@ -1727,7 +1727,7 @@ workflow {
             BAM_TO_FASTQ.out,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
-            'teloclip_extended'
+            'final'
         )
 
         ch_all_assembly_summaries = ch_all_assembly_summaries
@@ -1788,7 +1788,7 @@ workflow {
     */
     // Join gap-filled assemblies with their BUSCO results
     // BUSCO output from ASSEMBLY_QC_TELOCLIP is per-haplotype
-    ch_final_assembly
+    ch_finalized_assembly
         .join(ch_final_busco)
         .map { haplotype_id, assembly, busco_dir ->
             tuple(haplotype_id, assembly, busco_dir, "final")
@@ -1803,7 +1803,7 @@ workflow {
     */
 
     // Combine gap-filled assemblies with HiFi reads for coverage book
-    ch_final_assembly
+    ch_finalized_assembly
         .map { haplotype_id, final_fa ->
             def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
             tuple(sample_id, haplotype_id, final_fa)
