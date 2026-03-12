@@ -13,8 +13,8 @@
 #'   --output_dir: Directory for output files
 #'
 #' Outputs:
-#'   - final_qc_report.tsv: Consolidated QC metrics
-#'   - final_qc_report.html: Optional HTML visualization (if rmarkdown available)
+#'   - assembly_qc_metrics.csv: Consolidated QC metrics
+#'   - *.png: QC trend plots
 #' =============================================================================
 
 suppressPackageStartupMessages({
@@ -97,21 +97,8 @@ pairs_metrics <- read_all_tsvs(args$pairs_dir)
 # =============================================================================
 # Process and combine data
 # =============================================================================
-# TODO: Implement your specific data processing logic here
-#
-# The assembly_qc dataframe will contain columns from COMBINE_ASSEMBLY_QC outputs
-# The bam_metrics dataframe will contain columns:
-#   - haplotype_id, checkpoint, bam_total_align, bam_mapped_align, 
-#     bam_mapped_pct, bam_primary_align, bam_primary_mapped, bam_primary_mapped_pct
-# The pairs_metrics dataframe will contain columns:
-#   - haplotype_id, checkpoint, pairs_total, cis_pairs_contig, trans_pairs_contig,
-#     trans_to_cis_contig, cis_pairs_scaffold, trans_pairs_scaffold, 
-#     trans_to_cis_scaffold, parse_total_pairs, retention_pct
 
 message("\n=== Processing Data ===")
-
-# Example: Create a summary combining key metrics
-# Modify this section based on your specific needs
 
 # Extract sample_id from haplotype_id for joining
 if (!is.null(bam_metrics)) {
@@ -165,8 +152,36 @@ fixed_assembly <- assembly_qc %>%
            fct_drop(),
          analysis = case_when(str_detect(analysis, 'merqury') ~ 'merqury',
                               TRUE ~ analysis)) %>%
+  filter(!is.na(stage)) %>%   # Drop any unrecognised qc_labels
+
   arrange(stage) %>%
   select(-source_file)
+
+# --- Helper: resolve Hi-C checkpoint to assembly stage label ---
+# The factor levels are now the LABELS (ctg.base, ctg.cor, scaf.base, etc.),
+# so we must match against those, not the original qc_label names.
+asm_stage_levels <- levels(fixed_assembly$stage)
+
+last_ctg_stage  <- {
+  idx <- str_which(asm_stage_levels, '^ctg\\.')
+  if (length(idx) > 0) asm_stage_levels[max(idx)] else NA_character_
+}
+first_scaf_stage <- {
+  idx <- str_which(asm_stage_levels, '^scaf\\.')
+  if (length(idx) > 0) asm_stage_levels[min(idx)] else NA_character_
+}
+last_scaf_stage <- {
+  idx <- str_which(asm_stage_levels, '^scaf\\.')
+  if (length(idx) > 0) asm_stage_levels[max(idx)] else NA_character_
+}
+# Second scaffold stage (for scaffold_round2_space): first scaf stage that is NOT first_scaf_stage
+second_scaf_stage <- {
+  idx <- str_which(asm_stage_levels, '^scaf\\.')
+  if (length(idx) > 1) asm_stage_levels[idx[2]] else first_scaf_stage
+}
+
+message(sprintf("  Stage resolution: last_ctg=%s, first_scaf=%s, last_scaf=%s, second_scaf=%s",
+                last_ctg_stage, first_scaf_stage, last_scaf_stage, second_scaf_stage))
 
 # --- 4. Process BAM metrics ---
 fixed_bam <- bam_metrics %>%
@@ -175,15 +190,14 @@ fixed_bam <- bam_metrics %>%
                names_to = 'metric') %>%
   pivot_wider(names_from = haplotype_id) %>%
   mutate(stage = case_when(
-           checkpoint == 'contig_raw_map' ~
-             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
-           checkpoint == 'scaffold_round2_raw_map' ~
-             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
-           checkpoint == 'final_raw_map' ~ 'final'
+           checkpoint == 'contig_raw_map'          ~ last_ctg_stage,
+           checkpoint == 'scaffold_round2_raw_map' ~ last_scaf_stage,
+           checkpoint == 'final_raw_map'           ~ 'final'
          ) %>%
-           factor(levels = levels(fixed_assembly$stage)),
+           factor(levels = asm_stage_levels),
          .keep = 'unused',
          .before = 'metric') %>%
+  filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
   arrange(stage) %>%
   mutate(analysis = 'mapped_hic')
 
@@ -200,19 +214,16 @@ fixed_pairs <- pairs_metrics %>%
                             metric == 'pairs_total' ~ 'retained_pairs',
                             TRUE ~ metric),
          stage = case_when(
-           checkpoint == 'contig_filtered' ~
-             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'contig'))],
-           checkpoint == 'scaffold_space' ~
-             levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold'))],
-           checkpoint == 'scaffold_round2_space' ~
-             levels(fixed_assembly$stage)[min(str_which(levels(fixed_assembly$stage), 'scaffold')[-1])],
-           checkpoint == 'scaffold_round2_filtered' ~
-             levels(fixed_assembly$stage)[max(str_which(levels(fixed_assembly$stage), 'scaffold'))],
-           checkpoint == 'final_filtered' ~ 'final'
+           checkpoint == 'contig_filtered'          ~ last_ctg_stage,
+           checkpoint == 'scaffold_space'           ~ first_scaf_stage,
+           checkpoint == 'scaffold_round2_space'    ~ second_scaf_stage,
+           checkpoint == 'scaffold_round2_filtered' ~ last_scaf_stage,
+           checkpoint == 'final_filtered'           ~ 'final'
          ) %>%
-           factor(levels = levels(fixed_assembly$stage)),
+           factor(levels = asm_stage_levels),
          .keep = 'unused',
          .before = 'metric') %>%
+  filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
   arrange(stage) %>%
   mutate(analysis = 'hic_contact')
 
@@ -238,8 +249,6 @@ trans_cis_plot <- full_qc_data %>%
        x = 'Assembly Stage') +
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
-        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
-        # panel.grid.minor = element_blank(),
         axis.text = element_text(size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
@@ -273,8 +282,6 @@ contigs_plot <- full_qc_data %>%
        x = 'Assembly Stage') +
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
-        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
-        # panel.grid.minor = element_blank(),
         axis.text = element_text(size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
@@ -309,8 +316,6 @@ size_plot <- full_qc_data %>%
        x = 'Assembly Stage') +
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
-        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
-        # panel.grid.minor = element_blank(),
         axis.text = element_text(size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
@@ -345,8 +350,6 @@ misc_quast_plots <- full_qc_data %>%
        x = 'Assembly Stage') +
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
-        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
-        # panel.grid.minor = element_blank(),
         axis.text = element_text(size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
@@ -386,8 +389,6 @@ busco_plot <- full_qc_data %>%
        x = 'Assembly Stage') +
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
-        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
-        # panel.grid.minor = element_blank(),
         axis.text = element_text(size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
@@ -419,8 +420,6 @@ kmer_plot <- full_qc_data %>%
        x = 'Assembly Stage') +
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
-        # panel.grid.major = element_line(colour = 'grey80', linewidth = 0.25),
-        # panel.grid.minor = element_blank(),
         axis.text = element_text(size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
