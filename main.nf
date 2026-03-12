@@ -1118,6 +1118,7 @@ workflow {
     //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
     // =========================================================================
     FINALIZE_ASSEMBLY(ch_final_assembly)
+    ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
     /*
     ========================================================================================
@@ -1127,7 +1128,7 @@ workflow {
     // 1. Contact Maps for Final Assemblies
     //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
     if (params.make_final_contact_maps) {
-        ch_final_assembly
+        ch_finalized_assembly
             .map { haplotype_id, final_fa ->
                 def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
                 tuple(sample_id, haplotype_id, final_fa)
