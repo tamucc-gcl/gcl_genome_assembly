@@ -114,17 +114,18 @@ process FINALIZE_ASSEMBLY {
     # Ordered list of old names (scaffolds first, then contigs — by descending size)
     cut -f1 name_map_full.tsv > extract_order.txt
 
-    # Build sed rename commands from mapping
-    awk 'BEGIN{OFS="\\t"} {
-        # Escape any regex-special chars in old name
-        old = \$1; new = \$2
-        gsub(/[\\/.\\*\\[\\]\\^\\$]/, "\\\\\\\\&", old)
-        print "s/^>" old "\\\\b/>" new "/"
-    }' name_map_full.tsv > rename.sed
-
+    # Rename headers using awk exact-match lookup (no regex escaping needed)
     samtools faidx "\${INPUT_FA}" \$(cat extract_order.txt | tr '\\n' ' ') \\
-        | sed -f rename.sed \\
-        > ${haplotype_id}.fasta
+        | awk '
+            BEGIN { while ((getline < "name_map_full.tsv") > 0) map[\$1] = \$2 }
+            /^>/ {
+                old = substr(\$1, 2)  # strip leading ">"
+                if (old in map) print ">" map[old]
+                else print
+                next
+            }
+            { print }
+          ' > ${haplotype_id}.fasta
 
     # ------------------------------------------------------------------
     # 5. Index the final output
