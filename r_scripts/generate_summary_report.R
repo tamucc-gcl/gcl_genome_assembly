@@ -401,7 +401,7 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
       rip_row <- riparian_plots %>%
         filter(
           (id == hap1_id & id2 == hap2_id) |
-          (id == hap2_id & id2 == hap1_id)
+            (id == hap2_id & id2 == hap1_id)
         )
       if (nrow(rip_row) > 0) {
         src <- rel_path(rip_row$subdir[1], rip_row$filename[1])
@@ -410,7 +410,7 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
         md <- c(md, "  <td>—</td>")
       }
     }
-
+    
     md <- c(md, "</tr>")
   }
   
@@ -535,28 +535,27 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
 # =============================================================================
 # Section 5: Mitochondrial Genome
 # =============================================================================
-generate_mito_section <- function(md, args, manifest) {
+# ---- FIX 3: Call the mito section inline instead of defining-but-never-calling
+#             a function. The old code defined generate_mito_section() but never
+#             appended its return value to md. ----
 
-  md <- c(md, "## Mitochondrial Genome", "")
+md <- c(md, "## 5. Mitochondrial Genome", "")
 
-  # --- Read mito stats ---
-  mito_stats <- NULL
-  if (!grepl("NO_MITO_STATS", args$mito_stats, fixed = TRUE) &&
-      file.exists(args$mito_stats)) {
-    mito_stats <- tryCatch(
-      read_tsv(args$mito_stats, show_col_types = FALSE),
-      error = function(e) { message("WARNING: Could not read mito stats: ", e$message); NULL }
-    )
-  }
+mito_stats <- NULL
+if (!grepl("NO_MITO_STATS", args$mito_stats, fixed = TRUE) &&
+    file.exists(args$mito_stats)) {
+  mito_stats <- tryCatch(
+    read_tsv(args$mito_stats, show_col_types = FALSE),
+    error = function(e) { message("WARNING: Could not read mito stats: ", e$message); NULL }
+  )
+}
 
-  if (is.null(mito_stats) || nrow(mito_stats) == 0) {
-    md <- c(md, "*No mitochondrial genome assembly data available.*", "")
-    return(md)
-  }
-
-  # --- Summary table ---
+if (is.null(mito_stats) || nrow(mito_stats) == 0) {
+  md <- c(md, "*No mitochondrial genome assembly data available.*", "")
+} else {
+  # Summary table
   md <- c(md, "### Assembly Summary", "")
-
+  
   mito_table <- mito_stats %>%
     mutate(
       mitogenome_length = scales::comma(as.numeric(mitogenome_length)),
@@ -571,11 +570,10 @@ generate_mito_section <- function(md, args, manifest) {
       rRNAs = rrna_count,
       `Genetic Code` = genetic_code
     )
-
+  
   md <- c(md, make_markdown_table(mito_table), "")
-
-  # --- Mitogenome FASTA links ---
-  mito_assemblies <- manifest %>% filter(type == "mitogenome")
+  
+  # Mitogenome FASTA links
   if (nrow(mito_assemblies) > 0) {
     md <- c(md, "### Assembly Files", "")
     for (i in seq_len(nrow(mito_assemblies))) {
@@ -585,13 +583,10 @@ generate_mito_section <- function(md, args, manifest) {
     }
     md <- c(md, "")
   }
-
-  # --- Gene map images ---
-  mito_gene_maps <- manifest %>% filter(type == "mito_gene_map")
+  
+  # Gene map images
   if (nrow(mito_gene_maps) > 0) {
     md <- c(md, "### Gene Maps", "")
-
-    # Group by sample if possible (extract sample_id from filename)
     for (i in seq_len(nrow(mito_gene_maps))) {
       row <- mito_gene_maps[i, ]
       src <- rel_path(row$subdir, row$filename)
@@ -600,25 +595,22 @@ generate_mito_section <- function(md, args, manifest) {
     }
     md <- c(md, "")
   }
-
-  # --- Mito filtering stats (how many contigs were removed from nuclear assembly) ---
-  # These come from FILTER_MITO_CONTIGS output, collected via mito_stats manifest
+  
+  # Mito filtering note
   mito_stats_files <- manifest %>% filter(type == "mito_stats")
   if (nrow(mito_stats_files) > 0) {
     md <- c(md,
-      "### Nuclear Assembly Filtering",
-      "",
-      "Mitochondrial contigs were identified and removed from each haplotype",
-      "assembly prior to purge\\_dups, Inspector, decontamination, and scaffolding.",
-      ""
+            "### Nuclear Assembly Filtering",
+            "",
+            "Mitochondrial contigs were identified and removed from each haplotype",
+            "assembly prior to purge\\_dups, Inspector, decontamination, and scaffolding.",
+            ""
     )
   }
-
-  md
 }
 
 # =============================================================================
-# Section 6: Telomere Detection (collapsible)
+# Section 6: Telomere Detection
 # =============================================================================
 # This section includes:
 #   a) Teloclip extension summary (if teloclip was run)
@@ -636,11 +628,17 @@ has_teloclip <- !str_detect(basename(teloclip_path), "NO_TELOCLIP") &&
 if (has_teloclip) {
   teloclip_data <- tryCatch(read_tsv(teloclip_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(teloclip_data) && nrow(teloclip_data) > 0) {
-
-    # Summarize extensions per haplotype
+    
+    # ---- FIX 1: Extract haplotype_id by stripping _scaffold_N suffix ----
+    # Contig names follow the pattern {haplotype_id}_scaffold_{N},
+    # e.g. "Sde-CBau_104_hap1_scaffold_2" or "Sde_CLim_110_hap2_scaffold_7".
+    # The old regex (^[^_]+_[^_]+_hap[12]) assumed exactly two underscore-
+    # delimited tokens before _hap, which fails when the haplotype_id itself
+    # contains extra underscores (e.g. Sde_CLim_110_hap2).
     teloclip_summary <- teloclip_data %>%
       filter(extension_length > 0) %>%
-      group_by(haplotype_id = str_extract(contig, "^[^_]+_[^_]+_hap[12]")) %>%
+      mutate(haplotype_id = str_remove(contig, "_scaffold_\\d+$")) %>%
+      group_by(haplotype_id) %>%
       summarise(
         extensions = n(),
         total_bp_added = sum(extension_length),
@@ -648,28 +646,13 @@ if (has_teloclip) {
         max_extension_bp = max(extension_length),
         .groups = "drop"
       )
-
-    # If the contig names don't contain haplotype_id, try extracting from the
-    # stats file which may already have it as a prefix
-    if (nrow(teloclip_summary) == 0) {
-      # Fallback: summarize across all rows
-      teloclip_summary <- teloclip_data %>%
-        filter(extension_length > 0) %>%
-        summarise(
-          haplotype_id = "all",
-          extensions = n(),
-          total_bp_added = sum(extension_length),
-          mean_extension_bp = round(mean(extension_length)),
-          max_extension_bp = max(extension_length)
-        )
-    }
-
+    
     md <- c(md,
-      "### Telomere Extension (teloclip)", "",
-      "Soft-clipped HiFi read overhangs containing telomeric motifs were used to",
-      "extend scaffold ends missing telomeric sequence.", ""
+            "#### Telomere Extension (teloclip)", "",
+            "Soft-clipped HiFi read overhangs containing telomeric motifs were used to",
+            "extend scaffold ends missing telomeric sequence.", ""
     )
-
+    
     if (nrow(teloclip_summary) > 0) {
       tc_table <- teloclip_summary %>%
         mutate(
@@ -686,33 +669,34 @@ if (has_teloclip) {
         )
       md <- c(md, make_markdown_table(tc_table), "")
     }
-
-    # Collapsible per-contig detail
+    
+    # ---- FIX 2: Per-contig detail WITHOUT collapsible wrapper ----
     detail_table <- teloclip_data %>%
       filter(extension_length > 0) %>%
       mutate(
+        haplotype_id = str_remove(contig, "_scaffold_\\d+$"),
         extension_length = scales::comma(extension_length),
         contig_length = scales::comma(as.numeric(contig_length))
       ) %>%
+      arrange(haplotype_id, contig) %>%
       select(
+        Haplotype = haplotype_id,
         Contig = contig,
         `Contig Length` = contig_length,
         End = end,
         `Extension (bp)` = extension_length
       )
-
+    
     if (nrow(detail_table) > 0) {
       md <- c(md,
-        make_collapsible(
-          make_markdown_table(detail_table),
-          "Click to expand: Per-contig teloclip extension details"
-        )
+              "**Per-contig extension details:**", "",
+              make_markdown_table(detail_table), ""
       )
     }
   }
 } else {
   md <- c(md,
-    "*Teloclip extension was not run. Enable with `--run_teloclip_extend true`.*", ""
+          "*Teloclip extension was not run. Enable with `--run_teloclip_extend true`.*", ""
   )
 }
 
@@ -725,11 +709,11 @@ if (has_telo) {
   telo_data <- tryCatch(read_tsv(telo_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(telo_data) && nrow(telo_data) > 0) {
     md <- c(md,
-      "### Telomere Presence Summary (tidk)", "",
-      "Telomeric repeat detection across scaffold ends using",
-      "[tidk](https://github.com/tolkit/telomeric-identifier).", ""
+            "#### Telomere Presence Summary (tidk)", "",
+            "Telomeric repeat detection across scaffold ends using",
+            "[tidk](https://github.com/tolkit/telomeric-identifier).", ""
     )
-
+    
     telo_display <- telo_data %>%
       mutate(
         total_length = scales::comma(as.numeric(total_length)),
@@ -747,9 +731,9 @@ if (has_telo) {
         None = telomere_none,
         `% with Telomere` = pct_with_telomere
       )
-
+    
     md <- c(md, make_markdown_table(telo_display), "")
-
+    
     # Per-scaffold detail in collapsible
     telo_detail_path <- file.path(dirname(telo_path), "all_telomeres.tsv")
     if (file.exists(telo_detail_path) && file.size(telo_detail_path) > 0) {
@@ -768,13 +752,13 @@ if (has_telo) {
             Haplotype = haplotype_id, Scaffold = scaffold, Length = length,
             `5'` = telomere_5prime, `3'` = telomere_3prime, Both = telomere_both
           )
-
+        
         if (nrow(telo_has) > 0) {
           md <- c(md,
-            make_collapsible(
-              make_markdown_table(telo_has),
-              "Click to expand: Scaffolds with detected telomeres"
-            )
+                  make_collapsible(
+                    make_markdown_table(telo_has),
+                    "Click to expand: Scaffolds with detected telomeres"
+                  )
           )
         }
       }
@@ -787,8 +771,8 @@ if (has_telo) {
 # ---- 6c: tidk density plots ----
 tidk_plots <- manifest %>% filter(type == "tidk_plot")
 if (nrow(tidk_plots) > 0) {
-  md <- c(md, "### Telomere Density Plots (tidk)", "")
-
+  md <- c(md, "#### Telomere Density Plots (tidk)", "")
+  
   # Build an HTML table with one column per haplotype within each sample
   tidk_by_sample <- tidk_plots %>%
     mutate(
@@ -796,19 +780,19 @@ if (nrow(tidk_plots) > 0) {
       hap = str_extract(id, "hap[12]$")
     ) %>%
     arrange(sample_id, hap)
-
+  
   for (sid in unique(tidk_by_sample$sample_id)) {
     sample_plots <- tidk_by_sample %>% filter(sample_id == sid)
     md <- c(md, sprintf("**%s**", sid), "")
-
+    
     for (i in seq_len(nrow(sample_plots))) {
       row <- sample_plots[i, ]
       src <- rel_path(row$subdir, row$filename)
       alt <- sprintf("tidk telomere density: %s", row$id)
       md <- c(md,
-        sprintf("*%s*", row$hap),
-        img_tag(src, alt, width = args$img_width),
-        ""
+              sprintf("*%s*", row$hap),
+              img_tag(src, alt, width = args$img_width),
+              ""
       )
     }
   }
