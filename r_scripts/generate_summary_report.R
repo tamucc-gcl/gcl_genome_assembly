@@ -745,34 +745,34 @@ if (has_telo) {
 }
 
 # ---- 6c: tidk density plots ----
-tidk_plots <- manifest %>% filter(type == "tidk_plot")
-if (nrow(tidk_plots) > 0) {
-  md <- c(md, "#### Telomere Density Plots (tidk)", "")
-  
-  # Build an HTML table with one column per haplotype within each sample
-  tidk_by_sample <- tidk_plots %>%
-    mutate(
-      sample_id = str_replace(id, "_hap[12]$", ""),
-      hap = str_extract(id, "hap[12]$")
-    ) %>%
-    arrange(sample_id, hap)
-  
-  for (sid in unique(tidk_by_sample$sample_id)) {
-    sample_plots <- tidk_by_sample %>% filter(sample_id == sid)
-    md <- c(md, sprintf("**%s**", sid), "")
-    
-    for (i in seq_len(nrow(sample_plots))) {
-      row <- sample_plots[i, ]
-      src <- rel_path(row$subdir, row$filename)
-      alt <- sprintf("tidk telomere density: %s", row$id)
-      md <- c(md,
-              sprintf("*%s*", row$hap),
-              img_tag(src, alt, width = args$img_width),
-              ""
-      )
-    }
-  }
-}
+#tidk_plots <- manifest %>% filter(type == "tidk_plot")
+#if (nrow(tidk_plots) > 0) {
+#  md <- c(md, "#### Telomere Density Plots (tidk)", "")
+#  
+#  # Build an HTML table with one column per haplotype within each sample
+#  tidk_by_sample <- tidk_plots %>%
+#    mutate(
+#      sample_id = str_replace(id, "_hap[12]$", ""),
+#      hap = str_extract(id, "hap[12]$")
+#    ) %>%
+#    arrange(sample_id, hap)
+#  
+#  for (sid in unique(tidk_by_sample$sample_id)) {
+#    sample_plots <- tidk_by_sample %>% filter(sample_id == sid)
+#    md <- c(md, sprintf("**%s**", sid), "")
+#    
+#    for (i in seq_len(nrow(sample_plots))) {
+#      row <- sample_plots[i, ]
+#      src <- rel_path(row$subdir, row$filename)
+#      alt <- sprintf("tidk telomere density: %s", row$id)
+#      md <- c(md,
+#              sprintf("*%s*", row$hap),
+#              img_tag(src, alt, width = args$img_width),
+#              ""
+#      )
+#    }
+#  }
+#}
 
 # ---- End of Section 6 ----
 
