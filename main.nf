@@ -160,6 +160,7 @@ params.yahs_round2_no_scaffold_ec = true
 // Finalization Parameters
 params.make_final_contact_maps = true
 params.report_stage = 'final'
+params.finalize_min_scaffold_size = 1000000
 
 // Dotplot Params
 params.run_pairwise_alignments = true
