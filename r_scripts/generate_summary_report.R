@@ -565,7 +565,7 @@ if (is.null(mito_stats) || nrow(mito_stats) == 0) {
     "  <th>Genes</th>",
     "  <th>tRNAs</th>",
     "  <th>rRNAs</th>",
-    "  <th>FASTA</th>",
+    "  <th>GenBank</th>",
     "</tr>"
   )
 
@@ -581,10 +581,10 @@ if (is.null(mito_stats) || nrow(mito_stats) == 0) {
     } else { "—" }
 
     # FASTA link from manifest
-    fasta_row <- mito_assemblies %>% filter(id == sid)
-    fasta_cell <- if (nrow(fasta_row) > 0) {
-      sprintf("[%s](%s)", fasta_row$filename[1],
-              rel_path(fasta_row$subdir[1], fasta_row$filename[1]))
+    mito_gb <- manifest %>% filter(type == "mito_genbank", id == sid)
+    gb_cell <- if (nrow(mito_gb) > 0) {
+      sprintf("[%s](%s)", mito_gb$filename[1],
+              rel_path(mito_gb$subdir[1], mito_gb$filename[1]))
     } else { "—" }
 
     # Format stats
@@ -594,7 +594,7 @@ if (is.null(mito_stats) || nrow(mito_stats) == 0) {
     md <- c(md, sprintf(
       "<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
       sid, map_cell, length_fmt, circular_fmt,
-      row$gene_count, row$trna_count, row$rrna_count, fasta_cell
+      row$gene_count, row$trna_count, row$rrna_count, gb_cell
     ))
   }
 

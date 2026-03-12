@@ -1917,9 +1917,9 @@ workflow {
 
     // ---- Mitogenome assembly ----
     // publishDir: ${params.outdir}/mitogenome/${sample_id}
-    ch_manifest_mitogenome = MITOHIFI.out.mitogenome
-        .map { sample_id, fasta ->
-            "mitogenome\t${sample_id}\t.\t${fasta.name}\tmitogenome"
+    ch_manifest_mito_gb = MITOHIFI.out.annotation
+        .map { sample_id, gb ->
+            "mito_genbank\t${sample_id}\t.\t${gb.name}\tmitogenome"
         }
 
     ch_manifest_mito_stats = MITOHIFI.out.stats
@@ -1929,7 +1929,7 @@ workflow {
 
     ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
         .map { sample_id, png ->
-            "mito_gene_map\t${sample_id}\t.\t${png.name}\t/mitogenome"
+            "mito_gene_map\t${sample_id}\t.\t${png.name}\tmitogenome"
         }
 
     // ---- Combine all manifest entries into a single TSV ----
@@ -1941,7 +1941,7 @@ workflow {
         .mix(ch_manifest_compiled_csv)
         .mix(ch_manifest_qc_plots)
         .mix(ch_manifest_assembly_report)
-        .mix(ch_manifest_mitogenome)
+        .mix(ch_manifest_mito_gb)
         .mix(ch_manifest_mito_stats)
         .mix(ch_manifest_mito_circular)
         .mix(ch_manifest_tidk_plots)
