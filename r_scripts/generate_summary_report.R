@@ -577,14 +577,15 @@ if (is.null(mito_stats) || nrow(mito_stats) == 0) {
     map_row <- mito_gene_maps %>% filter(id == sid)
     map_cell <- if (nrow(map_row) > 0) {
       src <- rel_path(map_row$subdir[1], map_row$filename[1])
-      img_tag(src, paste("Mito gene map:", sid), width = 300)
+      img_tag(src, paste("Mito gene map:", sid), width = args$img_width)
     } else { "—" }
 
     # FASTA link from manifest
     mito_gb <- manifest %>% filter(type == "mito_genbank", id == sid)
     gb_cell <- if (nrow(mito_gb) > 0) {
-      sprintf("[%s](%s)", mito_gb$filename[1],
-              rel_path(mito_gb$subdir[1], mito_gb$filename[1]))
+      sprintf('<a href="%s">%s</a>',
+              rel_path(mito_gb$subdir[1], mito_gb$filename[1]),
+              mito_gb$filename[1])
     } else { "—" }
 
     # Format stats
