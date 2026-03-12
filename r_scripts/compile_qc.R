@@ -167,21 +167,21 @@ last_ctg_stage  <- {
   if (length(idx) > 0) asm_stage_levels[max(idx)] else NA_character_
 }
 first_scaf_stage <- {
-  idx <- str_which(asm_stage_levels, '^scaf\\.')
+  idx <- str_which(asm_stage_levels, '^scaf')
   if (length(idx) > 0) asm_stage_levels[min(idx)] else NA_character_
 }
 last_scaf_stage <- {
-  idx <- str_which(asm_stage_levels, '^scaf\\.')
+  idx <- str_which(asm_stage_levels, '^scaf')
   if (length(idx) > 0) asm_stage_levels[max(idx)] else NA_character_
 }
-# Second scaffold stage (for scaffold_round2_space): first scaf stage that is NOT first_scaf_stage
-second_scaf_stage <- {
-  idx <- str_which(asm_stage_levels, '^scaf\\.')
-  if (length(idx) > 1) asm_stage_levels[idx[2]] else first_scaf_stage
+# scaf2 stage (for scaffold_round2_space/filtered): look for 'scaf2' explicitly,
+# fall back to last scaffold stage
+scaf2_stage <- {
+  if ('scaf2' %in% asm_stage_levels) 'scaf2' else last_scaf_stage
 }
 
-message(sprintf("  Stage resolution: last_ctg=%s, first_scaf=%s, last_scaf=%s, second_scaf=%s",
-                last_ctg_stage, first_scaf_stage, last_scaf_stage, second_scaf_stage))
+message(sprintf("  Stage resolution: last_ctg=%s, first_scaf=%s, scaf2=%s, last_scaf=%s",
+                last_ctg_stage, first_scaf_stage, scaf2_stage, last_scaf_stage))
 
 # --- 4. Process BAM metrics ---
 fixed_bam <- bam_metrics %>%
@@ -216,8 +216,8 @@ fixed_pairs <- pairs_metrics %>%
          stage = case_when(
            checkpoint == 'contig_filtered'          ~ last_ctg_stage,
            checkpoint == 'scaffold_space'           ~ first_scaf_stage,
-           checkpoint == 'scaffold_round2_space'    ~ second_scaf_stage,
-           checkpoint == 'scaffold_round2_filtered' ~ last_scaf_stage,
+           checkpoint == 'scaffold_round2_space'    ~ scaf2_stage,
+           checkpoint == 'scaffold_round2_filtered' ~ scaf2_stage,
            checkpoint == 'final_filtered'           ~ 'final'
          ) %>%
            factor(levels = asm_stage_levels),
@@ -227,8 +227,9 @@ fixed_pairs <- pairs_metrics %>%
   arrange(stage) %>%
   mutate(analysis = 'hic_contact')
 
-# --- 6. Combine and write ---
+# --- 6. Combine and write (deduplicate in case checkpoints overlap) ---
 full_qc_data <- bind_rows(fixed_assembly, fixed_bam, fixed_pairs) %>%
+  distinct(sample_id, stage, analysis, metric, .keep_all = TRUE) %>%
   arrange(stage, sample_id)
 
 write_csv(full_qc_data,
