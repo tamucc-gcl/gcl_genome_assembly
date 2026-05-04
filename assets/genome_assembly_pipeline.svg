@@ -1,0 +1,1567 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="2400"
+   height="580"
+   viewBox="0 0 2400 580"
+   style="background:#ffffff; font-family: Arial, Helvetica, sans-serif;"
+   version="1.1"
+   id="svg333"
+   sodipodi:docname="genome_assembly_pipeline_horizontal_update.svg"
+   inkscape:version="1.1.1 (3bf5ae0d25, 2021-09-20)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <sodipodi:namedview
+     id="namedview335"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     showgrid="false"
+     inkscape:zoom="2.5733333"
+     inkscape:cx="338.8601"
+     inkscape:cy="333.61399"
+     inkscape:window-width="1920"
+     inkscape:window-height="1129"
+     inkscape:window-x="3832"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg333" />
+  <title
+     id="title2">Genome Assembly Pipeline</title>
+  <desc
+     id="desc4">Haplotype-resolved genome assembly pipeline: HiFi and Hi-C on separate input rows merging into HIFIASM, mito branch on top, QC fan below.</desc>
+  <defs
+     id="defs15">
+    <marker
+       id="arr"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#555"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path6" />
+    </marker>
+    <marker
+       id="arr-teal"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#0F6E56"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path9" />
+    </marker>
+    <marker
+       id="arr-dash"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#999"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path12" />
+    </marker>
+  </defs>
+  <!-- ============================================================
+  GEOMETRY
+
+  Box: w=128 h=44 rx=8  (main pipeline)
+  Box: w=140 h=44 rx=8  (wider where needed)
+
+  Row A  mito:    y_top=54   y_ctr=76
+  Row B  HiFi:    y_top=134  y_ctr=156
+  Row C  HiC:     y_top=214  y_ctr=236
+  Row D  main:    y_top=174  y_ctr=196   ← "row 2.5", between B and C
+  Row E  QC:      y_top=360  y_ctr=382
+
+  Input+prep zone x=30..530 (cols 0-3)
+  HIFIASM starts at x=540, spans y 144..256 (h=112, w=128) → center (604, 200)
+  Main pipeline (Row D) starts right of HIFIASM at x=690
+
+  Stage columns for main pipeline (x_left = 690 + i*148, pitch=148, w=128):
+    0: Filter mito      690
+    1: Purge dups       838
+    2: Inspector ctg    986
+    3: Decon ctg       1134
+    4: Map Hi-C        1282
+    5: Filter BAM      1430
+    6: YaHS R1         1578
+    7: Inspector scf   1726
+    8: Decon scf       1874
+    9: YaHS R2         2022
+   10: Gap fill        2170
+   11: Teloclip        2170+148=2318 → too far. 
+   
+  Need to check: 12 steps × 128 + 11 gaps × 20 = 1536+220=1756. Start 690 → end 2446. Too wide.
+  
+  Reduce pitch to 136 (gap=8): 12×128+11×8=1536+88=1624. End=690+1624=2314. Ok but cramped gaps.
+  
+  Better: merge gap-fill+teloclip+finalize into 3 at pitch 136, and drop finalize to a sub-box.
+  Or: use 11 main steps + finalize below, pitch=140 (gap=12):
+    11×128 + 10×12 = 1408+120 = 1528. End = 690+1528 = 2218. Fine!
+  
+  Steps 0-10 at pitch=140:
+    0 Filter mito    x=690  ctr=754
+    1 Purge dups     x=830  ctr=894
+    2 Inspector ctg  x=970  ctr=1034
+    3 Decon ctg     x=1110  ctr=1174
+    4 Map Hi-C      x=1250  ctr=1314
+    5 Filter BAM    x=1390  ctr=1454
+    6 YaHS R1       x=1530  ctr=1594
+    7 Inspector scf x=1670  ctr=1734
+    8 Decon scf     x=1810  ctr=1874
+    9 YaHS R2       x=1950  ctr=2014
+   10 Gap fill      x=2090  ctr=2154
+   11 Teloclip      x=2090+140=2230 ctr=2294  right=2358. Fine.
+
+  Finalize box: centered below gap-fill+teloclip, x=2090 w=268 y=250
+  
+  QC fan: 6 boxes at Row E. Centers spaced from ~750 to ~2320.
+    spread = 2320-750=1570, 5 gaps for 6 boxes → pitch=314, box w=200
+    Check: 6×200+5×114=1200+570=1770 > 1570. Use w=160, gap=(1570-6×160)/5=(1570-960)/5=122
+    Centers: 750, 750+282=1032, 1314, 1596, 1878, 2160
+    x_left = center-80
+============================================================ -->
+  <!-- ============================================================
+  TITLE
+============================================================ -->
+  <text
+     x="1200"
+     y="22"
+     text-anchor="middle"
+     font-size="18"
+     font-weight="700"
+     fill="#1a1a1a"
+     id="text17">Genome Assembly Pipeline</text>
+  <text
+     x="1200"
+     y="38"
+     text-anchor="middle"
+     font-size="11"
+     fill="#999"
+     id="text19">PacBio HiFi + Hi-C  ·  Haplotype-resolved, chromosome-scale  ·  gcl_genome_assembly · Nextflow DSL2</text>
+  <!-- ============================================================
+  STAGE LABEL BANDS
+============================================================ -->
+  <!-- Inputs band -->
+  <rect
+     x="26"
+     y="46"
+     width="264"
+     height="14"
+     rx="3"
+     fill="#F1EFE8"
+     id="rect21" />
+  <text
+     x="158"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#5F5E5A"
+     letter-spacing="1"
+     id="text23">INPUTS</text>
+  <!-- Read prep band -->
+  <rect
+     x="306"
+     y="46"
+     width="216"
+     height="14"
+     rx="3"
+     fill="#D3F0E4"
+     id="rect25" />
+  <text
+     x="414"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#085041"
+     letter-spacing="1"
+     id="text27">READ PREP</text>
+  <!-- Mito band -->
+  <rect
+     x="26"
+     y="46"
+     width="264"
+     height="14"
+     rx="3"
+     fill="none"
+     id="rect29" />
+  <!-- Assembly band -->
+  <rect
+     x="536"
+     y="46"
+     width="140"
+     height="14"
+     rx="3"
+     fill="#EEEDFE"
+     id="rect31" />
+  <text
+     x="606"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#534AB7"
+     letter-spacing="1"
+     id="text33">ASSEMBLY</text>
+  <!-- Correction band -->
+  <rect
+     x="688"
+     y="46"
+     width="562"
+     height="14"
+     rx="3"
+     fill="#FAECE7"
+     id="rect35" />
+  <text
+     x="969"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#993C1D"
+     letter-spacing="1"
+     id="text37">CORRECTION + DECON</text>
+  <!-- Hi-C mapping band -->
+  <rect
+     x="1248"
+     y="46"
+     width="280"
+     height="14"
+     rx="3"
+     fill="#DDEEFA"
+     id="rect39" />
+  <text
+     x="1388"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#185FA5"
+     letter-spacing="1"
+     id="text41">HI-C MAPPING</text>
+  <!-- Scaffolding band -->
+  <rect
+     x="1528"
+     y="46"
+     width="562"
+     height="14"
+     rx="3"
+     fill="#EEEDFE"
+     id="rect43" />
+  <text
+     x="1809"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#534AB7"
+     letter-spacing="1"
+     id="text45">SCAFFOLDING + CORRECTION</text>
+  <!-- Finalize band -->
+  <rect
+     x="2088"
+     y="46"
+     width="282"
+     height="14"
+     rx="3"
+     fill="#D3F0E4"
+     id="rect47" />
+  <text
+     x="2229"
+     y="56"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#085041"
+     letter-spacing="1"
+     id="text49">FINALIZATION</text>
+  <!-- ============================================================
+  ROW A — MITO BRANCH  y_top=64 y_ctr=86
+============================================================ -->
+  <!-- Find mito ref  x=306 -->
+  <rect
+     x="306"
+     y="64"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect51" />
+  <text
+     x="370"
+     y="82"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text53">Find mito ref</text>
+  <text
+     x="370"
+     y="97"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text55">NCBI closest genome</text>
+  <!-- arrow -->
+  <line
+     x1="434"
+     y1="86"
+     x2="450"
+     y2="86"
+     stroke="#0F6E56"
+     stroke-width="1.2"
+     marker-end="url(#arr-teal)"
+     id="line57" />
+  <!-- MitoHiFi  x=452 -->
+  <rect
+     x="452"
+     y="64"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect59" />
+  <text
+     x="516"
+     y="82"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text61">MitoHiFi</text>
+  <text
+     x="516"
+     y="97"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text63">Assemble mitogenome</text>
+  <!-- arrow -->
+  <line
+     x1="580"
+     y1="86"
+     x2="596"
+     y2="86"
+     stroke="#0F6E56"
+     stroke-width="1.2"
+     marker-end="url(#arr-teal)"
+     id="line65" />
+  <!-- Circular mito map  x=598 -->
+  <rect
+     x="598"
+     y="64"
+     width="140"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect67" />
+  <text
+     x="668"
+     y="82"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text69">Circular mito map</text>
+  <text
+     x="668"
+     y="97"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text71">pyCirclize annotation</text>
+  <!-- Dashed dependency: MitoHiFi output → Filter mito box on Row D -->
+  <!-- MitoHiFi bottom at y=108, Filter mito at x=690 y_ctr=196 -->
+  <!-- Route: down from MitoHiFi center, then right+down to Filter mito top -->
+  <path
+     d="M516 108 L516 126 L754 126 L754 172"
+     fill="none"
+     stroke="#999"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-dash)"
+     id="path73" />
+  <!-- ============================================================
+  ROW B — HiFi track  y_top=134 y_ctr=156
+============================================================ -->
+  <!-- HiFi BAM  x=30 -->
+  <rect
+     x="30"
+     y="134"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect75" />
+  <text
+     x="94"
+     y="152"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text77">HiFi BAM</text>
+  <text
+     x="94"
+     y="167"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text79">PacBio reads</text>
+  <!-- arrow -->
+  <line
+     x1="158"
+     y1="156"
+     x2="174"
+     y2="156"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line81" />
+  <!-- BAM→FASTQ  x=176 -->
+  <rect
+     x="176"
+     y="134"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect83" />
+  <text
+     x="240"
+     y="152"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text85">BAM → FASTQ</text>
+  <text
+     x="240"
+     y="167"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text87">Convert HiFi reads</text>
+  <!-- Branch: BAM→FASTQ also feeds mito branch (row A) -->
+  <!-- Up from BAM→FASTQ top-center to Find mito ref -->
+  <path
+     d="m 239.70319,133.82173 v -9.25359 h 130.58102 v -15.65993"
+     fill="none"
+     stroke="#0f6e56"
+     stroke-width="1.2"
+     marker-end="url(#arr-teal)"
+     id="path89" />
+  <!-- arrow from BAM→FASTQ toward HIFIASM merge point -->
+  <!-- Route diagonally: right then down to HIFIASM left at y_ctr=196 -->
+  <path
+     d="M304 156 L540 156 L540 196"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path91" />
+  <!-- ============================================================
+  ROW C — Hi-C track  y_top=214 y_ctr=236
+============================================================ -->
+  <!-- Hi-C FASTQ  x=30 -->
+  <rect
+     x="30"
+     y="214"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect93" />
+  <text
+     x="94"
+     y="232"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text95">Hi-C FASTQ</text>
+  <text
+     x="94"
+     y="247"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text97">Chromatin contacts</text>
+  <!-- arrow -->
+  <line
+     x1="158"
+     y1="236"
+     x2="174"
+     y2="236"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line99" />
+  <!-- Trim Hi-C  x=176 -->
+  <rect
+     x="176"
+     y="214"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect101" />
+  <text
+     x="240"
+     y="232"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text103">Trim Hi-C</text>
+  <text
+     x="240"
+     y="247"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text105">Remove adapters</text>
+  <!-- arrow from Trim Hi-C toward HIFIASM merge point -->
+  <path
+     d="M304 236 L540 236 L540 216"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path107" />
+  <!-- ============================================================
+  HIFIASM  x=536 y_top=144 h=116 → center y=202
+  Use y_top=146 h=112 so it visually spans rows B and C
+============================================================ -->
+  <rect
+     x="536"
+     y="144"
+     width="140"
+     height="116"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="2"
+     id="rect109" />
+  <text
+     x="606"
+     y="194"
+     text-anchor="middle"
+     font-size="13"
+     font-weight="700"
+     fill="#26215C"
+     id="text111">HIFIASM</text>
+  <text
+     x="606"
+     y="211"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text113">Diploid contig assembly</text>
+  <text
+     x="606"
+     y="225"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text115">hap1 + hap2</text>
+  <!-- ============================================================
+  ROW D — MAIN PIPELINE  y_top=174 y_ctr=196
+  Starts right of HIFIASM at x=690
+  pitch=140, box w=128
+============================================================ -->
+  <!-- arrow from HIFIASM right side (x=676, y=202) to Filter mito -->
+  <line
+     x1="676"
+     y1="202"
+     x2="688"
+     y2="202"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line117" />
+  <!-- 0: Filter mito  x=690 -->
+  <rect
+     x="690"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect119" />
+  <text
+     x="754"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text121">Filter mito</text>
+  <text
+     x="754"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text123">Remove mito-like ctgs</text>
+  <!-- 0→1 -->
+  <line
+     x1="818"
+     y1="196"
+     x2="828"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line125" />
+  <!-- 1: Purge dups  x=830 (optional, dashed) -->
+  <rect
+     x="830"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAEEDA"
+     stroke="#BA7517"
+     stroke-width="1"
+     stroke-dasharray="6 3"
+     id="rect127" />
+  <text
+     x="894"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#633806"
+     id="text129">Purge dups</text>
+  <text
+     x="894"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#854F0B"
+     id="text131">Optional</text>
+  <!-- 1→2 -->
+  <line
+     x1="958"
+     y1="196"
+     x2="968"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line133" />
+  <!-- 2: Inspector ctg  x=970 -->
+  <rect
+     x="970"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect135" />
+  <text
+     x="1034"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text137">Inspector</text>
+  <text
+     x="1034"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text139">Contig correction</text>
+  <!-- 2→3 -->
+  <line
+     x1="1098"
+     y1="196"
+     x2="1108"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line141" />
+  <!-- 3: Decon ctg  x=1110 -->
+  <rect
+     x="1110"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect143" />
+  <text
+     x="1174"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text145">Decon (contigs)</text>
+  <text
+     x="1174"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text147">FCS-GX + blobtools</text>
+  <!-- 3→4 -->
+  <line
+     x1="1238"
+     y1="196"
+     x2="1248"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line149" />
+  <!-- 4: Map Hi-C  x=1250 -->
+  <rect
+     x="1250"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect151" />
+  <text
+     x="1314"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text153">Map Hi-C</text>
+  <text
+     x="1314"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text155">bwa-mem2 → contigs</text>
+  <!-- Hi-C reads feed into Map Hi-C from row C -->
+  <!-- Trim Hi-C right edge is at 304 y=236; Map Hi-C bottom center is 1314 y=218 -->
+  <!-- Route along bottom: from Trim Hi-C y=236 → right across to x=1314, then up -->
+  <path
+     d="M304 236 L304 288 L1314 288 L1314 218"
+     fill="none"
+     stroke="#185FA5"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr)"
+     id="path157" />
+  <!-- 4→5 -->
+  <line
+     x1="1378"
+     y1="196"
+     x2="1388"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line159" />
+  <!-- 5: Filter BAM  x=1390 -->
+  <rect
+     x="1390"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect161" />
+  <text
+     x="1454"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text163">Filter BAM</text>
+  <text
+     x="1454"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text165">pairtools dedup</text>
+  <!-- 5→6 -->
+  <line
+     x1="1518"
+     y1="196"
+     x2="1528"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line167" />
+  <!-- 6: YaHS R1  x=1530 -->
+  <rect
+     x="1530"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1.5"
+     id="rect169" />
+  <text
+     x="1594"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#26215C"
+     id="text171">YaHS (round 1)</text>
+  <text
+     x="1594"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text173">Hi-C scaffolding</text>
+  <!-- 6→7 -->
+  <line
+     x1="1658"
+     y1="196"
+     x2="1668"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line175" />
+  <!-- 7: Inspector scf  x=1670 -->
+  <rect
+     x="1670"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect177" />
+  <text
+     x="1734"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text179">Inspector</text>
+  <text
+     x="1734"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text181">Scaffold correction</text>
+  <!-- 7→8 -->
+  <line
+     x1="1798"
+     y1="196"
+     x2="1808"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line183" />
+  <!-- 8: Decon scf (optional)  x=1810 -->
+  <rect
+     x="1810"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     stroke-dasharray="6 3"
+     id="rect185" />
+  <text
+     x="1874"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text187">Decon (scaffolds)</text>
+  <text
+     x="1874"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text189">Optional re-screen</text>
+  <!-- 8→9 -->
+  <line
+     x1="1938"
+     y1="196"
+     x2="1948"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line191" />
+  <!-- 9: YaHS R2 (optional)  x=1950 -->
+  <rect
+     x="1950"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1"
+     stroke-dasharray="6 3"
+     id="rect193" />
+  <text
+     x="2014"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#26215C"
+     id="text195">YaHS (round 2)</text>
+  <text
+     x="2014"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text197">Optional re-scaffold</text>
+  <!-- 9→10 -->
+  <line
+     x1="2078"
+     y1="196"
+     x2="2088"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line199" />
+  <!-- 10: Gap fill  x=2090 -->
+  <rect
+     x="2090"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect201" />
+  <text
+     x="2154"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text203">Gap fill</text>
+  <text
+     x="2154"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text205">TGSGapCloser</text>
+  <!-- 10→11 -->
+  <line
+     x1="2218"
+     y1="196"
+     x2="2228"
+     y2="196"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line207" />
+  <!-- 11: Teloclip  x=2230 -->
+  <rect
+     x="2230"
+     y="174"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect209" />
+  <text
+     x="2294"
+     y="192"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text211">Teloclip</text>
+  <text
+     x="2294"
+     y="207"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text213">Telomere extension</text>
+  <!-- 11→Finalize (down) -->
+  <path
+     d="M2294 218 L2294 248 L2224 248 L2224 268"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path215" />
+  <!-- Gap fill also feeds finalize -->
+  <path
+     d="M2154 218 L2154 248"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path217" />
+  <!-- ============================================================
+  FINALIZE  centered under gap fill + teloclip
+  x=2090 w=268 y=250
+============================================================ -->
+  <rect
+     x="2090"
+     y="250"
+     width="268"
+     height="44"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="2"
+     id="rect219" />
+  <text
+     x="2224"
+     y="268"
+     text-anchor="middle"
+     font-size="13"
+     font-weight="700"
+     fill="#26215C"
+     id="text221">Finalize assembly</text>
+  <text
+     x="2224"
+     y="283"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text223">Rename + sort scaffolds, index FASTA</text>
+  <!-- ============================================================
+  ROW E — QC FAN  y_top=356 y_ctr=378
+  6 boxes, centers: 750, 1032, 1314, 1596, 1878, 2224
+  Box w=160
+  Finalize → down to fan spine at y=330
+============================================================ -->
+  <!-- Finalize down to fan spine -->
+  <path
+     d="M2224 294 L2224 340"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     id="path225" />
+  <!-- Fan spine horizontal line -->
+  <path
+     d="M2224 340 L750 340"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     id="path227" />
+  <!-- Drop arrows to each QC box -->
+  <line
+     x1="750"
+     y1="340"
+     x2="750"
+     y2="354"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line229" />
+  <line
+     x1="1032"
+     y1="340"
+     x2="1032"
+     y2="354"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line231" />
+  <line
+     x1="1314"
+     y1="340"
+     x2="1314"
+     y2="354"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line233" />
+  <line
+     x1="1596"
+     y1="340"
+     x2="1596"
+     y2="354"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line235" />
+  <line
+     x1="1878"
+     y1="340"
+     x2="1878"
+     y2="354"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line237" />
+  <line
+     x1="2224"
+     y1="340"
+     x2="2224"
+     y2="354"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line239" />
+  <!-- QC boxes y=356, h=44, w=160, centers as above -->
+  <!-- QUAST + BUSCO -->
+  <rect
+     x="670"
+     y="356"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect241" />
+  <text
+     x="750"
+     y="374"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text243">QUAST + BUSCO</text>
+  <text
+     x="750"
+     y="389"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text245">Contiguity + completeness</text>
+  <!-- Merqury -->
+  <rect
+     x="952"
+     y="356"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect247" />
+  <text
+     x="1032"
+     y="374"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text249">Merqury</text>
+  <text
+     x="1032"
+     y="389"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text251">QV + k-mer completeness</text>
+  <!-- Snail + TIDK -->
+  <rect
+     x="1234"
+     y="356"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect253" />
+  <text
+     x="1314"
+     y="374"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text255">Snail plot + TIDK</text>
+  <text
+     x="1314"
+     y="389"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text257">Assembly stats + telomeres</text>
+  <!-- Hi-C contact map -->
+  <rect
+     x="1516"
+     y="356"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect259" />
+  <text
+     x="1596"
+     y="374"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text261">Hi-C contact map</text>
+  <text
+     x="1596"
+     y="389"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text263">Chromosome interactions</text>
+  <!-- Pairwise dotplot -->
+  <rect
+     x="1798"
+     y="356"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect265" />
+  <text
+     x="1878"
+     y="374"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text267">Pairwise dotplot</text>
+  <text
+     x="1878"
+     y="389"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text269">hap1 vs hap2 synteny</text>
+  <!-- Summary report (wider) -->
+  <rect
+     x="2104"
+     y="356"
+     width="240"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#5F5E5A"
+     stroke-width="1.5"
+     id="rect271" />
+  <text
+     x="2224"
+     y="374"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text273">Summary report</text>
+  <text
+     x="2224"
+     y="389"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text275">Interactive HTML · all QC metrics</text>
+  <!-- QC boxes → Summary report merge line -->
+  <path
+     d="M830  378 L870 378 L870 440 L2102 440 L2102 400"
+     fill="none"
+     stroke="#555"
+     stroke-width="0.8"
+     stroke-dasharray="4 2"
+     marker-end="url(#arr)"
+     id="path277" />
+  <path
+     d="M1112 378 L1112 440"
+     fill="none"
+     stroke="#555"
+     stroke-width="0.8"
+     stroke-dasharray="4 2"
+     id="path279" />
+  <path
+     d="M1394 378 L1394 440"
+     fill="none"
+     stroke="#555"
+     stroke-width="0.8"
+     stroke-dasharray="4 2"
+     id="path281" />
+  <path
+     d="M1676 378 L1676 440"
+     fill="none"
+     stroke="#555"
+     stroke-width="0.8"
+     stroke-dasharray="4 2"
+     id="path283" />
+  <path
+     d="M1958 378 L1958 440"
+     fill="none"
+     stroke="#555"
+     stroke-width="0.8"
+     stroke-dasharray="4 2"
+     id="path285" />
+  <!-- ============================================================
+  LEGEND
+============================================================ -->
+  <rect
+     x="30"
+     y="355"
+     width="580"
+     height="160"
+     rx="8"
+     fill="#f9f9f9"
+     stroke="#e0e0e0"
+     stroke-width="1"
+     id="rect287" />
+  <text
+     x="320"
+     y="374"
+     text-anchor="middle"
+     font-size="11"
+     font-weight="700"
+     fill="#1a1a1a"
+     id="text289">Legend</text>
+  <rect
+     x="46"
+     y="384"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect291" />
+  <text
+     x="63"
+     y="393"
+     font-size="10"
+     fill="#333"
+     id="text293">Hi-C / read processing</text>
+  <rect
+     x="196"
+     y="384"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1.5"
+     id="rect295" />
+  <text
+     x="213"
+     y="393"
+     font-size="10"
+     fill="#333"
+     id="text297">Assembly / scaffolding</text>
+  <rect
+     x="356"
+     y="384"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect299" />
+  <text
+     x="373"
+     y="393"
+     font-size="10"
+     fill="#333"
+     id="text301">Correction / decontamination</text>
+  <rect
+     x="46"
+     y="404"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect303" />
+  <text
+     x="63"
+     y="413"
+     font-size="10"
+     fill="#333"
+     id="text305">Mitogenome assembly</text>
+  <rect
+     x="196"
+     y="404"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#FAEEDA"
+     stroke="#BA7517"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect307" />
+  <text
+     x="213"
+     y="413"
+     font-size="10"
+     fill="#333"
+     id="text309">Optional step (dashed border)</text>
+  <rect
+     x="356"
+     y="404"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect311" />
+  <text
+     x="373"
+     y="413"
+     font-size="10"
+     fill="#333"
+     id="text313">QC and visualization</text>
+  <rect
+     x="46"
+     y="424"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect315" />
+  <text
+     x="63"
+     y="433"
+     font-size="10"
+     fill="#333"
+     id="text317">Input / output</text>
+  <line
+     x1="196"
+     y1="429"
+     x2="207"
+     y2="429"
+     stroke="#999"
+     stroke-width="1"
+     stroke-dasharray="4 2"
+     id="line319" />
+  <text
+     x="213"
+     y="433"
+     font-size="10"
+     fill="#333"
+     id="text321">Auxiliary / conditional flow</text>
+  <text
+     x="46"
+     y="453"
+     font-size="10"
+     fill="#888"
+     id="text323">Row 1: Mito branch runs in parallel with main pipeline from HiFi reads.</text>
+  <text
+     x="46"
+     y="467"
+     font-size="10"
+     fill="#888"
+     id="text325">Row 2: HiFi track. Row 3: Hi-C track. Rows 2+3 merge into HIFIASM. All downstream steps process hap1 + hap2 independently.</text>
+  <text
+     x="46"
+     y="481"
+     font-size="10"
+     fill="#888"
+     id="text327">Dashed blue line: trimmed Hi-C reads also routed to Hi-C mapping step after scaffolding setup.</text>
+  <text
+     x="46"
+     y="495"
+     font-size="10"
+     fill="#888"
+     id="text329">Dashed green line: assembled mitogenome used to filter nuclear mito-like contigs from HIFIASM output.</text>
+  <text
+     x="46"
+     y="509"
+     font-size="10"
+     fill="#888"
+     id="text331">Dashed gray arrows: QC outputs aggregated into summary report.</text>
+  <metadata
+     id="metadata1152">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:title>Genome Assembly Pipeline</dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+</svg>
