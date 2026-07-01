@@ -4,13 +4,14 @@
 ========================================================================================
     Assembles and annotates the mitochondrial genome from PacBio HiFi reads
     using MitoHiFi in reads mode (-r).
+    Repo location: modules/mitohifi.nf
 
     Runs concurrently with HIFIASM — both consume HiFi reads independently.
     The assembled mitogenome is used downstream by FILTER_MITO_CONTIGS to
     remove mitochondrial sequences from the nuclear assembly.
 
     Input:
-    - sample_id + hifi_fastq: HiFi reads (from BAM_TO_FASTQ)
+    - meta + hifi_fastq: HiFi reads (from BAM_TO_FASTQ)
     - ref_fasta: Closely related mitogenome FASTA (from FIND_MITO_REFERENCE)
     - ref_gb: Matching GenBank annotation (from FIND_MITO_REFERENCE)
 
@@ -19,35 +20,27 @@
     - annotation: GenBank annotation of the mitogenome
     - stats: Assembly statistics and QC metrics
     - contigs_fasta: All candidate mitochondrial contigs (for filtering)
-    - output_dir: Full MitoHiFi output directory (images, logs, intermediates)
-
-    Key MitoHiFi outputs preserved:
-    - final_mitogenome.fasta — circularized, rotated mitogenome
-    - final_mitogenome.gb — annotated GenBank file
-    - final_mitogenome.annotation.png — gene map visualization
-    - contigs_stats.tsv — per-contig statistics
-    - shared_genes.tsv — genes shared with reference
 ========================================================================================
 */
 
 process MITOHIFI {
-    tag "${sample_id}"
+    tag "${meta.sample}"
     label 'mitohifi'
 
     publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
 
     input:
-    tuple val(sample_id), path(hifi_fastq)
+    tuple val(meta), path(hifi_fastq)
     path(ref_fasta)
     path(ref_gb)
 
     output:
-    tuple val(sample_id), path("${sample_id}_mitogenome.fasta"),           emit: mitogenome
-    tuple val(sample_id), path("${sample_id}_mitogenome.gb"),              emit: annotation
-    tuple val(sample_id), path("${sample_id}_mito_stats.tsv"),             emit: stats
-    tuple val(sample_id), path("${sample_id}_mito_contigs.fasta"),         emit: contigs_fasta
-    //tuple val(sample_id), path("mitohifi_output"),                         emit: output_dir
-    tuple val(sample_id), path("${sample_id}_final_mitogenome*.png"),      emit: gene_map, optional: true
+    tuple val(meta), path("${meta.sample}_mitogenome.fasta"),           emit: mitogenome
+    tuple val(meta), path("${meta.sample}_mitogenome.gb"),              emit: annotation
+    tuple val(meta), path("${meta.sample}_mito_stats.tsv"),             emit: stats
+    tuple val(meta), path("${meta.sample}_mito_contigs.fasta"),         emit: contigs_fasta
+    //tuple val(meta), path("mitohifi_output"),                          emit: output_dir
+    tuple val(meta), path("${meta.sample}_final_mitogenome*.png"),      emit: gene_map, optional: true
 
     script:
     def genetic_code = params.mitohifi_genetic_code ?: 2
@@ -61,7 +54,7 @@ process MITOHIFI {
     """
     set -euo pipefail
 
-    echo "[MITOHIFI] Assembling mitogenome for ${sample_id}"
+    echo "[MITOHIFI] Assembling mitogenome for ${meta.sample}"
     echo "[MITOHIFI] Genetic code: ${genetic_code}"
     echo "[MITOHIFI] Min percent identity: ${perc_id}%"
     echo "[MITOHIFI] Reference: ${ref_fasta}"
@@ -84,14 +77,14 @@ process MITOHIFI {
     echo "[MITOHIFI] MitoHiFi complete: \$(date)"
 
     # -------------------------------------------------------------------------
-    # Collect and rename outputs with sample_id prefix
+    # Collect and rename outputs with sample prefix
     # -------------------------------------------------------------------------
 
     # Final mitogenome
     if [ -f final_mitogenome.fasta ]; then
-        # Prefix the header with sample_id for clarity
-        sed "s/^>/>mitogenome_${sample_id} /" final_mitogenome.fasta \\
-            > ${sample_id}_mitogenome.fasta
+        # Prefix the header with sample for clarity
+        sed "s/^>/>mitogenome_${meta.sample} /" final_mitogenome.fasta \\
+            > ${meta.sample}_mitogenome.fasta
     else
         echo "[MITOHIFI] WARNING: final_mitogenome.fasta not found"
         echo "[MITOHIFI] MitoHiFi may have failed to assemble a complete mitogenome"
@@ -102,28 +95,28 @@ process MITOHIFI {
 
     # GenBank annotation
     if [ -f final_mitogenome.gb ]; then
-        cp final_mitogenome.gb ${sample_id}_mitogenome.gb
+        cp final_mitogenome.gb ${meta.sample}_mitogenome.gb
     else
-        touch ${sample_id}_mitogenome.gb
+        touch ${meta.sample}_mitogenome.gb
     fi
 
     # Gene map image(s)
     for png in final_mitogenome*.png; do
-        [ -f "\${png}" ] && cp "\${png}" "${sample_id}_\${png}"
+        [ -f "\${png}" ] && cp "\${png}" "${meta.sample}_\${png}"
     done
 
     # All candidate mito contigs (used by FILTER_MITO_CONTIGS)
     if [ -f contigs_filtering/all_potential_contigs.fa ]; then
-        cp contigs_filtering/all_potential_contigs.fa ${sample_id}_mito_contigs.fasta
+        cp contigs_filtering/all_potential_contigs.fa ${meta.sample}_mito_contigs.fasta
     elif [ -f final_mitogenome.fasta ]; then
         # Fallback: use the final mitogenome itself as the filter target
-        cp final_mitogenome.fasta ${sample_id}_mito_contigs.fasta
+        cp final_mitogenome.fasta ${meta.sample}_mito_contigs.fasta
     fi
 
     # -------------------------------------------------------------------------
     # Compile statistics
     # -------------------------------------------------------------------------
-    MITO_LEN=\$(grep -v '^>' ${sample_id}_mitogenome.fasta | tr -d '\\n' | wc -c)
+    MITO_LEN=\$(grep -v '^>' ${meta.sample}_mitogenome.fasta | tr -d '\\n' | wc -c)
 
     # Check circularity from MitoHiFi log
     CIRCULAR="unknown"
@@ -133,25 +126,25 @@ process MITOHIFI {
 
     # Count annotated genes
     GENE_COUNT=0
-    if [ -f ${sample_id}_mitogenome.gb ]; then
-        GENE_COUNT=\$(grep -c '^ */gene=' ${sample_id}_mitogenome.gb 2>/dev/null || echo 0)
+    if [ -f ${meta.sample}_mitogenome.gb ]; then
+        GENE_COUNT=\$(grep -c '^ */gene=' ${meta.sample}_mitogenome.gb 2>/dev/null || echo 0)
     fi
 
     # Count tRNAs
     TRNA_COUNT=0
-    if [ -f ${sample_id}_mitogenome.gb ]; then
-        TRNA_COUNT=\$(grep -c '^ */product="tRNA' ${sample_id}_mitogenome.gb 2>/dev/null || echo 0)
+    if [ -f ${meta.sample}_mitogenome.gb ]; then
+        TRNA_COUNT=\$(grep -c '^ */product="tRNA' ${meta.sample}_mitogenome.gb 2>/dev/null || echo 0)
     fi
 
     # Count rRNAs
     RRNA_COUNT=0
-    if [ -f ${sample_id}_mitogenome.gb ]; then
-        RRNA_COUNT=\$(grep -c 'rRNA' ${sample_id}_mitogenome.gb 2>/dev/null || echo 0)
+    if [ -f ${meta.sample}_mitogenome.gb ]; then
+        RRNA_COUNT=\$(grep -c 'rRNA' ${meta.sample}_mitogenome.gb 2>/dev/null || echo 0)
     fi
 
-    cat > ${sample_id}_mito_stats.tsv <<EOF
+    cat > ${meta.sample}_mito_stats.tsv <<EOF
 sample_id\tmitogenome_length\tcircular\tgene_count\ttrna_count\trrna_count\tgenetic_code
-${sample_id}\t\${MITO_LEN}\t\${CIRCULAR}\t\${GENE_COUNT}\t\${TRNA_COUNT}\t\${RRNA_COUNT}\t${genetic_code}
+${meta.sample}\t\${MITO_LEN}\t\${CIRCULAR}\t\${GENE_COUNT}\t\${TRNA_COUNT}\t\${RRNA_COUNT}\t${genetic_code}
 EOF
 
     echo "[MITOHIFI] Mitogenome summary:"
@@ -170,11 +163,11 @@ EOF
     stub:
     """
     mkdir -p mitohifi_output
-    echo ">mitogenome_${sample_id} stub" > ${sample_id}_mitogenome.fasta
-    echo "ATCGATCG" >> ${sample_id}_mitogenome.fasta
-    touch ${sample_id}_mitogenome.gb
-    touch ${sample_id}_mito_stats.tsv
-    cp ${sample_id}_mitogenome.fasta ${sample_id}_mito_contigs.fasta
-    touch ${sample_id}_final_mitogenome.annotation.png
+    echo ">mitogenome_${meta.sample} stub" > ${meta.sample}_mitogenome.fasta
+    echo "ATCGATCG" >> ${meta.sample}_mitogenome.fasta
+    touch ${meta.sample}_mitogenome.gb
+    touch ${meta.sample}_mito_stats.tsv
+    cp ${meta.sample}_mitogenome.fasta ${meta.sample}_mito_contigs.fasta
+    touch ${meta.sample}_final_mitogenome.annotation.png
     """
 }

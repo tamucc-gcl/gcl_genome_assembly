@@ -2,40 +2,30 @@
 ========================================================================================
     FILTER HI-C BAM MODULE (FAST + EXPLICIT)
 ========================================================================================
-    Filters Hi-C BAM files to remove invalid/low-quality pairs and PCR duplicates
-    - Pair-level filtering (explicit): keeps only UU pairs (both ends uniquely mapped)
-    - MAPQ filter at parse stage (default: 30)
-    - PCR duplicate removal using pairtools (in pair-space)
-    - Produces:
-        1) coordinate-sorted, indexed BAM (for scaffolding / visualization)
-        2) filtered pairs.gz (for QC/contact-map tooling)
-        3) stats report combining samtools + pairtools summaries
+    Repo location: modules/filter_hic_bam.nf
 
-    Speed improvements vs original:
-    - Avoids writing gigantic intermediate SAMs and merge steps
-    - Streams pairsam -> samtools sort directly
-    - Uses work-directory-local temp to avoid /tmp collisions across tasks/nodes
-    - Uses pairtools multithreading where supported
-
-    Stage parameter controls publishDir but not filenames
+    Filters Hi-C BAM to keep valid UU pairs, MAPQ filter at parse, PCR-dup removal in
+    pair-space. Produces sorted/indexed BAM, filtered pairs.gz, and a combined stats report.
+    Work-dir-local temp (job-namespaced via meta.id) avoids /tmp collisions across tasks.
+    Stage parameter controls publishDir but not filenames.
 ========================================================================================
 */
 
 process FILTER_HIC_BAM {
-    tag "${haplotype_id}_${stage}"
+    tag "${meta.id}_${stage}"
     label 'filter_hic_bam'
 
     publishDir "${params.outdir}/bam/hic/${stage}/filtered", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), val(stage), path(bam), path(bai), path(assembly_fasta)
+    tuple val(meta), val(stage), path(bam), path(bai), path(assembly_fasta)
 
     output:
-    tuple val(haplotype_id), val(stage), path("${haplotype_id}.filtered.sorted.bam"), path("${haplotype_id}.filtered.sorted.bam.bai"), emit: bam
-    tuple val(haplotype_id), val(stage), path("${haplotype_id}_filtering_stats.txt"), emit: stats
-    tuple val(haplotype_id), val(stage), path("${haplotype_id}.pairs.gz"), emit: pairs
-    tuple val(haplotype_id), val(stage), path("${haplotype_id}_parse_stats.txt"), emit: parse_stats
-    tuple val(haplotype_id), val(stage), path("${haplotype_id}_dedup_stats.txt"), emit: dedup_stats
+    tuple val(meta), val(stage), path("${meta.id}.filtered.sorted.bam"), path("${meta.id}.filtered.sorted.bam.bai"), emit: bam
+    tuple val(meta), val(stage), path("${meta.id}_filtering_stats.txt"), emit: stats
+    tuple val(meta), val(stage), path("${meta.id}.pairs.gz"), emit: pairs
+    tuple val(meta), val(stage), path("${meta.id}_parse_stats.txt"), emit: parse_stats
+    tuple val(meta), val(stage), path("${meta.id}_dedup_stats.txt"), emit: dedup_stats
 
     script:
     """
@@ -45,7 +35,7 @@ process FILTER_HIC_BAM {
     MINQ=${params.hic_min_mapq ?: 30}
 
     # Force all temp file defaults onto the scratch-backed working directory.
-    # Nextflow's scratch directive already places $PWD on local NVMe; this
+    # Nextflow's scratch directive already places \$PWD on local NVMe; this
     # ensures pairtools sort (which reads TMPDIR) doesn't fall back to /tmp.
     export TMPDIR="\$PWD"
 
@@ -69,13 +59,13 @@ process FILTER_HIC_BAM {
     # 2) Parse -> sort -> dedup -> select (keep only valid UU pairs)
     #    IMPORTANT: output is a .pairsam.gz containing sam1/sam2 so we can restore BAM.
     # -------------------------------------------------------------------------
-    samtools collate -T "\$PWD/${haplotype_id}_collate" -@ \${T_IO} -O -u ${bam} | \\
+    samtools collate -T "\$PWD/${meta.id}_collate" -@ \${T_IO} -O -u ${bam} | \\
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
         --max-inter-align-gap 30 \\
         --chroms-path chrom.sizes \\
-        --output-stats ${haplotype_id}_parse_stats.txt \\
+        --output-stats ${meta.id}_parse_stats.txt \\
         --nproc-in  \${T_IO} \\
         --nproc-out \${T_IO} \\
         - \\
@@ -84,31 +74,31 @@ process FILTER_HIC_BAM {
         --tmpdir "\$PWD" \\
     | pairtools dedup \\
         --mark-dups \\
-        --output-stats ${haplotype_id}_dedup_stats.txt \\
-        --output-dups ${haplotype_id}.dups.pairs.gz \\
+        --output-stats ${meta.id}_dedup_stats.txt \\
+        --output-dups ${meta.id}.dups.pairs.gz \\
     | pairtools select '(pair_type == "UU")' \\
-        --output ${haplotype_id}.pairsam.gz
+        --output ${meta.id}.pairsam.gz
 
     # -------------------------------------------------------------------------
     # 3) Create filtered .pairs.gz AND restore a filtered BAM, fast:
     #    pairtools split streams SAM to stdout; samtools consumes + sorts once.
     # -------------------------------------------------------------------------
     pairtools split \\
-      --output-pairs ${haplotype_id}.pairs.gz \\
+      --output-pairs ${meta.id}.pairs.gz \\
       --output-sam - \\
       --nproc-in  \${T_IO} \\
       --nproc-out \${T_IO} \\
-      ${haplotype_id}.pairsam.gz \\
+      ${meta.id}.pairsam.gz \\
     | samtools view -@ \${T_IO} -b - \\
-    | samtools sort -@ \${T_SORT} -T "\$PWD/${haplotype_id}.sort" -o ${haplotype_id}.filtered.sorted.bam -
+    | samtools sort -@ \${T_SORT} -T "\$PWD/${meta.id}.sort" -o ${meta.id}.filtered.sorted.bam -
 
-    samtools index -@ \${CPUS} ${haplotype_id}.filtered.sorted.bam
+    samtools index -@ \${CPUS} ${meta.id}.filtered.sorted.bam
 
     # -------------------------------------------------------------------------
     # 4) Optional pair-level stats (pairtools stats) if available
     # -------------------------------------------------------------------------
     if pairtools stats --help >/dev/null 2>&1; then
-      pairtools stats ${haplotype_id}.pairs.gz > ${haplotype_id}_pairs_stats.txt
+      pairtools stats ${meta.id}.pairs.gz > ${meta.id}_pairs_stats.txt
       HAVE_PAIRTOOLS_STATS=1
     else
       HAVE_PAIRTOOLS_STATS=0
@@ -121,14 +111,14 @@ process FILTER_HIC_BAM {
     # Exclude secondary (0x100) and supplementary (0x800) alignments:
     # 0x100 + 0x800 = 0x900 = 2304
     original_primary=\$(samtools view -c -F 2304 ${bam})
-    filtered_primary=\$(samtools view -c -F 2304 ${haplotype_id}.filtered.sorted.bam)
+    filtered_primary=\$(samtools view -c -F 2304 ${meta.id}.filtered.sorted.bam)
 
     # Avoid hard dependency on bc; awk is everywhere
     retained_pct=\$(awk -v f="\$filtered_primary" -v o="\$original_primary" 'BEGIN{ if(o>0) printf("%.2f", (f/o)*100); else print "NA"; }')
 
     {
       echo "================================================================================"
-      echo "Hi-C BAM Filtering Statistics for ${haplotype_id} (${stage})"
+      echo "Hi-C BAM Filtering Statistics for ${meta.id} (${stage})"
       echo "Generated: \$(date)"
       echo "pairtools version: \$(pairtools --version 2>/dev/null || echo 'unknown')"
       echo "samtools version:  \$(samtools --version | head -n 1)"
@@ -147,24 +137,24 @@ process FILTER_HIC_BAM {
       echo "--------------------------------------------------------------------------------"
       echo "PAIRTOOLS PARSE STATS"
       echo "--------------------------------------------------------------------------------"
-      cat ${haplotype_id}_parse_stats.txt
+      cat ${meta.id}_parse_stats.txt
       echo
       echo "--------------------------------------------------------------------------------"
       echo "PAIRTOOLS DEDUP STATS"
       echo "--------------------------------------------------------------------------------"
-      cat ${haplotype_id}_dedup_stats.txt
+      cat ${meta.id}_dedup_stats.txt
       echo
       if [[ "\${HAVE_PAIRTOOLS_STATS}" -eq 1 ]]; then
         echo "--------------------------------------------------------------------------------"
         echo "PAIRTOOLS PAIRS STATS (filtered pairs.gz)"
         echo "--------------------------------------------------------------------------------"
-        cat ${haplotype_id}_pairs_stats.txt
+        cat ${meta.id}_pairs_stats.txt
         echo
       fi
       echo "--------------------------------------------------------------------------------"
       echo "FILTERED BAM (samtools flagstat)"
       echo "--------------------------------------------------------------------------------"
-      samtools flagstat ${haplotype_id}.filtered.sorted.bam
+      samtools flagstat ${meta.id}.filtered.sorted.bam
       echo
       echo "--------------------------------------------------------------------------------"
       echo "ALIGNMENT-LEVEL RETENTION (primary alignments only; excludes secondary+supplementary)"
@@ -177,21 +167,21 @@ process FILTER_HIC_BAM {
       echo "  - Use pairs.gz / pairtools stats for true pair-level retention."
       echo "  - UU-only is typically a good default for scaffolding to reduce noise."
       echo "================================================================================"
-    } > ${haplotype_id}_filtering_stats.txt
+    } > ${meta.id}_filtering_stats.txt
 
     # Cleanup intermediates
-    rm -f ${haplotype_id}.pairsam.gz
-    rm -f ${haplotype_id}.dups.pairs.gz
+    rm -f ${meta.id}.pairsam.gz
+    rm -f ${meta.id}.dups.pairs.gz
     rm -f chrom.sizes
     """
 
     stub:
     """
-    touch ${haplotype_id}.filtered.sorted.bam
-    touch ${haplotype_id}.filtered.sorted.bam.bai
-    touch ${haplotype_id}_filtering_stats.txt
-    touch ${haplotype_id}.pairs.gz
-    touch ${haplotype_id}_parse_stats.txt
-    touch ${haplotype_id}_dedup_stats.txt
+    touch ${meta.id}.filtered.sorted.bam
+    touch ${meta.id}.filtered.sorted.bam.bai
+    touch ${meta.id}_filtering_stats.txt
+    touch ${meta.id}.pairs.gz
+    touch ${meta.id}_parse_stats.txt
+    touch ${meta.id}_dedup_stats.txt
     """
 }

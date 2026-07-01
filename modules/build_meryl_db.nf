@@ -2,25 +2,25 @@
 ========================================================================================
     BUILD MERYL DATABASE MODULE
 ========================================================================================
-    Builds k-mer database from HiFi reads for use with Merqury
-    - Run once per sample
-    - Reused across all assembly QC steps
-    - Significantly speeds up iterative QC
+    Repo location: modules/build_meryl_db.nf
+
+    Builds a k-mer database from HiFi reads for Merqury. Run once per sample, reused
+    across all assembly-QC steps. Carries the sample-level meta (meta.id == sample).
 ========================================================================================
 */
 
 process BUILD_MERYL_DB {
-    tag "${sample_id}"
+    tag "${meta.id}"
     label 'merqury'
-    
+
     //publishDir "${params.outdir}/meryl_db", mode: params.publish_dir_mode
-    
+
     input:
-    tuple val(sample_id), path(hifi_fastq)
-    
+    tuple val(meta), path(hifi_fastq)
+
     output:
-    tuple val(sample_id), path("${sample_id}.meryl"), emit: meryl_db
-    
+    tuple val(meta), path("${meta.id}.meryl"), emit: meryl_db
+
     script:
     def k = params.merqury_k ?: 21
     """
@@ -30,12 +30,12 @@ process BUILD_MERYL_DB {
         threads=${task.cpus} \\
         memory=${task.memory.toGiga()} \\
         ${hifi_fastq} \\
-        output ${sample_id}.meryl
+        output ${meta.id}.meryl
     """
-    
+
     stub:
     """
-    mkdir -p ${sample_id}.meryl
-    touch ${sample_id}.meryl/merylIndex
+    mkdir -p ${meta.id}.meryl
+    touch ${meta.id}.meryl/merylIndex
     """
 }

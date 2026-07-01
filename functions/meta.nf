@@ -17,8 +17,7 @@
       assembler    'hifiasm' | 'spades'
       dedup        'purge_dups' | 'redundans' | 'none'   (selectable, input-independent)
       mito_tool    'mitohifi' | 'mitofinder' | 'none'
-      hic_rounds   N rounds of YaHS (0 if no Hi-C)        [consumed in Phase 5]
-      scaffolders  ordered subset of ['linked','hic']     [consumed in Phase 4/5]
+      (scaffolding round count + scaffolder ordering are intentionally NOT in meta — see CACHING)
 
     PER-HAPLOTYPE meta (forkHaplotypeMeta — wired during Phase 1 module threading):
       id           "${sample}_hap1" | "${sample}_hap2" | "${sample}_primary"
@@ -33,6 +32,13 @@
         (so a HiFi+Hi-C run with run_purge_dups=false still resolves to dedup='none').
       - ploidy defaults to 'diploid'; mito_tool defaults to 'mitohifi' when HiFi is present.
       => the legacy 4-column sheet resolves to a meta that reproduces current behavior.
+
+    CACHING:
+      meta becomes part of each task's hash, so only stable per-sample identity/strategy fields
+      live here. Volatile knobs (scaffolding round count, scaffolder ordering) are deliberately
+      EXCLUDED — tuning e.g. params.hic_scaffold_rounds must not re-hash (and re-run) upstream
+      assembly/QC tasks. Read params.hic_scaffold_rounds at point of use, and derive scaffolder
+      ordering from meta.hic / meta.tellseq in routing (Phase 5).
 ========================================================================================
 */
 
@@ -86,14 +92,6 @@ def buildMeta(Map a) {
 
     def n_hap = (ploidy == 'haploid') ? 1 : 2
 
-    def rounds_param = (params.containsKey('hic_scaffold_rounds') && params.hic_scaffold_rounds != null) ?
-                       (params.hic_scaffold_rounds as Integer) : 2
-    def hic_rounds = hasHic ? rounds_param : 0
-
-    def scaffolders = []
-    if (hasTell) scaffolders << 'linked'
-    if (hasHic)  scaffolders << 'hic'
-
     return [
         id:          sample,
         sample:      sample,
@@ -106,9 +104,7 @@ def buildMeta(Map a) {
         long_reads:  hasHifi,          // (|| ONT later)
         assembler:   assembler,
         dedup:       dedup,
-        mito_tool:   mito,
-        hic_rounds:  hic_rounds,
-        scaffolders: scaffolders
+        mito_tool:   mito
     ]
 }
 

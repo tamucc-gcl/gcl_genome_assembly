@@ -2,24 +2,25 @@
 ========================================================================================
     FASTQC HiFi MODULE
 ========================================================================================
-    Runs FastQC on HiFi reads
+    Repo location: modules/fastqc_hifi.nf
+    Runs FastQC on HiFi reads (per-sample; carries meta, meta.id == sample).
 ========================================================================================
 */
 
 process FASTQC_HIFI {
-    tag "${sample_id}"
+    tag "${meta.id}"
     label 'fastqc'
-    
+
     //temporarily output
-    //publishDir "${params.outdir}/${sample_id}/qc/hifi/fastqc", mode: params.publish_dir_mode
-    
+    //publishDir "${params.outdir}/${meta.id}/qc/hifi/fastqc", mode: params.publish_dir_mode
+
     input:
-    tuple val(sample_id), path(hifi_fastq)
-    
+    tuple val(meta), path(hifi_fastq)
+
     output:
-    tuple val(sample_id), path("*.html"), emit: fastqc_html
-    tuple val(sample_id), path("*.zip"),  emit: fastqc_zip
-    
+    tuple val(meta), path("*.html"), emit: fastqc_html
+    tuple val(meta), path("*.zip"),  emit: fastqc_zip
+
     script:
     """
     fastqc \\
@@ -27,7 +28,7 @@ process FASTQC_HIFI {
         --outdir . \\
         ${hifi_fastq}
     """
-    
+
     stub:
     """
     touch ${hifi_fastq.baseName}_fastqc.html

@@ -2,23 +2,28 @@
 ========================================================================================
     Hi-C mapping metrics (NO remapping)
 ========================================================================================
+    Repo location: modules/hic_mapping_metrics.nf
+
     - BAM metrics: mapping %, primary mapped, etc.
     - pairs.gz metrics: cis/trans, trans:cis
     - optional: scaffold-space cis/trans via AGP (contig->scaffold relabel)
+
+    NOTE: the TSV "haplotype_id" column header is kept verbatim (it is the contract with
+    compile_final_qc.R / compile_qc.R); only the value written is now meta.id.
 ========================================================================================
 */
 
 process HIC_BAM_METRICS {
-    tag "${haplotype_id}_${checkpoint}"
+    tag "${meta.id}_${checkpoint}"
     label 'hic_qc'
 
     //publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), val(checkpoint), path(bam), path(bai)
+    tuple val(meta), val(checkpoint), path(bam), path(bai)
 
     output:
-    tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}_${checkpoint}.bam_metrics.tsv"), emit: metrics
+    tuple val(meta), val(checkpoint), path("${meta.id}_${checkpoint}.bam_metrics.tsv"), emit: metrics
 
     script:
     """
@@ -41,19 +46,19 @@ process HIC_BAM_METRICS {
 
     {
         echo -e "haplotype_id\\tcheckpoint\\tbam_total_align\\tbam_mapped_align\\tbam_mapped_pct\\tbam_primary_align\\tbam_primary_mapped\\tbam_primary_mapped_pct"
-        echo -e "${haplotype_id}\\t${checkpoint}\\t\$total\\t\$mapped\\t\$mapped_pct\\t\$primary_total\\t\$primary_mapped\\t\$primary_mapped_pct"
-    } > ${haplotype_id}_${checkpoint}.bam_metrics.tsv
+        echo -e "${meta.id}\\t${checkpoint}\\t\$total\\t\$mapped\\t\$mapped_pct\\t\$primary_total\\t\$primary_mapped\\t\$primary_mapped_pct"
+    } > ${meta.id}_${checkpoint}.bam_metrics.tsv
     """
 }
 
 process HIC_PAIRS_METRICS {
-    tag "${haplotype_id}_${checkpoint}"
+    tag "${meta.id}_${checkpoint}"
     label 'hic_qc'
 
     //publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id),
+    tuple val(meta),
         val(checkpoint),
         path(pairs_gz),
         path(agp),
@@ -61,7 +66,7 @@ process HIC_PAIRS_METRICS {
         path(dedup_stats)
 
     output:
-    tuple val(haplotype_id), val(checkpoint), path("${haplotype_id}_${checkpoint}.pairs_metrics.tsv"), emit: metrics
+    tuple val(meta), val(checkpoint), path("${meta.id}_${checkpoint}.pairs_metrics.tsv"), emit: metrics
 
     script:
     // Check if AGP is provided (not empty)
@@ -150,8 +155,8 @@ process HIC_PAIRS_METRICS {
 
     {
         echo -e "haplotype_id\\tcheckpoint\\tpairs_total\\tcis_pairs_contig\\ttrans_pairs_contig\\ttrans_to_cis_contig\\tcis_pairs_scaffold\\ttrans_pairs_scaffold\\ttrans_to_cis_scaffold\\tparse_total_pairs\\tretention_pct"
-        echo -e "${haplotype_id}\\t${checkpoint}\\t\${pairs_kept}\\t\${cis_contig}\\t\${trans_contig}\\t\${tc_contig}\\t\${cis_scaf}\\t\${trans_scaf}\\t\${tc_scaf}\\t\${total_in}\\t\${retention}"
-    } > ${haplotype_id}_${checkpoint}.pairs_metrics.tsv
+        echo -e "${meta.id}\\t${checkpoint}\\t\${pairs_kept}\\t\${cis_contig}\\t\${trans_contig}\\t\${tc_contig}\\t\${cis_scaf}\\t\${trans_scaf}\\t\${tc_scaf}\\t\${total_in}\\t\${retention}"
+    } > ${meta.id}_${checkpoint}.pairs_metrics.tsv
 
     rm -f pairs_metrics.kv contig_to_scaffold.tsv
     """

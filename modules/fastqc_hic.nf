@@ -2,25 +2,26 @@
 ========================================================================================
     FASTQC HI-C MODULE
 ========================================================================================
-    Runs FastQC on Hi-C paired-end reads
+    Repo location: modules/fastqc_hic.nf
+    Runs FastQC on Hi-C paired-end reads (per-sample; carries meta, meta.id == sample).
 ========================================================================================
 */
 
 process FASTQC_HIC {
-    tag "${sample_id}"
+    tag "${meta.id}"
     label 'fastqc'
-    
+
     //temporarily output
-    //publishDir "${params.outdir}/${sample_id}/qc/hic/${qc_label}/fastqc", mode: params.publish_dir_mode
-    
+    //publishDir "${params.outdir}/${meta.id}/qc/hic/${qc_label}/fastqc", mode: params.publish_dir_mode
+
     input:
-    tuple val(sample_id), path(hic_r1), path(hic_r2)
+    tuple val(meta), path(hic_r1), path(hic_r2)
     val qc_label  // "raw" or "trimmed"
-    
+
     output:
-    tuple val(sample_id), path("*.html"), emit: fastqc_html
-    tuple val(sample_id), path("*.zip"),  emit: fastqc_zip
-    
+    tuple val(meta), path("*.html"), emit: fastqc_html
+    tuple val(meta), path("*.zip"),  emit: fastqc_zip
+
     script:
     """
     fastqc \\
@@ -29,7 +30,7 @@ process FASTQC_HIC {
         ${hic_r1} \\
         ${hic_r2}
     """
-    
+
     stub:
     """
     touch ${hic_r1.baseName}_fastqc.html

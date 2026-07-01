@@ -2,44 +2,30 @@
 ========================================================================================
     FINALIZE ASSEMBLY MODULE
 ========================================================================================
-    Takes the final assembly from the pipeline and produces a clean, standardized
-    output suitable for downstream analysis and submission.
+    Repo location: modules/finalize_assembly.nf
 
-    Operations performed:
-      1. Classify sequences as chromosomal scaffolds vs unplaced contigs
-         based on a minimum scaffold size threshold
-      2. Rename chromosomal scaffolds by descending size: scaffold_1, scaffold_2, ...
-      3. Rename unplaced contigs by descending size: contig_1, contig_2, ...
-      4. Write all sequences in sorted order (scaffolds first, then contigs)
-      5. Produce a name mapping file (old name → new name) for traceability
-      6. Index the final FASTA
+    Classifies scaffolds vs unplaced contigs by size, renames by descending size
+    (scaffold_1..N, then contig_1..N), writes sorted FASTA + name map + index.
+    Deterministic ordering prevents contact-map display artifacts from length reorder.
 
-    The input channel is ch_final_assembly, which is set in main.nf to either
-    TELOCLIP_EXTEND.out.extended_assembly or GAP_FILLING.out.filled_assembly.
-
-    Input:
-    - tuple(haplotype_id, assembly_fasta)
-
-    Output:
-    - assembly:     tuple(haplotype_id, final_fasta)        — renamed, sorted FASTA
-    - name_map:     tuple(haplotype_id, name_map_tsv)       — old_name → new_name mapping
-    - fai:          tuple(haplotype_id, fasta_index)         — samtools faidx index
+    Input : tuple(meta, assembly_fasta)   (ch_final_assembly: teloclip- or gap-fill output)
+    Output: assembly / name_map / fai      (per-haplotype, meta.id)
 ========================================================================================
 */
 
 process FINALIZE_ASSEMBLY {
-    tag "${haplotype_id}"
+    tag "${meta.id}"
     label 'finalize_assembly'
 
     publishDir "${params.outdir}/assembly/final", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(assembly_fasta, stageAs: 'input/*')
+    tuple val(meta), path(assembly_fasta, stageAs: 'input/*')
 
     output:
-    tuple val(haplotype_id), path("${haplotype_id}.fasta"),          emit: assembly
-    tuple val(haplotype_id), path("${haplotype_id}.name_map.tsv"),   emit: name_map
-    tuple val(haplotype_id), path("${haplotype_id}.fasta.fai"),      emit: fai
+    tuple val(meta), path("${meta.id}.fasta"),          emit: assembly
+    tuple val(meta), path("${meta.id}.name_map.tsv"),   emit: name_map
+    tuple val(meta), path("${meta.id}.fasta.fai"),      emit: fai
 
     script:
     // Sequences >= this size are treated as chromosomal scaffolds.
@@ -102,8 +88,8 @@ process FINALIZE_ASSEMBLY {
     # ------------------------------------------------------------------
     # 3. Create the name mapping output (old_name → new_name)
     # ------------------------------------------------------------------
-    echo -e "old_name\\tnew_name\\tlength\\tclass" > ${haplotype_id}.name_map.tsv
-    cat name_map_full.tsv >> ${haplotype_id}.name_map.tsv
+    echo -e "old_name\\tnew_name\\tlength\\tclass" > ${meta.id}.name_map.tsv
+    cat name_map_full.tsv >> ${meta.id}.name_map.tsv
 
     # ------------------------------------------------------------------
     # 4. Extract sequences in sorted order and rename headers
@@ -125,26 +111,26 @@ process FINALIZE_ASSEMBLY {
                 next
             }
             { print }
-          ' > ${haplotype_id}.fasta
+          ' > ${meta.id}.fasta
 
     # ------------------------------------------------------------------
     # 5. Index the final output
     # ------------------------------------------------------------------
-    samtools faidx ${haplotype_id}.fasta
+    samtools faidx ${meta.id}.fasta
 
     # ------------------------------------------------------------------
     # 6. Summary log
     # ------------------------------------------------------------------
     N_SCAFF=\$(awk '\$4 == "scaffold"' name_map_full.tsv | wc -l)
     N_CTG=\$(awk '\$4 == "unplaced"' name_map_full.tsv | wc -l)
-    echo "[FINALIZE] ${haplotype_id}: \${N_SCAFF} scaffolds + \${N_CTG} unplaced contigs"
+    echo "[FINALIZE] ${meta.id}: \${N_SCAFF} scaffolds + \${N_CTG} unplaced contigs"
     echo "[FINALIZE] Scaffold size threshold: ${min_scaffold} bp"
     """
 
     stub:
     """
-    touch ${haplotype_id}.fasta
-    touch ${haplotype_id}.fasta.fai
-    echo -e "old_name\\tnew_name\\tlength\\tclass" > ${haplotype_id}.name_map.tsv
+    touch ${meta.id}.fasta
+    touch ${meta.id}.fasta.fai
+    echo -e "old_name\\tnew_name\\tlength\\tclass" > ${meta.id}.name_map.tsv
     """
 }

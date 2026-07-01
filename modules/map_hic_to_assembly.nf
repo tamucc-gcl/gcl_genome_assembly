@@ -2,43 +2,33 @@
 ========================================================================================
     MAP HI-C READS TO ASSEMBLY (bwa-mem2, PAIRTOOLS-READY)
 ========================================================================================
-    Purpose:
-      Produce the optimal BAM for Hi-C filtering with pairtools:
-        - queryname-collated BAM (mates adjacent)
-        - no coordinate sorting here
-        - optimized for speed and correctness
+    Repo location: modules/map_hic_to_assembly.nf
 
-    Outputs:
-      - *.hic.qname.bam        → input for FILTER_HIC_BAM
-      - *.hic.qname.bam.csi    → optional index
-      - mapping flagstat QC
-
+    Produces a sorted, indexed BAM for Hi-C filtering with pairtools.
     Notes:
-      - Uses bwa-mem2 (much faster than bwa mem)
-      - Uses Hi-C appropriate flags: -5SP
-      - pairtools parse REQUIRES qname-collated input
+      - bwa-mem2, Hi-C flags -5SP
       - Stage parameter controls publishDir but not filenames
 ========================================================================================
 */
 
 process MAP_HIC_TO_ASSEMBLY {
-    tag "${haplotype_id}_${stage}"
+    tag "${meta.id}_${stage}"
     label 'map_hic'
 
     publishDir "${params.outdir}/bam/hic/${stage}/raw",
         mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(assembly_fasta), path(hic_r1), path(hic_r2), val(stage)
+    tuple val(meta), path(assembly_fasta), path(hic_r1), path(hic_r2), val(stage)
 
     output:
-    tuple val(haplotype_id), val(stage),
-          path("${haplotype_id}.sorted.bam"),
-          path("${haplotype_id}.sorted.bam.bai"),
+    tuple val(meta), val(stage),
+          path("${meta.id}.sorted.bam"),
+          path("${meta.id}.sorted.bam.bai"),
           emit: bam
 
-    tuple val(haplotype_id), val(stage),
-          path("${haplotype_id}_mapping_stats.txt"),
+    tuple val(meta), val(stage),
+          path("${meta.id}_mapping_stats.txt"),
           emit: stats
 
     script:
@@ -66,24 +56,24 @@ process MAP_HIC_TO_ASSEMBLY {
     # -------------------------------------------------------------------------
     bwa-mem2 mem -t ${task.cpus} -5SP ${extra_args} ${assembly_fasta} ${hic_r1} ${hic_r2} \
     | samtools view -@ ${task.cpus} -b - \
-    | samtools sort -@ ${task.cpus} -o ${haplotype_id}.sorted.bam -
-    samtools index -@ ${task.cpus} ${haplotype_id}.sorted.bam
+    | samtools sort -@ ${task.cpus} -o ${meta.id}.sorted.bam -
+    samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
 
     # CSI index works on unsorted BAMs
-    samtools index -@ ${task.cpus} -c ${haplotype_id}.sorted.bam
+    samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
 
     # -------------------------------------------------------------------------
     # 2) Mapping QC
     # -------------------------------------------------------------------------
     samtools flagstat -@ ${task.cpus} \\
-      ${haplotype_id}.sorted.bam \\
-      > ${haplotype_id}_mapping_stats.txt
+      ${meta.id}.sorted.bam \\
+      > ${meta.id}_mapping_stats.txt
     """
-    
+
     stub:
     """
-    touch ${haplotype_id}.sorted.bam
-    touch ${haplotype_id}.sorted.bam.bai
-    touch ${haplotype_id}_mapping_stats.txt
+    touch ${meta.id}.sorted.bam
+    touch ${meta.id}.sorted.bam.bai
+    touch ${meta.id}_mapping_stats.txt
     """
 }

@@ -2,33 +2,31 @@
 ========================================================================================
     HI-C SCAFFOLDING MODULE (YaHS) - UNIFIED FOR ALL ROUNDS
 ========================================================================================
-    Input : filtered Hi-C BAM (valid pairs) + BAI + assembly FASTA + round identifier + round_params
+    Repo location: modules/scaffold_hic.nf
+
+    Input : filtered Hi-C BAM (valid pairs) + BAI + assembly FASTA + round id + round_params
     Output: scaffolded FASTA + final AGP + YaHS BIN + log
-    
-    The round parameter controls output directory and file naming:
-    - round = "round1" or "" → scaffolding/yahs/
-    - round = "round2" → scaffolding/yahs_round2/
-    - round = "roundN" → scaffolding/yahs_roundN/
-    
-    The round_params map contains all YaHS parameters for this specific round
+
+    round = "round1"/"" -> scaffolding/yahs/ ; "roundN" -> scaffolding/yahs_roundN/
+    (NOTE: the SCAFFOLD_HIC_ROUND subworkflow consolidation is Phase 5; this stays per-round.)
 ========================================================================================
 */
 
 process SCAFFOLD_HIC {
-    tag "${haplotype_id}_${round ?: 'round1'}"
+    tag "${meta.id}_${round ?: 'round1'}"
     label 'scaffold_hic'
 
-    publishDir "${params.outdir}/assembly/scaffold/yahs${round && round != 'round1' ? '_' + round : ''}/", 
+    publishDir "${params.outdir}/assembly/scaffold/yahs${round && round != 'round1' ? '_' + round : ''}/",
         mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(bam), path(bai), path(assembly_fasta), val(round), val(round_params)
+    tuple val(meta), path(bam), path(bai), path(assembly_fasta), val(round), val(round_params)
 
     output:
-    tuple val(haplotype_id), path("${haplotype_id}${round && round != 'round1' ? '_' + round : ''}_scaffolds.fa"), emit: scaffolds
-    tuple val(haplotype_id), path("${haplotype_id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.agp"), emit: agp
-    tuple val(haplotype_id), path("${haplotype_id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.bin"), emit: bin
-    tuple val(haplotype_id), path("${haplotype_id}${round && round != 'round1' ? '_' + round : ''}.yahs.log"), emit: log
+    tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds.fa"), emit: scaffolds
+    tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.agp"), emit: agp
+    tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.bin"), emit: bin
+    tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}.yahs.log"), emit: log
 
     script:
     // Extract parameters from round_params map
@@ -42,7 +40,7 @@ process SCAFFOLD_HIC {
 
     // Use a prefix that includes round identifier if present
     def round_suffix = round && round != 'round1' ? "_${round}" : ""
-    def prefix = "${haplotype_id}_yahs${round_suffix}"
+    def prefix = "${meta.id}_yahs${round_suffix}"
 
     """
     set -euo pipefail
@@ -82,7 +80,7 @@ process SCAFFOLD_HIC {
     fi
 
     # Run YaHS
-    echo "[YAHS ${round ?: 'round1'}] Starting scaffolding for ${haplotype_id}"
+    echo "[YAHS ${round ?: 'round1'}] Starting scaffolding for ${meta.id}"
     echo "[YAHS ${round ?: 'round1'}] Input assembly: ${assembly_fasta}"
     echo "[YAHS ${round ?: 'round1'}] Hi-C BAM: ${bam}"
     echo "[YAHS ${round ?: 'round1'}] Parameters:"
@@ -93,12 +91,12 @@ process SCAFFOLD_HIC {
     echo "  enzyme: ${enzyme ?: 'none'}"
     echo "  no_contig_ec: ${no_contig_ec}"
     echo "  no_scaffold_ec: ${no_scaffold_ec}"
-    
-    yahs "${assembly_fasta}" "${bam}" "\${yahs_args[@]}" 2>&1 | tee "${haplotype_id}${round_suffix}.yahs.log"
+
+    yahs "${assembly_fasta}" "${bam}" "\${yahs_args[@]}" 2>&1 | tee "${meta.id}${round_suffix}.yahs.log"
 
     # Standardize names
-    mv "${prefix}_scaffolds_final.fa"  "${haplotype_id}${round_suffix}_scaffolds.fa"
-    mv "${prefix}_scaffolds_final.agp" "${haplotype_id}${round_suffix}_scaffolds_final.agp"
+    mv "${prefix}_scaffolds_final.fa"  "${meta.id}${round_suffix}_scaffolds.fa"
+    mv "${prefix}_scaffolds_final.agp" "${meta.id}${round_suffix}_scaffolds_final.agp"
 
     # Capture the YaHS-generated BIN (name can vary by version/prefix)
     # Prefer a BIN matching our prefix if it exists.
@@ -114,17 +112,17 @@ process SCAFFOLD_HIC {
         exit 1
     fi
 
-    cp -f "\${bin_candidate}" "${haplotype_id}${round_suffix}_scaffolds_final.bin"
-    
-    echo "[YAHS ${round ?: 'round1'}] Scaffolding complete for ${haplotype_id}"
+    cp -f "\${bin_candidate}" "${meta.id}${round_suffix}_scaffolds_final.bin"
+
+    echo "[YAHS ${round ?: 'round1'}] Scaffolding complete for ${meta.id}"
     """
-    
+
     stub:
     def round_suffix = round && round != 'round1' ? "_${round}" : ""
     """
-    touch ${haplotype_id}${round_suffix}_scaffolds.fa
-    touch ${haplotype_id}${round_suffix}_scaffolds_final.agp
-    touch ${haplotype_id}${round_suffix}_scaffolds_final.bin
-    touch ${haplotype_id}${round_suffix}.yahs.log
+    touch ${meta.id}${round_suffix}_scaffolds.fa
+    touch ${meta.id}${round_suffix}_scaffolds_final.agp
+    touch ${meta.id}${round_suffix}_scaffolds_final.bin
+    touch ${meta.id}${round_suffix}.yahs.log
     """
 }

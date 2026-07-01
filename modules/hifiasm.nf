@@ -3,24 +3,28 @@
     HIFIASM MODULE
 ========================================================================================
     Phased genome assembly using HiFi and Hi-C reads with hifiasm
+    Repo location: modules/hifiasm.nf
+
+    Emits the sample-level assembly (both haplotypes) as tuple(meta, hap1, hap2).
+    main.nf forks this into per-haplotype tuple(meta, fasta) via forkHaplotypeMeta().
 ========================================================================================
 */
 
 process HIFIASM {
-    tag "${sample_id}"
+    tag "${meta.sample}"
     label 'hifiasm'
-    
+
     publishDir "${params.outdir}/assembly/contig/hifiasm", mode: params.publish_dir_mode
-    
+
     input:
-    tuple val(sample_id), path(hifi_fastq), path(hic_r1), path(hic_r2)
-    
+    tuple val(meta), path(hifi_fastq), path(hic_r1), path(hic_r2)
+
     output:
-    tuple val(sample_id), path("${sample_id}.hap1.p_ctg.fasta"), path("${sample_id}.hap2.p_ctg.fasta"), emit: assemblies
-    tuple val(sample_id), path("${sample_id}.hifiasm.log"), emit: log
-    tuple val(sample_id), path("${sample_id}.hap1.p_ctg.gfa"), emit: gfa_hap1
-    tuple val(sample_id), path("${sample_id}.hap2.p_ctg.gfa"), emit: gfa_hap2
-    
+    tuple val(meta), path("${meta.sample}.hap1.p_ctg.fasta"), path("${meta.sample}.hap2.p_ctg.fasta"), emit: assemblies
+    tuple val(meta), path("${meta.sample}.hifiasm.log"), emit: log
+    tuple val(meta), path("${meta.sample}.hap1.p_ctg.gfa"), emit: gfa_hap1
+    tuple val(meta), path("${meta.sample}.hap2.p_ctg.gfa"), emit: gfa_hap2
+
     script:
     telomere_motif = params.telomere_motif ?: 'CCCTAA'  // Default to human telomeric repeat if not provided
     primary_flag = params.hifiasm_primary ? '--primary' : ''
@@ -31,22 +35,21 @@ process HIFIASM {
     // HiFi-only + primary: *.p_ctg.gfa / *.a_ctg.gfa (no hap1/hap2)
     // HiFi-only default:   *.bp.hap1.p_ctg.gfa / *.bp.hap2.p_ctg.gfa
     // Hi-C (any):          *.hic.hap1.p_ctg.gfa / *.hic.hap2.p_ctg.gfa
-    
+
     // Handle 'auto' parameters - omit flag entirely for auto behavior
     hgsize_opt = params.hifiasm_hgSize == 'auto' ? '' : "--hg-size ${params.hifiasm_hgSize}"
     homcov_opt = params.hifiasm_homCov == 'auto' ? '' : "--hom-cov ${params.hifiasm_homCov}"
     purgemax_opt = params.hifiasm_purgeMax == 'auto' ? '' : "--purge-max ${params.hifiasm_purgeMax}"
 
-
     use_primary_alt = params.hifiasm_primary && !params.hifiasm_useHiC
     prefix = params.hifiasm_useHiC ? 'hic.' : 'bp.'
-    
-    gfa1 = use_primary_alt ? "${sample_id}.p_ctg.gfa" : "${sample_id}.${prefix}hap1.p_ctg.gfa"
-    gfa2 = use_primary_alt ? "${sample_id}.a_ctg.gfa" : "${sample_id}.${prefix}hap2.p_ctg.gfa"
+
+    gfa1 = use_primary_alt ? "${meta.sample}.p_ctg.gfa" : "${meta.sample}.${prefix}hap1.p_ctg.gfa"
+    gfa2 = use_primary_alt ? "${meta.sample}.a_ctg.gfa" : "${meta.sample}.${prefix}hap2.p_ctg.gfa"
 
     """
     hifiasm \\
-        -o ${sample_id} \\
+        -o ${meta.sample} \\
         -t ${task.cpus} \\
         -k ${params.hifiasm_k} \\
         -w ${params.hifiasm_w} \\
@@ -89,23 +92,23 @@ process HIFIASM {
         --l-msjoin ${params.hifiasm_lMSjoin} \\
         ${hic_opts} \\
         ${hifi_fastq} \\
-        2>&1 | tee ${sample_id}.hifiasm.log
-    
+        2>&1 | tee ${meta.sample}.hifiasm.log
+
     # Convert GFA to FASTA
-    gfatools gfa2fa ${gfa1} > ${sample_id}.hap1.p_ctg.fasta
-    gfatools gfa2fa ${gfa2} > ${sample_id}.hap2.p_ctg.fasta
+    gfatools gfa2fa ${gfa1} > ${meta.sample}.hap1.p_ctg.fasta
+    gfatools gfa2fa ${gfa2} > ${meta.sample}.hap2.p_ctg.fasta
 
     # Copy GFAs to standardized names (preserves originals too)
-    cp ${gfa1} ${sample_id}.hap1.p_ctg.gfa
-    cp ${gfa2} ${sample_id}.hap2.p_ctg.gfa
+    cp ${gfa1} ${meta.sample}.hap1.p_ctg.gfa
+    cp ${gfa2} ${meta.sample}.hap2.p_ctg.gfa
     """
-    
+
     stub:
     """
-    touch ${sample_id}.hap1.p_ctg.fasta
-    touch ${sample_id}.hap2.p_ctg.fasta
-    touch ${sample_id}.hifiasm.log
-    touch ${sample_id}.hap1.p_ctg.gfa
-    touch ${sample_id}.hap2.p_ctg.gfa
+    touch ${meta.sample}.hap1.p_ctg.fasta
+    touch ${meta.sample}.hap2.p_ctg.fasta
+    touch ${meta.sample}.hifiasm.log
+    touch ${meta.sample}.hap1.p_ctg.gfa
+    touch ${meta.sample}.hap2.p_ctg.gfa
     """
 }

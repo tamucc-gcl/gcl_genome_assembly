@@ -2,42 +2,32 @@
 ========================================================================================
     TELOCLIP — TELOMERE EXTENSION MODULE
 ========================================================================================
-    Uses teloclip (Taranto) to recover missing telomeric sequences from
-    soft-clipped HiFi read alignments and extend scaffold ends.
+    Repo location: modules/teloclip.nf
 
-    Workflow:
-      1. Map raw HiFi reads to gap-filled scaffolds (minimap2 map-hifi)
-      2. Filter for soft-clipped alignments at scaffold ends with telomeric
-         motifs (teloclip filter)
-      3. Extend scaffolds using overhang sequences (teloclip extend)
+    Recovers missing telomeres from soft-clipped HiFi alignments and extends scaffold ends.
+    Single process: map (minimap2 map-hifi) -> teloclip filter -> teloclip extend.
+    Input : tuple(meta, scaffold_fasta, hifi_fastq)
+    Output: extended fasta + stats TSV + overhang BAM/BAI (per-haplotype, meta.id).
 
-    Single process handles the full pipeline to avoid staging large BAMs
-    between processes. The intermediate BAM is created and consumed in the
-    same work directory.
-
-    Input:
-      tuple(haplotype_id, scaffold_fasta, hifi_fastq)
-
-    Output:
-      tuple(haplotype_id, extended_fasta)  — scaffolds with telomeres appended
-      tuple(haplotype_id, stats_report)    — per-contig extension statistics
+    NOTE: the stats TSV prefixes each contig with meta.id (contract with
+    generate_summary_report.R, which extracts the id back off the contig name).
 ========================================================================================
 */
 
 process TELOCLIP_EXTEND {
-    tag "${haplotype_id}"
+    tag "${meta.id}"
     label 'teloclip'
 
     publishDir "${params.outdir}/assembly/scaffold/teloclip", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(scaffold_fasta), path(hifi_fastq)
+    tuple val(meta), path(scaffold_fasta), path(hifi_fastq)
 
     output:
-    tuple val(haplotype_id), path("${haplotype_id}.teloclip_extended.fasta"), emit: extended_assembly
-    tuple val(haplotype_id), path("${haplotype_id}.teloclip_stats.tsv"),      emit: stats
-    tuple val(haplotype_id), path("${haplotype_id}.teloclip_overhangs.bam"),  emit: overhangs_bam
-    tuple val(haplotype_id), path("${haplotype_id}.teloclip_overhangs.bam.bai"), emit: overhangs_bai
+    tuple val(meta), path("${meta.id}.teloclip_extended.fasta"), emit: extended_assembly
+    tuple val(meta), path("${meta.id}.teloclip_stats.tsv"),      emit: stats
+    tuple val(meta), path("${meta.id}.teloclip_overhangs.bam"),  emit: overhangs_bam
+    tuple val(meta), path("${meta.id}.teloclip_overhangs.bam.bai"), emit: overhangs_bai
 
     script:
     def motif       = params.telomere_motif ?: 'TTAGGG'
@@ -50,7 +40,7 @@ process TELOCLIP_EXTEND {
     """
     set -euo pipefail
 
-    echo "[TELOCLIP] Starting telomere extension for ${haplotype_id}"
+    echo "[TELOCLIP] Starting telomere extension for ${meta.id}"
     echo "[TELOCLIP] Motif: ${motif}  min_clip: ${min_clip}  max_break: ${max_break}"
     echo "[TELOCLIP] min_anchor: ${min_anchor}  min_mapq: ${min_mapq}"
     echo ""
@@ -74,21 +64,21 @@ process TELOCLIP_EXTEND {
         --min-clip ${min_clip} \\
         --max-break ${max_break} \\
         --min-anchor ${min_anchor} \\
-    | samtools sort -@ ${task.cpus} -o ${haplotype_id}.teloclip_overhangs.bam
+    | samtools sort -@ ${task.cpus} -o ${meta.id}.teloclip_overhangs.bam
 
-    samtools index ${haplotype_id}.teloclip_overhangs.bam
+    samtools index ${meta.id}.teloclip_overhangs.bam
 
     # ---- Step 3: Count overhang reads (QC) ----
-    OVERHANG_COUNT=\$(samtools view -c ${haplotype_id}.teloclip_overhangs.bam)
+    OVERHANG_COUNT=\$(samtools view -c ${meta.id}.teloclip_overhangs.bam)
     echo "[TELOCLIP] Found \${OVERHANG_COUNT} telomere-containing overhang alignments"
 
     # ---- Step 4: Extend scaffolds ----
     if [ "\${OVERHANG_COUNT}" -gt 0 ]; then
         teloclip extend \\
-            ${haplotype_id}.teloclip_overhangs.bam \\
+            ${meta.id}.teloclip_overhangs.bam \\
             ${scaffold_fasta} \\
-            --output-fasta ${haplotype_id}.teloclip_extended.fasta \\
-            --stats-report ${haplotype_id}.teloclip_stats.tsv \\
+            --output-fasta ${meta.id}.teloclip_extended.fasta \\
+            --stats-report ${meta.id}.teloclip_stats.tsv \\
             --min-overhangs ${min_ovh} \\
             --max-homopolymer ${max_homopol} \\
             --max-break ${max_break} \\
@@ -100,12 +90,12 @@ process TELOCLIP_EXTEND {
 # ---- Step 5: Parse human-readable stats report into TSV ----
     # teloclip extend --stats-report produces a formatted text report, not TSV.
     # Convert it to the TSV format expected by generate_summary_report.R
-    mv ${haplotype_id}.teloclip_stats.tsv ${haplotype_id}.teloclip_stats_raw.txt
+    mv ${meta.id}.teloclip_stats.tsv ${meta.id}.teloclip_stats_raw.txt
 
     python3 <<'PYEOF'
 import re, csv, sys
 
-hap_id = "${haplotype_id}"
+hap_id = "${meta.id}"
 infile  = f"{hap_id}.teloclip_stats_raw.txt"
 outfile = f"{hap_id}.teloclip_stats.tsv"
 
@@ -139,7 +129,7 @@ with open(infile) as fh:
         if m and original_len is not None:
             end = m.group(1).lower()
             ext_len = int(m.group(2))
-            # Prefix contig with haplotype_id so the R script can extract it
+            # Prefix contig with meta.id so the R script can extract it
             contig_name = f"{hap_id}_{current_contig}"
             rows.append({
                 "contig": contig_name,
@@ -161,21 +151,21 @@ print(f"[TELOCLIP] Parsed {len(rows)} extensions into {outfile}")
 PYEOF
     else
         echo "[TELOCLIP] No overhang reads found — copying input assembly unchanged"
-        cp ${scaffold_fasta} ${haplotype_id}.teloclip_extended.fasta
+        cp ${scaffold_fasta} ${meta.id}.teloclip_extended.fasta
         # Create empty stats report with header
         printf "contig\\tcontig_length\\tend\\textension_length\\toverhang_count\\tmotif_counts\\n" \\
-            > ${haplotype_id}.teloclip_stats.tsv
+            > ${meta.id}.teloclip_stats.tsv
     fi
 
-    echo "[TELOCLIP] Done: ${haplotype_id}"
+    echo "[TELOCLIP] Done: ${meta.id}"
     """
 
     stub:
     """
-    touch ${haplotype_id}.teloclip_extended.fasta
-    printf "contig\\tcontig_length\\tend\\textension_length\\toverhang_count\\tmotif_counts\\n" > ${haplotype_id}.teloclip_stats.tsv
-    touch ${haplotype_id}.teloclip_overhangs.bam
-    touch ${haplotype_id}.teloclip_overhangs.bam.bai
+    touch ${meta.id}.teloclip_extended.fasta
+    printf "contig\\tcontig_length\\tend\\textension_length\\toverhang_count\\tmotif_counts\\n" > ${meta.id}.teloclip_stats.tsv
+    touch ${meta.id}.teloclip_overhangs.bam
+    touch ${meta.id}.teloclip_overhangs.bam.bai
     """
 }
 
@@ -184,7 +174,7 @@ PYEOF
     COLLECT_TELOCLIP_STATS
 ========================================================================================
     Aggregates per-haplotype teloclip extension statistics into a single
-    summary file for the report.
+    summary file for the report. (Meta-agnostic: consumes staged files only.)
 ========================================================================================
 */
 process COLLECT_TELOCLIP_STATS {
