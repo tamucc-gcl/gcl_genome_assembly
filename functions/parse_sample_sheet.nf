@@ -119,7 +119,7 @@ def parseSampleSheet(sample_sheet_path) {
                      "dedup=${meta.dedup}, mito=${meta.mito_tool}, hic_rounds=${meta.hic_rounds}"
         }
         catch (Exception e) {
-            log.warn "Skipping row ${i + 1} (sample '${sid ?: 'UNKNOWN'}'): ${e.message}"
+            log.warn("Skipping row ${i + 1} (sample '${sid ?: 'UNKNOWN'}'): ${e.class.simpleName}: ${e.message}", e)
         }
     }
 

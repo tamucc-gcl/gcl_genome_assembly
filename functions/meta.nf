@@ -65,7 +65,9 @@ def buildMeta(Map a) {
     }
 
     def assembler = pick(a.assembler, 'assembler') { hasHifi ? 'hifiasm' : 'spades' }
-    def ploidy    = pick(a.ploidy,    'ploidy')    { 'diploid' }
+    def ploidyRaw = pick(a.ploidy,    'ploidy')    { 'diploid' }
+    // accept numeric (1|2) or string (haploid|diploid), case-insensitive
+    def ploidy    = ['1':'haploid','haploid':'haploid','2':'diploid','diploid':'diploid'][ploidyRaw?.toString()?.trim()?.toLowerCase()]
     def dedup     = pick(a.dedup,     'dedup') {
         if (assembler == 'hifiasm')
             (params.containsKey('run_purge_dups') && params.run_purge_dups) ? 'purge_dups' : 'none'
@@ -78,7 +80,7 @@ def buildMeta(Map a) {
     if (!(assembler in ['hifiasm','spades']))
         throw new IllegalArgumentException("sample '${sample}': invalid assembler '${assembler}' (allowed: hifiasm, spades)")
     if (!(ploidy in ['haploid','diploid']))
-        throw new IllegalArgumentException("sample '${sample}': invalid ploidy '${ploidy}' (allowed: haploid, diploid)")
+        throw new IllegalArgumentException("sample '${sample}': invalid ploidy '${ploidyRaw}' (allowed: 1/haploid, 2/diploid)")
     if (!(dedup in ['purge_dups','redundans','none']))
         throw new IllegalArgumentException("sample '${sample}': invalid dedup '${dedup}' (allowed: purge_dups, redundans, none)")
     if (!(mito in ['mitohifi','mitofinder','none']))
