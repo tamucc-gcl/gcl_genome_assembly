@@ -87,7 +87,8 @@ EOF
     stub:
     """
     mkdir -p qc_inputs/assembly qc_inputs/bam qc_inputs/pairs
-    touch final_qc_report.tsv
+    touch assembly_qc_metrics.csv
+    touch assembly_qc_metrics.png
     touch qc_inputs/manifest.txt
     """
 }
