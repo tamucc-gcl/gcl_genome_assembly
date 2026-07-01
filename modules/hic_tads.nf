@@ -22,6 +22,13 @@ process HIC_TADS {
           path("${meta.id}_${stage}.tads_${resolution}bp_w${window_bp}.tad_book.pdf"),
           emit: tad_book_pdf
 
+  stub:
+  """
+  touch ${meta.id}_${stage}.tads_${resolution}bp_w${window_bp}.insulation.tsv
+  touch ${meta.id}_${stage}.tads_${resolution}bp_w${window_bp}.boundaries.tsv
+  touch ${meta.id}_${stage}.tads_${resolution}bp_w${window_bp}.tad_book.pdf
+  """
+
   script:
     def out_prefix = "${meta.id}_${stage}.tads_${resolution}bp_w${window_bp}"
     def assembly_label = "${meta.id} (${stage})"

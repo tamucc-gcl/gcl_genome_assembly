@@ -25,6 +25,11 @@ process HIC_BAM_METRICS {
     output:
     tuple val(meta), val(checkpoint), path("${meta.id}_${checkpoint}.bam_metrics.tsv"), emit: metrics
 
+    stub:
+    """
+    touch ${meta.id}_${checkpoint}.bam_metrics.tsv
+    """
+
     script:
     """
     set -euo pipefail
@@ -67,6 +72,11 @@ process HIC_PAIRS_METRICS {
 
     output:
     tuple val(meta), val(checkpoint), path("${meta.id}_${checkpoint}.pairs_metrics.tsv"), emit: metrics
+
+    stub:
+    """
+    touch ${meta.id}_${checkpoint}.pairs_metrics.tsv
+    """
 
     script:
     // Check if AGP is provided (not empty)

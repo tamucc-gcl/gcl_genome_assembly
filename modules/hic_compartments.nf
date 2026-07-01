@@ -23,6 +23,13 @@ process HIC_COMPARTMENTS {
           path("${meta.id}_${stage}.comp_${resolution}.eigvals.tsv"),
           emit: eigvals
 
+  stub:
+  """
+  touch ${meta.id}_${stage}.comp_${resolution}.pc1.bedGraph
+  touch ${meta.id}_${stage}.comp_${resolution}.pc1.genomewide.png
+  touch ${meta.id}_${stage}.comp_${resolution}.eigvals.tsv
+  """
+
   script:
     def out_prefix = "${meta.id}_${stage}.comp_${resolution}"
     def assembly_label = "${meta.id} (${stage})"

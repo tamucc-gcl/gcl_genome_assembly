@@ -14,6 +14,12 @@ process FCS_GX_SCREEN {
     tuple val(meta), path("*.taxonomy.rpt"),      emit: taxonomy_report
     tuple val(meta), path("gx_out/fcs_gx_stdout.log"), emit: stdout_log
 
+  stub:
+  """
+  mkdir -p gx_out
+  touch ${meta.id}.fcs_gx_report.txt ${meta.id}.taxonomy.rpt gx_out/fcs_gx_stdout.log
+  """
+
   script:
   """
   set -euo pipefail

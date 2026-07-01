@@ -11,6 +11,11 @@ process FCS_CLEAN_GENOME {
     tuple val(meta), path("${meta.id}.decontaminated.fasta"), emit: decontaminated_fasta
     tuple val(meta), path("${meta.id}.contaminants.fasta"),   emit: contaminants_fasta
 
+  stub:
+  """
+  touch ${meta.id}.decontaminated.fasta ${meta.id}.contaminants.fasta
+  """
+
   script:
   """
   set -euo pipefail

@@ -10,6 +10,12 @@ process FCS_ADAPTOR {
     tuple val(meta), path("${meta.id}.cleaned.fasta"), emit: cleaned_fasta
     tuple val(meta), path("fcsadaptor"),               emit: out_dir
 
+  stub:
+  """
+  mkdir -p fcsadaptor
+  touch ${meta.id}.cleaned.fasta
+  """
+
   script:
   """
   command -v run_fcsadaptor.sh >/dev/null 2>&1 || { echo "ERROR: run_fcsadaptor.sh not found in PATH"; exit 127; }
