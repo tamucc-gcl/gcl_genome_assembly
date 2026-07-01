@@ -380,3 +380,4 @@ convenient). Resolved items move to the Change Log.
       include + `modules/scan_telomeres.nf` — superseded by TIDK)
   Also check whether `hic_qc_from_pairs.nf` / `hic_mapping_qc.nf` are orphaned files (not imported
   anywhere) and remove if so. Non-blocking: dead includes don't run in `-stub` or real runs.
+- [x] **`params.outdir` config parse-order** (`nextflow.config`): the reporting scopes (`timeline`/`report`/`trace`/`dag`, lines ~485–500) reference `${params.outdir}`, but `outdir` was only defined in `main.nf` (line 38), which runs *after* the config is parsed → `Unknown config attribute params.outdir` on any bare `nextflow run` (masked previously because the launch wrapper passes `--outdir`). Pre-existing (also on `main`), surfaced by the first `-stub` run. Fix: add `outdir = './results'` to the config `params {}` block; the `main.nf` line-38 assignment becomes a redundant no-op.
