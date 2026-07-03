@@ -37,6 +37,7 @@ nextflow.enable.dsl=2
 params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link'
+params.qc_mode = 'all_stages'   // 'all_stages' (QC every checkpoint) | 'final_only'
 
 // Assembly parameters
 ////   Overlap/Error correction:
@@ -378,6 +379,7 @@ if (!params.sample_sheet) {
 ========================================================================================
 */
 include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
+include { forkHaplotypeMeta } from './functions/meta.nf'
 
 /*
 ========================================================================================
@@ -426,8 +428,7 @@ include { HIFIASM } from './modules/hifiasm.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
 include { MITOHIFI } from './modules/mitohifi.nf'
-include { FILTER_MITO_CONTIGS as FILTER_MITO_CONTIGS_HAP1 } from './modules/filter_mito_contigs.nf'
-include { FILTER_MITO_CONTIGS as FILTER_MITO_CONTIGS_HAP2 } from './modules/filter_mito_contigs.nf'
+include { FILTER_MITO_CONTIGS } from './modules/filter_mito_contigs.nf'
 include { MITO_CIRCULAR_MAP } from './modules/mito_circular_map.nf'
 
 include { PURGE_DUPS } from './modules/purge_dups.nf'
@@ -472,7 +473,7 @@ include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 
 workflow {
     
-    // Parse sample sheet and create input channel
+    // Parse sample sheet -> per-sample tuple(meta, reads)
     ch_input = parseSampleSheet(params.sample_sheet)
 
     /*
@@ -490,20 +491,6 @@ workflow {
         ch_diamond_db = SETUP_DECONTAM_DBS.out.diamond_db
         ch_taxdump_dir = SETUP_DECONTAM_DBS.out.taxdump_dir
     }
-
-    /*
-    // Debug: Print all channel contents
-    ch_input.view { sample_id, hifi_bam, hic_r1, hic_r2 ->
-        """
-        ========================================
-        Sample ID  : ${sample_id}
-        HiFi BAM   : ${hifi_bam}
-        Hi-C R1    : ${hic_r1}
-        Hi-C R2    : ${hic_r2}
-        ========================================
-        """
-    }
-    */
     
     DOWNLOAD_BUSCO_DB(params.busco_lineage)
     ch_busco_db = DOWNLOAD_BUSCO_DB.out.db
@@ -518,26 +505,22 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 1: Convert BAM to FASTQ
+        STEP 1: Convert BAM to FASTQ (extract hifi_bam from the reads map)
     ========================================================================================
     */
     
     BAM_TO_FASTQ(
-        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
-            tuple(sample_id, hifi_bam)
-        }
+        ch_input.map { meta, reads -> tuple(meta, reads.hifi_bam) }
     )
 
     
     /*
     ========================================================================================
-        STEP 2: Trim Hi-C Reads
+        STEP 2: Trim Hi-C Reads (extract the Hi-C pair from the reads map)
     ========================================================================================
     */
     TRIM_HIC(
-        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
-            tuple(sample_id, hic_r1, hic_r2)
-        }
+        ch_input.map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
     )
 
     /*
@@ -545,12 +528,13 @@ workflow {
         STEP 3: Combine HiFi FASTQ with trimmed Hi-C reads
     ========================================================================================
     */
-    TRIM_HIC.out.trimmed_reads
-        .join(BAM_TO_FASTQ.out)
-        .map { sample_id, hic_r1_trim, hic_r2_trim, hifi_fastq ->
-            tuple(sample_id, hifi_fastq, hic_r1_trim, hic_r2_trim)
-        }
+    // Scalar-keyed join (robust if a branch ever alters meta); carries sample-level meta through.
+    BAM_TO_FASTQ.out.fastq
+        .map { meta, hifi_fastq -> [ meta.sample, meta, hifi_fastq ] }
+        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] } )
+        .map { sample, meta, hifi_fastq, r1, r2 -> tuple(meta, hifi_fastq, r1, r2) }
         .set { ch_fastq_all }
+
 
     /*
     ========================================================================================
@@ -569,140 +553,71 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 4: Assemble with Hifiasm
+        STEP 4: Assemble with Hifiasm (sample-level meta in; hap1 + hap2 out)
     ========================================================================================
     */
     
     HIFIASM(ch_fastq_all)
 
+    // STEP 4-fork: the single fork point. Split the sample-level assembly into per-haplotype
+    // tuple(meta, fasta). Everything downstream stays per-haplotype and re-pairs (via groupKey)
+    // ONLY where a step genuinely needs both haplotypes (QUAST/MERQURY/COMBINE).
+    // NOTE: diploid path; n_hap==1 (primary/haploid) output naming is wired in Phase 2.
+    HIFIASM.out.assemblies
+        .flatMap { meta, hap1_fa, hap2_fa ->
+            def hmetas = forkHaplotypeMeta(meta)          // [meta_hap1, meta_hap2]
+            [ tuple(hmetas[0], hap1_fa), tuple(hmetas[1], hap2_fa) ]
+        }
+        .set { ch_contigs }                                // per-haplotype tuple(meta, fasta)
+
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 4a: Remove Mitochondrial Contigs from Nuclear Assembly
-        Runs after HIFIASM (+ optional purge_dups) and after MITOHIFI completes.
-        Filters each haplotype independently using the assembled mitogenome.
-        The filtered assemblies flow into all downstream steps (Inspector,
-        decontamination, scaffolding, etc.)
-    ========================================================================================
+        ch_contigs is per-haplotype; attach the per-sample mitogenome (one fans out to
+        both haplotypes via combine). A single FILTER_MITO_CONTIGS handles both.
+    ====================================================================================
     */
-    HIFIASM.out.assemblies
-        .map { sample_id, hap1_fasta, hap2_fasta ->
-            tuple(sample_id, hap1_fasta)
-        }
-        .combine(
-            MITOHIFI.out.mitogenome.map { sid, mfa -> tuple(sid, mfa) },
-            by: 0
-        )
-        .map { sample_id, hap1_fasta, mito_fa ->
-            tuple("${sample_id}_hap1", hap1_fasta, mito_fa)
-        }
-        .set { ch_mito_filter_hap1_input }
+    ch_contigs
+        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+        .combine( MITOHIFI.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
+        .map { sample, meta, fasta, mito_fa -> tuple(meta, fasta, mito_fa) }
+        .set { ch_mito_filter_input }
 
-    HIFIASM.out.assemblies
-        .map { sample_id, hap1_fasta, hap2_fasta ->
-            tuple(sample_id, hap2_fasta)
-        }
-        .combine(
-            MITOHIFI.out.mitogenome.map { sid, mfa -> tuple(sid, mfa) },
-            by: 0
-        )
-        .map { sample_id, hap2_fasta, mito_fa ->
-            tuple("${sample_id}_hap2", hap2_fasta, mito_fa)
-        }
-        .set { ch_mito_filter_hap2_input }
+    FILTER_MITO_CONTIGS(ch_mito_filter_input)
 
-    FILTER_MITO_CONTIGS_HAP1(ch_mito_filter_hap1_input)
-    FILTER_MITO_CONTIGS_HAP2(ch_mito_filter_hap2_input)
-
-    // Reconstruct sample-level tuple
-    FILTER_MITO_CONTIGS_HAP1.out.filtered
-        .mix(FILTER_MITO_CONTIGS_HAP2.out.filtered)
-        .map { haplotype_id, fasta ->
-            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            def hap_num = haplotype_id.contains('_hap1') ? 1 : 2
-            tuple(sample_id, hap_num, fasta)
-        }
-        .groupTuple(by: 0, size: 2)
-        .map { sample_id, hap_nums, fastas ->
-            def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-            tuple(sample_id, sorted[0][1], sorted[1][1])
-        }
-        .set { ch_mito_filtered }
+    ch_mito_filtered = FILTER_MITO_CONTIGS.out.filtered   // per-haplotype tuple(meta, fasta)
 
     /*
-    ========================================================================================
-        STEP 4a: PURGE DUPLICATES (Optional)
-        Remove haplotig duplications from HIFIASM output
-        Only runs if params.run_purge_dups is true
-        Runs BEFORE Inspector correction (if enabled)
-    ========================================================================================
+    ====================================================================================
+        STEP 4b: PURGE DUPLICATES (optional)
+        ch_mito_filtered is per-haplotype; attach per-sample HiFi reads (combine by sample),
+        one PURGE_DUPS over both haplotypes.
+    ====================================================================================
     */
     if (params.run_purge_dups) {
-        ch_mito_filtered                              // <-- mito-filtered, not HIFIASM.out
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", hap1_fasta),
-                    tuple("${sample_id}_hap2", hap2_fasta)
-                ]
-            }
-            .map { haplotype_id, assembly ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, assembly)
-            }
-            .combine(BAM_TO_FASTQ.out, by: 0)
-            .map { sample_id, haplotype_id, assembly, hifi_reads ->
-                tuple(haplotype_id, assembly, hifi_reads)
-            }
+        ch_mito_filtered
+            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
+            .map { sample, meta, fasta, hifi_reads -> tuple(meta, fasta, hifi_reads) }
             .set { ch_purge_dups_input }
 
         PURGE_DUPS(ch_purge_dups_input)
-
-        PURGE_DUPS.out.purged_assembly
-            .map { haplotype_id, purged_fa ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = haplotype_id.contains('_hap1') ? 1 : 2
-                tuple(sample_id, hap_num, purged_fa)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, fastas ->
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_hifiasm_output }
-
+        ch_hifiasm_output = PURGE_DUPS.out.purged_assembly      // per-haplotype (meta, fasta)
     } else {
-        ch_mito_filtered                              // <-- mito-filtered, not HIFIASM.out
-            .set { ch_hifiasm_output }
+        ch_hifiasm_output = ch_mito_filtered                    // per-haplotype (meta, fasta)
     }
 
 
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies (Inspector)
-        Runs before decontamination if enabled
-        Uses HiFi reads to identify and break structural errors
-        uses either purged or original assemblies based on params.run_purge_dups
-    ========================================================================================
+    ====================================================================================
     */
     if (params.inspector_run_on_contigs) {
-        // Split assemblies into individual haplotypes for correction
         ch_hifiasm_output
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", hap1_fasta),
-                    tuple("${sample_id}_hap2", hap2_fasta)
-                ]
-            }
-            .set { ch_contigs_for_correction }
-        
-        // Combine each haplotype with its HiFi reads for correction
-        ch_contigs_for_correction
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, fasta)
-            }
-            .combine(BAM_TO_FASTQ.out, by: 0)
-            .map { sample_id, haplotype_id, fasta, hifi_fastq ->
-                // Create correction parameters map for CONTIGS
+            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
+            .map { sample, meta, fasta, hifi_fastq ->
                 def correction_params = [
                     min_depth: params.inspector_contig_min_depth,
                     min_contig_length: params.inspector_contig_min_contig_length,
@@ -711,175 +626,121 @@ workflow {
                     max_assembly_error_size: params.inspector_contig_max_assembly_error_size,
                     skip_baseerror: params.inspector_contig_skip_baseerror
                 ]
-                tuple(haplotype_id, fasta, hifi_fastq, "contig", correction_params)
+                tuple(meta, fasta, hifi_fastq, "contig", correction_params)
             }
             .set { ch_correction_input }
-        
-        // Run misassembly correction
+
         CORRECT_MISASSEMBLIES_CONTIG(ch_correction_input)
-        
-        // Use corrected assemblies for downstream processing
-        ch_assemblies_for_decontam = CORRECT_MISASSEMBLIES_CONTIG.out.corrected
-        
+        ch_assemblies_for_decontam = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
     } else {
-        // Use original assemblies if correction not requested
-        ch_hifiasm_output
-            .flatMap { sample_id, hap1_fasta, hap2_fasta ->
-                [
-                    tuple("${sample_id}_hap1", hap1_fasta),
-                    tuple("${sample_id}_hap2", hap2_fasta)
-                ]
-            }
-            .set { ch_assemblies_for_decontam }
+        ch_assemblies_for_decontam = ch_hifiasm_output                            // per-hap (meta, fasta)
     }
 
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 5: Optional Decontamination of Contig Assemblies
-        Runs in parallel with Hi-C mapping preparation
-        Databases were already set up in STEP 0 (parallel with assembly)
-        Works on either original contigs OR corrected contigs (if Inspector was run)
-    ========================================================================================
+        ch_assemblies_for_decontam is already per-haplotype (meta, fasta).
+    ====================================================================================
     */
     if (params.decon.run_on_contigs) {
-        // Run decontamination (parallel across all haplotypes)
-        DECONTAMINATE_ASSEMBLY_CONTIG(
-            ch_assemblies_for_decontam,
-            ch_gxdb_dir,
-            "contig"
-        )
-        
-        
-        // Use decontaminated assemblies for downstream Hi-C mapping
-        // Need to add sample_id back for joining with Hi-C reads
-        DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(haplotype_id, sample_id, fasta)
-            }
-            .set { ch_individual_haplotypes }
+        DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
+        ch_individual_haplotypes = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated   // per-hap (meta, fasta)
     } else {
-        // Use corrected or original assemblies (depending on Inspector setting)
-        ch_assemblies_for_decontam
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(haplotype_id, sample_id, fasta)
-            }
-            .set { ch_individual_haplotypes }
+        ch_individual_haplotypes = ch_assemblies_for_decontam                          // per-hap (meta, fasta)
     }
 
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 6: Map Hi-C to Assemblies (contigs or decontaminated contigs)
-    ========================================================================================
+    ====================================================================================
     */
-    // Combine each haplotype with its corresponding trimmed Hi-C reads
+    // Combine each haplotype with its sample's trimmed Hi-C reads (key on meta.sample —
+    // TRIM_HIC carries the sample-level meta; ch_individual_haplotypes is per-haplotype)
     ch_individual_haplotypes
-        .map { haplotype_id, sample_id, fasta ->
-            tuple(sample_id, haplotype_id, fasta)
-        }
-        .combine(TRIM_HIC.out.trimmed_reads, by: 0)
-        .map { sample_id, haplotype_id, fasta, hic_r1, hic_r2 ->
-            tuple(haplotype_id, fasta, hic_r1, hic_r2, "contig")
+        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+        .combine( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+        .map { sample, meta, fasta, hic_r1, hic_r2 ->
+            tuple(meta, fasta, hic_r1, hic_r2, "contig")
         }
         .set { ch_hic_mapping_input }
-    
-    // Map Hi-C reads to assemblies
+
     MAP_HIC_TO_ASSEMBLY(ch_hic_mapping_input)
 
     // checkpoint: contig_raw_map (BAM-level only)
     MAP_HIC_TO_ASSEMBLY.out.bam
-    .map { hap, stage, bam, bai -> tuple(hap, "contig_raw_map", bam, bai) }
-    .set { ch_hic_raw_bam_for_qc }
+        .map { meta, stage, bam, bai -> tuple(meta, "contig_raw_map", bam, bai) }
+        .set { ch_hic_raw_bam_for_qc }
 
     HIC_BAM_METRICS_CONTIG(ch_hic_raw_bam_for_qc)
 
-    // Prepare assemblies channel for QC (haplotype_id, assembly_fasta)
+    // Assemblies channel for the filter / scaffold joins (meta, fasta)
     ch_individual_haplotypes
-        .map { haplotype_id, sample_id, fasta ->
-            tuple(haplotype_id, fasta)
-        }
+        .map { meta, fasta -> tuple(meta, fasta) }
         .set { ch_assemblies_for_qc }
 
 
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 7: Filter Hi-C BAM Files
-    ========================================================================================
+    ====================================================================================
     */
-    
-    // Combine BAM files with assemblies for filtering
     MAP_HIC_TO_ASSEMBLY.out.bam
         .join(ch_assemblies_for_qc)
-        .map { haplotype_id, stage, bam, bai, assembly_fasta ->
-            tuple(haplotype_id, stage, bam, bai, assembly_fasta)
+        .map { meta, stage, bam, bai, assembly_fasta ->
+            tuple(meta, stage, bam, bai, assembly_fasta)
         }
         .set { ch_bam_with_assembly }
-    
-    // Filter BAM files to remove invalid pairs and duplicates
+
     FILTER_HIC_BAM(ch_bam_with_assembly)
 
-    // checkpoint: contig_filtered (pairs-level + retention)
-    // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
-    // Note: No AGP at this checkpoint - pass empty list [] for optional AGP
+    // checkpoint: contig_filtered (pairs-level + retention); no AGP here -> []
     FILTER_HIC_BAM.out.pairs
         .join(FILTER_HIC_BAM.out.parse_stats)
         .join(FILTER_HIC_BAM.out.dedup_stats)
-        .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-            // no agp at this checkpoint - pass empty list for optional path
-            tuple(hap, "contig_filtered", pairs_gz, [], parse_stats, dedup_stats)
+        .map { meta, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
+            tuple(meta, "contig_filtered", pairs_gz, [], parse_stats, dedup_stats)
         }
         .set { ch_hic_pairs_contig_filtered_for_qc }
 
     HIC_PAIRS_METRICS_CONTIG(ch_hic_pairs_contig_filtered_for_qc)
     
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 8: First Round of Scaffolding with Hi-C
-    ========================================================================================
+    ====================================================================================
     */
-    
-    // Prepare input for scaffolding: (haplotype_id, filtered_bam, bai, assembly_fasta, round, round_params)
     FILTER_HIC_BAM.out.bam
         .join(ch_assemblies_for_qc)
-        .map { haplotype_id, stage, bam, bai, assembly_fasta ->
-            tuple(haplotype_id, bam, bai, assembly_fasta, "round1", params.yahs_round1)
+        .map { meta, stage, bam, bai, assembly_fasta ->
+            tuple(meta, bam, bai, assembly_fasta, "round1", params.yahs_round1)
         }
         .set { ch_scaffolding_round1_input }
-    
-    // Run first round of Hi-C scaffolding
+
     SCAFFOLD_HIC_ROUND1(ch_scaffolding_round1_input)
 
-    // checkpoint: scaffold_space (relabel contigs to scaffolds using AGP; no remapping)
-    // After join: (hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats)
+    // checkpoint: scaffold_space (relabel contigs->scaffolds via round1 AGP; no remap)
     FILTER_HIC_BAM.out.pairs
         .join(SCAFFOLD_HIC_ROUND1.out.agp)
         .join(FILTER_HIC_BAM.out.parse_stats)
         .join(FILTER_HIC_BAM.out.dedup_stats)
-        .map { hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
-            tuple(hap, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
+        .map { meta, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
+            tuple(meta, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
         }
         .set { ch_hic_pairs_scaffold_space_for_qc }
 
     HIC_PAIRS_METRICS_CONTIGSCAF(ch_hic_pairs_scaffold_space_for_qc)
 
     /*
-    ========================================================================================
+    ====================================================================================
         STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies (Inspector)
-        Runs after scaffolding, before scaffold decontamination if enabled
-        Uses HiFi reads to identify and break structural errors in scaffolds
-    ========================================================================================
+    ====================================================================================
     */
     if (params.inspector_run_on_scaffolds) {
-        // Combine each scaffolded haplotype with its HiFi reads for correction
+        // Combine each scaffolded haplotype with its sample's HiFi reads (key on meta.sample)
         SCAFFOLD_HIC_ROUND1.out.scaffolds
-            .map { haplotype_id, scaffold ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, scaffold)
-            }
-            .combine(BAM_TO_FASTQ.out, by: 0)
-            .map { sample_id, haplotype_id, scaffold, hifi_fastq ->
-                // Create correction parameters map for SCAFFOLDS
+            .map { meta, scaffold -> [ meta.sample, meta, scaffold ] }
+            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
+            .map { sample, meta, scaffold, hifi_fastq ->
                 def correction_params = [
                     min_depth: params.inspector_scaffold_min_depth,
                     min_contig_length: params.inspector_scaffold_min_contig_length,
@@ -888,19 +749,14 @@ workflow {
                     max_assembly_error_size: params.inspector_scaffold_max_assembly_error_size,
                     skip_baseerror: params.inspector_scaffold_skip_baseerror
                 ]
-                tuple(haplotype_id, scaffold, hifi_fastq, "scaffold", correction_params)
+                tuple(meta, scaffold, hifi_fastq, "scaffold", correction_params)
             }
             .set { ch_scaffold_correction_input }
-        
-        // Run misassembly correction on scaffolds
+
         CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffold_correction_input)
-        
-        // Use corrected scaffolds for downstream processing
-        ch_scaffolds_for_decontam = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
-        
+        ch_scaffolds_for_decontam = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected   // per-hap (meta, fasta)
     } else {
-        // Use original scaffolds if correction not requested
-        ch_scaffolds_for_decontam = SCAFFOLD_HIC_ROUND1.out.scaffolds
+        ch_scaffolds_for_decontam = SCAFFOLD_HIC_ROUND1.out.scaffolds              // per-hap (meta, fasta)
     }
 
     /*
@@ -942,93 +798,75 @@ workflow {
         log.info "[INFO] Running second round of scaffolding (scaffold correction or decontamination was performed)"
         
         /*
-        ========================================================================================
-            STEP 10: Map Hi-C to Final Scaffolds (corrected/decontaminated if those options chosen)
-        ========================================================================================
+        ================================================================================
+            STEP 10: Map Hi-C to Final Scaffolds
+        ================================================================================
         */
-        // Extract sample_id from haplotype_id and combine with trimmed Hi-C reads
         ch_final_scaffolds
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, fasta)
-            }
-            .combine(TRIM_HIC.out.trimmed_reads, by: 0)
-            .map { sample_id, haplotype_id, fasta, hic_r1, hic_r2 ->
-                tuple(haplotype_id, fasta, hic_r1, hic_r2, "scaffold")
+            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+            .combine( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+            .map { sample, meta, fasta, hic_r1, hic_r2 ->
+                tuple(meta, fasta, hic_r1, hic_r2, "scaffold")
             }
             .set { ch_hic_scaffold_mapping_input }
-        
-        // Map Hi-C reads to final scaffolds
+
         MAP_HIC_TO_SCAFFOLD(ch_hic_scaffold_mapping_input)
 
         // checkpoint: scaffold_round2_raw_map (BAM-level only)
         MAP_HIC_TO_SCAFFOLD.out.bam
-            .map { hap, stage, bam, bai -> tuple(hap, "scaffold_round2_raw_map", bam, bai) }
+            .map { meta, stage, bam, bai -> tuple(meta, "scaffold_round2_raw_map", bam, bai) }
             .set { ch_hic_scaffold_raw_bam_for_qc }
 
         HIC_BAM_METRICS_SCAFFOLD(ch_hic_scaffold_raw_bam_for_qc)
 
         /*
-        ========================================================================================
-            STEP 11: Filter Hi-C BAM Files mapped to final scaffolds
-        ========================================================================================
+        ================================================================================
+            STEP 11: Filter Hi-C BAM mapped to final scaffolds
+        ================================================================================
         */
-        
-        // Combine BAM files with scaffolds for filtering
         MAP_HIC_TO_SCAFFOLD.out.bam
             .join(ch_final_scaffolds)
-            .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
-                tuple(haplotype_id, stage, bam, bai, scaffold_fasta)
+            .map { meta, stage, bam, bai, scaffold_fasta ->
+                tuple(meta, stage, bam, bai, scaffold_fasta)
             }
             .set { ch_bam_with_scaffold }
-        
-        // Filter BAM files to remove invalid pairs and duplicates
+
         FILTER_HIC_BAM_SCAFFOLD(ch_bam_with_scaffold)
 
-        // checkpoint: scaffold_round2_filtered (pairs-level + retention)
-        // After join: (hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats)
+        // checkpoint: scaffold_round2_filtered (pairs-level + retention); already in scaffold1 names -> []
         FILTER_HIC_BAM_SCAFFOLD.out.pairs
             .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
-            .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                // already mapped to scaffold1 names, so no AGP needed here - pass empty list
-                tuple(hap, "scaffold_round2_filtered", pairs_gz, [], parse_stats, dedup_stats)
+            .map { meta, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
+                tuple(meta, "scaffold_round2_filtered", pairs_gz, [], parse_stats, dedup_stats)
             }
-        .set { ch_hic_pairs_scaffold_round2_filtered_for_qc }
+            .set { ch_hic_pairs_scaffold_round2_filtered_for_qc }
 
         HIC_PAIRS_METRICS_SCAFFOLD(ch_hic_pairs_scaffold_round2_filtered_for_qc)
 
 
         /*
-        ========================================================================================
-            STEP 12: Second Round of Scaffolding (Iterative Improvement)
-            Uses filtered Hi-C BAM from corrected/decontaminated scaffolds
-            This allows YaHS to potentially improve scaffolding based on the corrected structure
-        ========================================================================================
+        ================================================================================
+            STEP 12: Second Round of Scaffolding
+        ================================================================================
         */
-        
-        // Prepare input for second scaffolding: (haplotype_id, filtered_bam, bai, scaffold_fasta, round, round_params)
         FILTER_HIC_BAM_SCAFFOLD.out.bam
             .join(ch_final_scaffolds)
-            .map { haplotype_id, stage, bam, bai, scaffold_fasta ->
-                tuple(haplotype_id, bam, bai, scaffold_fasta, "round2", params.yahs_round2)
+            .map { meta, stage, bam, bai, scaffold_fasta ->
+                tuple(meta, bam, bai, scaffold_fasta, "round2", params.yahs_round2)
             }
             .set { ch_second_scaffolding_input }
-        
-        // Run second round of Hi-C scaffolding (reusing same module with different round parameter)
-        SCAFFOLD_HIC_ROUND2(ch_second_scaffolding_input)
-        
-        // Store final scaffolds from second round
-        ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds
 
-        // checkpoint: scaffold_round2_space (relabel scaffold1 -> scaffold2 using ROUND2 AGP; no remapping)
-        // After join: (hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats)
+        SCAFFOLD_HIC_ROUND2(ch_second_scaffolding_input)
+        ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds   // per-hap (meta, fasta)
+
+        // checkpoint: scaffold_round2_space (relabel scaffold1->scaffold2 via round2 AGP; no remap)
         FILTER_HIC_BAM_SCAFFOLD.out.pairs
             .join(SCAFFOLD_HIC_ROUND2.out.agp)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
             .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
-            .map { hap, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
-                tuple(hap, "scaffold_round2_space", pairs_gz, agp, parse_stats, dedup_stats)
+            .map { meta, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
+                tuple(meta, "scaffold_round2_space", pairs_gz, agp, parse_stats, dedup_stats)
             }
             .set { ch_hic_pairs_scaffold_round2_space_for_qc }
 
@@ -1062,16 +900,11 @@ workflow {
         ch_scaffolds_for_gap_filling = ch_final_scaffolds
     }
     
-    // Combine scaffolds with HiFi reads for gap filling
+    // Combine scaffolds with sample HiFi reads for gap filling (key on meta.sample)
     ch_scaffolds_for_gap_filling
-        .map { haplotype_id, scaffold ->
-            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            tuple(sample_id, haplotype_id, scaffold)
-        }
-        .combine(BAM_TO_FASTQ.out, by: 0)
-        .map { sample_id, haplotype_id, scaffold, hifi_fastq ->
-            tuple(haplotype_id, scaffold, hifi_fastq)
-        }
+        .map { meta, scaffold -> [ meta.sample, meta, scaffold ] }
+        .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
+        .map { sample, meta, scaffold, hifi_fastq -> tuple(meta, scaffold, hifi_fastq) }
         .set { ch_gap_filling_input }
     
     // Run gap filling
@@ -1086,29 +919,23 @@ workflow {
     ========================================================================================
     */
     if (params.run_teloclip_extend) {
-        // Combine gap-filled assemblies with HiFi reads (same join pattern as gap filling)
+        // Combine gap-filled assemblies with sample HiFi reads (key on meta.sample)
         GAP_FILLING.out.filled_assembly
-            .map { haplotype_id, filled_fa ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, filled_fa)
-            }
-            .combine(BAM_TO_FASTQ.out, by: 0)
-            .map { sample_id, haplotype_id, filled_fa, hifi_fastq ->
-                tuple(haplotype_id, filled_fa, hifi_fastq)
-            }
+            .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
+            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
+            .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta, filled_fa, hifi_fastq) }
             .set { ch_teloclip_input }
 
         TELOCLIP_EXTEND(ch_teloclip_input)
 
         // Collect teloclip stats across all haplotypes
         COLLECT_TELOCLIP_STATS(
-            TELOCLIP_EXTEND.out.stats.map { haplotype_id, stats -> stats }.collect()
+            TELOCLIP_EXTEND.out.stats.map { meta, stats -> stats }.collect()
         )
 
         // The teloclip-extended assembly becomes the "final" assembly
         ch_final_assembly = TELOCLIP_EXTEND.out.extended_assembly
         ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats
-
     } else {
         // No teloclip — gap-filled assembly IS the final assembly
         ch_final_assembly = GAP_FILLING.out.filled_assembly
@@ -1129,42 +956,39 @@ workflow {
     // 1. Contact Maps for Final Assemblies
     //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
     if (params.make_final_contact_maps) {
+        // Combine final per-hap assemblies with sample Hi-C reads (key on meta.sample)
         ch_finalized_assembly
-            .map { haplotype_id, final_fa ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                tuple(sample_id, haplotype_id, final_fa)
-            }
-            .combine(TRIM_HIC.out.trimmed_reads, by: 0)
-            .map { sample_id, haplotype_id, final_fa, hic_r1, hic_r2 ->
-                tuple(haplotype_id, final_fa, hic_r1, hic_r2, 'final')
+            .map { meta, final_fa -> [ meta.sample, meta, final_fa ] }
+            .combine( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+            .map { sample, meta, final_fa, hic_r1, hic_r2 ->
+                tuple(meta, final_fa, hic_r1, hic_r2, 'final')
             }
             .set { ch_final_hic_map_input }
 
         MAP_HIC_TO_FINAL(ch_final_hic_map_input)
 
-        // (rest of contact map wiring is the same but uses ch_finalized_assembly
-        //  instead of GAP_FILLING.out.filled_assembly for joins)
-
+        // checkpoint: final_raw_map (BAM-level only)
         MAP_HIC_TO_FINAL.out.bam
-            .map { haplotype_id, stage, bam, bai -> tuple(haplotype_id, "final_raw_map", bam, bai) }
+            .map { meta, stage, bam, bai -> tuple(meta, "final_raw_map", bam, bai) }
             .set { ch_final_raw_bam_qc }
 
         HIC_BAM_METRICS_FINAL(ch_final_raw_bam_qc)
 
         MAP_HIC_TO_FINAL.out.bam
-            .join(ch_finalized_assembly, by: 0)
-            .map { haplotype_id, stage, bam, bai, final_fa ->
-                tuple(haplotype_id, "final", bam, bai, final_fa)
+            .join(ch_finalized_assembly)
+            .map { meta, stage, bam, bai, final_fa ->
+                tuple(meta, "final", bam, bai, final_fa)
             }
             .set { ch_final_filter_input }
 
         FILTER_HIC_BAM_FINAL(ch_final_filter_input)
 
+        // checkpoint: final_filtered (pairs-level + retention); already in final names -> []
         FILTER_HIC_BAM_FINAL.out.pairs
             .join(FILTER_HIC_BAM_FINAL.out.parse_stats)
             .join(FILTER_HIC_BAM_FINAL.out.dedup_stats)
-            .map { hap, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                tuple(hap, "final_filtered", pairs_gz, [], parse_stats, dedup_stats)
+            .map { meta, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
+                tuple(meta, "final_filtered", pairs_gz, [], parse_stats, dedup_stats)
             }
             .set { ch_final_pairs_qc }
 
@@ -1172,14 +996,14 @@ workflow {
 
         FILTER_HIC_BAM_FINAL.out.pairs
             .join(ch_finalized_assembly)
-            .map { haplotype_id, stage, pairs_gz, final_fasta ->
-                tuple(haplotype_id, pairs_gz, final_fasta, "final")
+            .map { meta, stage, pairs_gz, final_fasta ->
+                tuple(meta, pairs_gz, final_fasta, "final")
             }
             .set { ch_contact_map_final_input }
 
         CONTACT_MAP_FINAL(ch_contact_map_final_input)
 
-        if (params.hic_balance ) {
+        if (params.hic_balance) {
             HIC_COMPARTMENTS(
                 CONTACT_MAP_FINAL.out.mcool,
                 params.compartment_resolution ?: 250000,
@@ -1197,6 +1021,12 @@ workflow {
         }
     }
 
+    // String-id view of the finalized per-hap assemblies for the leaf viz/QUAST steps.
+    // These only need an id (for pairing, labels, output naming) — meta itself isn't used.
+    ch_finalized_assembly
+        .map { meta, fa -> tuple(meta.id, fa) }
+        .set { ch_final_by_id }
+
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
     /*
     ========================================================================================
@@ -1208,7 +1038,7 @@ workflow {
         SETUP_PAFR()
 
         // Collect all final assemblies, SORT for deterministic ordering, then generate pairs
-        ch_finalized_assembly
+        ch_final_by_id 
             .toSortedList { a, b -> a[0] <=> b[0] }
             .flatMap { assemblies ->
                 def pairs = []
@@ -1245,11 +1075,11 @@ workflow {
         // Riparian plot input — uses ch_final_assembly
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
             .map { hap1, hap2, paf -> tuple(hap1, hap2, paf) }
-            .combine(ch_finalized_assembly, by: 0)
+            .combine(ch_final_by_id, by: 0)
 
         ch_riparian_input = ch_paf_with_asm1
             .map { hap1, hap2, paf, fasta1 -> tuple(hap2, hap1, fasta1, paf) }
-            .combine(ch_finalized_assembly, by: 0)
+            .combine(ch_final_by_id, by: 0)
             .map { hap2, hap1, fasta1, paf, fasta2 ->
                 tuple(hap1, fasta1, hap2, fasta2, paf)
             }
@@ -1270,8 +1100,7 @@ workflow {
     ========================================================================================
     */
     // Collect all gap-filled assemblies with their labels for cross-sample comparison
-    ch_finalized_assembly
-        .map { haplotype_id, assembly -> tuple(haplotype_id, assembly) }
+    ch_final_by_id
         .toSortedList { a, b -> a[0] <=> b[0] }
         .map { list ->
             def labels = list.collect { it[0] }
@@ -1299,10 +1128,10 @@ workflow {
     ========================================================================================
     */
     // 1. Explore: discover telomere motif de novo
-    TIDK_EXPLORE(ch_finalized_assembly)
+    TIDK_EXPLORE(ch_final_by_id)
 
     // 2. Search: windowed telomere repeat quantification
-    TIDK_SEARCH(ch_finalized_assembly)
+    TIDK_SEARCH(ch_final_by_id)
 
     // 3. Plot: SVG visualization per haplotype
     TIDK_PLOT(TIDK_SEARCH.out.search_tsv)
@@ -1344,9 +1173,7 @@ workflow {
     ========================================================================================
     */
     HIC_QC_RAW(
-        ch_input.map { sample_id, hifi_bam, hic_r1, hic_r2 ->
-            tuple(sample_id, hic_r1, hic_r2)
-        },
+        ch_input.map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
         "raw"
     )
 
@@ -1356,7 +1183,7 @@ workflow {
     ========================================================================================
     */
     HIFI_QC(
-        BAM_TO_FASTQ.out
+        BAM_TO_FASTQ.out.fastq
     )
 
     /*
@@ -1375,256 +1202,119 @@ workflow {
     ========================================================================================
     */
 
-    /*
-    ========================================================================================
-        QC Contig Genomes Assemblies
-    ========================================================================================
-    */
-    ASSEMBLY_QC_INITIAL(
-        HIFIASM.out.assemblies,
-        BAM_TO_FASTQ.out,
-        BUILD_MERYL_DB.out.meryl_db,
-        ch_busco_db,
-        'contig'
-    )
+    // QC stage selector: 'all_stages' (default) runs QC at every checkpoint;
+    // 'final_only' runs QC on the final assembly only.
+    def run_all_qc = ( (params.qc_mode ?: 'all_stages') != 'final_only' )
 
-    /*
-    ========================================================================================
-        QC Mito-Filtered Contig Assemblies
-    ========================================================================================
-    */
-    ASSEMBLY_QC_MITO_FILTERED(
-        ch_mito_filtered,
-        BAM_TO_FASTQ.out,
-        BUILD_MERYL_DB.out.meryl_db,
-        ch_busco_db,
-        'contig_mito_filtered'
-    )
-
-    /*
-    ========================================================================================
-        QC Purged Contig Genomes Assemblies
-    ========================================================================================
-    */
-    if (params.run_purge_dups) {
-        ASSEMBLY_QC_PURGED(
-            ch_hifiasm_output,    // tuple(sample_id, hap1_fasta, hap2_fasta)
-            BAM_TO_FASTQ.out,     // tuple(sample_id, hifi_fastq)
-            BUILD_MERYL_DB.out.meryl_db,        // tuple(sample_id, meryl_db)
-            ch_busco_db,          // path
-            "contig_purged"       // string
+     // QC raw hifiasm contigs (per-hap fork — was HIFIASM.out.assemblies triple)
+    if (run_all_qc) {
+        ASSEMBLY_QC_INITIAL(
+            ch_contigs,
+            BAM_TO_FASTQ.out.fastq,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'contig'
         )
     }
-    /*
-    ========================================================================================
-        QC Corrected Contig Genomes Assemblies (if Inspector was run)
-    ========================================================================================
-    */
-    if (params.inspector_run_on_contigs) {
-        // Re-pair corrected haplotypes by sample for QC
-        CORRECT_MISASSEMBLIES_CONTIG.out.corrected
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, fasta)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, fastas ->
-                // Sort by haplotype number to ensure hap1, hap2 order
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_corrected_paired }
 
+    // QC mito-filtered contigs
+    if (run_all_qc) {
+        ASSEMBLY_QC_MITO_FILTERED(
+            ch_mito_filtered,
+            BAM_TO_FASTQ.out.fastq,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'contig_mito_filtered'
+        )
+    }
+
+    // QC purged contigs
+    if (run_all_qc && params.run_purge_dups) {
+        ASSEMBLY_QC_PURGED(
+            ch_hifiasm_output,
+            BAM_TO_FASTQ.out.fastq,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'contig_purged'
+        )
+    }
+
+    // QC Inspector-corrected contigs
+    if (run_all_qc && params.inspector_run_on_contigs) {
         ASSEMBLY_QC_CONTIG_CORRECTED(
-            ch_corrected_paired,
-            BAM_TO_FASTQ.out,
+            CORRECT_MISASSEMBLIES_CONTIG.out.corrected,
+            BAM_TO_FASTQ.out.fastq,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_corrected'
         )
     }
 
-    /*
-    ========================================================================================
-        QC Contig Decontaminated Genome Assemblies
-    ========================================================================================
-    */
-    if (params.decon.run_on_contigs) {
-        // QC on decontaminated assemblies
-        // Re-pair haplotypes by sample for QC
-        DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, fasta)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, fastas ->
-                // Sort by haplotype number to ensure hap1, hap2 order
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_decontam_paired }
-
+    // QC decontaminated contigs
+    if (run_all_qc && params.decon.run_on_contigs) {
         ASSEMBLY_QC_CONTIG_DECONTAM(
-            ch_decontam_paired,
-            BAM_TO_FASTQ.out,
+            DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
+            BAM_TO_FASTQ.out.fastq,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_decontam'
         )
     }
 
-    /*
-    ========================================================================================
-        QC Scaffolded Genomes (Round 1)
-    ========================================================================================
-    */
-    // Re-pair scaffolded haplotypes by sample
-    SCAFFOLD_HIC_ROUND1.out.scaffolds
-        .map { haplotype_id, scaffold ->
-            // Extract sample_id and haplotype number
-            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-            tuple(sample_id, hap_num, scaffold)
-        }
-        .groupTuple(by: 0, size: 2)
-        .map { sample_id, hap_nums, scaffolds ->
-            // Sort by haplotype number to ensure hap1, hap2 order
-            def sorted = [hap_nums, scaffolds].transpose().sort { it[0] }
-            tuple(sample_id, sorted[0][1], sorted[1][1])
-        }
-        .set { ch_scaffolds_paired }
+    // QC round-1 scaffolds
+    if (run_all_qc) {
+        ASSEMBLY_QC_SCAFFOLD(
+            SCAFFOLD_HIC_ROUND1.out.scaffolds,
+            BAM_TO_FASTQ.out.fastq,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'scaffold'
+        )
+    }
 
-    ASSEMBLY_QC_SCAFFOLD(
-        ch_scaffolds_paired,
-        BAM_TO_FASTQ.out,
-        BUILD_MERYL_DB.out.meryl_db,
-        ch_busco_db,
-        'scaffold'
-    )
-
-    /*
-    ========================================================================================
-        QC Corrected Scaffold Genomes Assemblies (if Inspector was run on scaffolds)
-    ========================================================================================
-    */
-    if (params.inspector_run_on_scaffolds) {
-        // Re-pair corrected scaffolds by sample for QC
-        CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, fasta)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, fastas ->
-                // Sort by haplotype number to ensure hap1, hap2 order
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_scaffold_corrected_paired }
-
+    // QC Inspector-corrected scaffolds
+    if (run_all_qc && params.inspector_run_on_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_CORRECTED(
-            ch_scaffold_corrected_paired,
-            BAM_TO_FASTQ.out,
+            CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected,
+            BAM_TO_FASTQ.out.fastq,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_corrected'
         )
     }
 
-    /*
-    ========================================================================================
-        QC Scaffold Decontaminated Genome Assemblies
-    ========================================================================================
-    */
-    if (params.decon.run_on_scaffolds) {
-        // QC on decontaminated assemblies
-        // Re-pair haplotypes by sample for QC
-        DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, fasta)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, fastas ->
-                // Sort by haplotype number to ensure hap1, hap2 order
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_decontam_scaffold_paired }
-
+    // QC decontaminated scaffolds
+    if (run_all_qc && params.decon.run_on_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_DECONTAM(
-            ch_decontam_scaffold_paired,
-            BAM_TO_FASTQ.out,
+            DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
+            BAM_TO_FASTQ.out.fastq,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_decontam'
         )
     }
 
-    /*
-    ========================================================================================
-        QC Second Round Scaffolded Genomes (Conditional - only if round 2 was run)
-    ========================================================================================
-    */
-    if (params.run_scaffold_round2) {
-        // Re-pair second-round scaffolded haplotypes by sample
-        ch_final_scaffolds_round2
-            .map { haplotype_id, scaffold ->
-                // Extract sample_id and haplotype number
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, scaffold)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, scaffolds ->
-                // Sort by haplotype number to ensure hap1, hap2 order
-                def sorted = [hap_nums, scaffolds].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_scaffolds_round2_paired }
-
+    // QC round-2 scaffolds
+    if (run_all_qc && params.run_scaffold_round2) {
         ASSEMBLY_QC_SCAFFOLD_ROUND2(
-            ch_scaffolds_round2_paired,
-            BAM_TO_FASTQ.out,
+            ch_final_scaffolds_round2,
+            BAM_TO_FASTQ.out.fastq,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_round2'
         )
     }
 
-    /*
-    ========================================================================================
-        QC Gap-Filled Genomes
-    ========================================================================================
-    */
-    // Re-pair gap-filled haplotypes by sample
-    GAP_FILLING.out.filled_assembly
-        .map { haplotype_id, assembly ->
-            // Extract sample_id and haplotype number
-            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-            tuple(sample_id, hap_num, assembly)
-        }
-        .groupTuple(by: 0, size: 2)
-        .map { sample_id, hap_nums, assemblies ->
-            // Sort by haplotype number to ensure hap1, hap2 order
-            def sorted = [hap_nums, assemblies].transpose().sort { it[0] }
-            tuple(sample_id, sorted[0][1], sorted[1][1])
-        }
-        .set { ch_gap_filled_paired }
-
-    ASSEMBLY_QC_GAP_FILLED(
-        ch_gap_filled_paired,
-        BAM_TO_FASTQ.out,
-        BUILD_MERYL_DB.out.meryl_db,
-        ch_busco_db,
-        'gap_filled'
-    )
+    // QC gap-filled genomes (this is the final QC when teloclip is off)
+    if (run_all_qc || !params.run_teloclip_extend) {
+        ASSEMBLY_QC_GAP_FILLED(
+            GAP_FILLING.out.filled_assembly,
+            BAM_TO_FASTQ.out.fastq,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'gap_filled'
+        )
+    }
 
     /*
     ========================================================================================
@@ -1670,61 +1360,40 @@ workflow {
     ========================================================================================
     */
     
-    // Collect all assembly QC summaries
-    // Start with the ones that always run
-    ch_all_assembly_summaries = ASSEMBLY_QC_INITIAL.out.assembly_summary
-        .mix(ASSEMBLY_QC_MITO_FILTERED.out.assembly_summary)
-        .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
-        .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
-    
-    // Add conditional assembly QC outputs
-    if (params.run_purge_dups) {
+    // Collect all assembly QC summaries (respecting qc_mode + which steps ran)
+    ch_all_assembly_summaries = Channel.empty()
+
+    if (run_all_qc) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
+            .mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
+            .mix(ASSEMBLY_QC_MITO_FILTERED.out.assembly_summary)
+            .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
+
+        if (params.run_purge_dups)
+            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
+        if (params.inspector_run_on_contigs)
+            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
+        if (params.decon.run_on_contigs)
+            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
+        if (params.inspector_run_on_scaffolds)
+            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
+        if (params.decon.run_on_scaffolds)
+            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
+        if (params.run_scaffold_round2)
+            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
     }
 
-    if (params.inspector_run_on_contigs) {
+    // Gap-filled summary included whenever the gap-filled QC ran
+    if (run_all_qc || !params.run_teloclip_extend) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
+            .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     }
-    
-    if (params.decon.run_on_contigs) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
-    }
-    
-    if (params.inspector_run_on_scaffolds) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
-    }
-    
-    if (params.decon.run_on_scaffolds) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
-    }
-    
-    if (params.run_scaffold_round2) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
-    }
-    
+
+    // Final (teloclip-extended) assembly QC — always runs when teloclip is enabled
     if (params.run_teloclip_extend) {
-        ch_finalized_assembly
-            .map { haplotype_id, fasta ->
-                def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-                def hap_num = (haplotype_id =~ /_hap([12])$/)[0][1]
-                tuple(sample_id, hap_num, fasta)
-            }
-            .groupTuple(by: 0, size: 2)
-            .map { sample_id, hap_nums, fastas ->
-                def sorted = [hap_nums, fastas].transpose().sort { it[0] }
-                tuple(sample_id, sorted[0][1], sorted[1][1])
-            }
-            .set { ch_teloclip_assemblies_paired }
-
         ASSEMBLY_QC_TELOCLIP(
-            ch_teloclip_assemblies_paired,
-            BAM_TO_FASTQ.out,
+            ch_finalized_assembly,
+            BAM_TO_FASTQ.out.fastq,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'final'
@@ -1774,8 +1443,8 @@ workflow {
     // Extract just the TSV files from tuples and collect
     COMPILE_FINAL_QC(
         ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect(),
-        ch_all_bam_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect(),
-        ch_all_pairs_metrics.map { haplotype_id, checkpoint, tsv -> tsv }.collect()
+        ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect(),
+        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect()
     )
 
     // Make interactive HTML assembly viewer
@@ -1790,8 +1459,8 @@ workflow {
     // BUSCO output from ASSEMBLY_QC_TELOCLIP is per-haplotype
     ch_finalized_assembly
         .join(ch_final_busco)
-        .map { haplotype_id, assembly, busco_dir ->
-            tuple(haplotype_id, assembly, busco_dir, "final")
+        .map { meta, assembly, busco_dir ->
+            tuple(meta.id, assembly, busco_dir, "final")
         }
         .set { ch_snail_plot_final_input }
 
@@ -1804,16 +1473,12 @@ workflow {
 
     // Combine gap-filled assemblies with HiFi reads for coverage book
     ch_finalized_assembly
-        .map { haplotype_id, final_fa ->
-            def sample_id = haplotype_id.replaceAll(/_hap[12]$/, '')
-            tuple(sample_id, haplotype_id, final_fa)
-        }
-        .combine(BAM_TO_FASTQ.out, by: 0)
-        .map { sample_id, haplotype_id, final_fa, hifi_fastq ->
-            def meta = [
-                id: haplotype_id,
-                sample: sample_id
-            ]
+        .map { meta, final_fa -> tuple(meta.sample, meta, final_fa) }
+        .combine(
+            BAM_TO_FASTQ.out.fastq.map { meta, hifi_fastq -> tuple(meta.sample, hifi_fastq) },
+            by: 0
+        )
+        .map { sample, meta, final_fa, hifi_fastq ->
             tuple(meta, final_fa, hifi_fastq)
         }
         .set { ch_coverage_book_input }
@@ -1837,9 +1502,7 @@ workflow {
     // FINALIZE_ASSEMBLY.out.assembly: tuple(haplotype_id, fasta)
     // publishDir: ${params.outdir}/assembly/final
     ch_manifest_assemblies = FINALIZE_ASSEMBLY.out.assembly
-        .map { hap_id, fasta ->
-            "assembly\t${hap_id}\t.\t${fasta.name}\tassembly/final"
-        }
+        .map { meta, fasta -> "assembly\t${meta.id}\t.\t${fasta.name}\tassembly/final" }
 
     // ---- Snail plots (final) ----
     // SNAIL_PLOT_FINAL.out.snail: tuple(haplotype_id, qc_label, svg)
@@ -1854,10 +1517,10 @@ workflow {
     // publishDir: ${params.outdir}/contact_maps
     if (params.make_final_contact_maps) {
         ch_manifest_contact_maps = CONTACT_MAP_FINAL.out.contact_maps
-            .flatMap { hap_id, stage, pngs ->
+            .flatMap { meta, stage, pngs ->
                 def png_list = pngs instanceof List ? pngs : [pngs]
                 png_list.collect { png ->
-                    "contact_map\t${hap_id}\t.\t${png.name}\tcontact_maps"
+                    "contact_map\t${meta.id}\t.\t${png.name}\tcontact_maps"
                 }
             }
     } else {
@@ -1920,19 +1583,13 @@ workflow {
     // ---- Mitogenome assembly ----
     // publishDir: ${params.outdir}/mitogenome/${sample_id}
     ch_manifest_mito_gb = MITOHIFI.out.annotation
-        .map { sample_id, gb ->
-            "mito_genbank\t${sample_id}\t.\t${gb.name}\tmitogenome"
-        }
+        .map { meta, gb -> "mito_genbank\t${meta.sample}\t.\t${gb.name}\tmitogenome" }
 
     ch_manifest_mito_stats = MITOHIFI.out.stats
-        .map { sample_id, tsv ->
-            "mito_stats\t${sample_id}\t.\t${tsv.name}\tmitogenome"
-        }
+        .map { meta, tsv -> "mito_stats\t${meta.sample}\t.\t${tsv.name}\tmitogenome" }
 
     ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
-        .map { sample_id, png ->
-            "mito_gene_map\t${sample_id}\t.\t${png.name}\tmitogenome"
-        }
+        .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\tmitogenome" }
 
     // ---- Combine all manifest entries into a single TSV ----
     ch_manifest_assemblies
@@ -1960,7 +1617,7 @@ workflow {
 
     // Collect mitogenome stats for report
     ch_mito_stats_for_report = MITOHIFI.out.stats
-        .map { sample_id, tsv -> tsv }
+        .map { meta, tsv -> tsv }
         .collectFile(
             name: 'all_mito_stats.tsv',
             keepHeader: true,

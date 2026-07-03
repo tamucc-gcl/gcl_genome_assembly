@@ -4,20 +4,18 @@
 ========================================================================================
     Removes mitochondrial contigs from the nuclear assembly using the MitoHiFi
     assembled mitogenome as reference.
+    Repo location: modules/filter_mito_contigs.nf
 
-    Uses minimap2 to align HIFIASM contigs against the mitogenome, then filters
-    out any contig with high identity and coverage alignment to the mitogenome.
-    This prevents mito contigs from confusing purge_dups (extreme coverage),
+    Uses minimap2 to align contigs against the mitogenome, then filters out any
+    contig with high identity and coverage alignment to the mitogenome. This
+    prevents mito contigs from confusing purge_dups (extreme coverage),
     scaffolding (no Hi-C signal), and decontamination (false positive flags).
 
-    Runs per-haplotype after HIFIASM (or after purge_dups if enabled),
-    before Inspector / FCS-GX / scaffolding.
+    Runs per-haplotype over ch_contigs (one instance handles both haplotypes;
+    no HAP1/HAP2 aliasing needed now that the assembly is forked upstream).
 
     Input:
-    - haplotype_id: Haplotype identifier (e.g., sample_id_hap1)
-    - assembly_fasta: Nuclear assembly contigs
-    - mitogenome_fasta: Assembled mitogenome from MITOHIFI
-
+    - meta + assembly_fasta + mitogenome_fasta
     Output:
     - filtered: Nuclear assembly with mito contigs removed
     - mito_contigs: Extracted mitochondrial contigs (for verification)
@@ -26,18 +24,18 @@
 */
 
 process FILTER_MITO_CONTIGS {
-    tag "${haplotype_id}"
+    tag "${meta.id}"
     label 'filter_mito_contigs'
 
     publishDir "${params.outdir}/assembly/contig/mito_filtered", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(assembly_fasta), path(mitogenome_fasta)
+    tuple val(meta), path(assembly_fasta), path(mitogenome_fasta)
 
     output:
-    tuple val(haplotype_id), path("${haplotype_id}.mito_filtered.fasta"),  emit: filtered
-    tuple val(haplotype_id), path("${haplotype_id}.mito_contigs.fasta"),   emit: mito_contigs
-    tuple val(haplotype_id), path("${haplotype_id}.mito_filter_stats.tsv"),emit: filter_stats
+    tuple val(meta), path("${meta.id}.mito_filtered.fasta"),  emit: filtered
+    tuple val(meta), path("${meta.id}.mito_contigs.fasta"),   emit: mito_contigs
+    tuple val(meta), path("${meta.id}.mito_filter_stats.tsv"),emit: filter_stats
 
     script:
     def min_identity = params.mitohifi_filter_min_identity ?: 90
@@ -45,7 +43,7 @@ process FILTER_MITO_CONTIGS {
     """
     set -euo pipefail
 
-    echo "[FILTER_MITO] Filtering mitochondrial contigs from ${haplotype_id}"
+    echo "[FILTER_MITO] Filtering mitochondrial contigs from ${meta.id}"
     echo "[FILTER_MITO] Min identity: ${min_identity}%"
     echo "[FILTER_MITO] Min query coverage: ${min_coverage}%"
     echo "[FILTER_MITO] Started: \$(date)"
@@ -112,7 +110,7 @@ process FILTER_MITO_CONTIGS {
         # Extract mito contigs
         samtools faidx ${assembly_fasta}
         xargs -a mito_names.txt samtools faidx ${assembly_fasta} \\
-            > ${haplotype_id}.mito_contigs.fasta
+            > ${meta.id}.mito_contigs.fasta
 
         # Build filtered assembly (all contigs NOT in the mito list)
         awk 'NR==FNR {exclude[\$1]=1; next}
@@ -122,34 +120,34 @@ process FILTER_MITO_CONTIGS {
              }
              !skip {print}
         ' mito_names.txt ${assembly_fasta} \\
-            > ${haplotype_id}.mito_filtered.fasta
+            > ${meta.id}.mito_filtered.fasta
     else
         # No mito contigs found — pass through unchanged
         echo "[FILTER_MITO] No mitochondrial contigs detected; assembly unchanged"
-        cp ${assembly_fasta} ${haplotype_id}.mito_filtered.fasta
-        touch ${haplotype_id}.mito_contigs.fasta
+        cp ${assembly_fasta} ${meta.id}.mito_filtered.fasta
+        touch ${meta.id}.mito_contigs.fasta
     fi
 
     # -------------------------------------------------------------------------
     # 4) Compile statistics
     # -------------------------------------------------------------------------
-    FILTERED_CONTIGS=\$(grep -c '^>' ${haplotype_id}.mito_filtered.fasta || echo 0)
+    FILTERED_CONTIGS=\$(grep -c '^>' ${meta.id}.mito_filtered.fasta || echo 0)
     MITO_TOTAL_BP=0
     if [ "\${MITO_COUNT}" -gt 0 ]; then
-        MITO_TOTAL_BP=\$(grep -v '^>' ${haplotype_id}.mito_contigs.fasta | tr -d '\\n' | wc -c)
+        MITO_TOTAL_BP=\$(grep -v '^>' ${meta.id}.mito_contigs.fasta | tr -d '\\n' | wc -c)
     fi
 
-    cat > ${haplotype_id}.mito_filter_stats.tsv <<EOF
+    cat > ${meta.id}.mito_filter_stats.tsv <<EOF
 haplotype_id\ttotal_contigs\tmito_contigs_removed\tmito_total_bp\tremaining_contigs
-${haplotype_id}\t\${TOTAL_CONTIGS}\t\${MITO_COUNT}\t\${MITO_TOTAL_BP}\t\${FILTERED_CONTIGS}
+${meta.id}\t\${TOTAL_CONTIGS}\t\${MITO_COUNT}\t\${MITO_TOTAL_BP}\t\${FILTERED_CONTIGS}
 EOF
 
     # Append per-contig details if any mito contigs were found
     if [ "\${MITO_COUNT}" -gt 0 ]; then
-        echo "" >> ${haplotype_id}.mito_filter_stats.tsv
+        echo "" >> ${meta.id}.mito_filter_stats.tsv
         echo "# Removed contigs (contig_name, length, percent_identity, query_coverage):" \\
-            >> ${haplotype_id}.mito_filter_stats.tsv
-        cat mito_contig_ids.tsv >> ${haplotype_id}.mito_filter_stats.tsv
+            >> ${meta.id}.mito_filter_stats.tsv
+        cat mito_contig_ids.tsv >> ${meta.id}.mito_filter_stats.tsv
     fi
 
     echo "[FILTER_MITO] Filtering complete:"
@@ -161,8 +159,8 @@ EOF
 
     stub:
     """
-    cp ${assembly_fasta} ${haplotype_id}.mito_filtered.fasta
-    touch ${haplotype_id}.mito_contigs.fasta
-    printf 'haplotype_id\\ttotal_contigs\\tmito_contigs_removed\\tmito_total_bp\\tremaining_contigs\\n${haplotype_id}\\t100\\t0\\t0\\t100\\n' > ${haplotype_id}.mito_filter_stats.tsv
+    cp ${assembly_fasta} ${meta.id}.mito_filtered.fasta
+    touch ${meta.id}.mito_contigs.fasta
+    printf 'haplotype_id\\ttotal_contigs\\tmito_contigs_removed\\tmito_total_bp\\tremaining_contigs\\n${meta.id}\\t100\\t0\\t0\\t100\\n' > ${meta.id}.mito_filter_stats.tsv
     """
 }
