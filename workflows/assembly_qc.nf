@@ -56,23 +56,20 @@ workflow ASSEMBLY_QC {
         .map { key, metas, fastas ->
             def sample_id = metas[0].sample
             def ordered = [metas, fastas].transpose().sort { it[0].haplotype }
-            tuple(sample_id, ordered.collect { it[1] })
+            tuple(sample_id,
+                  ordered.collect { it[1] },                              // [fastas]  (1 haploid | 2 diploid)
+                  ordered.collect { "${sample_id}.${it[0].haplotype}" })  // [labels]  sample.hap1/.hap2 | sample.primary
         }
-        .set { ch_paired_assemblies }   // (sample_id, [hap1_fa, hap2_fa])
+        .set { ch_paired_assemblies }   // (sample_id, [fastas], [labels])
 
-    // QUAST — per-sample, both haplotypes (Phase 1: exactly two)
-    ch_paired_assemblies
-        .map { sample_id, fastas -> tuple(sample_id, fastas[0], fastas[1]) }
-        .set { ch_quast_input }
-
-    QUAST(ch_quast_input)
+    // QUAST — per-sample; 1 (haploid) or 2 (diploid) assemblies + matching labels
+    QUAST(ch_paired_assemblies)
 
     // MERQURY — join re-paired assemblies with the sample's meryl DB (by sample_id)
     ch_paired_assemblies
-        .map { sample_id, fastas -> tuple(sample_id, fastas[0], fastas[1]) }
+        .map { sample_id, fastas, labels -> tuple(sample_id, fastas) }
         .join( meryl_db.map { meta, db -> tuple(meta.sample, db) } )
-        .map { sample_id, hap1, hap2, db -> tuple(sample_id, hap1, hap2, db) }
-        .set { ch_merqury_input }
+        .set { ch_merqury_input }   // (sample_id, [fastas], db)
 
     MERQURY(ch_merqury_input)
 

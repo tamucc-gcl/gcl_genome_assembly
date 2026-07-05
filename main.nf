@@ -559,14 +559,12 @@ workflow {
     
     HIFIASM(ch_fastq_all)
 
-    // STEP 4-fork: the single fork point. Split the sample-level assembly into per-haplotype
-    // tuple(meta, fasta). Everything downstream stays per-haplotype and re-pairs (via groupKey)
-    // ONLY where a step genuinely needs both haplotypes (QUAST/MERQURY/COMBINE).
-    // NOTE: diploid path; n_hap==1 (primary/haploid) output naming is wired in Phase 2.
+    // Fork sample-level assembly into per-hap contigs: diploid -> hap1+hap2, haploid -> one primary.
     HIFIASM.out.assemblies
-        .flatMap { meta, hap1_fa, hap2_fa ->
-            def hmetas = forkHaplotypeMeta(meta)          // [meta_hap1, meta_hap2]
-            [ tuple(hmetas[0], hap1_fa), tuple(hmetas[1], hap2_fa) ]
+        .flatMap { meta, fastas ->
+            def hmetas = forkHaplotypeMeta(meta)           // [hap1, hap2]  or  [primary]
+            def fs = (fastas instanceof List) ? fastas.sort { it.name } : [fastas]
+            [hmetas, fs].transpose().collect { hm, fa -> tuple(hm, fa) }
         }
         .set { ch_contigs }                                // per-haplotype tuple(meta, fasta)
 
@@ -1044,9 +1042,12 @@ workflow {
                 def pairs = []
 
                 if (params.pairwise_alignment_mode == 'within_sample') {
-                    // Only compare hap1 vs hap2 within each sample
+                    // Only compare hap1 vs hap2 within each sample.
+                    // A haploid sample has a single 'primary' assembly and therefore no
+                    // within-sample comparison — it is intentionally excluded below by the
+                    // haps.size() == 2 check (its group has size 1).
                     def grouped = assemblies.groupBy { haplotype_id, fasta ->
-                        haplotype_id.replaceAll(/_hap[12]$/, '')
+                        haplotype_id.replaceAll(/_(hap[12]|primary)$/, '')
                     }
                     grouped.each { sample_id, haps ->
                         if (haps.size() == 2) {

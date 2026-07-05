@@ -19,7 +19,7 @@ Task checkboxes: `- [ ]` open · `- [x]` done.
 
 | Field | Value |
 |---|---|
-| Current phase | **Phase 1 COMPLETE** ✅ — stub-validated + real-run parity (CMat_203 byte-identical to pre-refactor). Next: §9 cleanup, then Phase 2 |
+| Current phase | **Phase 2 (haploid) — scoping.** Fork + re-pairing already `n_hap`-aware; 3 design decisions (D1–D3, §7) pending before edits |
 | Phases complete | none |
 | Last updated | 2026-06-29 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
@@ -253,14 +253,23 @@ Goal: introduce the meta carrier, `groupKey`, and the QC toggle with **zero beha
 - [x] Add `params.qc_mode` (`all_stages` default | `final_only`); `if`-gate the intermediate `ASSEMBLY_QC_*` calls so default reproduces current behavior (§3.9).
 - [ ] Validation: run one S. delicatulus sample; confirm outputs match the current `main` results.
 
-### Phase 2 — Ploidy generalization `[TODO]`
+### Phase 2 — Ploidy generalization `[IN PROGRESS — scoping]`
 
-Goal: make diploid a meta-driven `n_hap`; support haploid output.
+Goal: make diploid a meta-driven `n_hap`; support haploid (`n_hap==1`, `primary`) output.
 
-- [ ] Drive hifiasm `--primary` and `n_hap=1` from `meta.ploidy`.
-- [ ] Confirm all grouping/QC paths handle `n_hap=1` (no hang, no missing-pair errors).
-- [ ] Gate hap1-vs-hap2 pairwise/riparian on `n_hap == 2`.
-- [ ] Validation: run an existing sample forced haploid; one assembly out, full QC, no stalls.
+**Already haploid-ready (verified in merged code):** `forkHaplotypeMeta` returns one `primary` meta for `n_hap==1`; `buildMeta` sets `n_hap=1` for haploid ploidy; the `assembly_qc.nf` `groupKey` re-pairing groups a variable hap count; pairwise `within_sample` `replaceAll(/_hap[12]$/)` won't match `primary` → no spurious hap-pair.
+
+**Two-haplotype assumption to remove (dependency order):**
+- [ ] **Fork call site** (`main.nf` ~566–571): `flatMap { meta, hap1_fa, hap2_fa -> [tuple(hmetas[0],hap1_fa), tuple(hmetas[1],hap2_fa)] }` — for `n_hap==1`, `hmetas[1]` is null. Zip `forkHaplotypeMeta(meta)` against the fasta(s) generically; haploid emits one `(primary, <primary fasta>)`. (Depends on D1: which fasta.)
+- [ ] **`quast.nf` (QUAST)**: `input: tuple(sample_id, hap1_fasta, hap2_fasta)` + fixed `.hap1,.hap2` labels → variable `path(fastas)` + `val(labels)` (copy the `QUAST_FINAL` pattern already in this file).
+- [ ] **`merqury.nf` (MERQURY)**: `merqury.sh db hap1 hap2 prefix` → build asm-arg list dynamically (`merqury.sh` takes 1 or 2 assemblies).
+- [ ] **`assembly_qc.nf`**: replace `fastas[0], fastas[1]` (QUAST + MERQURY prep, lines 65/72) with the ordered fasta LIST + a labels list; feed the refactored modules.
+- [ ] **`combine_individual_assembly_qc.R`**: `str_extract(..., 'hap[0-9]')` + `pivot_wider(names_from=haplotype)` → also recognize `primary`, tolerate a single hap. (Depends on D2/D3.)
+- [ ] **`compile_qc.R`**: `pivot_longer(cols=c(hap1,hap2))` (×5) + `c(hap1,hap2,both)` → tolerate samples with only one hap. (Depends on D3.)
+- [ ] Gate hap1-vs-hap2 pairwise/riparian explicitly on `n_hap == 2` (currently implicit via `replaceAll`).
+- [ ] Validation: run a sample forced `ploidy=1`; one assembly out, full QC, no stalls; diploid parity unaffected.
+
+**Design decisions (D1–D3) — see §7.**
 
 ### Phase 3 — Input flexibility + assembler selector + QC read source `[TODO]`
 
@@ -302,6 +311,13 @@ Goal: per-round Hi-C subworkflow, short-read gap closer, linked-read scaffolder,
 
 ## 6. Change Log (implemented)
 
+- **2026-07-03 — Phase 2, pass 5 (QC metric R layer).** `combine_individual_assembly_qc.R`: added `norm_hap()` (hap1/hap2 → hap1/hap2; `primary` → `hap1` per D3; both/Both → both), applied at all 5 haplotype-extraction points (QUAST/BUSCO/MAPPING/merqury-qv/completeness), and now guarantees a uniform `hap1/hap2/both` output schema (NA-fills missing cols + fixed column order) so `compile_qc.R` is ploidy-agnostic. `compile_qc.R`: BAM + pairs `haplotype_id` parsing (lines ~106/113) now strip `_(hap[12]|primary)$` and map `primary`→`hap1`; plots/CSV unchanged (schema guaranteed upstream ⇒ haploid carries NA in hap2/both). Diploid output unchanged.
+- **DISCOVERED (pass 5b, PENDING — blocks haploid validation):** `generate_summary_report.R` (run in `SUMMARY_REPORT`) has pervasive hap1/hap2 assumptions that will break/misrender on a haploid sample — `str_replace(id,"_hap[12]$","")` + `str_extract(id,"hap[12]$")` for sample/hap split (≥5 sites: 90, 164-165, 433-436), `across(c(hap1,hap2))` + `pivot_longer(c(hap1,hap2,both))` overview tables (191/200/270/488/495), `haplotype %in% c("hap1","hap2")` filters (241), and hardcoded `paste0(sid,"_hap1"/"_hap2")` + `for(hid in c(hap1_id,hap2_id))` loops in the contact-map / dotplot / riparian synteny section (348-371). Must be made ploidy-aware before the `ploidy=1` validation run reaches the report stage.
+
+- **2026-07-03 — Phase 2, pass 3+4 (QUAST/MERQURY variable haplotype count).** `quast.nf` (QUAST) + `merqury.nf` (MERQURY) now take the ordered FASTA **list** + labels (QUAST) / meryl DB (MERQURY) instead of hardcoded `hap1_fasta, hap2_fasta` — one assembly (haploid) or two (diploid); QUAST copies its `QUAST_FINAL` list pattern, MERQURY builds `../asm` args dynamically. `assembly_qc.nf` re-pairing now emits `(sample_id, [fastas], [labels])` (labels `sample.<haplotype>`), feeds `QUAST(ch_paired_assemblies)` directly and `MERQURY` the `[fastas]`+db. Coupled — deploy together (module signatures changed). Diploid labels unchanged (`sample.hap1/.hap2`) ⇒ diploid QC identical; haploid now runs QUAST/MERQURY/BUSCO/MAPPING on one FASTA, but correct haploid **reporting** still needs pass 5 (R): the `primary` label lands in the `hap1` column there.
+
+- **2026-07-03 — Phase 2, pass 1 (hifiasm ploidy branch + fork).** `hifiasm.nf`: `meta.n_hap`-driven — haploid (`n_hap==1`) forces `--primary` and disables Hi-C *phasing* (Hi-C still scaffolds downstream), emits one `<sample>.primary.p_ctg.fasta`; diploid unchanged. Output `assemblies` now variable-arity (glob `{hap1,hap2,primary}.p_ctg.fasta`); `gfa_hap1`/`gfa_hap2` (no consumers) consolidated into one globbed `gfa` output. `main.nf` fork (~566): destructure `(meta, fastas)`, coerce to list + `sort{it.name}`, `transpose`-zip against `forkHaplotypeMeta(meta)` → haploid 1 tuple, diploid 2. Diploid path unaffected by construction; haploid QC comes online after passes 3–4. D1(b)/D2/D3 chosen.
+
 _(Add dated entries as work lands. Newest first.)_
 
 - **2026-06-29 — Phase 1 REAL-RUN PARITY ✅ (CMat_203 identical to pre-refactor).** Real cluster run of `Sde-CMat_203` (diploid HiFi+Hi-C) through the refactored pipeline; QC metrics compared against the pre-refactor all-samples run. **All 153 compared values across 72 headline metrics matched exactly** (plus granular spot-checks: auN, error_rate, kmer_found identical to full precision), over all 8 stages (`ctg.base`→`final`), both haplotypes, and the combined `both` column. Includes the RNG-prone Hi-C mapping %/pairtools contact counts (identical → same inputs+resources) and the combined `both` QV (identical → `groupKey` regroup reproduces the old `groupTuple(size:2)` merge). QUAST total length + MERQURY kmer/QV identity ⇒ assembly FASTAs effectively confirmed unchanged. **Meta-map refactor is behavior-preserving on the diploid path.** Phase 1 done (threading + stub + parity). Remaining: §9 cleanup (non-blocking); Phases 2/4/5.
@@ -327,6 +343,12 @@ _(Add dated entries as work lands. Newest first.)_
 ---
 
 ## 7. Decisions & Open Questions
+
+### Phase 2 open decisions (haploid) — pending Jason
+
+- **D1 — What is the haploid assembly?** For `n_hap==1`, which FASTA becomes `primary`? (a) Take hifiasm's first/primary contigs (`hap1.p_ctg`) from the existing 2-fasta output and discard the second — minimal, no per-sample hifiasm mode change; or (b) run hifiasm in `--primary` mode for haploid samples (per-sample mode driven by `meta.n_hap`) — "more correct" for a true haploid/collapsed assembly, but `hifiasm_primary` is currently a global param, so this means per-sample assembler config. *Leaning (a) to start; (b) as a follow-up if the collapsed primary is biologically needed.*
+- **D2 — Haploid label:** keep `primary` (accurate for collapsed) as `meta.haplotype`/output naming, vs relabel to `hap1` (flows through existing hap1 machinery with least R churn). *Leaning keep `primary` for file/output naming; handle the mapping only in the QC layer (D3).*
+- **D3 — Haploid QC-CSV representation:** the schema is `hap1,hap2,both`. For a haploid sample, put the single assembly's metrics in the **`hap1` column, `hap2`/`both` = NA** (keeps the schema uniform across mixed haploid+diploid runs, minimal downstream disruption), vs add a dedicated `primary` column (schema churn). *Leaning `hap1` column + NA.* Note: MERQURY on one assembly yields no combined QV, so `both`=NA falls out naturally.
 
 ### Resolved (2026-06-29)
 

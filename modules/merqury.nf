@@ -2,37 +2,38 @@
 ========================================================================================
     MERQURY MODULE (OPTIMIZED)
 ========================================================================================
-    K-mer based assembly evaluation using pre-built meryl database
-    - Accepts pre-computed meryl database (built once from HiFi reads)
-    - Dramatically faster than rebuilding k-mer database each time
+    K-mer based assembly evaluation using a pre-built meryl database.
+    Variable haplotype count (Phase 2): merqury.sh accepts one (haploid) or two
+    (diploid) assemblies. Caller (assembly_qc.nf) passes the ordered FASTA list.
 ========================================================================================
 */
 
 process MERQURY {
     tag "${sample_id}"
     label 'merqury'
-    
+
     //publishDir "${params.outdir}/qc/assembly/merqury", mode: params.publish_dir_mode
-    
+
     input:
-    tuple val(sample_id), path(hap1_fasta), path(hap2_fasta), path(meryl_db)
-    
+    tuple val(sample_id), path(fastas), path(meryl_db)
+
     output:
     tuple val(sample_id), path("${sample_id}_merqury"), emit: results
-    
+
     script:
+    // Assemblies are staged in the task dir; merqury runs from a subdir, so prefix with ../
+    def asm_args = (fastas instanceof List ? fastas : [fastas]).collect { "../${it}" }.join(' ')
     """
     mkdir -p ${sample_id}_merqury
     cd ${sample_id}_merqury
-    
-    # Run Merqury using pre-built k-mer database
+
+    # Run Merqury using pre-built k-mer database (1 assembly = haploid, 2 = diploid)
     merqury.sh \\
         ../${meryl_db} \\
-        ../${hap1_fasta} \\
-        ../${hap2_fasta} \\
+        ${asm_args} \\
         ${sample_id}
     """
-    
+
     stub:
     """
     mkdir -p ${sample_id}_merqury

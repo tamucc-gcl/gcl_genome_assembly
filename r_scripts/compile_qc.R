@@ -103,15 +103,17 @@ message("\n=== Processing Data ===")
 # Extract sample_id from haplotype_id for joining
 if (!is.null(bam_metrics)) {
   bam_metrics <- bam_metrics %>%
-    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""),
-           haplotype_id = str_extract(haplotype_id, 'hap[12]'),
+    mutate(sample_id = str_replace(haplotype_id, "_(hap[12]|primary)$", ""),
+           haplotype_id = str_extract(haplotype_id, 'hap[12]|primary'),
+           haplotype_id = if_else(haplotype_id == 'primary', 'hap1', haplotype_id),
            .before = everything())
 }
 
 if (!is.null(pairs_metrics)) {
   pairs_metrics <- pairs_metrics %>%
-    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""),
-           haplotype_id = str_extract(haplotype_id, 'hap[12]'),
+    mutate(sample_id = str_replace(haplotype_id, "_(hap[12]|primary)$", ""),
+           haplotype_id = str_extract(haplotype_id, 'hap[12]|primary'),
+           haplotype_id = if_else(haplotype_id == 'primary', 'hap1', haplotype_id),
            .before = everything())
 }
 
