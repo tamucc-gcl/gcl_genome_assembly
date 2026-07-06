@@ -13,7 +13,7 @@
       hic_r1, hic_r2                              Hi-C paired FASTQ
       tellseq_r1, tellseq_r2                      TellSeq linked-read paired FASTQ
       sr_r1, sr_r2                                short-read shotgun paired FASTQ
-      ploidy        (optional)                    'haploid' | 'diploid'
+      ploidy        (optional)                    'haploid'/'diploid' or a positive integer (organism ploidy)
       assembler     (optional)                    'hifiasm' | 'spades'
       dedup         (optional)                    'purge_dups' | 'redundans' | 'none'
       mito_tool     (optional)                    'mitohifi' | 'mitofinder' | 'none'
@@ -115,8 +115,8 @@ def parseSampleSheet(sample_sheet_path) {
 
             samples << tuple(meta, reads)
             log.info "  parsed '${sid}': assembler=${meta.assembler}, " +
-                     "${meta.n_hap == 1 ? 'haploid' : 'diploid'}, reads=[${readTypes.join(',')}], " +
-                     "dedup=${meta.dedup}, mito=${meta.mito_tool}, hic_rounds=${meta.hic_rounds}"
+                     "ploidy=${meta.ploidy}n -> n_hap=${meta.n_hap}, reads=[${readTypes.join(',')}], " +
+                     "dedup=${meta.dedup}, mito=${meta.mito_tool}"
         }
         catch (Exception e) {
             log.warn("Skipping row ${i + 1} (sample '${sid ?: 'UNKNOWN'}'): ${e.class.simpleName}: ${e.message}", e)

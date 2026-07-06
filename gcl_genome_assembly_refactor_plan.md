@@ -19,9 +19,10 @@ Task checkboxes: `- [ ]` open · `- [x]` done.
 
 | Field | Value |
 |---|---|
-| Current phase | **Phase 2 (haploid) — scoping.** Fork + re-pairing already `n_hap`-aware; 3 design decisions (D1–D3, §7) pending before edits |
-| Phases complete | none |
-| Last updated | 2026-06-29 |
+| Current phase | **Phase 4a next (short-read contig path + organelle stub).** Phase 2 (haploid) complete & validated. |
+| Phases complete | **Phase 1** (meta-map refactor, stub + byte-identical parity) · **Phase 2** (haploid `--primary`, stub + real validation) |
+| Roadmap ahead | Phase 4a (short-read + organelle stub) → Phase 4b (organelle rework, GetOrganelle) → §9 cleanup → Phase 5 (linked-read/TellSeq + scaffolding). §10 backlog (blobtools resurrection, shared-Hi-C) as capacity allows. |
+| Last updated | 2026-07-06 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
 | Refactor branch | TBD (e.g. `feature/multi-input`) |
 
@@ -224,24 +225,24 @@ carrying across a phase boundary).
 > short-read test data is available now; linked-read scaffolding comes last because no linked-read
 > test data exists yet.
 
-### Phase 1 — Meta-map refactor (behavior-identical) `[WIP]`
+### Phase 1 — Meta-map refactor (behavior-identical) `[DONE — merged, byte-identical parity]`
 
 Goal: introduce the meta carrier, `groupKey`, and the QC toggle with **zero behavior change** on HiFi+Hi-C diploid.
 
 - [x] Rewrite `parse_sample_sheet.nf` as a validating parser emitting `tuple(meta, files)`; keep `Channel.fromList()` for per-sample cache independence; keep relative-path resolution.
 - [x] Define the canonical `meta` shape (§3.1) in one place (a helper or the parser).
 - [x] **Caching:** exclude volatile fields (`hic_rounds`, `scaffolders`) from `meta` so tuning `params.hic_scaffold_rounds` does not re-hash/re-run upstream tasks under `-resume`.
-- [ ] Thread `meta` through all module signatures, by pass:
+- [x] Thread `meta` through all module signatures, by pass:
   - [x] **Spine** — `bam_to_fastq`, `trim_hic`, `hifiasm` + the single haplotype fork (`ch_contigs`).
   - [x] **Mito** — `mitohifi`, `filter_mito_contigs` (collapsed HAP1/HAP2 → one process), `mito_circular_map` + STEP 4a rewire.
   - [x] **Purge + Inspector** — `purge_dups`, `correct_misassemblies` (contig) + collapse rewire onto `ch_mito_filtered`.
   - [x] **Decontam** — `decontaminate_assembly` subworkflow + 3 FCS modules + rewire (single per-hap `(meta, fasta)` channel).
-  - [ ] **Hi-C map/scaffold spine** (2-round retained; `SCAFFOLD_HIC_ROUND` consolidation deferred to Phase 5):
+  - [x] **Hi-C map/scaffold spine** (2-round retained; `SCAFFOLD_HIC_ROUND` consolidation deferred to Phase 5):
     - [x] modules (`map_hic_to_assembly`, `filter_hic_bam`, `scaffold_hic`, `hic_mapping_metrics`) + contig-stage wiring (STEP 6–8) + contig checkpoints (`contig_raw_map`, `contig_filtered`, `scaffold_space`)
     - [x] scaffold-round2 (Inspector/decontam on scaffolds, remap/refilter, round 2) + round-2 checkpoints (`scaffold_round2_raw_map`, `scaffold_round2_filtered`, `scaffold_round2_space`)
   - [x] **Gap-fill / teloclip / finalize** — `gap_filling`, `teloclip`, `finalize_assembly` + rewire → `ch_finalized_assembly` (per-hap canonical channel feeding QC).
   - [x] **Final contact-map** — `contact_map` (+ `hic_compartments`/`hic_tads`) + STEP 14 rewire: `MAP_HIC_TO_FINAL`/`FILTER_HIC_BAM_FINAL` + `final_raw_map`/`final_filtered` checkpoints + `CONTACT_MAP_FINAL`. Consumes `ch_finalized_assembly`.
-  - [ ] **QC pass** (final threading block):
+  - [x] **QC pass** (final threading block):
     - [x] `assembly_qc` subworkflow + modules — `build_meryl_db`/`busco`/`mapping_qc` threaded (per-hap `meta`); `quast`/`merqury`/`combine_assembly_qc` unchanged (sample-string keyed); internal `groupKey` re-pairing
     - [x] 11 `ASSEMBLY_QC_*` call sites → pass per-hap channel (dropped the `groupTuple` prep blocks) + `params.qc_mode` gate on intermediates
     - [x] raw-read QC: `hic_qc`, `hifi_qc` threaded + call-sites (`HIC_QC_RAW` reads-map fix, `HIFI_QC` → `.out.fastq`); `hic_qc_from_bam`/`hic_scaffold_qc` are dead includes (see §9)
@@ -249,54 +250,71 @@ Goal: introduce the meta carrier, `groupKey`, and the QC toggle with **zero beha
       - [x] STEP 14 viz tail — pairwise/riparian, `QUAST_FINAL`, TIDK call-sites (via `ch_final_by_id` string-id view; modules unchanged) ✅ applied
       - [x] post-QC compilation — metrics collection, `COMPILE_FINAL_QC`, `ASSEMBLY_REPORT`, `SNAIL_PLOT_FINAL`, `COVERAGE_BOOK`, manifest, `SUMMARY_REPORT` ✅
 - [x] Replace every `groupTuple(by: 0, size: 2)` with `groupKey(meta.sample, meta.n_hap)` grouping. *(Done across all active code: the call-site re-pairs were deleted, `ASSEMBLY_QC` uses `groupKey`. No `size: 2` remains in `main.nf`.)*
-- [ ] Replace `replaceAll(/_hap[12]$/, '')` identity surgery with `meta` field reads. *(Assembly-QC + spine done; 2 remain in the pairwise/viz tail — next sub-pass.)*
+- [x] Replace `replaceAll(/_hap[12]$/, '')` identity surgery with `meta` field reads. *(All active code done; the pairwise/viz-tail ones operate on string ids via `ch_final_by_id`, which is correct. The one remaining raw `replaceAll`-on-`meta` lives in the un-threaded `GENERATE_DECONTAM_EVIDENCE` blobtools branch — tracked in §10, not active by default.)*
 - [x] Add `params.qc_mode` (`all_stages` default | `final_only`); `if`-gate the intermediate `ASSEMBLY_QC_*` calls so default reproduces current behavior (§3.9).
-- [ ] Validation: run one S. delicatulus sample; confirm outputs match the current `main` results.
+- [x] Validation: run one S. delicatulus sample; confirm outputs match the current `main` results. *(Byte-identical parity on Sde-CMat_203 — 153 values / 72 metrics across all 8 stages.)*
 
-### Phase 2 — Ploidy generalization `[IN PROGRESS — scoping]`
+### Phase 2 — Ploidy generalization `[DONE — stub + real validation passed]`
 
-Goal: make diploid a meta-driven `n_hap`; support haploid (`n_hap==1`, `primary`) output.
+Goal: make diploid a meta-driven `n_hap`; support haploid (`n_hap==1`, `primary`) output. **Decisions: D1(b) hifiasm `--primary`; D2 keep `primary` name, map in QC layer; D3 haploid → `hap1` column, `hap2`/`both` = NA.**
 
-**Already haploid-ready (verified in merged code):** `forkHaplotypeMeta` returns one `primary` meta for `n_hap==1`; `buildMeta` sets `n_hap=1` for haploid ploidy; the `assembly_qc.nf` `groupKey` re-pairing groups a variable hap count; pairwise `within_sample` `replaceAll(/_hap[12]$/)` won't match `primary` → no spurious hap-pair.
-
-**Two-haplotype assumption to remove (dependency order):**
-- [ ] **Fork call site** (`main.nf` ~566–571): `flatMap { meta, hap1_fa, hap2_fa -> [tuple(hmetas[0],hap1_fa), tuple(hmetas[1],hap2_fa)] }` — for `n_hap==1`, `hmetas[1]` is null. Zip `forkHaplotypeMeta(meta)` against the fasta(s) generically; haploid emits one `(primary, <primary fasta>)`. (Depends on D1: which fasta.)
-- [ ] **`quast.nf` (QUAST)**: `input: tuple(sample_id, hap1_fasta, hap2_fasta)` + fixed `.hap1,.hap2` labels → variable `path(fastas)` + `val(labels)` (copy the `QUAST_FINAL` pattern already in this file).
-- [ ] **`merqury.nf` (MERQURY)**: `merqury.sh db hap1 hap2 prefix` → build asm-arg list dynamically (`merqury.sh` takes 1 or 2 assemblies).
-- [ ] **`assembly_qc.nf`**: replace `fastas[0], fastas[1]` (QUAST + MERQURY prep, lines 65/72) with the ordered fasta LIST + a labels list; feed the refactored modules.
-- [ ] **`combine_individual_assembly_qc.R`**: `str_extract(..., 'hap[0-9]')` + `pivot_wider(names_from=haplotype)` → also recognize `primary`, tolerate a single hap. (Depends on D2/D3.)
-- [ ] **`compile_qc.R`**: `pivot_longer(cols=c(hap1,hap2))` (×5) + `c(hap1,hap2,both)` → tolerate samples with only one hap. (Depends on D3.)
-- [ ] Gate hap1-vs-hap2 pairwise/riparian explicitly on `n_hap == 2` (currently implicit via `replaceAll`).
-- [ ] Validation: run a sample forced `ploidy=1`; one assembly out, full QC, no stalls; diploid parity unaffected.
+**Two-haplotype assumption removed (all validated on a forced-`ploidy=1` real run alongside a diploid):**
+- [x] **`hifiasm.nf`** — `meta.n_hap`-driven: haploid forces `--primary`, disables Hi-C *phasing* (Hi-C still scaffolds), emits one `primary.p_ctg.fasta`; output `assemblies` variable-arity; `gfa_hap1/2` consolidated to one `gfa`. (pass 1)
+- [x] **Fork call site** (`main.nf` ~566): zip `forkHaplotypeMeta(meta)` against the fasta list (coerce + `sort{it.name}`) — haploid 1 tuple, diploid 2. (pass 2)
+- [x] **`quast.nf` (QUAST)** — variable `path(fastas)` + `val(labels)`. (pass 3)
+- [x] **`merqury.nf` (MERQURY)** — dynamic asm-arg list (1 or 2 assemblies). (pass 3)
+- [x] **`assembly_qc.nf`** — re-pairing emits `(sample_id, [fastas], [labels])`, feeds both modules the list. (pass 4)
+- [x] **`combine_individual_assembly_qc.R`** — `norm_hap()` maps `primary`→`hap1` at all 5 extraction points; guarantees uniform `hap1/hap2/both` schema. (pass 5)
+- [x] **`compile_qc.R`** — BAM/pairs `haplotype_id` parsing strips `_(hap[12]|primary)$` and maps `primary`→`hap1` (confirmed on real Hi-C metrics). (pass 5)
+- [x] **`generate_summary_report.R`** — 5 edits: sample-id/assembly-table/dotplot-count `primary`-aware; per-hap slash notation NA-fills `hap2`; diploid-metric QV/completeness fall back to `hap1`; visual loop resolves hap ids from manifest (haploid → `primary` in Hap1 slot, `—` elsewhere). (pass 5b)
+- [x] Gate hap1-vs-hap2 pairwise/riparian on `n_hap == 2` (`main.nf` within-sample grouping strips `_primary`; size==2 excludes haploid — confirmed: no haploid within-sample pair). (pass 6)
+- [x] Validation: forced-`ploidy=1` sample → one collapsed `primary` assembly, full QC with metrics in `hap1` / NA elsewhere, report renders correctly, no stalls; diploid unaffected. **Stub (192 procs) + real run both passed.** (pass 7)
 
 **Design decisions (D1–D3) — see §7.**
 
-### Phase 3 — Input flexibility + assembler selector + QC read source `[TODO]`
+### Phase 3 — Input flexibility + assembler selector + QC read source `[PARTIAL — parser done; rest folded into Phase 4a]`
 
 Goal: flexible sample sheet, contig-assembler selection scaffold, generalized QC reads. Enables HiFi-only.
 
-- [ ] Wide sample sheet, **header-driven**: a missing column **or** an empty cell = no data of that type for that sample. Parser derives `hifi/hic/tellseq/shortread` flags and validates combinations (reject "Hi-C scaffolding requested but no Hi-C reads", "no read types", etc.). **(decided)**
-- [ ] `CONTIG_ASSEMBLY` selector subworkflow emitting `(meta, fasta)`; hifiasm wired, short-read branch stubbed (filled in Phase 4); built to accept future assemblers.
-- [ ] Generalize `BUILD_MERYL_DB` + `MAPPING_QC` to a qc_reads channel (§3.8).
-- [ ] Gate `MITOHIFI` on `meta.hifi`.
-- [ ] Validation: HiFi-only run (drop Hi-C columns) → conditioned contigs as final, no scaffolding, no contact maps, teloclip still runs.
+- [x] Wide sample sheet, **header-driven** (`parse_sample_sheet.nf`, done in Phase 1): missing column **or** empty cell = no data of that type. Parser derives `hifi/hic/tellseq/shortread` flags, reads `assembler`/`dedup`/`mito_tool`, validates pairing (sr_r1↔sr_r2, hic_r1↔hic_r2). *(Combination-rejection rules — "Hi-C requested but no Hi-C reads", etc. — to firm up as the branches land.)*
+- [ ] `CONTIG_ASSEMBLY` selector subworkflow emitting `(meta, fasta)`; hifiasm wired, short-read branch stubbed → **built in Phase 4a** (no selector exists yet; HIFIASM is called directly at main.nf:560).
+- [ ] Generalize `BUILD_MERYL_DB` + `MAPPING_QC` to a qc_reads channel (§3.8) → **Phase 4a** (short-read path forces this: QC reads = PE, not HiFi).
+- [ ] Gate `MITOHIFI` on `meta.hifi` → **Phase 4a/4b** (currently ungated at main.nf:546; a short-read-only sample can't run MitoHiFi — this is subsumed by the organelle restructure).
+- [ ] Validation: HiFi-only run (drop Hi-C columns) → conditioned contigs as final, no scaffolding, no contact maps, teloclip still runs → **falls out of Phase 4a** (same gating).
 
-### Phase 4 — Short-read contig path `[TODO]`  *(was Phase 5)*
+> **Note:** the parser already carries everything Phase 3 needs; the remaining items are all prerequisites of the short-read path and have no standalone value, so they're absorbed into **Phase 4a** rather than run as a separate phase.
 
-Goal: SPAdes assembly + a real branched `CONDITION_CONTIGS`. Validated **short-read-only**.
+### Phase 4a — Short-read contig path + organelle stub `[NEXT]`  *(absorbs the remaining Phase 3 prereqs)*
 
-- [ ] Wire SPAdes into the `CONTIG_ASSEMBLY` selector (Jason has scripts).
-- [ ] Build `CONDITION_CONTIGS` subworkflow (§3.6) with internal branching:
-  - long-read branch wraps existing purge_dups / Inspector / MitoHiFi-removal (each optional);
-  - short-read branch = dedup (`redundans|purge_dups|none`) → optional Pilon → MitoFinder-removal.
-- [ ] Make `dedup` method selectable via `meta.dedup`, input-independent; redundans reduction-only.
-- [ ] **Verify** purge_dups behaves sensibly on a short-read assembly (read source + duplicate calls).
-- [ ] Confirm long-read-only steps (Inspector, teloclip) are skipped for SR-only; merqury/mapping use PE reads.
-- [ ] **Regression**: re-run the HiFi+Hi-C production sample through the new `CONDITION_CONTIGS`; outputs must still match `main`.
-- [ ] Validation: short-read-only run → SPAdes contigs, conditioning, full QC, no scaffolding, no teloclip, no contact maps.
-- [ ] **Note:** short-read+Hi-C and short-read+TellSeq combos validate in **Phase 5** (need scaffolding chain).
+Goal: SPAdes short-read assembly through a real assembler selector + branched conditioning, validated **short-read-only**, with organelle handling factored into a **stubbed** subworkflow (filled in 4b) and a genome-size estimation running concurrently. Test data: a different fish + a plant (short reads).
 
-### Phase 5 — Scaffolding chain + linked reads `[TODO]`  *(was Phase 4)*
+- [x] **DECISION (confirmed 2026-07-06): `meta.ploidy` vs `meta.n_hap`.** Add `meta.ploidy` (organism ploidy, from the `ploidy` column) driving genomescope `-p` and hifiasm `--n-hap`; keep `meta.n_hap` as the *output* haplotype count driving the fork. Short-read forces `n_hap=1` (SPAdes = one collapsed assembly → `primary` path) with `ploidy` unchanged. hifiasm diploid unchanged. *(Parser change lands with the selector pass.)*
+- [x] **SPAdes module** (`spades.nf`, drafted) — `(meta, r1, r2)` → `contigs.fasta` (+ scaffolds/gfa); params `spades_kmers|spades_cov_cutoff|spades_mode|spades_extra|spades_output_level`; `--memory` from `task.memory`. Needs a `spades` label (ultramem / `--qos=highmem`).
+- [x] **`ESTIMATE_GENOME_SIZE` module** (`estimate_genome_size.nf`, drafted) — jellyfish → genomescope2, concurrent in both branches, reads = HiFi (long) or PE (short), `-p` = `meta.ploidy`; params `genomescope_kmer|genomescope_ploidy|jellyfish_hash_size`. Needs a `genomescope` label (conda: genomescope2 + jellyfish). *Genome-size parse from summary.txt is brittle — verify field.*
+- [ ] **`CONTIG_ASSEMBLY` selector subworkflow** — `meta.assembler`-driven `.branch{}` (`hifiasm` | `spades`), emitting `.assemblies` in the shape today's fork consumes (hifiasm branch = passthrough of `HIFIASM.out.assemblies`, identical); replace the direct `HIFIASM(ch_fastq_all)` (main.nf:560). Also fan out `ESTIMATE_GENOME_SIZE` concurrently.
+- [ ] **`CONDITION_CONTIGS` subworkflow** (§3.6) with internal branching: long-read branch wraps existing purge_dups / Inspector / mito-removal (each optional); short-read branch = dedup (`meta.dedup` → `redundans|purge_dups|none`, reduction-only) → optional Pilon.
+- [ ] **QC read-source generalization** (§3.8): `BUILD_MERYL_DB` + `MAPPING_QC` take a qc_reads channel — HiFi for the long-read path, PE for short-read.
+- [ ] **Skip long-read-only finishing for SR-only**: Inspector, teloclip, TGSGapCloser, Hi-C scaffolding/contact maps gated off when `!meta.hifi && !meta.hic`.
+- [ ] **`ORGANELLE_ASSEMBLY` stub subworkflow** — placeholder slot (touch-only outputs matching the eventual real contract) so the short-read wiring lands without blocking on the mito rework. Route today's `MITOHIFI`/`FIND_MITO_REFERENCE`/`FILTER_MITO_CONTIGS` through it (HiFi branch keeps MitoHiFi; SR branch hits the stub). Fixes the ungated `MITOHIFI` (main.nf:546) for SR-only.
+- [ ] **Report the genome-size estimate**: collect `ESTIMATE_GENOME_SIZE.out.size` (+ genomescope plot) into the manifest and surface it in `generate_summary_report.R` (a value in the QC overview and/or a small genome-size section with the linear plot). Parse confirmed against a real `summary.txt` — takes the max Haploid Length (416.3 Mb on the test).
+- [ ] **Regression**: HiFi+Hi-C production sample through the new selector + `CONDITION_CONTIGS` must still match `main`.
+- [ ] Validation: short-read-only run (fish + plant) → SPAdes contigs, conditioning, full QC, genome-size estimate, no scaffolding/teloclip/contact maps; organelle step is a no-op stub. HiFi-only run also falls out (Phase 3 gating).
+- [ ] **Note:** short-read+Hi-C and short-read+TellSeq combos validate in **Phase 5** (need the scaffolding chain).
+
+### Phase 4b — Organelle rework (GetOrganelle for short-read) `[AFTER 4a]`  *(own scope)*
+
+Goal: fill the `ORGANELLE_ASSEMBLY` stub with a real organelle subworkflow. **Decided:** MitoHiFi stays the **sole** organelle tool on the **HiFi branch** (mito only) until a HiFi chloroplast tool is identified; **GetOrganelle** ([link](https://github.com/kinggerm/getorganelle)) handles the **short-read-only** branch, doing **mito** for animals and **mito + chloroplast** for plants.
+
+- [ ] **Organelle-target selection**: sheet-driven — a `kingdom`/`organelle_targets` (or `plant`) column so plant SR samples attempt **mito + chloroplast**, animal SR samples **mito only**. Parser + `meta` addition.
+- [ ] `ORGANELLE_ASSEMBLY` subworkflow (real): HiFi branch → MitoHiFi (as today); SR branch → GetOrganelle (assembly → annotation → circular map → organelle-contig **filtering** from the nuclear assembly, generalized to N organelle types). Both converge on the same downstream contract the 4a stub defined.
+- [ ] Extend `generate_summary_report.R` §5 ("Mitochondrial Genome") to report multiple organelles (mito + chloroplast) per sample.
+- [ ] Validation: plant SR run yields mito + chloroplast; fish SR run yields mito; HiFi run unchanged (MitoHiFi); nuclear assembly correctly stripped of all organelle contigs.
+
+### (then) §9 cleanup batch — before Phase 5
+
+Knock out the deferred cleanup (§9) after Phase 4, before the linked-read work.
+
+### Phase 5 — Scaffolding chain + linked reads `[TODO]`  *(was Phase 4; after 4a/4b + cleanup)*
 
 Goal: per-round Hi-C subworkflow, short-read gap closer, linked-read scaffolder, data-driven routing.
 
@@ -310,6 +328,14 @@ Goal: per-round Hi-C subworkflow, short-read gap closer, linked-read scaffolder,
 ---
 
 ## 6. Change Log (implemented)
+
+- **2026-07-06 — Phase 4a-i: assembler selector + `meta.ploidy` + genome-size wiring (delivered; pending deploy+stub).** `meta.nf`: added integer `meta.ploidy` (organism ploidy — accepts `1|2|N` or `haploid`/`diploid`; drives genomescope `-p` and, later, hifiasm `--n-hap`), made `n_hap` the *output* haplotype count = `(assembler=='spades') ? 1 : (ploidy==1 ? 1 : 2)` so SPAdes is always a single collapsed `primary` even for a diploid organism; legacy diploid sheet still → ploidy=2/n_hap=2. `parse_sample_sheet.nf`: log line now prints `ploidy=Nn -> n_hap=N` (dropped the stale `hic_rounds=null`); doc notes numeric ploidy. New `workflows/contig_assembly.nf` (`CONTIG_ASSEMBLY`): `.branch{}` on `meta.assembler` (spades explicit, hifiasm catch-all), hifiasm branch feeds `(meta,hifi,hic1,hic2)` — identical to the old direct call — spades branch feeds `(meta,sr1,sr2)`, re-converges `HIFIASM.out.assemblies.mix(SPADES.out.contigs)` → `.assemblies` in the exact shape the existing fork consumes. main.nf (3 edits, against the current uploaded main.nf): includes (`ESTIMATE_GENOME_SIZE`, `CONTIG_ASSEMBLY`); build `ch_reads_all` (= `ch_fastq_all` ⋈ `ch_input` sr) + concurrent `ESTIMATE_GENOME_SIZE` (reads by assembler); swap `HIFIASM(ch_fastq_all)` → `CONTIG_ASSEMBLY(ch_reads_all)` and the fork source → `CONTIG_ASSEMBLY.out.assemblies`. **Non-regressive on HiFi**: all current samples are hifiasm → selector is a passthrough; genome-size is additive (doesn't touch the assembly). **Also fixed:** the pasted SPAdes/genomescope params in main.nf were missing the `params.` prefix (bare assignments = dead script vars) — corrected to `params.spades_*` / `params.genomescope_kmer` / `params.jellyfish_hash_size`. **Deferred to 4a-ii (next):** short-read-ONLY can't run yet — `ch_reads_all` is still built from `BAM_TO_FASTQ × TRIM_HIC`, so gating `BAM_TO_FASTQ` on `meta.hifi`, `TRIM_HIC` on `meta.hic`, and routing `MITOHIFI` through the `ORGANELLE_ASSEMBLY` stub are required before a no-HiFi/no-HiC sample flows. Genome-size report integration also pending. Follow-up: wire hifiasm `--n-hap` ← `meta.ploidy` (a hifiasm.nf edit).
+
+- **2026-07-06 — Phase 4a kickoff: SPAdes + genome-size modules drafted.** From Jason's `2-spades.sh` / `1-estimate_genome_size.sh`: `spades.nf` (SPADES, PE → `contigs.fasta`; params `spades_kmers|cov_cutoff|mode|extra|output_level`; `--memory` from `task.memory`; needs `spades` label on ultramem/`--qos=highmem`) and `estimate_genome_size.nf` (ESTIMATE_GENOME_SIZE, jellyfish→genomescope2, concurrent both branches, `-p`=organism ploidy; params `genomescope_kmer|genomescope_ploidy|jellyfish_hash_size`; needs `genomescope` conda label). **Decisions recorded:** 4b = MitoHiFi sole tool on HiFi branch (mito only) until a HiFi chloroplast tool exists, GetOrganelle on short-read-only (mito + chloroplast for plants); genome-size runs concurrently in both branches. **Design proposed (needs confirm before selector wiring):** `meta.ploidy` (organism, → genomescope `-p` + hifiasm `--n-hap`) split from `meta.n_hap` (output hap count → fork); short-read forces `n_hap=1`. Added §10 backlog item: parameter unification pass. Next 4a pass: `CONTIG_ASSEMBLY` selector + wire the two modules.
+
+- **2026-07-06 — Phase 2 CLOSED + bookkeeping + Phase 4 restructured.** Summary report verified on the real run: Assembly-Files table puts `hap_primary` in **Haplotype 1** / `—` in Hap2; overview shows `1.23 Gb / —` slash notation and QV/completeness fall back to the `hap1` value for the haploid (Edit C); Visual Summary haploid row shows the primary snail + contact map in the **Hap1** slots and `—` for Hap2/within-sample dotplot/riparian (Edit D); §4/§5/§6 render correctly. Pairwise showed 3 pairs (1 within + 2 cross-sample) on the real run vs 1 on the stub — **not a bug**: the real launcher uses `pairwise_alignment_mode = 'all'` (stub used the `within_sample` default); Pass 6 gates only the within-sample hap1-vs-hap2 (correctly absent for the haploid) and does not exclude the haploid from `all`-mode cross-sample comparisons. Status Dashboard + §5 Phase 1/2 checkboxes brought current (both phases done/validated). **Phase 4 split** per Jason's plan: **4a** short-read contig path (new `CONTIG_ASSEMBLY` selector + SPAdes + `CONDITION_CONTIGS` + qc-read generalization + `ORGANELLE_ASSEMBLY` **stub**; absorbs the remaining Phase 3 prereqs, which the existing parser already half-covers) → **4b** organelle rework (GetOrganelle; plant mito+chloroplast; wired into HiFi + short-read; replaces MitoHiFi-only) → §9 cleanup → Phase 5 (linked-read). Confirmed: no `CONTIG_ASSEMBLY`/SPAdes exists yet (HIFIASM direct at main.nf:560); `MITOHIFI` ungated at :546.
+
+- **2026-07-05 — Phase 2 REAL validation PASSED — Phase 2 complete.** Full real run (both samples, `--decon_make_blobtools_evidence false`) produced `assembly_qc_metrics.csv` with the correct ploidy-aware schema at every stage (ctg.base→final): `Sde-CMat_203_hap` metrics land entirely in `hap1`, `hap2`/`both` = NA across ALL analyses — including the Hi-C ones (`mapped_hic`/`hic_contact`), confirming the `compile_qc.R` `haplotype_id` `primary`→`hap1` fix on real data, not just the assembly QC; `Sde-CMat_203_dip` keeps `hap1`+`hap2` with MERQURY `both` populated (diploid unchanged). hifiasm `.command.sh` confirmed `--primary` + no `--h1/--h2` (haploid) vs `--h1/--h2` + no `--primary` (diploid); `--n-hap 2` correctly retained (organism ploidy ≠ output hap count). **All Phase 2 passes (1–6) validated.** Biology note (not code): forced-haploid collapsed primary ≈1.23 Gb / ~6% BUSCO dup vs ~1.09 Gb / ~1.5% per phased hap — expected `--primary` shape (retains alt haplotigs).
 
 - **2026-07-05 — Phase 2 stub validation PASSED (both paths, one run).** Local `-stub` (`stub_local.config`, `--decon_make_blobtools_evidence false`) on a 2-sample sheet — `Sde-CMat_203_dip` (ploidy 2) + `Sde-CMat_203_hap` (ploidy 1), same reads via distinct Hi-C symlinks — ran **192 processes to SUCCESS**. Confirms end-to-end: hifiasm fork emits 2 (diploid) / 1 (haploid) → per-hap steps `3 of 3` (dip_hap1+dip_hap2+hap_primary); QUAST/MERQURY 2-arity (dip) + 1-arity (hap); `groupTuple`/`COMBINE_ASSEMBLY_QC` `2 of 2` per stage; **pairwise/riparian ran only `dip_hap1_vs_dip_hap2`, no haploid pair (Pass 6 confirmed)**; COMPILE_FINAL_QC/SUMMARY_REPORT completed. Caveat: stub `touch`es outputs, so the R haploid logic (combine/compile/report) is NOT yet exercised — that's the real run's job. Two config-parse/wiring issues cleared en route (`params.outdir` default; `--mitohifi_species` required at build time). Next: real validation run.
 
@@ -418,6 +444,8 @@ convenient). Resolved items move to the Change Log.
 ---
 
 ## 10. Improvements / Feature Backlog (post-Phase-2)
+
+- [ ] **Parameter cleanup / systematization / unification pass.** As branches land, params proliferate (hifiasm ~40, plus SPAdes/jellyfish/genomescope/organelle) with inconsistent naming (`hifiasm_k` vs `spades_kmers`), scattered defaults (some in `nextflow.config`, some Elvis in-module, some in `main.nf`), and redundancy (multiple k-mer sizes, memory caps). Goal: one consistent scheme — grouped/namespaced params, defined once, documented in `nextflow.config`, still fully overridable per-run — without losing any current tunability. Best done once the input matrix is broad enough to see the full param surface (after short-read + organelles, likely alongside/after Phase 5). Requested by Jason 2026-07-06.
 
 - [ ] **Resurrect the blobtools decontam-evidence branch (`GENERATE_DECONTAM_EVIDENCE`).** This whole side-branch (coverage + DIAMOND taxonomy + BlobTools2 plots/report on cleaned assemblies) is non-functional and has been for a while — always run with `--decon_make_blobtools_evidence false` (its gate `params.decon_make_blobtools_evidence` defaults `true` at main.nf:267, which is a trap worth flipping to `false` when this is picked up). It was deferred in Phase 1 pass 4 and never threaded to the meta model: `workflows/generate_decontam_evidence.nf:49` calls `haplotype_id.replaceAll(/_hap[12]$/,'')` on a `meta` LinkedHashMap. Scope for the project: thread the `take:` channels (`decontaminated`/`contaminants`/`action_reports`/`taxonomy_reports`, now `(meta, …)`) using `meta.sample` for the HiFi-reads join and `meta.id` for labels/output naming, audit its 5 modules (`MAP_READS_MINIMAP2`, `DIAMOND_BLASTX`, `BLOBTOOLS_CREATE`, `BLOBTOOLS_VIEWPLOT`, `FCS_BLOB_EVIDENCE_REPORT`) for the same string-id assumptions, then validate the branch actually produces sensible blob plots (it's never been run to completion post-refactor). Two call sites: main.nf:1327/1343.
 

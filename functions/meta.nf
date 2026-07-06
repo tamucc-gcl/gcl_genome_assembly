@@ -11,7 +11,11 @@
       id           unique id (== sample at sample level)
       sample       sample identifier
       haplotype    null until assembly; then 'hap1' | 'hap2' | 'primary'
-      n_hap        1 (haploid/collapsed) | 2 (diploid)  -> drives groupKey(sample, n_hap)
+      ploidy       ORGANISM ploidy as an integer (1, 2, 4, ...) -> genomescope -p, hifiasm --n-hap
+      n_hap        OUTPUT haplotype count: 1 (haploid organism, or any collapsed/short-read
+                   assembly) | 2 (diploid+ organism via hifiasm) -> drives the assembly fork
+                   and groupKey(sample, n_hap). DISTINCT from ploidy: SPAdes yields one
+                   collapsed assembly (n_hap=1) even for a diploid organism (ploidy=2).
       hifi/hic/tellseq/shortread  booleans: which read types are present
       long_reads   derived: hifi (|| future ONT) -> gates teloclip / long-read gap-fill
       assembler    'hifiasm' | 'spades'
@@ -30,8 +34,9 @@
     BEHAVIOR PRESERVATION (Phase 1):
       - dedup default for hifiasm honors the existing params.run_purge_dups switch
         (so a HiFi+Hi-C run with run_purge_dups=false still resolves to dedup='none').
-      - ploidy defaults to 'diploid'; mito_tool defaults to 'mitohifi' when HiFi is present.
-      => the legacy 4-column sheet resolves to a meta that reproduces current behavior.
+      - ploidy defaults to 'diploid' (=2); mito_tool defaults to 'mitohifi' when HiFi is present.
+      => the legacy 4-column sheet resolves to a meta that reproduces current behavior
+         (diploid organism, hifiasm -> ploidy=2, n_hap=2).
 
     CACHING:
       meta becomes part of each task's hash, so only stable per-sample identity/strategy fields
@@ -65,9 +70,15 @@ def buildMeta(Map a) {
     }
 
     def assembler = pick(a.assembler, 'assembler') { hasHifi ? 'hifiasm' : 'spades' }
-    def ploidyRaw = pick(a.ploidy,    'ploidy')    { 'diploid' }
-    // accept numeric (1|2) or string (haploid|diploid), case-insensitive
-    def ploidy    = ['1':'haploid','haploid':'haploid','2':'diploid','diploid':'diploid'][ploidyRaw?.toString()?.trim()?.toLowerCase()]
+
+    // ORGANISM ploidy as a positive integer. Accept numeric (1|2|3|4|...) or the words
+    // 'haploid'(1) / 'diploid'(2), case-insensitive. Drives genomescope -p and hifiasm --n-hap.
+    def ploidyRaw = pick(a.ploidy, 'ploidy') { 'diploid' }
+    def ploidyStr = ploidyRaw?.toString()?.trim()?.toLowerCase()
+    def ploidyNum = (ploidyStr == 'haploid') ? 1 :
+                    (ploidyStr == 'diploid') ? 2 :
+                    (ploidyStr?.isInteger()  ? ploidyStr.toInteger() : null)
+
     def dedup     = pick(a.dedup,     'dedup') {
         if (assembler == 'hifiasm')
             (params.containsKey('run_purge_dups') && params.run_purge_dups) ? 'purge_dups' : 'none'
@@ -76,11 +87,11 @@ def buildMeta(Map a) {
     }
     def mito = pick(a.mito_tool, 'mito_tool') { hasHifi ? 'mitohifi' : 'mitofinder' }
 
-    // enum validation
+    // enum / range validation
     if (!(assembler in ['hifiasm','spades']))
         throw new IllegalArgumentException("sample '${sample}': invalid assembler '${assembler}' (allowed: hifiasm, spades)")
-    if (!(ploidy in ['haploid','diploid']))
-        throw new IllegalArgumentException("sample '${sample}': invalid ploidy '${ploidyRaw}' (allowed: 1/haploid, 2/diploid)")
+    if (ploidyNum == null || ploidyNum < 1)
+        throw new IllegalArgumentException("sample '${sample}': invalid ploidy '${ploidyRaw}' (allowed: a positive integer, or 'haploid'/'diploid')")
     if (!(dedup in ['purge_dups','redundans','none']))
         throw new IllegalArgumentException("sample '${sample}': invalid dedup '${dedup}' (allowed: purge_dups, redundans, none)")
     if (!(mito in ['mitohifi','mitofinder','none']))
@@ -92,13 +103,17 @@ def buildMeta(Map a) {
     if (assembler == 'spades' && !hasSr)
         throw new IllegalArgumentException("sample '${sample}': assembler=spades but no short-read shotgun provided")
 
-    def n_hap = (ploidy == 'haploid') ? 1 : 2
+    // OUTPUT haplotype count (assembly fork + groupKey), distinct from organism ploidy:
+    //   - SPAdes produces a single collapsed assembly -> always 1 (flows through the 'primary' path)
+    //   - hifiasm: haploid organism -> 1 (--primary); diploid+ -> 2 phased haplotypes
+    def n_hap = (assembler == 'spades') ? 1 : (ploidyNum == 1 ? 1 : 2)
 
     return [
         id:          sample,
         sample:      sample,
         haplotype:   null,
-        n_hap:       n_hap,
+        ploidy:      ploidyNum,        // organism ploidy (genomescope -p, hifiasm --n-hap)
+        n_hap:       n_hap,            // output haplotype count (assembly fork + groupKey)
         hifi:        hasHifi,
         hic:         hasHic,
         tellseq:     hasTell,

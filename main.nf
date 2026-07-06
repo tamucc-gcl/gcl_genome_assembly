@@ -100,6 +100,16 @@ params.mitohifi_circular_map_dpi = 300
 params.mitohifi_filter_min_identity = 90     // Min alignment identity to call a contig mitochondrial
 params.mitohifi_filter_min_coverage = 50     // Min query coverage to call a contig mitochondrial
 
+// ---- SPAdes (short-read assembly) ----
+params.spades_kmers        = '21,33,55,77'   // -k
+params.spades_cov_cutoff   = 'auto'          // --cov-cutoff (a number, or 'auto')
+params.spades_mode         = '--isolate'     // '--isolate' | '--careful' | '--sc' | '' for none
+params.spades_extra        = ''              // any extra spades.py flags, verbatim
+params.spades_output_level = 'contigs'       // 'contigs' | 'scaffolds' — which FASTA feeds downstream
+
+// ---- Genome-size estimation (jellyfish + GenomeScope2) ----
+params.genomescope_kmer    = 21              // jellyfish -m / genomescope -k
+params.jellyfish_hash_size = '5G'            // jellyfish count -s
 
 // Purge duplicates parameters
 params.run_purge_dups = false  // Default off - enable with --run_purge_dups true
@@ -425,6 +435,8 @@ include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
 include { HIFIASM } from './modules/hifiasm.nf'
+include { ESTIMATE_GENOME_SIZE } from './modules/estimate_genome_size.nf'
+include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
 include { MITOHIFI } from './modules/mitohifi.nf'
@@ -535,6 +547,28 @@ workflow {
         .map { sample, meta, hifi_fastq, r1, r2 -> tuple(meta, hifi_fastq, r1, r2) }
         .set { ch_fastq_all }
 
+    // Attach short reads (from the parsed reads map) -> full read bundle for the assembler selector.
+    // NOTE (4a-i): inner join keyed on sample. ch_fastq_all currently holds only samples with BOTH
+    // HiFi and Hi-C (built from BAM_TO_FASTQ x TRIM_HIC), so short-read-ONLY samples don't reach here
+    // yet — the input-gating pass (4a-ii) rebuilds this bundle so non-HiFi/non-HiC inputs flow through.
+    // For HiFi(+Hi-C) samples sr1/sr2 are null.
+    ch_fastq_all
+        .map { meta, hifi_fastq, r1, r2 -> [ meta.sample, meta, hifi_fastq, r1, r2 ] }
+        .join( ch_input.map { meta, reads -> [ meta.sample, reads.sr_r1, reads.sr_r2 ] } )
+        .map { sample, meta, hifi_fastq, r1, r2, sr1, sr2 -> tuple(meta, hifi_fastq, r1, r2, sr1, sr2) }
+        .set { ch_reads_all }
+
+    // Genome-size estimation (jellyfish -> GenomeScope2), concurrent with assembly.
+    // Reads by assembler: HiFi for the long-read path, PE for short-read.
+    ch_reads_all
+        .map { meta, hifi_fastq, r1, r2, sr1, sr2 ->
+            def gs_reads = (meta.assembler == 'spades') ? [ sr1, sr2 ] : [ hifi_fastq ]
+            tuple(meta, gs_reads)
+        }
+        .set { ch_gsize_input }
+
+    ESTIMATE_GENOME_SIZE(ch_gsize_input)
+
 
     /*
     ========================================================================================
@@ -553,14 +587,16 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 4: Assemble with Hifiasm (sample-level meta in; hap1 + hap2 out)
+        STEP 4: Assemble contigs — assembler selector (hifiasm | spades)
+        hifiasm: HiFi(+Hi-C) -> hap1+hap2 (diploid) / primary (haploid)
+        spades:  PE short reads -> one collapsed 'primary' assembly
     ========================================================================================
     */
-    
-    HIFIASM(ch_fastq_all)
 
-    // Fork sample-level assembly into per-hap contigs: diploid -> hap1+hap2, haploid -> one primary.
-    HIFIASM.out.assemblies
+    CONTIG_ASSEMBLY(ch_reads_all)
+
+    // Fork sample-level assembly into per-hap contigs: diploid -> hap1+hap2, haploid/spades -> one primary.
+    CONTIG_ASSEMBLY.out.assemblies
         .flatMap { meta, fastas ->
             def hmetas = forkHaplotypeMeta(meta)           // [hap1, hap2]  or  [primary]
             def fs = (fastas instanceof List) ? fastas.sort { it.name } : [fastas]
