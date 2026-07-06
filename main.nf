@@ -1206,7 +1206,8 @@ workflow {
     ========================================================================================
     */
     HIC_QC_RAW(
-        ch_input.map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
+        ch_input.filter { meta, reads -> meta.hic }
+                .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
         "raw"
     )
 
