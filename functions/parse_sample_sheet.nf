@@ -14,9 +14,14 @@
       tellseq_r1, tellseq_r2                      TellSeq linked-read paired FASTQ
       sr_r1, sr_r2                                short-read shotgun paired FASTQ
       ploidy        (optional)                    'haploid'/'diploid' or a positive integer (organism ploidy)
+      n_hap         (optional)                    1 | 2 — OUTPUT haplotype count override
+                                                  (blank = derived: spades->1, hifiasm-> ploidy==1?1:2)
       assembler     (optional)                    'hifiasm' | 'spades'
       dedup         (optional)                    'purge_dups' | 'redundans' | 'none'
       mito_tool     (optional)                    'mitohifi' | 'mitofinder' | 'none'
+      species       (optional)                    organism scientific name (per-sample; falls back
+                                                  to params.mitohifi_species) — organelle/kingdom (4b)
+      taxid         (optional)                    NCBI taxonomy id — alternative to species (4b)
 
     Unrecognized columns are ignored. Optional strategy columns override the matching
     global params (precedence is defined in buildMeta). The legacy 4-column sheet
@@ -95,8 +100,11 @@ def parseSampleSheet(sample_sheet_path) {
                 shortread : hasSr,
                 assembler : row['assembler'],
                 ploidy    : row['ploidy'],
+                n_hap     : row['n_hap'],
                 dedup     : row['dedup'],
-                mito_tool : row['mito_tool']
+                mito_tool : row['mito_tool'],
+                species   : row['species'],
+                taxid     : row['taxid']
             ])
 
             // resolve + existence-check present paths only
@@ -116,7 +124,7 @@ def parseSampleSheet(sample_sheet_path) {
             samples << tuple(meta, reads)
             log.info "  parsed '${sid}': assembler=${meta.assembler}, " +
                      "ploidy=${meta.ploidy}n -> n_hap=${meta.n_hap}, reads=[${readTypes.join(',')}], " +
-                     "dedup=${meta.dedup}, mito=${meta.mito_tool}"
+                     "dedup=${meta.dedup}, mito=${meta.mito_tool}, species=${meta.species}"
         }
         catch (Exception e) {
             log.warn("Skipping row ${i + 1} (sample '${sid ?: 'UNKNOWN'}'): ${e.class.simpleName}: ${e.message}", e)

@@ -400,6 +400,12 @@ include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 
+// Assembly
+include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
+
+//Organelle assembly/annotation
+include { ORGANELLE_ASSEMBLY } from './workflows/organelle_assembly.nf'
+
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_MITO_FILTERED } from './workflows/assembly_qc.nf'
@@ -434,14 +440,10 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
-include { HIFIASM } from './modules/hifiasm.nf'
 include { ESTIMATE_GENOME_SIZE } from './modules/estimate_genome_size.nf'
-include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
-include { MITOHIFI } from './modules/mitohifi.nf'
 include { FILTER_MITO_CONTIGS } from './modules/filter_mito_contigs.nf'
-include { MITO_CIRCULAR_MAP } from './modules/mito_circular_map.nf'
 
 include { PURGE_DUPS } from './modules/purge_dups.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
@@ -522,7 +524,8 @@ workflow {
     */
     
     BAM_TO_FASTQ(
-        ch_input.map { meta, reads -> tuple(meta, reads.hifi_bam) }
+        ch_input.filter { meta, reads -> meta.hifi }
+                .map { meta, reads -> tuple(meta, reads.hifi_bam) }
     )
 
     
@@ -532,7 +535,8 @@ workflow {
     ========================================================================================
     */
     TRIM_HIC(
-        ch_input.map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
+        ch_input.filter { meta, reads -> meta.hic }
+                .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
     )
 
     /*
@@ -540,22 +544,16 @@ workflow {
         STEP 3: Combine HiFi FASTQ with trimmed Hi-C reads
     ========================================================================================
     */
-    // Scalar-keyed join (robust if a branch ever alters meta); carries sample-level meta through.
-    BAM_TO_FASTQ.out.fastq
-        .map { meta, hifi_fastq -> [ meta.sample, meta, hifi_fastq ] }
-        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] } )
-        .map { sample, meta, hifi_fastq, r1, r2 -> tuple(meta, hifi_fastq, r1, r2) }
-        .set { ch_fastq_all }
-
-    // Attach short reads (from the parsed reads map) -> full read bundle for the assembler selector.
-    // NOTE (4a-i): inner join keyed on sample. ch_fastq_all currently holds only samples with BOTH
-    // HiFi and Hi-C (built from BAM_TO_FASTQ x TRIM_HIC), so short-read-ONLY samples don't reach here
-    // yet — the input-gating pass (4a-ii) rebuilds this bundle so non-HiFi/non-HiC inputs flow through.
-    // For HiFi(+Hi-C) samples sr1/sr2 are null.
-    ch_fastq_all
-        .map { meta, hifi_fastq, r1, r2 -> [ meta.sample, meta, hifi_fastq, r1, r2 ] }
-        .join( ch_input.map { meta, reads -> [ meta.sample, reads.sr_r1, reads.sr_r2 ] } )
-        .map { sample, meta, hifi_fastq, r1, r2, sr1, sr2 -> tuple(meta, hifi_fastq, r1, r2, sr1, sr2) }
+    // Full per-sample read bundle for the selector + organelle + genome-size.
+    // remainder:true left-joins keep samples lacking HiFi or Hi-C (null slots), so
+    // short-read-only rows flow instead of being dropped by an inner join.
+    ch_input
+        .map { meta, reads -> [ meta.sample, meta, reads ] }
+        .join( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, remainder: true )
+        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, remainder: true )
+        .map { sample, meta, reads, hifi_fastq, hic_r1, hic_r2 ->
+            tuple(meta, hifi_fastq, hic_r1, hic_r2, reads.sr_r1, reads.sr_r2)
+        }
         .set { ch_reads_all }
 
     // Genome-size estimation (jellyfish -> GenomeScope2), concurrent with assembly.
@@ -577,13 +575,11 @@ workflow {
         Depends on: BAM_TO_FASTQ + FIND_MITO_REFERENCE
     ========================================================================================
     */
-    MITOHIFI(
-        BAM_TO_FASTQ.out,
+    ORGANELLE_ASSEMBLY(
+        ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
         FIND_MITO_REFERENCE.out.ref_fasta,
         FIND_MITO_REFERENCE.out.ref_gb
     )
-
-    MITO_CIRCULAR_MAP(MITOHIFI.out.annotation)
 
     /*
     ========================================================================================
@@ -613,7 +609,7 @@ workflow {
     */
     ch_contigs
         .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-        .combine( MITOHIFI.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
+        .combine( ORGANELLE_ASSEMBLY.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
         .map { sample, meta, fasta, mito_fa -> tuple(meta, fasta, mito_fa) }
         .set { ch_mito_filter_input }
 
@@ -1619,13 +1615,13 @@ workflow {
 
     // ---- Mitogenome assembly ----
     // publishDir: ${params.outdir}/mitogenome/${sample_id}
-    ch_manifest_mito_gb = MITOHIFI.out.annotation
+    ch_manifest_mito_gb = ORGANELLE_ASSEMBLY.out.annotation
         .map { meta, gb -> "mito_genbank\t${meta.sample}\t.\t${gb.name}\tmitogenome" }
 
-    ch_manifest_mito_stats = MITOHIFI.out.stats
+    ch_manifest_mito_stats = ORGANELLE_ASSEMBLY.out.stats
         .map { meta, tsv -> "mito_stats\t${meta.sample}\t.\t${tsv.name}\tmitogenome" }
 
-    ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
+    ch_manifest_mito_circular = ORGANELLE_ASSEMBLY.out.circular_map
         .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\tmitogenome" }
 
     // ---- Combine all manifest entries into a single TSV ----
@@ -1653,7 +1649,7 @@ workflow {
         .ifEmpty(file('NO_TELOMERES'))
 
     // Collect mitogenome stats for report
-    ch_mito_stats_for_report = MITOHIFI.out.stats
+    ch_mito_stats_for_report = ORGANELLE_ASSEMBLY.out.stats
         .map { meta, tsv -> tsv }
         .collectFile(
             name: 'all_mito_stats.tsv',
