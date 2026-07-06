@@ -406,6 +406,9 @@ include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 //Organelle assembly/annotation
 include { ORGANELLE_ASSEMBLY } from './workflows/organelle_assembly.nf'
 
+//Short-read qc #Hi-C, SSL, TellSeq
+include { SHORTREAD_QC } from './workflows/shortread_qc.nf'
+
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_MITO_FILTERED } from './workflows/assembly_qc.nf'
@@ -550,11 +553,21 @@ workflow {
     ch_input
         .map { meta, reads -> [ meta.sample, meta, reads ] }
         .join( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, remainder: true )
-        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, remainder: true )
-        .map { sample, meta, reads, hifi_fastq, hic_r1, hic_r2 ->
+        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }, remainder: true )
+        .map { sample, meta, reads, hifi_fastq, hic_pair ->
+            def hic_r1 = hic_pair ? hic_pair[0] : null
+            def hic_r2 = hic_pair ? hic_pair[1] : null
             tuple(meta, hifi_fastq, hic_r1, hic_r2, reads.sr_r1, reads.sr_r2)
         }
         .set { ch_reads_all }
+
+    // Per-sample reads for assembly QC (meryl DB + mapping): HiFi FASTQ for HiFi samples,
+    // the Illumina R1+R2 pair for short-read samples. Read-source-aware QC.
+    ch_reads_all
+        .map { meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2 ->
+            meta.hifi ? tuple(meta, hifi_fastq) : tuple(meta, [sr_r1, sr_r2])
+        }
+        .set { ch_qc_reads }
 
     // Genome-size estimation (jellyfish -> GenomeScope2), concurrent with assembly.
     // Reads by assembler: HiFi for the long-read path, PE for short-read.
@@ -1193,7 +1206,7 @@ workflow {
         Reused across ALL assembly QC steps for dramatic speedup
     ========================================================================================
     */
-    BUILD_MERYL_DB(BAM_TO_FASTQ.out)
+    BUILD_MERYL_DB(ch_qc_reads)
 
     /*
     ========================================================================================
@@ -1229,6 +1242,12 @@ workflow {
         TRIM_HIC.out.trimmed_reads,
         "trimmed"
     )
+
+    SHORTREAD_QC(
+        ch_input.filter { meta, reads -> meta.shortread }
+                .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) },
+        "raw"
+    )
     
     /*
     ========================================================================================
@@ -1244,7 +1263,7 @@ workflow {
     if (run_all_qc) {
         ASSEMBLY_QC_INITIAL(
             ch_contigs,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig'
@@ -1255,7 +1274,7 @@ workflow {
     if (run_all_qc) {
         ASSEMBLY_QC_MITO_FILTERED(
             ch_mito_filtered,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_mito_filtered'
@@ -1266,7 +1285,7 @@ workflow {
     if (run_all_qc && params.run_purge_dups) {
         ASSEMBLY_QC_PURGED(
             ch_hifiasm_output,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_purged'
@@ -1277,7 +1296,7 @@ workflow {
     if (run_all_qc && params.inspector_run_on_contigs) {
         ASSEMBLY_QC_CONTIG_CORRECTED(
             CORRECT_MISASSEMBLIES_CONTIG.out.corrected,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_corrected'
@@ -1288,7 +1307,7 @@ workflow {
     if (run_all_qc && params.decon.run_on_contigs) {
         ASSEMBLY_QC_CONTIG_DECONTAM(
             DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_decontam'
@@ -1299,7 +1318,7 @@ workflow {
     if (run_all_qc) {
         ASSEMBLY_QC_SCAFFOLD(
             SCAFFOLD_HIC_ROUND1.out.scaffolds,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold'
@@ -1310,7 +1329,7 @@ workflow {
     if (run_all_qc && params.inspector_run_on_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_CORRECTED(
             CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_corrected'
@@ -1321,7 +1340,7 @@ workflow {
     if (run_all_qc && params.decon.run_on_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_DECONTAM(
             DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_decontam'
@@ -1332,7 +1351,7 @@ workflow {
     if (run_all_qc && params.run_scaffold_round2) {
         ASSEMBLY_QC_SCAFFOLD_ROUND2(
             ch_final_scaffolds_round2,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_round2'
@@ -1343,7 +1362,7 @@ workflow {
     if (run_all_qc || !params.run_teloclip_extend) {
         ASSEMBLY_QC_GAP_FILLED(
             GAP_FILLING.out.filled_assembly,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'gap_filled'
@@ -1364,7 +1383,7 @@ workflow {
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants,
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.action_report,
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.taxonomy_report,
-                BAM_TO_FASTQ.out,
+                ch_qc_reads,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
@@ -1380,7 +1399,7 @@ workflow {
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants,
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.action_report,
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.taxonomy_report,
-                BAM_TO_FASTQ.out,
+                ch_qc_reads,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
@@ -1427,7 +1446,7 @@ workflow {
     if (params.run_teloclip_extend) {
         ASSEMBLY_QC_TELOCLIP(
             ch_finalized_assembly,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'final'

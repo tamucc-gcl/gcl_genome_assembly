@@ -4,8 +4,13 @@
 ========================================================================================
     Repo location: modules/mapping_qc.nf
 
-    Maps HiFi reads back to each haplotype and computes coverage/mapping stats.
+    Maps the sample's QC reads back to each haplotype and computes coverage/mapping stats.
     Carries meta so ASSEMBLY_QC can regroup results per sample via groupKey.
+
+    Phase 4a-iii: read-source-aware. `reads` is a single HiFi FASTQ for HiFi samples, or
+    the Illumina R1+R2 pair for short-read samples; the minimap2 preset is chosen from meta
+    (map-hifi for HiFi, sr for short-read paired-end, map-ont reserved for future long-read).
+    `minimap2 -ax sr R1 R2` performs paired mapping.
 ========================================================================================
 */
 
@@ -16,24 +21,25 @@ process MAPPING_QC {
     //publishDir "${params.outdir}/qc/assembly/mapping", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(assembly_fasta), path(hifi_fastq)
+    tuple val(meta), path(assembly_fasta), path(reads)
 
     output:
     tuple val(meta), path("${meta.id}_mapping_stats"), emit: results
 
     script:
+    def preset = meta.hifi ? 'map-hifi' : ( meta.long_reads ? 'map-ont' : 'sr' )
     """
     mkdir -p ${meta.id}_mapping_stats
 
     # Index assembly
     minimap2 -d ${meta.id}.mmi ${assembly_fasta}
 
-    # Map HiFi reads
+    # Map QC reads (preset by read type; `reads` = 1 HiFi FASTQ or R1 R2 for PE)
     minimap2 \\
-        -ax map-hifi \\
+        -ax ${preset} \\
         -t ${task.cpus} \\
         ${meta.id}.mmi \\
-        ${hifi_fastq} \\
+        ${reads} \\
         | samtools sort -@ ${task.cpus} -o ${meta.id}.sorted.bam -
 
     # Index BAM
