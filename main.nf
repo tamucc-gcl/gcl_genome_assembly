@@ -602,12 +602,28 @@ workflow {
     // Full per-sample read bundle for the selector + organelle + genome-size.
     // remainder:true left-joins keep samples lacking HiFi or Hi-C (null slots), so
     // short-read-only rows flow instead of being dropped by an inner join.
+    // Per-modality slots: every sample gets exactly one entry per slot — its processed
+    // reads if it has that modality, else a null placeholder from ch_input (immediate).
+    // Plain 1:1 joins then emit each sample as soon as ITS OWN reads are ready — no
+    // waiting on other samples' BAM_TO_FASTQ / TRIM_HIC / TRIM_SHORTREAD to finish.
+    ch_hifi_slot = BAM_TO_FASTQ.out.fastq
+        .map { meta, fq -> [ meta.sample, fq ] }
+        .mix( ch_input.filter { meta, reads -> !meta.hifi }.map { meta, reads -> [ meta.sample, null ] } )
+
+    ch_hic_slot = TRIM_HIC.out.trimmed_reads
+        .map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }
+        .mix( ch_input.filter { meta, reads -> !meta.hic }.map { meta, reads -> [ meta.sample, null ] } )
+
+    ch_sr_slot = ch_shortread_reads
+        .map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }
+        .mix( ch_input.filter { meta, reads -> !meta.shortread }.map { meta, reads -> [ meta.sample, null ] } )
+
     ch_input
-        .map { meta, reads -> [ meta.sample, meta, reads ] }
-        .join( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, remainder: true )
-        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }, remainder: true )
-        .join( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }, remainder: true )
-        .map { sample, meta, reads, hifi_fastq, hic_pair, sr_pair ->
+        .map { meta, reads -> [ meta.sample, meta ] }
+        .join( ch_hifi_slot )
+        .join( ch_hic_slot )
+        .join( ch_sr_slot )
+        .map { sample, meta, hifi_fastq, hic_pair, sr_pair ->
             def hic_r1 = hic_pair ? hic_pair[0] : null
             def hic_r2 = hic_pair ? hic_pair[1] : null
             def sr_r1  = sr_pair  ? sr_pair[0]  : null
@@ -615,7 +631,7 @@ workflow {
             tuple(meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2)
         }
         .set { ch_reads_all }
-
+        
     // Per-sample reads for assembly QC (meryl DB + mapping): HiFi FASTQ for HiFi samples,
     // the Illumina R1+R2 pair for short-read samples. Read-source-aware QC.
     ch_reads_all
