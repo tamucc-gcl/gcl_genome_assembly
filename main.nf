@@ -774,6 +774,10 @@ workflow {
         ch_individual_haplotypes = ch_assemblies_for_decontam                          // per-hap (meta, fasta)
     }
 
+    // HiFi-only rows have no Hi-C, so they drop out of the Hi-C scaffolding block below.
+    // Their decontaminated contigs are their "scaffolds" — rejoin at gap-filling.
+    ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
+
     /*
     ====================================================================================
         STEP 6: Map Hi-C to Assemblies (contigs or decontaminated contigs)
@@ -1024,6 +1028,9 @@ workflow {
         // Use round 1 final scaffolds (corrected/decontaminated if those options were chosen)
         ch_scaffolds_for_gap_filling = ch_final_scaffolds
     }
+
+    // Re-inject HiFi-only assemblies (they skipped Hi-C scaffolding) so they gap-fill/finish.
+    ch_scaffolds_for_gap_filling = ch_scaffolds_for_gap_filling.mix(ch_hifi_only_scaffolds)
     
     // Combine scaffolds with sample HiFi reads for gap filling (key on meta.sample)
     ch_scaffolds_for_gap_filling

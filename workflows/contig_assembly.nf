@@ -46,9 +46,10 @@ workflow CONTIG_ASSEMBLY {
         }
         .set { ch_by_assembler }
 
-    // --- hifiasm branch: HiFi (+ Hi-C). Identical inputs to the prior direct call. ---
+    // --- hifiasm branch: HiFi (+ optional Hi-C). Null Hi-C (HiFi-only rows) -> empty list
+    //     so path staging accepts it; HIFIASM gates Hi-C phasing on meta.hic. ---
     HIFIASM(
-        ch_by_assembler.hifiasm.map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta, hifi, hic1, hic2) }
+        ch_by_assembler.hifiasm.map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta, hifi, hic1 ?: [], hic2 ?: []) }
     )
 
     // --- spades branch: PE short reads. ---

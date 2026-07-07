@@ -37,8 +37,9 @@ process HIFIASM {
 
     // ---- ploidy-driven mode (Phase 2) ----
     // Haploid -> collapsed primary assembly: --primary, no Hi-C phasing.
+    // Hi-C phasing also requires Hi-C to actually be present (HiFi-only rows -> off).
     def haploid  = (meta.n_hap == 1)
-    def useHiC   = !haploid && params.hifiasm_useHiC
+    def useHiC   = !haploid && params.hifiasm_useHiC && meta.hic
     def primary  = haploid || params.hifiasm_primary
 
     primary_flag  = primary ? '--primary' : ''
