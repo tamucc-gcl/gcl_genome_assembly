@@ -114,6 +114,40 @@ params.jellyfish_hash_size = '5G'            // jellyfish count -s
 // Purge duplicates parameters
 params.run_purge_dups = false  // Default off - enable with --run_purge_dups true
 
+// Redundans parameters
+params.redundans_run_reduction      = true
+params.redundans_run_scaffolding    = true
+params.redundans_run_gapclosing     = true
+params.redundans_identity           = 0.51
+params.redundans_overlap            = 0.80
+params.redundans_min_length         = 200
+params.redundans_joins              = 5
+params.redundans_linkratio          = 0.7
+params.redundans_limit              = 0.2
+params.redundans_mapq               = 10
+params.redundans_iters              = 2
+params.redundans_preset             = 'asm5'
+params.redundans_index              = '4G'
+params.redundans_minimap2reduce     = false
+params.redundans_minimap2scaffold   = false
+params.redundans_usebwa             = false
+params.redundans_populate_scaffolds = false
+params.redundans_norearrangements   = false
+params.redundans_extra              = ''
+
+// Shortread trim Parameters
+params.shortread_trim                 = true      // raw + fastp; false = pass pre-cleaned reads through
+params.shortread_fastp_cut_tail_quality = 20
+params.shortread_fastp_cut_tail_window  = 4
+params.shortread_fastp_length_required  = 30
+params.shortread_fastp_extra          = ''
+
+// Pilon parameters
+params.run_pilon                      = false     // optional short-read polish
+params.pilon_fix                      = 'all'
+params.pilon_rounds                   = 1
+params.pilon_extra                    = ''
+
 // Assembly QC parameters
 params.busco_lineage = 'actinopterygii_odb10'
 params.busco_downloads = '/work/birdlab/databases/busco'
@@ -407,7 +441,8 @@ include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 include { ORGANELLE_ASSEMBLY } from './workflows/organelle_assembly.nf'
 
 //Short-read qc #Hi-C, SSL, TellSeq
-include { SHORTREAD_QC } from './workflows/shortread_qc.nf'
+include { SHORTREAD_QC as SHORTREAD_QC_RAW }     from './workflows/shortread_qc.nf'
+include { SHORTREAD_QC as SHORTREAD_QC_TRIMMED } from './workflows/shortread_qc.nf'
 
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
@@ -447,6 +482,10 @@ include { ESTIMATE_GENOME_SIZE } from './modules/estimate_genome_size.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
 include { FILTER_MITO_CONTIGS } from './modules/filter_mito_contigs.nf'
+
+include { TRIM_SHORTREAD } from './modules/trim_shortread.nf'
+include { REDUNDANS }      from './modules/redundans.nf'
+include { PILON }          from './modules/pilon.nf'
 
 include { PURGE_DUPS } from './modules/purge_dups.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
@@ -542,6 +581,19 @@ workflow {
                 .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
     )
 
+    // Optional short-read trimming (fastp): raw shotgun -> adapter/quality-trimmed, or
+    // pass-through when off. Feeds the assembly + assembly-QC path; SHORTREAD_QC stays on raw.
+    ch_shortread_raw = ch_input
+        .filter { meta, reads -> meta.shortread }
+        .map    { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) }
+
+    if (params.shortread_trim) {
+        TRIM_SHORTREAD(ch_shortread_raw)
+        ch_shortread_reads = TRIM_SHORTREAD.out.trimmed_reads
+    } else {
+        ch_shortread_reads = ch_shortread_raw
+    }
+
     /*
     ========================================================================================
         STEP 3: Combine HiFi FASTQ with trimmed Hi-C reads
@@ -554,10 +606,13 @@ workflow {
         .map { meta, reads -> [ meta.sample, meta, reads ] }
         .join( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, remainder: true )
         .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }, remainder: true )
-        .map { sample, meta, reads, hifi_fastq, hic_pair ->
+        .join( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }, remainder: true )
+        .map { sample, meta, reads, hifi_fastq, hic_pair, sr_pair ->
             def hic_r1 = hic_pair ? hic_pair[0] : null
             def hic_r2 = hic_pair ? hic_pair[1] : null
-            tuple(meta, hifi_fastq, hic_r1, hic_r2, reads.sr_r1, reads.sr_r2)
+            def sr_r1  = sr_pair  ? sr_pair[0]  : null
+            def sr_r2  = sr_pair  ? sr_pair[1]  : null
+            tuple(meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2)
         }
         .set { ch_reads_all }
 
@@ -613,6 +668,13 @@ workflow {
         }
         .set { ch_contigs }                                // per-haplotype tuple(meta, fasta)
 
+    ch_contigs
+        .branch { meta, fasta ->
+            hifi:      meta.hifi
+            shortread: true
+        }
+        .set { ch_contigs_by_type }
+
     /*
     ====================================================================================
         STEP 4a: Remove Mitochondrial Contigs from Nuclear Assembly
@@ -620,7 +682,7 @@ workflow {
         both haplotypes via combine). A single FILTER_MITO_CONTIGS handles both.
     ====================================================================================
     */
-    ch_contigs
+    ch_contigs_by_type.hifi
         .map { meta, fasta -> [ meta.sample, meta, fasta ] }
         .combine( ORGANELLE_ASSEMBLY.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
         .map { sample, meta, fasta, mito_fa -> tuple(meta, fasta, mito_fa) }
@@ -650,6 +712,26 @@ workflow {
         ch_hifiasm_output = ch_mito_filtered                    // per-haplotype (meta, fasta)
     }
 
+    // Short-read conditioning: REDUNDANS (reduce/scaffold/gap-close) -> optional Pilon.
+    ch_contigs_by_type.shortread
+        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+        .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+        .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
+        .set { ch_redundans_input }
+
+    REDUNDANS(ch_redundans_input)
+
+    if (params.run_pilon) {
+        REDUNDANS.out.assembly
+            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+            .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+            .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
+            .set { ch_pilon_input }
+        PILON(ch_pilon_input)
+        ch_shortread_finished = PILON.out.assembly
+    } else {
+        ch_shortread_finished = REDUNDANS.out.assembly
+    }
 
     /*
     ====================================================================================
@@ -988,6 +1070,8 @@ workflow {
     // =========================================================================
     //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
     // =========================================================================
+    ch_final_assembly = ch_final_assembly.mix(ch_shortread_finished)
+
     FINALIZE_ASSEMBLY(ch_final_assembly)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
@@ -1243,11 +1327,15 @@ workflow {
         "trimmed"
     )
 
-    SHORTREAD_QC(
+    // Short-read input QC — raw + trimmed (mirrors HIC_QC_RAW / HIC_QC_TRIMMED)
+    SHORTREAD_QC_RAW(
         ch_input.filter { meta, reads -> meta.shortread }
                 .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) },
         "raw"
     )
+    if (params.shortread_trim) {
+        SHORTREAD_QC_TRIMMED(TRIM_SHORTREAD.out.trimmed_reads, "trimmed")
+    }
     
     /*
     ========================================================================================

@@ -23,12 +23,13 @@ process MULTIQC_SHORTREAD {
     path("multiqc_report_data"), emit: data
 
     script:
+    def title = qc_label == "raw" ? "Short-read Raw Reads QC" : "Short-read Trimmed Reads QC"
     """
     multiqc \\
         --force \\
         --filename multiqc_report.html \\
-        --title "Short-read Reads QC" \\
-        --comment "Quality control metrics for short-read (Illumina) paired-end reads" \\
+        --title "${title}" \\
+        --comment "Quality control metrics for short-read (Illumina) paired-end reads (${qc_label})" \\
         .
     """
 
