@@ -58,8 +58,8 @@ METRIC_MAP = {
         "trans_pairs":    {"key": "trans_pairs",    "scale": 1, "unit": ""},
         "retention_pct":  {"key": "retention_pct",  "scale": 1, "unit": "%"},
     },
-    "mapped_hifi": {
-        "hifi_depth":  {"key": "hifi_depth", "scale": 1, "unit": "x"},
+    "mapped_reads": {
+        "coverage":  {"key": "coverage", "scale": 1, "unit": "x"},
     },
 }
 
@@ -104,7 +104,7 @@ def get_available_stages(data):
     stage_order = [
         "ctg.base", "ctg.mito", "ctg.purged", "ctg.cor", "ctg.deco",
         "scaf.base", "scaf.cor", "scaf2",
-        "gap_fill", "final"
+        "gap_fill", "teloclip", "final"
     ]
     ordered = [s for s in stage_order if s in stages]
     remaining = sorted(stages - set(ordered))
@@ -560,7 +560,7 @@ function renderDetail(sd, ranking) {
   }
   html += metricBar("BUSCO missing (fewer = better)", h.busco_m, 150, 350, color, "", true);
   html += metricBar("K-mer completeness", h.kcomp, 70, 82, color, "%", false);
-  html += metricBar("HiFi depth", h.hifi_depth, 15, 45, color, "x", false);
+  html += metricBar("Coverage", h.coverage, 15, 45, color, "x", false);
   html += `</div></div>`;
 
   if (h.tc_ratio !== undefined || both.kcomp !== undefined) {

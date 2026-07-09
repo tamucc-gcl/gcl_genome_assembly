@@ -300,7 +300,8 @@ params.decon_run_on_contigs = true       // Run on initial contig assemblies (be
 params.decon_run_on_scaffolds = false     // Run on scaffolded assemblies (after Hi-C scaffolding)
 
 // Core settings
-params.decon_source_taxid = 7898          // Actinopterygii; set your species taxid when possible
+params.taxid = null    // optional GLOBAL taxid for all samples; per-sample `taxid` column overrides; decontam falls back to params.decon_source_taxid
+params.decon_source_taxid = null          // set your species taxid when possible
 
 // Optional: adapter/vector removal
 params.decon_run_fcs_adaptor = false      // Requires FCS-adaptor containers; enable only if configured
@@ -448,6 +449,7 @@ include { SHORTREAD_QC as SHORTREAD_QC_TRIMMED } from './workflows/shortread_qc.
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_MITO_FILTERED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_PURGED } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_REDUNDANS } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
@@ -456,6 +458,7 @@ include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assem
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_ROUND2 } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_GAP_FILLED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_TELOCLIP } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_FINAL } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
@@ -744,9 +747,9 @@ workflow {
             .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
             .set { ch_pilon_input }
         PILON(ch_pilon_input)
-        ch_shortread_finished = PILON.out.assembly
+        ch_shortread_conditioned = PILON.out.assembly
     } else {
-        ch_shortread_finished = REDUNDANS.out.assembly
+        ch_shortread_conditioned = REDUNDANS.out.assembly
     }
 
     /*
@@ -772,23 +775,36 @@ workflow {
             .set { ch_correction_input }
 
         CORRECT_MISASSEMBLIES_CONTIG(ch_correction_input)
-        ch_assemblies_for_decontam = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
+        ch_hifi_conditioned = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
     } else {
-        ch_assemblies_for_decontam = ch_hifiasm_output                            // per-hap (meta, fasta)
+        ch_hifi_conditioned = ch_hifiasm_output                           // per-hap (meta, fasta)
     }
 
     /*
     ====================================================================================
         STEP 5: Optional Decontamination of Contig Assemblies
-        ch_assemblies_for_decontam is already per-haplotype (meta, fasta).
+        HiFi-conditioned (mito-filter / purge / correct) and short-read-conditioned
+        (redundans / pilon) both flow through the SAME optional decontamination — FCS-GX is
+        genome-based, so short-read assemblies are screened too (per-sample taxid via
+        meta.taxid; see decontaminate_assembly.nf). Short-read gets NO Inspector correction
+        (long-read-only). After decontam: HiFi continues into Hi-C scaffolding / the HiFi-only
+        bypass; short-read is finished (nothing to scaffold with) → straight to FINALIZE.
     ====================================================================================
     */
+    ch_assemblies_for_decontam = ch_hifi_conditioned.mix(ch_shortread_conditioned)
+
     if (params.decon.run_on_contigs) {
         DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
-        ch_individual_haplotypes = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated   // per-hap (meta, fasta)
+        ch_decontaminated_contigs = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
     } else {
-        ch_individual_haplotypes = ch_assemblies_for_decontam                          // per-hap (meta, fasta)
+        ch_decontaminated_contigs = ch_assemblies_for_decontam
     }
+
+    ch_individual_haplotypes = ch_decontaminated_contigs.filter { meta, fasta -> !meta.shortread }  // HiFi (+ HiFi-only)
+    ch_shortread_finished    = ch_decontaminated_contigs.filter { meta, fasta ->  meta.shortread }  // → FINALIZE
+
+    // short-read already split off, so this is HiFi-only:
+    ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
 
     // HiFi-only rows have no Hi-C, so they drop out of the Hi-C scaffolding block below.
     // Their decontaminated contigs are their "scaffolds" — rejoin at gap-filling.
@@ -1403,6 +1419,15 @@ workflow {
         )
     }
 
+    // QC redundans-reduced short-read contigs — short-read analogue of purge_dups, reported
+    // at the same 'contig_purged' (ctg.purged) stage. No-op when there are no short-read samples.
+    if (run_all_qc) {
+        ASSEMBLY_QC_REDUNDANS(
+            ch_shortread_conditioned, ch_qc_reads, BUILD_MERYL_DB.out.meryl_db, ch_busco_db,
+            'contig_purged'
+        )
+    }
+
     // QC Inspector-corrected contigs
     if (run_all_qc && params.inspector_run_on_contigs) {
         ASSEMBLY_QC_CONTIG_CORRECTED(
@@ -1469,8 +1494,8 @@ workflow {
         )
     }
 
-    // QC gap-filled genomes (this is the final QC when teloclip is off)
-    if (run_all_qc || !params.run_teloclip_extend) {
+    // QC gap-filled genomes — intermediate HiFi-path stage (short-read has no gap-fill).
+    if (run_all_qc) {
         ASSEMBLY_QC_GAP_FILLED(
             GAP_FILLING.out.filled_assembly,
             ch_qc_reads,
@@ -1479,6 +1504,29 @@ workflow {
             'gap_filled'
         )
     }
+
+    // QC teloclip-extended assembly (pre-FINALIZE) — kept independent of the final QC so the
+    // effect of FINALIZE (scaffold renaming, future small-contig trimming, etc.) stays
+    // visible. HiFi-path only, when teloclip is enabled.
+    if (run_all_qc && params.run_teloclip_extend) {
+        ASSEMBLY_QC_TELOCLIP(
+            TELOCLIP_EXTEND.out.extended_assembly,
+            ch_qc_reads,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'teloclip_extended'
+        )
+    }
+
+    // Final QC — ALWAYS runs on the finalized assembly (post-FINALIZE), independent of
+    // teloclip and of qc_mode (final_only needs it too). The 'final' stage for EVERY sample.
+    ASSEMBLY_QC_FINAL(
+        ch_finalized_assembly,
+        ch_qc_reads,
+        BUILD_MERYL_DB.out.meryl_db,
+        ch_busco_db,
+        'final'
+    )
 
     /*
     ========================================================================================
@@ -1532,6 +1580,7 @@ workflow {
             .mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
             .mix(ASSEMBLY_QC_MITO_FILTERED.out.assembly_summary)
             .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
+            .mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
 
         if (params.run_purge_dups)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
@@ -1547,29 +1596,23 @@ workflow {
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
     }
 
-    // Gap-filled summary included whenever the gap-filled QC ran
-    if (run_all_qc || !params.run_teloclip_extend) {
+    // Gap-filled summary — intermediate HiFi-path stage.
+    if (run_all_qc) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
             .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     }
 
-    // Final (teloclip-extended) assembly QC — always runs when teloclip is enabled
-    if (params.run_teloclip_extend) {
-        ASSEMBLY_QC_TELOCLIP(
-            ch_finalized_assembly,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'final'
-        )
-
+    // Teloclip-extended summary — intermediate; only when teloclip ran under run_all_qc.
+    if (run_all_qc && params.run_teloclip_extend) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
             .mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
-
-        ch_final_busco = ASSEMBLY_QC_TELOCLIP.out.busco_results
-    } else {
-        ch_final_busco = ASSEMBLY_QC_GAP_FILLED.out.busco_results
     }
+
+    // Final summary — always (ASSEMBLY_QC_FINAL runs unconditionally).
+    ch_all_assembly_summaries = ch_all_assembly_summaries
+        .mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
+
+    ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
 
     // Collect all BAM metrics
     // Start with ones that always run

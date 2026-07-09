@@ -206,7 +206,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                  names_to = "haplotype",
                  values_to = "value",
                  values_drop_na = TRUE) %>%
-    filter(metric %in% c("hifi_depth", "Total length", "L90", "auN",
+    filter(metric %in% c("coverage", "Total length", "L90", "auN",
                          "complete", "Largest contig", "GC (%)", "qv",
                          "kmer_completeness"))
   
@@ -215,7 +215,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     fmt_value <- function(value, metric) {
       case_when(
         metric == "complete"                          ~ percent(value, accuracy = 0.1),
-        metric == "hifi_depth"                        ~ comma(value, accuracy = 0.1),
+        metric == "coverage"                        ~ comma(value, accuracy = 0.1),
         metric == "Total length"                      ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
         metric %in% c("Largest contig", "auN")        ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
         metric %in% c("GC (%)", "kmer_completeness")  ~ percent(value, scale = 1, accuracy = 0.1),
@@ -231,7 +231,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       "auN"                = "auN",
       "L90"                = "L90",
       "GC (%)"             = "GC (%)",
-      "hifi_depth"         = "HiFi Depth",
+      "coverage"         = "Coverage",
       "complete"           = "BUSCO Complete",
       "qv"                 = "QV",
       "kmer_completeness"  = "K-mer Completeness"
@@ -293,7 +293,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
            !str_detect(metric, ">=")) %>%
     mutate(value_fmt = case_when(
       analysis == "busco" ~ percent(value, accuracy = 0.1),
-      metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
+      metric == "coverage" ~ comma(value, accuracy = 0.1),
       metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
       TRUE ~ comma(value, accuracy = 1)
     )) %>%
@@ -524,7 +524,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
            !str_detect(metric, ">=")) %>%
     mutate(value_fmt = case_when(
       analysis == "busco" ~ percent(value, accuracy = 0.1),
-      metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
+      metric == "coverage" ~ comma(value, accuracy = 0.1),
       metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
       TRUE ~ comma(value, accuracy = 1)
     ))

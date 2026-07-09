@@ -93,7 +93,7 @@ mapping_out <- list.files(file.path(input_dir, 'mapping'),
   tibble(file = .) %>%
   mutate(haplotype = norm_hap(file)) %>%
   rowwise(haplotype) %>%
-  reframe(hifi_depth = read_lines(file) %>% 
+  reframe(coverage = read_lines(file) %>% 
             as.numeric()) %>%
   pivot_longer(cols = -haplotype,
                names_to = 'metric') %>%
@@ -125,7 +125,7 @@ completeness_out <- read_tsv(file.path(input_dir, 'merqury', str_c(sample_id, 'c
 
 #### Join it all together ####
 joined_data <- bind_rows(.id = 'analysis',
-          mapped_hifi = mapping_out,
+                         mapped_reads  = mapping_out,
           quast = quast_out,
           busco = busco_out,
           merqury_qv = qv_out,

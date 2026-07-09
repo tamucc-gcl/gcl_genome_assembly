@@ -121,9 +121,22 @@ if (!is.null(pairs_metrics)) {
 #### Join together for nice single output ####
 
 # --- 1. Determine pipeline stages present ---
+# --- Build stage levels and labels ---
+# Finalized assembly is QC'd unconditionally as 'final' (ASSEMBLY_QC_FINAL); teloclip-extended
+# is its own intermediate (ASSEMBLY_QC_TELOCLIP, pre-FINALIZE); gap_filled is 'gap_fill'.
+# Absent stages (e.g. teloclip off, or short-read which has none of these) drop via fct_drop().
 all_assembly_stages <- unique(assembly_qc$qc_label)
-has_teloclip <- 'teloclip_extended' %in% all_assembly_stages
-last_assembly_stage <- if (has_teloclip) 'teloclip_extended' else 'gap_filled'
+last_assembly_stage <- 'final'
+message(sprintf("  Final assembly stage: %s", last_assembly_stage))
+
+stage_levels <- c('contig', 'contig_mito_filtered', 'contig_purged',
+                  'contig_corrected', 'contig_decontam',
+                  'scaffold', 'scaffold_corrected', 'scaffold_round2',
+                  'gap_filled', 'teloclip_extended', 'final')
+
+stage_labels <- c('ctg.base', 'ctg.mito', 'ctg.purged', 'ctg.cor', 'ctg.deco',
+                  'scaf.base', 'scaf.cor', 'scaf2',
+                  'gap_fill', 'teloclip', 'final')
 
 message(sprintf("  Teloclip detected: %s", has_teloclip))
 message(sprintf("  Final assembly stage: %s", last_assembly_stage))
