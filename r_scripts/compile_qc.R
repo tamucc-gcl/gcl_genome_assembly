@@ -138,19 +138,6 @@ stage_labels <- c('ctg.base', 'ctg.mito', 'ctg.purged', 'ctg.cor', 'ctg.deco',
                   'scaf.base', 'scaf.cor', 'scaf2',
                   'gap_fill', 'teloclip', 'final')
 
-#message(sprintf("  Teloclip detected: %s", has_teloclip))
-message(sprintf("  Final assembly stage: %s", last_assembly_stage))
-
-# --- 2. Build dynamic stage levels and labels ---
-stage_levels <- c('contig', 'contig_mito_filtered', 'contig_purged',
-                  'contig_corrected', 'contig_decontam',
-                  'scaffold', 'scaffold_corrected', 'scaffold_round2',
-                  'gap_filled')
-
-stage_labels <- c('ctg.base', 'ctg.mito', 'ctg.purged', 'ctg.cor', 'ctg.deco',
-                  'scaf.base', 'scaf.cor', 'scaf2',
-                  'final')  # gap_filled is "final" by default
-
 # --- 3. Process assembly QC ---
 fixed_assembly <- assembly_qc %>%
   rename(stage = qc_label) %>%
