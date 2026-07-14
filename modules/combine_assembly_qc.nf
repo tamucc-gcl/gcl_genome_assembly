@@ -20,8 +20,8 @@ process COMBINE_ASSEMBLY_QC {
           val(haplotype_ids_busco),
           path(busco_results),
           val(haplotype_ids_mapping),
-          path(mapping_results),
-          path(combine_qc_script)
+          path(mapping_results)
+    path(combine_qc_script)
     
     output:
     tuple val(sample_id), val(qc_label), path("${sample_id}_${qc_label}_qc_summary.tsv"), emit: summary
