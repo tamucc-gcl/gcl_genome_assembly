@@ -22,7 +22,8 @@ process MITO_CIRCULAR_MAP {
     publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(genbank), path(mito_circular_script)
+    tuple val(meta), path(genbank)
+    path(mito_circular_script)
 
     output:
     tuple val(meta), path("${meta.sample}_mito_circular.png"), emit: circular_map
