@@ -6,6 +6,7 @@ process COVERAGE_BOOK {
 
     input:
     tuple val(meta), path(assembly), path(hifi_reads)
+    path(coverage_book_script)
     
     output:
     tuple val(meta), path("*.sorted.bam"), path("*.sorted.bam.bai"), emit: bam
@@ -47,7 +48,7 @@ process COVERAGE_BOOK {
         --minMappingQuality ${params.min_mapq}
     
     # Generate coverage book PDF
-    python3 ${projectDir}/py_scripts/bigwig_genome_book.py \\
+    python3 ${coverage_book_script} \\
         --bw ${prefix}.cov.${params.bin_size}.bw \\
         --fai ${assembly}.fai \\
         --out_pdf ${prefix}.coverage_book.pdf \\

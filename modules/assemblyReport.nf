@@ -29,13 +29,14 @@ process ASSEMBLY_REPORT {
 
     input:
     path(metrics_csv)
+    path(assembly_report_script)
 
     output:
     path("assembly_qc_report.html"), emit: report_html
 
     script:
     """
-    python3 ${projectDir}/py_scripts/generate_assembly_report.py \\
+    python3 ${assembly_report_script} \\
         --input ${metrics_csv} \\
         --output assembly_qc_report.html \\
         --report-stage "${params.report_stage ?: 'final'}"

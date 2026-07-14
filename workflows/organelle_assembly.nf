@@ -32,6 +32,7 @@
 
 include { MITOHIFI }          from '../modules/mitohifi.nf'
 include { MITO_CIRCULAR_MAP } from '../modules/mito_circular_map.nf'
+mito_circular_script = file("${projectDir}/py_scripts/plot_mito_circular.py",           checkIfExists: true)
 
 workflow ORGANELLE_ASSEMBLY {
 
@@ -54,7 +55,7 @@ workflow ORGANELLE_ASSEMBLY {
         ch_ref_fasta,
         ch_ref_gb
     )
-    MITO_CIRCULAR_MAP(MITOHIFI.out.annotation)
+    MITO_CIRCULAR_MAP(MITOHIFI.out.annotation, mito_circular_script)
 
     // --- Non-HiFi branch: STUB (filled in Phase 4b with GetOrganelle). ---
     // Intentionally not consumed yet; short-read samples carry no organelle in 4a-ii.

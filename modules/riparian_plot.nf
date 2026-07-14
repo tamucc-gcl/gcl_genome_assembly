@@ -28,6 +28,7 @@ process RIPARIAN_PLOT {
 
     input:
     tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2), path(paf)
+    path(riparian_script)
 
     output:
     tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}_riparian.png"), emit: riparian
@@ -47,7 +48,7 @@ process RIPARIAN_PLOT {
     samtools faidx ${assembly2}
 
     # Generate riparian plot
-    Rscript ${projectDir}/r_scripts/riparian_paf.R \\
+    Rscript ${riparian_script} \\
         --paf       "${paf}" \\
         --ref_fai   "${assembly1}.fai" \\
         --query_fai "${assembly2}.fai" \\

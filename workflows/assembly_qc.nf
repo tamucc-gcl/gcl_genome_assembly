@@ -33,6 +33,7 @@ include { MERQURY }             from '../modules/merqury.nf'
 include { BUSCO }               from '../modules/busco.nf'
 include { MAPPING_QC }          from '../modules/mapping_qc.nf'
 include { COMBINE_ASSEMBLY_QC } from '../modules/combine_assembly_qc.nf'
+combine_qc_script    = file("${projectDir}/r_scripts/combine_individual_assembly_qc.R", checkIfExists: true)
 
 workflow ASSEMBLY_QC {
     take:
@@ -141,7 +142,7 @@ workflow ASSEMBLY_QC {
         }
         .set { ch_all_qc_labeled }
 
-    COMBINE_ASSEMBLY_QC(ch_all_qc_labeled)
+    COMBINE_ASSEMBLY_QC(ch_all_qc_labeled, combine_qc_script)
 
     emit:
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary   // (sample_id, qc_label, summary_tsv)

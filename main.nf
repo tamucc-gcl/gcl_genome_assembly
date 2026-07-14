@@ -524,6 +524,15 @@ include { HIC_TADS } from './modules/hic_tads.nf'
 include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 
+// ── helper scripts declared as inputs so edits invalidate the cache ──
+ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
+ch_summary_report_script  = file("${projectDir}/r_scripts/generate_summary_report.R",            checkIfExists: true)
+ch_dotplot_script         = file("${projectDir}/r_scripts/dotplot_paf.R",                        checkIfExists: true)
+ch_riparian_script        = file("${projectDir}/r_scripts/riparian_paf.R",                       checkIfExists: true)
+ch_assembly_report_script = file("${projectDir}/py_scripts/generate_assembly_report.py",         checkIfExists: true)
+ch_coverage_book_script   = file("${projectDir}/py_scripts/bigwig_genome_book.py",               checkIfExists: true)
+ch_tad_book_script        = file("${projectDir}/py_scripts/make_tad_book.py",                    checkIfExists: true)
+ch_compartments_script    = file("${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py", checkIfExists: true)
 /*
 ========================================================================================
     MAIN WORKFLOW
@@ -1174,7 +1183,8 @@ workflow {
                 CONTACT_MAP_FINAL.out.mcool,
                 params.compartment_resolution ?: 250000,
                 params.compartment_min_contig_bp ?: 5000000,
-                params.compartment_max_contigs ?: 30
+                params.compartment_max_contigs ?: 30,
+                ch_compartments_script
             )
 
             HIC_TADS(
@@ -1182,7 +1192,8 @@ workflow {
                 params.tad_resolution ?: 50000,
                 params.tad_window_bp ?: 500000,
                 params.tad_min_contig_bp ?: 5000000,
-                params.tad_max_contigs ?: 0
+                params.tad_max_contigs ?: 0,
+                ch_tads_script
             )
         }
     }
@@ -1239,7 +1250,7 @@ workflow {
             .set { ch_pairwise_input }
 
         // FIX: pass SETUP_PAFR.out.ready as second argument
-        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
+        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready, ch_dotplot_script)
 
         // Riparian plot input — uses ch_final_assembly
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
@@ -1253,7 +1264,7 @@ workflow {
                 tuple(hap1, fasta1, hap2, fasta2, paf)
             }
 
-        RIPARIAN_PLOT(ch_riparian_input)
+        RIPARIAN_PLOT(ch_riparian_input, ch_riparian_script)
 
         COLLECT_PAIRWISE_RESULTS(
             PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
@@ -1651,11 +1662,12 @@ workflow {
     COMPILE_FINAL_QC(
         ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect(),
         ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect(),
-        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect()
+        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect(),
+        ch_compile_qc_script
     )
 
     // Make interactive HTML assembly viewer
-    ASSEMBLY_REPORT(COMPILE_FINAL_QC.out.metrics)
+    ASSEMBLY_REPORT(COMPILE_FINAL_QC.out.metrics, ch_assembly_report_script)
 
     /*
     ========================================================================================
@@ -1690,7 +1702,7 @@ workflow {
         }
         .set { ch_coverage_book_input }
 
-    COVERAGE_BOOK(ch_coverage_book_input)
+    COVERAGE_BOOK(ch_coverage_book_input, ch_coverage_book_script)
 
     // =========================================================================
     //  SUMMARY REPORT — Build manifest and call the process
@@ -1839,7 +1851,8 @@ workflow {
         ch_telomere_for_report,
         ch_pairwise_summary,
         ch_mito_stats_for_report,
-        ch_teloclip_stats_for_report       
+        ch_teloclip_stats_for_report,
+        ch_summary_report_script       
     )
 }
 /*

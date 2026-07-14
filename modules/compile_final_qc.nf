@@ -25,6 +25,7 @@ process COMPILE_FINAL_QC {
     path(assembly_summaries)  // All assembly QC summary TSVs collected
     path(bam_metrics)         // All BAM metrics TSVs collected
     path(pairs_metrics)       // All pairs metrics TSVs collected
+    path(compile_qc_script)   // R script for compiling QC data
     
     output:
     //path("final_qc_report.tsv"), emit: report
@@ -77,7 +78,7 @@ Pairs metrics files:
 EOF
     
     # Run R script to compile all QC data
-    Rscript ${projectDir}/r_scripts/compile_qc.R \\
+    Rscript ${compile_qc_script} \\
         --assembly_dir qc_inputs/assembly \\
         --bam_dir qc_inputs/bam \\
         --pairs_dir qc_inputs/pairs \\

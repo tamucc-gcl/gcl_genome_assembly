@@ -31,13 +31,14 @@ process SUMMARY_REPORT {
     path(pairwise_summary)      // pairwise_alignment_summary.tsv  OR  NO_PAIRWISE
     path(mito_stats)            // all_mito_stats.tsv or NO_MITO_STATS
     path(teloclip_stats)        // all_teloclip_stats.tsv or NO_TELOCLIP_STATS
+    path(summary_report_script) // R script to generate the summary report
 
     output:
     path("assembly_report.md"), emit: report
 
     script:
     """
-    Rscript ${projectDir}/r_scripts/generate_summary_report.R \\
+    Rscript ${summary_report_script} \\
         --manifest ${report_manifest} \\
         --compiled_qc ${compiled_qc_csv} \\
         --telomere_summary ${telomere_summary} \\
