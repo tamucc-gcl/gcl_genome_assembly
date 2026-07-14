@@ -19,10 +19,12 @@
 nextflow.enable.dsl=2
 
 include { FCS_DB_GET }         from '../modules/fcs_dbgx.nf'
-include { DOWNLOAD_TAXDUMP }   from '../modules/download_taxdump.nf'
 include { BUILD_DIAMOND_DB }   from '../modules/build_diamond_db.nf'
 
 workflow SETUP_DECONTAM_DBS {
+    take:
+    ch_taxdump          // NCBI taxdump dir, downloaded once up front in main.nf
+
     main:
     /*
     // DEBUG
@@ -70,19 +72,6 @@ workflow SETUP_DECONTAM_DBS {
     */
     if (params.decon?.make_blobtools_evidence ?: false) {
         
-        def taxdump_dir_path = file(params.diamond?.taxdump_dir ?: './db/taxdump')
-        def taxdump_force = (params.diamond?.force ?: false) as boolean
-        
-        // Create channels
-        ch_taxdump_dir = Channel.value(taxdump_dir_path)
-        ch_taxdump_force = Channel.value(taxdump_force)
-        
-        // Always ensure taxdump exists (needed by both DIAMOND and BlobTools)
-        DOWNLOAD_TAXDUMP(
-            ch_taxdump_dir,
-            ch_taxdump_force
-        )
-        
         // Check if user provided pre-built DIAMOND database
         def prebuilt_dmnd = params.diamond?.dmnd ? file(params.diamond.dmnd) : null
         
@@ -124,19 +113,19 @@ workflow SETUP_DECONTAM_DBS {
                 Channel.value(diamond_name),
                 Channel.value(fasta_url),
                 Channel.value(taxonmap_url),
-                DOWNLOAD_TAXDUMP.out.taxdump_dir,
+                ch_taxdump,
                 Channel.value(diamond_force)
             )
             
             diamond_db_out = BUILD_DIAMOND_DB.out.dmnd
         }
         
-        taxdump_out = DOWNLOAD_TAXDUMP.out.taxdump_dir
+        taxdump_out = ch_taxdump
         
     } else {
         // Evidence not requested - emit empty channels
         diamond_db_out = Channel.empty()
-        taxdump_out = Channel.empty()
+        taxdump_out = ch_taxdump
     }
 
     emit:

@@ -94,7 +94,7 @@ def buildMeta(Map a) {
     // decision (wired in Phase 4b). Per-sample; `species` falls back to the global
     // params.mitohifi_species (so single-species runs need no column). `taxid` is optional
     // (an unambiguous alternative to the name for the NCBI-taxonomy kingdom lookup).
-    def species = pick(a.species, 'mitohifi_species') { null }
+    def species = pick(a.species, 'species') { null }
     def taxid   = pick(a.taxid,   'taxid')            { null }
 
     // enum / range validation

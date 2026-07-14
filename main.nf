@@ -38,6 +38,7 @@ params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link'
 params.qc_mode = 'all_stages'   // 'all_stages' (QC every checkpoint) | 'final_only'
+params.species = null   // optional global organism-name override; else derived from taxid
 
 // Assembly parameters
 ////   Overlap/Error correction:
@@ -477,6 +478,9 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
     IMPORT MODULES
 ========================================================================================
 */
+include { RESOLVE_TAXONOMY } from './modules/resolve_taxonomy.nf'
+include { buscoLineageFor; kingdomFlag; organismName } from './functions/taxonomy.nf'
+include { DOWNLOAD_TAXDUMP } from './modules/download_taxdump.nf'
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
@@ -544,6 +548,49 @@ workflow {
     // Parse sample sheet -> per-sample tuple(meta, reads)
     ch_input = parseSampleSheet(params.sample_sheet)
 
+    // ── Ensure the NCBI taxdump once, up front. Idempotent: the module skips the download
+    //    when names.dmp/nodes.dmp are already present at the target path. Needed by
+    //    RESOLVE_TAXONOMY and (when enabled) the decon evidence branch.
+    DOWNLOAD_TAXDUMP(
+        Channel.value( file(params.diamond_taxdump_dir) ),
+        Channel.value( (params.diamond?.force ?: false) as boolean )
+    )
+    ch_taxdump     = DOWNLOAD_TAXDUMP.out.taxdump_dir
+    ch_taxdump_dir = ch_taxdump          // reused by the decon evidence branch
+
+    // ── 4b-i: resolve organism taxonomy (taxid -> name / kingdom / BUSCO lineage) ──
+    RESOLVE_TAXONOMY(
+        ch_input
+            .map    { meta, reads -> meta.taxid }
+            .filter { it != null }
+            .unique()
+            .combine( ch_taxdump )          // pair each distinct taxid with the taxdump
+    )
+
+    ch_taxonomy = RESOLVE_TAXONOMY.out.tsv
+        .map { taxid, tsv -> tsv }
+        .splitCsv(sep: '\t', header: true)
+        .map { row ->
+            tuple(row.taxid.toString(),
+                  [ name         : organismName(row),
+                    kingdom      : kingdomFlag(row),
+                    busco_lineage: buscoLineageFor(row) ]) }
+
+    // Per-sample identity side-channel: (sample, {taxid, name, kingdom, busco_lineage}).
+    ch_sample_identity = ch_input
+        .map { meta, reads -> tuple(meta.taxid?.toString(), meta.sample, meta.species) }
+        .filter { taxid, sample, override -> taxid != null }
+        .combine(ch_taxonomy, by: 0)                       // many samples per taxid
+        .map { taxid, sample, override, tax ->
+            tuple(sample, [ taxid        : taxid,
+                            name         : override ?: tax.name,
+                            kingdom      : tax.kingdom,
+                            busco_lineage: tax.busco_lineage ]) }
+
+    ch_sample_identity.subscribe { sample, tax ->
+        log.info "  resolved '${sample}': taxid=${tax.taxid}  name='${tax.name}'  kingdom=${tax.kingdom}  busco=${tax.busco_lineage}"
+    }
+
     /*
     ========================================================================================
         STEP 0: Setup Decontamination Databases (if enabled) & BUSCO Database
@@ -552,12 +599,11 @@ workflow {
     ========================================================================================
     */
     if (params.decon.run_on_contigs || params.decon.run_on_scaffolds) {
-        SETUP_DECONTAM_DBS()
+        SETUP_DECONTAM_DBS(ch_taxdump)
         
         // Store outputs for later use
         ch_gxdb_dir = SETUP_DECONTAM_DBS.out.gxdb_dir
         ch_diamond_db = SETUP_DECONTAM_DBS.out.diamond_db
-        ch_taxdump_dir = SETUP_DECONTAM_DBS.out.taxdump_dir
     }
     
     DOWNLOAD_BUSCO_DB(params.busco_lineage)
