@@ -18,13 +18,15 @@ process BUSCO {
 
     input:
     tuple val(meta), path(assembly_fasta)
-    path(busco_db)
+    val(busco_lineage_map)
 
     output:
     tuple val(meta), path("${meta.id}_busco"), emit: results
 
     script:
-    def lineage = params.busco_lineage ?: "auto"
+    // Per-sample lineage, keyed by meta.taxid. Falls back to params.busco_lineage only if a
+    // sample somehow lacks a resolved taxid (unreachable while taxid is required — see notes).
+    def lineage = busco_lineage_map[meta.taxid?.toString()] ?: (params.busco_lineage ?: 'eukaryota_odb10')
     """
     busco \\
         --in ${assembly_fasta} \\

@@ -40,7 +40,7 @@ workflow ASSEMBLY_QC {
     assemblies   // channel: tuple(meta, fasta)          — per-haplotype
     hifi_reads   // channel: tuple(meta, hifi_fastq)      — per-sample (sample-level meta)
     meryl_db     // channel: tuple(meta, meryl_db)        — per-sample (sample-level meta)
-    busco_db     // value:   path to pre-downloaded BUSCO lineage database
+    busco_db     // value:   MAP taxid -> busco_lineage (passed straight through to BUSCO)
     qc_label     // value:   label for output subfolder
 
     main:

@@ -150,7 +150,7 @@ params.pilon_rounds                   = 1
 params.pilon_extra                    = ''
 
 // Assembly QC parameters
-params.busco_lineage = 'actinopterygii_odb10'
+params.busco_lineage = 'eukaryota_odb10'   // fallback only; primary lineage is per-sample from taxonomy
 params.busco_downloads = '/work/birdlab/databases/busco'
 params.merqury_k = 21  // k-mer size for meryl database
 
@@ -310,7 +310,7 @@ params.decon_fcsadaptor_mode = 'euk'      // 'euk' or 'prok'
 params.decon_container_engine = 'singularity'
 
 // Optional: generate evidence (coverage + taxonomy + blobtools plots)
-params.decon_make_blobtools_evidence = true
+params.decon_make_blobtools_evidence = false
 
 // ============================================================================
 // Evidence generation settings (FLATTENED)
@@ -606,8 +606,26 @@ workflow {
         ch_diamond_db = SETUP_DECONTAM_DBS.out.diamond_db
     }
     
-    DOWNLOAD_BUSCO_DB(params.busco_lineage)
-    ch_busco_db = DOWNLOAD_BUSCO_DB.out.db
+    // BUSCO databases — one download per DISTINCT lineage across all samples
+    // (storeDir dedupes; the per-lineage tasks run in parallel).
+    ch_busco_lineages = ch_taxonomy
+        .map { taxid, tax -> tax.busco_lineage }
+        .unique()
+    DOWNLOAD_BUSCO_DB(ch_busco_lineages)
+
+    // ch_busco_db is now a VALUE-channel MAP:  taxid -> busco_lineage (a String).
+    //   * value channel  -> broadcasts unchanged to all 13 ASSEMBLY_QC calls
+    //   * the .combine on DOWNLOAD_BUSCO_DB.out forces each lineage to finish
+    //     downloading before BUSCO reads it from the shared --download_path
+    //   * .reduce collapses to ONE map, so the channel emits once (after all
+    //     downloads) and broadcasts; multiplicity is what would otherwise break
+    //     the fan-out to 13 subworkflow calls.
+    // NOTE: many taxids can share one lineage -> combine(by:0) (one-to-many), NOT join.
+    ch_busco_db = ch_taxonomy
+        .map { taxid, tax -> tuple(tax.busco_lineage, taxid) }
+        .combine( DOWNLOAD_BUSCO_DB.out.db.map { db -> tuple(db.name, db) }, by: 0 )
+        .map { lineage, taxid, db -> [ (taxid): lineage ] }
+        .reduce([:]) { acc, m -> acc + m }
 
     /*
     ========================================================================================
