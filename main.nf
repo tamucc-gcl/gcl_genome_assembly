@@ -37,7 +37,7 @@ nextflow.enable.dsl=2
 params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link'
-params.qc_mode = 'all_stages'   // 'all_stages' (QC every checkpoint) | 'final_only'
+params.qc_mode = 'final_only'   // 'all_stages' (QC every checkpoint) | 'final_only'
 params.species = null   // optional global organism-name override; else derived from taxid
 
 // Assembly parameters
@@ -1134,8 +1134,9 @@ workflow {
         ch_scaffolds_for_gap_filling = ch_final_scaffolds
     }
 
-    // Re-inject HiFi-only assemblies (they skipped Hi-C scaffolding) so they gap-fill/finish.
-    ch_scaffolds_for_gap_filling = ch_scaffolds_for_gap_filling.mix(ch_hifi_only_scaffolds)
+    // HiFi-only assemblies are NOT gap-filled — no Hi-C scaffolding means no scaffold gaps to
+    // close. They rejoin the finishing chain at teloclip/finalize below (they still have HiFi
+    // reads), mirroring how short-read rejoins at ch_final_assembly.
     
     // Combine scaffolds with sample HiFi reads for gap filling (key on meta.sample)
     ch_scaffolds_for_gap_filling
@@ -1147,6 +1148,10 @@ workflow {
     // Run gap filling
     GAP_FILLING(ch_gap_filling_input)
 
+    // Gap-filled Hi-C scaffolds + HiFi-only contigs (which correctly skipped gap-fill) both
+    // continue to teloclip/finalize.
+    ch_post_gap_fill = GAP_FILLING.out.filled_assembly.mix(ch_hifi_only_scaffolds)
+
     /*
     ========================================================================================
         STEP 13b: Teloclip — Extend scaffolds with missing telomeres (Optional)
@@ -1157,7 +1162,7 @@ workflow {
     */
     if (params.run_teloclip_extend) {
         // Combine gap-filled assemblies with sample HiFi reads (key on meta.sample)
-        GAP_FILLING.out.filled_assembly
+        ch_post_gap_fill
             .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
             .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
             .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta, filled_fa, hifi_fastq) }
@@ -1175,7 +1180,7 @@ workflow {
         ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats
     } else {
         // No teloclip — gap-filled assembly IS the final assembly
-        ch_final_assembly = GAP_FILLING.out.filled_assembly
+        ch_final_assembly = ch_post_gap_fill
         ch_teloclip_stats_for_report = Channel.of(file('NO_TELOCLIP'))
     }
 
