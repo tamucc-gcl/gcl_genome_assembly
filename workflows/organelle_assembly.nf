@@ -38,8 +38,7 @@ workflow ORGANELLE_ASSEMBLY {
 
     take:
     ch_reads       // tuple(meta, hifi_fastq, sr_r1, sr_r2)
-    ch_ref_fasta   // FIND_MITO_REFERENCE.out.ref_fasta
-    ch_ref_gb      // FIND_MITO_REFERENCE.out.ref_gb
+    ch_mito_ref    // tuple(taxid, ref_fasta, ref_gb) — per resolved species
 
     main:
     ch_reads
@@ -49,12 +48,17 @@ workflow ORGANELLE_ASSEMBLY {
         }
         .set { ch_org }
 
-    // --- HiFi branch: MitoHiFi (mito only). Identical inputs to the pre-refactor call. ---
-    MITOHIFI(
-        ch_org.hifi.map { meta, hifi_fastq, sr1, sr2 -> tuple(meta, hifi_fastq) },
-        ch_ref_fasta,
-        ch_ref_gb
-    )
+    // --- HiFi branch: MitoHiFi (mito only), each sample paired with its own species' reference.
+    // combine(by:0) is one-to-many (both haplotypes of a diploid sample share the one reference).
+    // A HiFi sample whose taxid resolved no reference is dropped here (carries no mito) — same as
+    // the existing behaviour for organelle-less samples at FILTER_MITO_CONTIGS.
+    ch_org.hifi
+        .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.taxid?.toString(), meta, hifi_fastq) }
+        .combine( ch_mito_ref, by: 0 )
+        .map { taxid, meta, hifi_fastq, ref_fa, ref_gb -> tuple(meta, hifi_fastq, ref_fa, ref_gb) }
+        .set { ch_mitohifi_input }
+    MITOHIFI(ch_mitohifi_input)
+
     MITO_CIRCULAR_MAP(MITOHIFI.out.annotation, mito_circular_script)
 
     // --- Non-HiFi branch: STUB (filled in Phase 4b with GetOrganelle). ---

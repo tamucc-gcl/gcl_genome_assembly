@@ -30,9 +30,7 @@ process MITOHIFI {
     publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(hifi_fastq)
-    path(ref_fasta)
-    path(ref_gb)
+    tuple val(meta), path(hifi_fastq), path(ref_fasta), path(ref_gb)
 
     output:
     tuple val(meta), path("${meta.sample}_mitogenome.fasta"),           emit: mitogenome

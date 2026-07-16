@@ -89,7 +89,6 @@ params.hifiasm_teloD = 2000 // max drop [2000]
 params.hifiasm_teloS = 500 // min score for telomere reads [500]
 
 // Mitochondrial genome assembly (MitoHiFi)
-params.mitohifi_species        = null        // REQUIRED: Scientific name (e.g., "Spratelloides delicatulus")
 params.mitohifi_genetic_code   = 2           // NCBI genetic code: 2=vertebrate mito, 5=invertebrate mito
 params.mitohifi_ref_min_length = 14000       // Min reference mitogenome length for findMitoReference.py
 params.mitohifi_perc_identity  = 50          // Min percent identity for read filtering
@@ -633,7 +632,22 @@ workflow {
         Runs at pipeline start — no dependencies on reads or assembly
     ========================================================================================
     */
-    FIND_MITO_REFERENCE(params.mitohifi_species)
+    // Mito reference per DISTINCT resolved species name, among HiFi samples only
+    // (short-read samples use mitofinder / the organelle `other` branch — no MitoHiFi ref).
+    // Runs after taxonomy resolution now (was a global no-dependency call).
+    ch_mito_ref_todo = ch_input
+        .filter { meta, reads -> meta.hifi }
+        .map    { meta, reads -> tuple(meta.taxid?.toString(), meta.sample) }
+        .filter { taxid, sample -> taxid != null }
+        .combine( ch_taxonomy, by: 0 )                 // (taxid, sample, tax) — many samples per taxid
+        .map    { taxid, sample, tax -> tuple(taxid, tax.name) }
+        .filter { taxid, name -> name != null }        // no resolved name -> no reference
+        .unique()                                      // distinct (taxid, name)
+    FIND_MITO_REFERENCE(ch_mito_ref_todo)
+
+    // Per-taxid reference for the organelle step: (taxid, ref_fasta, ref_gb)
+    ch_mito_ref_by_taxid = FIND_MITO_REFERENCE.out.ref_fasta
+        .join( FIND_MITO_REFERENCE.out.ref_gb )        // .join is 1:1 by taxid — one ref per species
 
     /*
     ========================================================================================
@@ -737,8 +751,7 @@ workflow {
     */
     ORGANELLE_ASSEMBLY(
         ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
-        FIND_MITO_REFERENCE.out.ref_fasta,
-        FIND_MITO_REFERENCE.out.ref_gb
+        ch_mito_ref_by_taxid
     )
 
     /*
