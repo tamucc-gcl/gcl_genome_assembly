@@ -179,48 +179,55 @@ message(sprintf("  Stage resolution: last_ctg=%s, first_scaf=%s, scaf2=%s, last_
                 last_ctg_stage, first_scaf_stage, scaf2_stage, last_scaf_stage))
 
 # --- 4. Process BAM metrics ---
-fixed_bam <- bam_metrics %>%
-  select(-source_file) %>%
-  pivot_longer(cols = where(is.numeric),
-               names_to = 'metric') %>%
-  pivot_wider(names_from = haplotype_id) %>%
-  mutate(stage = case_when(
-           checkpoint == 'contig_raw_map'          ~ last_ctg_stage,
-           checkpoint == 'scaffold_round2_raw_map' ~ last_scaf_stage,
-           checkpoint == 'final_raw_map'           ~ 'final'
-         ) %>%
-           factor(levels = asm_stage_levels),
-         .keep = 'unused',
-         .before = 'metric') %>%
-  filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
-  arrange(stage) %>%
-  mutate(analysis = 'mapped_hic')
+fixed_bam <- NULL
+
+if (!is.null(bam_metrics)) {
+  fixed_bam <- bam_metrics %>%
+    select(-source_file) %>%
+    pivot_longer(cols = where(is.numeric),
+                names_to = 'metric') %>%
+    pivot_wider(names_from = haplotype_id) %>%
+    mutate(stage = case_when(
+            checkpoint == 'contig_raw_map'          ~ last_ctg_stage,
+            checkpoint == 'scaffold_round2_raw_map' ~ last_scaf_stage,
+            checkpoint == 'final_raw_map'           ~ 'final'
+          ) %>%
+            factor(levels = asm_stage_levels),
+          .keep = 'unused',
+          .before = 'metric') %>%
+    filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
+    arrange(stage) %>%
+    mutate(analysis = 'mapped_hic')
+}
 
 # --- 5. Process pairs metrics ---
-fixed_pairs <- pairs_metrics %>%
-  select(-source_file) %>%
-  pivot_longer(cols = where(is.numeric),
-               names_to = 'metric',
-               values_drop_na = TRUE) %>%
-  pivot_wider(names_from = haplotype_id) %>%
-  filter(!metric %in% c('cis_pairs_scaffold', 'trans_pairs_scaffold', 'trans_to_cis_scaffold')) %>%
-  mutate(metric = str_remove_all(metric, c('_contig|_scaffold')),
-         metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
-                            metric == 'pairs_total' ~ 'retained_pairs',
-                            TRUE ~ metric),
-         stage = case_when(
-           checkpoint == 'contig_filtered'          ~ last_ctg_stage,
-           checkpoint == 'scaffold_space'           ~ first_scaf_stage,
-           checkpoint == 'scaffold_round2_space'    ~ scaf2_stage,
-           checkpoint == 'scaffold_round2_filtered' ~ scaf2_stage,
-           checkpoint == 'final_filtered'           ~ 'final'
-         ) %>%
-           factor(levels = asm_stage_levels),
-         .keep = 'unused',
-         .before = 'metric') %>%
-  filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
-  arrange(stage) %>%
-  mutate(analysis = 'hic_contact')
+fixed_pairs <- NULL
+if (!is.null(pairs_metrics)) {
+  fixed_pairs <- pairs_metrics %>%
+    select(-source_file) %>%
+    pivot_longer(cols = where(is.numeric),
+                names_to = 'metric',
+                values_drop_na = TRUE) %>%
+    pivot_wider(names_from = haplotype_id) %>%
+    filter(!metric %in% c('cis_pairs_scaffold', 'trans_pairs_scaffold', 'trans_to_cis_scaffold')) %>%
+    mutate(metric = str_remove_all(metric, c('_contig|_scaffold')),
+          metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
+                              metric == 'pairs_total' ~ 'retained_pairs',
+                              TRUE ~ metric),
+          stage = case_when(
+            checkpoint == 'contig_filtered'          ~ last_ctg_stage,
+            checkpoint == 'scaffold_space'           ~ first_scaf_stage,
+            checkpoint == 'scaffold_round2_space'    ~ scaf2_stage,
+            checkpoint == 'scaffold_round2_filtered' ~ scaf2_stage,
+            checkpoint == 'final_filtered'           ~ 'final'
+          ) %>%
+            factor(levels = asm_stage_levels),
+          .keep = 'unused',
+          .before = 'metric') %>%
+    filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
+    arrange(stage) %>%
+    mutate(analysis = 'hic_contact')
+}
 
 # --- 6. Combine and write (deduplicate in case checkpoints overlap) ---
 full_qc_data <- bind_rows(fixed_assembly, fixed_bam, fixed_pairs) %>%

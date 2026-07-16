@@ -1729,9 +1729,9 @@ workflow {
     // Compile final QC report
     // Extract just the TSV files from tuples and collect
     COMPILE_FINAL_QC(
-        ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect(),
-        ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect(),
-        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect(),
+        ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect().ifEmpty([]),
+        ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect().ifEmpty([]),
+        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect().ifEmpty([]),
         ch_compile_qc_script
     )
 
