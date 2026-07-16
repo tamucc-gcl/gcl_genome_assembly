@@ -11,12 +11,19 @@
       id           unique id (== sample at sample level)
       sample       sample identifier
       haplotype    null until assembly; then 'hap1' | 'hap2' | 'primary'
-      n_hap        1 (haploid/collapsed) | 2 (diploid)  -> drives groupKey(sample, n_hap)
+      ploidy       ORGANISM ploidy as an integer (1, 2, 4, ...) -> genomescope -p, hifiasm --n-hap
+      n_hap        OUTPUT haplotype count: 1 (collapsed / short-read / forced-primary) |
+                   2 (phased diploid via hifiasm) -> drives the assembly fork and
+                   groupKey(sample, n_hap). DISTINCT from ploidy. Derived by default
+                   (SPAdes->1; hifiasm-> ploidy==1 ? 1 : 2) but OVERRIDABLE via an optional
+                   'n_hap' column — e.g. ploidy=2 + n_hap=1 = a collapsed diploid assembly.
       hifi/hic/tellseq/shortread  booleans: which read types are present
       long_reads   derived: hifi (|| future ONT) -> gates teloclip / long-read gap-fill
       assembler    'hifiasm' | 'spades'
       dedup        'purge_dups' | 'redundans' | 'none'   (selectable, input-independent)
       mito_tool    'mitohifi' | 'mitofinder' | 'none'
+      species      organism species (per-sample; falls back to params.mitohifi_species) — 4b
+      taxid        optional NCBI taxonomy id (alternative to species) — 4b
       (scaffolding round count + scaffolder ordering are intentionally NOT in meta — see CACHING)
 
     PER-HAPLOTYPE meta (forkHaplotypeMeta — wired during Phase 1 module threading):
@@ -30,8 +37,9 @@
     BEHAVIOR PRESERVATION (Phase 1):
       - dedup default for hifiasm honors the existing params.run_purge_dups switch
         (so a HiFi+Hi-C run with run_purge_dups=false still resolves to dedup='none').
-      - ploidy defaults to 'diploid'; mito_tool defaults to 'mitohifi' when HiFi is present.
-      => the legacy 4-column sheet resolves to a meta that reproduces current behavior.
+      - ploidy defaults to 'diploid' (=2); mito_tool defaults to 'mitohifi' when HiFi is present.
+      => the legacy 4-column sheet resolves to a meta that reproduces current behavior
+         (diploid organism, hifiasm -> ploidy=2, n_hap=2).
 
     CACHING:
       meta becomes part of each task's hash, so only stable per-sample identity/strategy fields
@@ -65,9 +73,15 @@ def buildMeta(Map a) {
     }
 
     def assembler = pick(a.assembler, 'assembler') { hasHifi ? 'hifiasm' : 'spades' }
-    def ploidyRaw = pick(a.ploidy,    'ploidy')    { 'diploid' }
-    // accept numeric (1|2) or string (haploid|diploid), case-insensitive
-    def ploidy    = ['1':'haploid','haploid':'haploid','2':'diploid','diploid':'diploid'][ploidyRaw?.toString()?.trim()?.toLowerCase()]
+
+    // ORGANISM ploidy as a positive integer. Accept numeric (1|2|3|4|...) or the words
+    // 'haploid'(1) / 'diploid'(2), case-insensitive. Drives genomescope -p and hifiasm --n-hap.
+    def ploidyRaw = pick(a.ploidy, 'ploidy') { 'diploid' }
+    def ploidyStr = ploidyRaw?.toString()?.trim()?.toLowerCase()
+    def ploidyNum = (ploidyStr == 'haploid') ? 1 :
+                    (ploidyStr == 'diploid') ? 2 :
+                    (ploidyStr?.isInteger()  ? ploidyStr.toInteger() : null)
+
     def dedup     = pick(a.dedup,     'dedup') {
         if (assembler == 'hifiasm')
             (params.containsKey('run_purge_dups') && params.run_purge_dups) ? 'purge_dups' : 'none'
@@ -76,11 +90,18 @@ def buildMeta(Map a) {
     }
     def mito = pick(a.mito_tool, 'mito_tool') { hasHifi ? 'mitohifi' : 'mitofinder' }
 
-    // enum validation
+    // Organism identity — carried for the organelle reference lookup + plant/animal kingdom
+    // decision (wired in Phase 4b). Per-sample; `species` falls back to the global
+    // params.mitohifi_species (so single-species runs need no column). `taxid` is optional
+    // (an unambiguous alternative to the name for the NCBI-taxonomy kingdom lookup).
+    def species = pick(a.species, 'species') { null }
+    def taxid   = pick(a.taxid,   'taxid')            { null }
+
+    // enum / range validation
     if (!(assembler in ['hifiasm','spades']))
         throw new IllegalArgumentException("sample '${sample}': invalid assembler '${assembler}' (allowed: hifiasm, spades)")
-    if (!(ploidy in ['haploid','diploid']))
-        throw new IllegalArgumentException("sample '${sample}': invalid ploidy '${ploidyRaw}' (allowed: 1/haploid, 2/diploid)")
+    if (ploidyNum == null || ploidyNum < 1)
+        throw new IllegalArgumentException("sample '${sample}': invalid ploidy '${ploidyRaw}' (allowed: a positive integer, or 'haploid'/'diploid')")
     if (!(dedup in ['purge_dups','redundans','none']))
         throw new IllegalArgumentException("sample '${sample}': invalid dedup '${dedup}' (allowed: purge_dups, redundans, none)")
     if (!(mito in ['mitohifi','mitofinder','none']))
@@ -92,13 +113,26 @@ def buildMeta(Map a) {
     if (assembler == 'spades' && !hasSr)
         throw new IllegalArgumentException("sample '${sample}': assembler=spades but no short-read shotgun provided")
 
-    def n_hap = (ploidy == 'haploid') ? 1 : 2
+    // OUTPUT haplotype count (assembly fork + groupKey), DISTINCT from organism ploidy.
+    // Optional per-row 'n_hap' override; else derived: SPAdes -> 1 (collapsed);
+    // hifiasm -> 1 if ploidy==1 else 2. The override lets a diploid organism (ploidy=2)
+    // yield a single collapsed hifiasm assembly (n_hap=1, --primary) WITHOUT mislabeling it
+    // as haploid (ploidy stays 2 for genomescope / --n-hap).
+    def n_hapRaw = pick(a.n_hap, 'n_hap') { ((assembler == 'spades') || (ploidyNum == 1)) ? '1' : '2' }
+    def n_hap = (n_hapRaw?.toString()?.trim()?.isInteger()) ? n_hapRaw.toString().trim().toInteger() : null
+    if (!(n_hap in [1, 2]))
+        throw new IllegalArgumentException("sample '${sample}': invalid n_hap '${n_hapRaw}' (allowed: 1 = one collapsed assembly, 2 = phased diploid)")
+    if (assembler == 'spades' && n_hap != 1)
+        throw new IllegalArgumentException("sample '${sample}': assembler=spades cannot output n_hap=${n_hap} (SPAdes yields a single collapsed assembly — use n_hap=1 or leave blank)")
 
     return [
         id:          sample,
         sample:      sample,
         haplotype:   null,
-        n_hap:       n_hap,
+        ploidy:      ploidyNum,        // organism ploidy (genomescope -p, hifiasm --n-hap)
+        n_hap:       n_hap,            // output haplotype count (assembly fork + groupKey)
+        species:     species,         // organism species — organelle ref + kingdom lookup (4b)
+        taxid:       taxid,            // optional NCBI taxid — alternative to species (4b)
         hifi:        hasHifi,
         hic:         hasHic,
         tellseq:     hasTell,

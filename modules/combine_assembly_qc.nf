@@ -21,6 +21,7 @@ process COMBINE_ASSEMBLY_QC {
           path(busco_results),
           val(haplotype_ids_mapping),
           path(mapping_results)
+    path(combine_qc_script)
     
     output:
     tuple val(sample_id), val(qc_label), path("${sample_id}_${qc_label}_qc_summary.tsv"), emit: summary
@@ -71,7 +72,7 @@ EOF
     
     
     # Call R script to join everything within a sample together
-    Rscript ${projectDir}/r_scripts/combine_individual_assembly_qc.R \\
+    Rscript ${combine_qc_script} \\
         --input_dir ${sample_id}_qc_inputs \\
         --output_dir . \\
         --sample_id ${sample_id} \\

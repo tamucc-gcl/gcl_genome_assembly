@@ -37,7 +37,8 @@ nextflow.enable.dsl=2
 params.sample_sheet = null
 params.outdir = './results'
 params.publish_dir_mode = 'link'
-params.qc_mode = 'all_stages'   // 'all_stages' (QC every checkpoint) | 'final_only'
+params.qc_mode = 'final_only'   // 'all_stages' (QC every checkpoint) | 'final_only'
+params.species = null   // optional global organism-name override; else derived from taxid
 
 // Assembly parameters
 ////   Overlap/Error correction:
@@ -88,7 +89,6 @@ params.hifiasm_teloD = 2000 // max drop [2000]
 params.hifiasm_teloS = 500 // min score for telomere reads [500]
 
 // Mitochondrial genome assembly (MitoHiFi)
-params.mitohifi_species        = null        // REQUIRED: Scientific name (e.g., "Spratelloides delicatulus")
 params.mitohifi_genetic_code   = 2           // NCBI genetic code: 2=vertebrate mito, 5=invertebrate mito
 params.mitohifi_ref_min_length = 14000       // Min reference mitogenome length for findMitoReference.py
 params.mitohifi_perc_identity  = 50          // Min percent identity for read filtering
@@ -100,12 +100,56 @@ params.mitohifi_circular_map_dpi = 300
 params.mitohifi_filter_min_identity = 90     // Min alignment identity to call a contig mitochondrial
 params.mitohifi_filter_min_coverage = 50     // Min query coverage to call a contig mitochondrial
 
+// ---- SPAdes (short-read assembly) ----
+params.spades_kmers        = '21,33,55,77'   // -k
+params.spades_cov_cutoff   = 'auto'          // --cov-cutoff (a number, or 'auto')
+params.spades_mode         = '--isolate'     // '--isolate' | '--careful' | '--sc' | '' for none
+params.spades_extra        = ''              // any extra spades.py flags, verbatim
+params.spades_output_level = 'contigs'       // 'contigs' | 'scaffolds' — which FASTA feeds downstream
+
+// ---- Genome-size estimation (jellyfish + GenomeScope2) ----
+params.genomescope_kmer    = 21              // jellyfish -m / genomescope -k
+params.jellyfish_hash_size = '5G'            // jellyfish count -s
 
 // Purge duplicates parameters
 params.run_purge_dups = false  // Default off - enable with --run_purge_dups true
 
+// Redundans parameters
+params.redundans_run_reduction      = true
+params.redundans_run_scaffolding    = true
+params.redundans_run_gapclosing     = true
+params.redundans_identity           = 0.51
+params.redundans_overlap            = 0.80
+params.redundans_min_length         = 200
+params.redundans_joins              = 5
+params.redundans_linkratio          = 0.7
+params.redundans_limit              = 0.2
+params.redundans_mapq               = 10
+params.redundans_iters              = 2
+params.redundans_preset             = 'asm5'
+params.redundans_index              = '4G'
+params.redundans_minimap2reduce     = false
+params.redundans_minimap2scaffold   = false
+params.redundans_usebwa             = false
+params.redundans_populate_scaffolds = false
+params.redundans_norearrangements   = false
+params.redundans_extra              = ''
+
+// Shortread trim Parameters
+params.shortread_trim                 = true      // raw + fastp; false = pass pre-cleaned reads through
+params.shortread_fastp_cut_tail_quality = 20
+params.shortread_fastp_cut_tail_window  = 4
+params.shortread_fastp_length_required  = 30
+params.shortread_fastp_extra          = ''
+
+// Pilon parameters
+params.run_pilon                      = false     // optional short-read polish
+params.pilon_fix                      = 'all'
+params.pilon_rounds                   = 1
+params.pilon_extra                    = ''
+
 // Assembly QC parameters
-params.busco_lineage = 'actinopterygii_odb10'
+params.busco_lineage = 'eukaryota_odb10'   // fallback only; primary lineage is per-sample from taxonomy
 params.busco_downloads = '/work/birdlab/databases/busco'
 params.merqury_k = 21  // k-mer size for meryl database
 
@@ -256,7 +300,8 @@ params.decon_run_on_contigs = true       // Run on initial contig assemblies (be
 params.decon_run_on_scaffolds = false     // Run on scaffolded assemblies (after Hi-C scaffolding)
 
 // Core settings
-params.decon_source_taxid = 7898          // Actinopterygii; set your species taxid when possible
+params.taxid = null    // optional GLOBAL taxid for all samples; per-sample `taxid` column overrides; decontam falls back to params.decon_source_taxid
+params.decon_source_taxid = null          // set your species taxid when possible
 
 // Optional: adapter/vector removal
 params.decon_run_fcs_adaptor = false      // Requires FCS-adaptor containers; enable only if configured
@@ -264,7 +309,7 @@ params.decon_fcsadaptor_mode = 'euk'      // 'euk' or 'prok'
 params.decon_container_engine = 'singularity'
 
 // Optional: generate evidence (coverage + taxonomy + blobtools plots)
-params.decon_make_blobtools_evidence = true
+params.decon_make_blobtools_evidence = false
 
 // ============================================================================
 // Evidence generation settings (FLATTENED)
@@ -390,10 +435,21 @@ include { HIC_QC as HIC_QC_RAW } from './workflows/hic_qc.nf'
 include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 
+// Assembly
+include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
+
+//Organelle assembly/annotation
+include { ORGANELLE_ASSEMBLY } from './workflows/organelle_assembly.nf'
+
+//Short-read qc #Hi-C, SSL, TellSeq
+include { SHORTREAD_QC as SHORTREAD_QC_RAW }     from './workflows/shortread_qc.nf'
+include { SHORTREAD_QC as SHORTREAD_QC_TRIMMED } from './workflows/shortread_qc.nf'
+
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_MITO_FILTERED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_PURGED } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_REDUNDANS } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
@@ -402,6 +458,7 @@ include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assem
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_ROUND2 } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_GAP_FILLED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_TELOCLIP } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_FINAL } from './workflows/assembly_qc.nf'
 
 // HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
@@ -420,16 +477,21 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
     IMPORT MODULES
 ========================================================================================
 */
+include { RESOLVE_TAXONOMY } from './modules/resolve_taxonomy.nf'
+include { buscoLineageFor; kingdomFlag; organismName } from './functions/taxonomy.nf'
+include { DOWNLOAD_TAXDUMP } from './modules/download_taxdump.nf'
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
 include { TRIM_HIC } from './modules/trim_hic.nf'
-include { HIFIASM } from './modules/hifiasm.nf'
+include { ESTIMATE_GENOME_SIZE } from './modules/estimate_genome_size.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
-include { MITOHIFI } from './modules/mitohifi.nf'
 include { FILTER_MITO_CONTIGS } from './modules/filter_mito_contigs.nf'
-include { MITO_CIRCULAR_MAP } from './modules/mito_circular_map.nf'
+
+include { TRIM_SHORTREAD } from './modules/trim_shortread.nf'
+include { REDUNDANS }      from './modules/redundans.nf'
+include { PILON }          from './modules/pilon.nf'
 
 include { PURGE_DUPS } from './modules/purge_dups.nf'
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
@@ -465,6 +527,15 @@ include { HIC_TADS } from './modules/hic_tads.nf'
 include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 
+// ── helper scripts declared as inputs so edits invalidate the cache ──
+ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
+ch_summary_report_script  = file("${projectDir}/r_scripts/generate_summary_report.R",            checkIfExists: true)
+ch_dotplot_script         = file("${projectDir}/r_scripts/dotplot_paf.R",                        checkIfExists: true)
+ch_riparian_script        = file("${projectDir}/r_scripts/riparian_paf.R",                       checkIfExists: true)
+ch_assembly_report_script = file("${projectDir}/py_scripts/generate_assembly_report.py",         checkIfExists: true)
+ch_coverage_book_script   = file("${projectDir}/py_scripts/bigwig_genome_book.py",               checkIfExists: true)
+ch_tad_book_script        = file("${projectDir}/py_scripts/make_tad_book.py",                    checkIfExists: true)
+ch_compartments_script    = file("${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py", checkIfExists: true)
 /*
 ========================================================================================
     MAIN WORKFLOW
@@ -476,6 +547,49 @@ workflow {
     // Parse sample sheet -> per-sample tuple(meta, reads)
     ch_input = parseSampleSheet(params.sample_sheet)
 
+    // ── Ensure the NCBI taxdump once, up front. Idempotent: the module skips the download
+    //    when names.dmp/nodes.dmp are already present at the target path. Needed by
+    //    RESOLVE_TAXONOMY and (when enabled) the decon evidence branch.
+    DOWNLOAD_TAXDUMP(
+        Channel.value( file(params.diamond_taxdump_dir) ),
+        Channel.value( (params.diamond?.force ?: false) as boolean )
+    )
+    ch_taxdump     = DOWNLOAD_TAXDUMP.out.taxdump_dir
+    ch_taxdump_dir = ch_taxdump          // reused by the decon evidence branch
+
+    // ── 4b-i: resolve organism taxonomy (taxid -> name / kingdom / BUSCO lineage) ──
+    RESOLVE_TAXONOMY(
+        ch_input
+            .map    { meta, reads -> meta.taxid }
+            .filter { it != null }
+            .unique()
+            .combine( ch_taxdump )          // pair each distinct taxid with the taxdump
+    )
+
+    ch_taxonomy = RESOLVE_TAXONOMY.out.tsv
+        .map { taxid, tsv -> tsv }
+        .splitCsv(sep: '\t', header: true)
+        .map { row ->
+            tuple(row.taxid.toString(),
+                  [ name         : organismName(row),
+                    kingdom      : kingdomFlag(row),
+                    busco_lineage: buscoLineageFor(row) ]) }
+
+    // Per-sample identity side-channel: (sample, {taxid, name, kingdom, busco_lineage}).
+    ch_sample_identity = ch_input
+        .map { meta, reads -> tuple(meta.taxid?.toString(), meta.sample, meta.species) }
+        .filter { taxid, sample, override -> taxid != null }
+        .combine(ch_taxonomy, by: 0)                       // many samples per taxid
+        .map { taxid, sample, override, tax ->
+            tuple(sample, [ taxid        : taxid,
+                            name         : override ?: tax.name,
+                            kingdom      : tax.kingdom,
+                            busco_lineage: tax.busco_lineage ]) }
+
+    ch_sample_identity.subscribe { sample, tax ->
+        log.info "  resolved '${sample}': taxid=${tax.taxid}  name='${tax.name}'  kingdom=${tax.kingdom}  busco=${tax.busco_lineage}"
+    }
+
     /*
     ========================================================================================
         STEP 0: Setup Decontamination Databases (if enabled) & BUSCO Database
@@ -484,16 +598,33 @@ workflow {
     ========================================================================================
     */
     if (params.decon.run_on_contigs || params.decon.run_on_scaffolds) {
-        SETUP_DECONTAM_DBS()
+        SETUP_DECONTAM_DBS(ch_taxdump)
         
         // Store outputs for later use
         ch_gxdb_dir = SETUP_DECONTAM_DBS.out.gxdb_dir
         ch_diamond_db = SETUP_DECONTAM_DBS.out.diamond_db
-        ch_taxdump_dir = SETUP_DECONTAM_DBS.out.taxdump_dir
     }
     
-    DOWNLOAD_BUSCO_DB(params.busco_lineage)
-    ch_busco_db = DOWNLOAD_BUSCO_DB.out.db
+    // BUSCO databases — one download per DISTINCT lineage across all samples
+    // (storeDir dedupes; the per-lineage tasks run in parallel).
+    ch_busco_lineages = ch_taxonomy
+        .map { taxid, tax -> tax.busco_lineage }
+        .unique()
+    DOWNLOAD_BUSCO_DB(ch_busco_lineages)
+
+    // ch_busco_db is now a VALUE-channel MAP:  taxid -> busco_lineage (a String).
+    //   * value channel  -> broadcasts unchanged to all 13 ASSEMBLY_QC calls
+    //   * the .combine on DOWNLOAD_BUSCO_DB.out forces each lineage to finish
+    //     downloading before BUSCO reads it from the shared --download_path
+    //   * .reduce collapses to ONE map, so the channel emits once (after all
+    //     downloads) and broadcasts; multiplicity is what would otherwise break
+    //     the fan-out to 13 subworkflow calls.
+    // NOTE: many taxids can share one lineage -> combine(by:0) (one-to-many), NOT join.
+    ch_busco_db = ch_taxonomy
+        .map { taxid, tax -> tuple(tax.busco_lineage, taxid) }
+        .combine( DOWNLOAD_BUSCO_DB.out.db.map { db -> tuple(db.name, db) }, by: 0 )
+        .map { lineage, taxid, db -> [ (taxid): lineage ] }
+        .reduce([:]) { acc, m -> acc + m }
 
     /*
     ========================================================================================
@@ -501,7 +632,22 @@ workflow {
         Runs at pipeline start — no dependencies on reads or assembly
     ========================================================================================
     */
-    FIND_MITO_REFERENCE(params.mitohifi_species)
+    // Mito reference per DISTINCT resolved species name, among HiFi samples only
+    // (short-read samples use mitofinder / the organelle `other` branch — no MitoHiFi ref).
+    // Runs after taxonomy resolution now (was a global no-dependency call).
+    ch_mito_ref_todo = ch_input
+        .filter { meta, reads -> meta.hifi }
+        .map    { meta, reads -> tuple(meta.taxid?.toString(), meta.sample) }
+        .filter { taxid, sample -> taxid != null }
+        .combine( ch_taxonomy, by: 0 )                 // (taxid, sample, tax) — many samples per taxid
+        .map    { taxid, sample, tax -> tuple(taxid, tax.name) }
+        .filter { taxid, name -> name != null }        // no resolved name -> no reference
+        .unique()                                      // distinct (taxid, name)
+    FIND_MITO_REFERENCE(ch_mito_ref_todo)
+
+    // Per-taxid reference for the organelle step: (taxid, ref_fasta, ref_gb)
+    ch_mito_ref_by_taxid = FIND_MITO_REFERENCE.out.ref_fasta
+        .join( FIND_MITO_REFERENCE.out.ref_gb )        // .join is 1:1 by taxid — one ref per species
 
     /*
     ========================================================================================
@@ -510,7 +656,8 @@ workflow {
     */
     
     BAM_TO_FASTQ(
-        ch_input.map { meta, reads -> tuple(meta, reads.hifi_bam) }
+        ch_input.filter { meta, reads -> meta.hifi }
+                .map { meta, reads -> tuple(meta, reads.hifi_bam) }
     )
 
     
@@ -520,20 +667,79 @@ workflow {
     ========================================================================================
     */
     TRIM_HIC(
-        ch_input.map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
+        ch_input.filter { meta, reads -> meta.hic }
+                .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
     )
+
+    // Optional short-read trimming (fastp): raw shotgun -> adapter/quality-trimmed, or
+    // pass-through when off. Feeds the assembly + assembly-QC path; SHORTREAD_QC stays on raw.
+    ch_shortread_raw = ch_input
+        .filter { meta, reads -> meta.shortread }
+        .map    { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) }
+
+    if (params.shortread_trim) {
+        TRIM_SHORTREAD(ch_shortread_raw)
+        ch_shortread_reads = TRIM_SHORTREAD.out.trimmed_reads
+    } else {
+        ch_shortread_reads = ch_shortread_raw
+    }
 
     /*
     ========================================================================================
         STEP 3: Combine HiFi FASTQ with trimmed Hi-C reads
     ========================================================================================
     */
-    // Scalar-keyed join (robust if a branch ever alters meta); carries sample-level meta through.
-    BAM_TO_FASTQ.out.fastq
-        .map { meta, hifi_fastq -> [ meta.sample, meta, hifi_fastq ] }
-        .join( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] } )
-        .map { sample, meta, hifi_fastq, r1, r2 -> tuple(meta, hifi_fastq, r1, r2) }
-        .set { ch_fastq_all }
+    // Full per-sample read bundle for the selector + organelle + genome-size.
+    // remainder:true left-joins keep samples lacking HiFi or Hi-C (null slots), so
+    // short-read-only rows flow instead of being dropped by an inner join.
+    // Per-modality slots: every sample gets exactly one entry per slot — its processed
+    // reads if it has that modality, else a null placeholder from ch_input (immediate).
+    // Plain 1:1 joins then emit each sample as soon as ITS OWN reads are ready — no
+    // waiting on other samples' BAM_TO_FASTQ / TRIM_HIC / TRIM_SHORTREAD to finish.
+    ch_hifi_slot = BAM_TO_FASTQ.out.fastq
+        .map { meta, fq -> [ meta.sample, fq ] }
+        .mix( ch_input.filter { meta, reads -> !meta.hifi }.map { meta, reads -> [ meta.sample, null ] } )
+
+    ch_hic_slot = TRIM_HIC.out.trimmed_reads
+        .map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }
+        .mix( ch_input.filter { meta, reads -> !meta.hic }.map { meta, reads -> [ meta.sample, null ] } )
+
+    ch_sr_slot = ch_shortread_reads
+        .map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }
+        .mix( ch_input.filter { meta, reads -> !meta.shortread }.map { meta, reads -> [ meta.sample, null ] } )
+
+    ch_input
+        .map { meta, reads -> [ meta.sample, meta ] }
+        .join( ch_hifi_slot )
+        .join( ch_hic_slot )
+        .join( ch_sr_slot )
+        .map { sample, meta, hifi_fastq, hic_pair, sr_pair ->
+            def hic_r1 = hic_pair ? hic_pair[0] : null
+            def hic_r2 = hic_pair ? hic_pair[1] : null
+            def sr_r1  = sr_pair  ? sr_pair[0]  : null
+            def sr_r2  = sr_pair  ? sr_pair[1]  : null
+            tuple(meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2)
+        }
+        .set { ch_reads_all }
+        
+    // Per-sample reads for assembly QC (meryl DB + mapping): HiFi FASTQ for HiFi samples,
+    // the Illumina R1+R2 pair for short-read samples. Read-source-aware QC.
+    ch_reads_all
+        .map { meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2 ->
+            meta.hifi ? tuple(meta, hifi_fastq) : tuple(meta, [sr_r1, sr_r2])
+        }
+        .set { ch_qc_reads }
+
+    // Genome-size estimation (jellyfish -> GenomeScope2), concurrent with assembly.
+    // Reads by assembler: HiFi for the long-read path, PE for short-read.
+    ch_reads_all
+        .map { meta, hifi_fastq, r1, r2, sr1, sr2 ->
+            def gs_reads = (meta.assembler == 'spades') ? [ sr1, sr2 ] : [ hifi_fastq ]
+            tuple(meta, gs_reads)
+        }
+        .set { ch_gsize_input }
+
+    ESTIMATE_GENOME_SIZE(ch_gsize_input)
 
 
     /*
@@ -543,32 +749,36 @@ workflow {
         Depends on: BAM_TO_FASTQ + FIND_MITO_REFERENCE
     ========================================================================================
     */
-    MITOHIFI(
-        BAM_TO_FASTQ.out,
-        FIND_MITO_REFERENCE.out.ref_fasta,
-        FIND_MITO_REFERENCE.out.ref_gb
+    ORGANELLE_ASSEMBLY(
+        ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
+        ch_mito_ref_by_taxid
     )
-
-    MITO_CIRCULAR_MAP(MITOHIFI.out.annotation)
 
     /*
     ========================================================================================
-        STEP 4: Assemble with Hifiasm (sample-level meta in; hap1 + hap2 out)
+        STEP 4: Assemble contigs — assembler selector (hifiasm | spades)
+        hifiasm: HiFi(+Hi-C) -> hap1+hap2 (diploid) / primary (haploid)
+        spades:  PE short reads -> one collapsed 'primary' assembly
     ========================================================================================
     */
-    
-    HIFIASM(ch_fastq_all)
 
-    // STEP 4-fork: the single fork point. Split the sample-level assembly into per-haplotype
-    // tuple(meta, fasta). Everything downstream stays per-haplotype and re-pairs (via groupKey)
-    // ONLY where a step genuinely needs both haplotypes (QUAST/MERQURY/COMBINE).
-    // NOTE: diploid path; n_hap==1 (primary/haploid) output naming is wired in Phase 2.
-    HIFIASM.out.assemblies
-        .flatMap { meta, hap1_fa, hap2_fa ->
-            def hmetas = forkHaplotypeMeta(meta)          // [meta_hap1, meta_hap2]
-            [ tuple(hmetas[0], hap1_fa), tuple(hmetas[1], hap2_fa) ]
+    CONTIG_ASSEMBLY(ch_reads_all)
+
+    // Fork sample-level assembly into per-hap contigs: diploid -> hap1+hap2, haploid/spades -> one primary.
+    CONTIG_ASSEMBLY.out.assemblies
+        .flatMap { meta, fastas ->
+            def hmetas = forkHaplotypeMeta(meta)           // [hap1, hap2]  or  [primary]
+            def fs = (fastas instanceof List) ? fastas.sort { it.name } : [fastas]
+            [hmetas, fs].transpose().collect { hm, fa -> tuple(hm, fa) }
         }
         .set { ch_contigs }                                // per-haplotype tuple(meta, fasta)
+
+    ch_contigs
+        .branch { meta, fasta ->
+            hifi:      meta.hifi
+            shortread: true
+        }
+        .set { ch_contigs_by_type }
 
     /*
     ====================================================================================
@@ -577,9 +787,9 @@ workflow {
         both haplotypes via combine). A single FILTER_MITO_CONTIGS handles both.
     ====================================================================================
     */
-    ch_contigs
+    ch_contigs_by_type.hifi
         .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-        .combine( MITOHIFI.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
+        .combine( ORGANELLE_ASSEMBLY.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
         .map { sample, meta, fasta, mito_fa -> tuple(meta, fasta, mito_fa) }
         .set { ch_mito_filter_input }
 
@@ -607,6 +817,26 @@ workflow {
         ch_hifiasm_output = ch_mito_filtered                    // per-haplotype (meta, fasta)
     }
 
+    // Short-read conditioning: REDUNDANS (reduce/scaffold/gap-close) -> optional Pilon.
+    ch_contigs_by_type.shortread
+        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+        .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+        .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
+        .set { ch_redundans_input }
+
+    REDUNDANS(ch_redundans_input)
+
+    if (params.run_pilon) {
+        REDUNDANS.out.assembly
+            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+            .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
+            .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
+            .set { ch_pilon_input }
+        PILON(ch_pilon_input)
+        ch_shortread_conditioned = PILON.out.assembly
+    } else {
+        ch_shortread_conditioned = REDUNDANS.out.assembly
+    }
 
     /*
     ====================================================================================
@@ -631,23 +861,40 @@ workflow {
             .set { ch_correction_input }
 
         CORRECT_MISASSEMBLIES_CONTIG(ch_correction_input)
-        ch_assemblies_for_decontam = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
+        ch_hifi_conditioned = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
     } else {
-        ch_assemblies_for_decontam = ch_hifiasm_output                            // per-hap (meta, fasta)
+        ch_hifi_conditioned = ch_hifiasm_output                           // per-hap (meta, fasta)
     }
 
     /*
     ====================================================================================
         STEP 5: Optional Decontamination of Contig Assemblies
-        ch_assemblies_for_decontam is already per-haplotype (meta, fasta).
+        HiFi-conditioned (mito-filter / purge / correct) and short-read-conditioned
+        (redundans / pilon) both flow through the SAME optional decontamination — FCS-GX is
+        genome-based, so short-read assemblies are screened too (per-sample taxid via
+        meta.taxid; see decontaminate_assembly.nf). Short-read gets NO Inspector correction
+        (long-read-only). After decontam: HiFi continues into Hi-C scaffolding / the HiFi-only
+        bypass; short-read is finished (nothing to scaffold with) → straight to FINALIZE.
     ====================================================================================
     */
+    ch_assemblies_for_decontam = ch_hifi_conditioned.mix(ch_shortread_conditioned)
+
     if (params.decon.run_on_contigs) {
         DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
-        ch_individual_haplotypes = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated   // per-hap (meta, fasta)
+        ch_decontaminated_contigs = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
     } else {
-        ch_individual_haplotypes = ch_assemblies_for_decontam                          // per-hap (meta, fasta)
+        ch_decontaminated_contigs = ch_assemblies_for_decontam
     }
+
+    ch_individual_haplotypes = ch_decontaminated_contigs.filter { meta, fasta -> !meta.shortread }  // HiFi (+ HiFi-only)
+    ch_shortread_finished    = ch_decontaminated_contigs.filter { meta, fasta ->  meta.shortread }  // → FINALIZE
+
+    // short-read already split off, so this is HiFi-only:
+    ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
+
+    // HiFi-only rows have no Hi-C, so they drop out of the Hi-C scaffolding block below.
+    // Their decontaminated contigs are their "scaffolds" — rejoin at gap-filling.
+    ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
 
     /*
     ====================================================================================
@@ -899,6 +1146,10 @@ workflow {
         // Use round 1 final scaffolds (corrected/decontaminated if those options were chosen)
         ch_scaffolds_for_gap_filling = ch_final_scaffolds
     }
+
+    // HiFi-only assemblies are NOT gap-filled — no Hi-C scaffolding means no scaffold gaps to
+    // close. They rejoin the finishing chain at teloclip/finalize below (they still have HiFi
+    // reads), mirroring how short-read rejoins at ch_final_assembly.
     
     // Combine scaffolds with sample HiFi reads for gap filling (key on meta.sample)
     ch_scaffolds_for_gap_filling
@@ -910,6 +1161,10 @@ workflow {
     // Run gap filling
     GAP_FILLING(ch_gap_filling_input)
 
+    // Gap-filled Hi-C scaffolds + HiFi-only contigs (which correctly skipped gap-fill) both
+    // continue to teloclip/finalize.
+    ch_post_gap_fill = GAP_FILLING.out.filled_assembly.mix(ch_hifi_only_scaffolds)
+
     /*
     ========================================================================================
         STEP 13b: Teloclip — Extend scaffolds with missing telomeres (Optional)
@@ -920,7 +1175,7 @@ workflow {
     */
     if (params.run_teloclip_extend) {
         // Combine gap-filled assemblies with sample HiFi reads (key on meta.sample)
-        GAP_FILLING.out.filled_assembly
+        ch_post_gap_fill
             .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
             .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
             .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta, filled_fa, hifi_fastq) }
@@ -938,13 +1193,15 @@ workflow {
         ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats
     } else {
         // No teloclip — gap-filled assembly IS the final assembly
-        ch_final_assembly = GAP_FILLING.out.filled_assembly
+        ch_final_assembly = ch_post_gap_fill
         ch_teloclip_stats_for_report = Channel.of(file('NO_TELOCLIP'))
     }
 
     // =========================================================================
     //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
     // =========================================================================
+    ch_final_assembly = ch_final_assembly.mix(ch_shortread_finished)
+
     FINALIZE_ASSEMBLY(ch_final_assembly)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
@@ -1008,7 +1265,8 @@ workflow {
                 CONTACT_MAP_FINAL.out.mcool,
                 params.compartment_resolution ?: 250000,
                 params.compartment_min_contig_bp ?: 5000000,
-                params.compartment_max_contigs ?: 30
+                params.compartment_max_contigs ?: 30,
+                ch_compartments_script
             )
 
             HIC_TADS(
@@ -1016,7 +1274,8 @@ workflow {
                 params.tad_resolution ?: 50000,
                 params.tad_window_bp ?: 500000,
                 params.tad_min_contig_bp ?: 5000000,
-                params.tad_max_contigs ?: 0
+                params.tad_max_contigs ?: 0,
+                ch_tads_script
             )
         }
     }
@@ -1044,9 +1303,12 @@ workflow {
                 def pairs = []
 
                 if (params.pairwise_alignment_mode == 'within_sample') {
-                    // Only compare hap1 vs hap2 within each sample
+                    // Only compare hap1 vs hap2 within each sample.
+                    // A haploid sample has a single 'primary' assembly and therefore no
+                    // within-sample comparison — it is intentionally excluded below by the
+                    // haps.size() == 2 check (its group has size 1).
                     def grouped = assemblies.groupBy { haplotype_id, fasta ->
-                        haplotype_id.replaceAll(/_hap[12]$/, '')
+                        haplotype_id.replaceAll(/_(hap[12]|primary)$/, '')
                     }
                     grouped.each { sample_id, haps ->
                         if (haps.size() == 2) {
@@ -1070,7 +1332,7 @@ workflow {
             .set { ch_pairwise_input }
 
         // FIX: pass SETUP_PAFR.out.ready as second argument
-        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready)
+        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready, ch_dotplot_script)
 
         // Riparian plot input — uses ch_final_assembly
         ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
@@ -1084,7 +1346,7 @@ workflow {
                 tuple(hap1, fasta1, hap2, fasta2, paf)
             }
 
-        RIPARIAN_PLOT(ch_riparian_input)
+        RIPARIAN_PLOT(ch_riparian_input, ch_riparian_script)
 
         COLLECT_PAIRWISE_RESULTS(
             PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
@@ -1160,7 +1422,7 @@ workflow {
         Reused across ALL assembly QC steps for dramatic speedup
     ========================================================================================
     */
-    BUILD_MERYL_DB(BAM_TO_FASTQ.out)
+    BUILD_MERYL_DB(ch_qc_reads)
 
     /*
     ========================================================================================
@@ -1173,7 +1435,8 @@ workflow {
     ========================================================================================
     */
     HIC_QC_RAW(
-        ch_input.map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
+        ch_input.filter { meta, reads -> meta.hic }
+                .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
         "raw"
     )
 
@@ -1195,6 +1458,16 @@ workflow {
         TRIM_HIC.out.trimmed_reads,
         "trimmed"
     )
+
+    // Short-read input QC — raw + trimmed (mirrors HIC_QC_RAW / HIC_QC_TRIMMED)
+    SHORTREAD_QC_RAW(
+        ch_input.filter { meta, reads -> meta.shortread }
+                .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) },
+        "raw"
+    )
+    if (params.shortread_trim) {
+        SHORTREAD_QC_TRIMMED(TRIM_SHORTREAD.out.trimmed_reads, "trimmed")
+    }
     
     /*
     ========================================================================================
@@ -1210,7 +1483,7 @@ workflow {
     if (run_all_qc) {
         ASSEMBLY_QC_INITIAL(
             ch_contigs,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig'
@@ -1221,7 +1494,7 @@ workflow {
     if (run_all_qc) {
         ASSEMBLY_QC_MITO_FILTERED(
             ch_mito_filtered,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_mito_filtered'
@@ -1232,9 +1505,18 @@ workflow {
     if (run_all_qc && params.run_purge_dups) {
         ASSEMBLY_QC_PURGED(
             ch_hifiasm_output,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
+            'contig_purged'
+        )
+    }
+
+    // QC redundans-reduced short-read contigs — short-read analogue of purge_dups, reported
+    // at the same 'contig_purged' (ctg.purged) stage. No-op when there are no short-read samples.
+    if (run_all_qc) {
+        ASSEMBLY_QC_REDUNDANS(
+            ch_shortread_conditioned, ch_qc_reads, BUILD_MERYL_DB.out.meryl_db, ch_busco_db,
             'contig_purged'
         )
     }
@@ -1243,7 +1525,7 @@ workflow {
     if (run_all_qc && params.inspector_run_on_contigs) {
         ASSEMBLY_QC_CONTIG_CORRECTED(
             CORRECT_MISASSEMBLIES_CONTIG.out.corrected,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_corrected'
@@ -1254,7 +1536,7 @@ workflow {
     if (run_all_qc && params.decon.run_on_contigs) {
         ASSEMBLY_QC_CONTIG_DECONTAM(
             DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'contig_decontam'
@@ -1265,7 +1547,7 @@ workflow {
     if (run_all_qc) {
         ASSEMBLY_QC_SCAFFOLD(
             SCAFFOLD_HIC_ROUND1.out.scaffolds,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold'
@@ -1276,7 +1558,7 @@ workflow {
     if (run_all_qc && params.inspector_run_on_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_CORRECTED(
             CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_corrected'
@@ -1287,7 +1569,7 @@ workflow {
     if (run_all_qc && params.decon.run_on_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_DECONTAM(
             DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_decontam'
@@ -1298,23 +1580,46 @@ workflow {
     if (run_all_qc && params.run_scaffold_round2) {
         ASSEMBLY_QC_SCAFFOLD_ROUND2(
             ch_final_scaffolds_round2,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'scaffold_round2'
         )
     }
 
-    // QC gap-filled genomes (this is the final QC when teloclip is off)
-    if (run_all_qc || !params.run_teloclip_extend) {
+    // QC gap-filled genomes — intermediate HiFi-path stage (short-read has no gap-fill).
+    if (run_all_qc) {
         ASSEMBLY_QC_GAP_FILLED(
             GAP_FILLING.out.filled_assembly,
-            BAM_TO_FASTQ.out.fastq,
+            ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
             'gap_filled'
         )
     }
+
+    // QC teloclip-extended assembly (pre-FINALIZE) — kept independent of the final QC so the
+    // effect of FINALIZE (scaffold renaming, future small-contig trimming, etc.) stays
+    // visible. HiFi-path only, when teloclip is enabled.
+    if (run_all_qc && params.run_teloclip_extend) {
+        ASSEMBLY_QC_TELOCLIP(
+            TELOCLIP_EXTEND.out.extended_assembly,
+            ch_qc_reads,
+            BUILD_MERYL_DB.out.meryl_db,
+            ch_busco_db,
+            'teloclip_extended'
+        )
+    }
+
+    // Final QC — ALWAYS runs on the finalized assembly (post-FINALIZE), independent of
+    // teloclip and of qc_mode (final_only needs it too). The 'final' stage for EVERY sample.
+    ASSEMBLY_QC_FINAL(
+        ch_finalized_assembly,
+        ch_qc_reads,
+        BUILD_MERYL_DB.out.meryl_db,
+        ch_busco_db,
+        'final'
+    )
 
     /*
     ========================================================================================
@@ -1330,7 +1635,7 @@ workflow {
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants,
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.action_report,
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.taxonomy_report,
-                BAM_TO_FASTQ.out,
+                ch_qc_reads,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
@@ -1346,7 +1651,7 @@ workflow {
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants,
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.action_report,
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.taxonomy_report,
-                BAM_TO_FASTQ.out,
+                ch_qc_reads,
                 ch_diamond_db,
                 ch_taxdump_dir
             )
@@ -1368,6 +1673,7 @@ workflow {
             .mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
             .mix(ASSEMBLY_QC_MITO_FILTERED.out.assembly_summary)
             .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
+            .mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
 
         if (params.run_purge_dups)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
@@ -1383,29 +1689,23 @@ workflow {
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
     }
 
-    // Gap-filled summary included whenever the gap-filled QC ran
-    if (run_all_qc || !params.run_teloclip_extend) {
+    // Gap-filled summary — intermediate HiFi-path stage.
+    if (run_all_qc) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
             .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     }
 
-    // Final (teloclip-extended) assembly QC — always runs when teloclip is enabled
-    if (params.run_teloclip_extend) {
-        ASSEMBLY_QC_TELOCLIP(
-            ch_finalized_assembly,
-            BAM_TO_FASTQ.out.fastq,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'final'
-        )
-
+    // Teloclip-extended summary — intermediate; only when teloclip ran under run_all_qc.
+    if (run_all_qc && params.run_teloclip_extend) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
             .mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
-
-        ch_final_busco = ASSEMBLY_QC_TELOCLIP.out.busco_results
-    } else {
-        ch_final_busco = ASSEMBLY_QC_GAP_FILLED.out.busco_results
     }
+
+    // Final summary — always (ASSEMBLY_QC_FINAL runs unconditionally).
+    ch_all_assembly_summaries = ch_all_assembly_summaries
+        .mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
+
+    ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
 
     // Collect all BAM metrics
     // Start with ones that always run
@@ -1442,13 +1742,14 @@ workflow {
     // Compile final QC report
     // Extract just the TSV files from tuples and collect
     COMPILE_FINAL_QC(
-        ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect(),
-        ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect(),
-        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect()
+        ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect().ifEmpty([]),
+        ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect().ifEmpty([]),
+        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect().ifEmpty([]),
+        ch_compile_qc_script
     )
 
     // Make interactive HTML assembly viewer
-    ASSEMBLY_REPORT(COMPILE_FINAL_QC.out.metrics)
+    ASSEMBLY_REPORT(COMPILE_FINAL_QC.out.metrics, ch_assembly_report_script)
 
     /*
     ========================================================================================
@@ -1483,7 +1784,7 @@ workflow {
         }
         .set { ch_coverage_book_input }
 
-    COVERAGE_BOOK(ch_coverage_book_input)
+    COVERAGE_BOOK(ch_coverage_book_input, ch_coverage_book_script)
 
     // =========================================================================
     //  SUMMARY REPORT — Build manifest and call the process
@@ -1582,13 +1883,13 @@ workflow {
 
     // ---- Mitogenome assembly ----
     // publishDir: ${params.outdir}/mitogenome/${sample_id}
-    ch_manifest_mito_gb = MITOHIFI.out.annotation
+    ch_manifest_mito_gb = ORGANELLE_ASSEMBLY.out.annotation
         .map { meta, gb -> "mito_genbank\t${meta.sample}\t.\t${gb.name}\tmitogenome" }
 
-    ch_manifest_mito_stats = MITOHIFI.out.stats
+    ch_manifest_mito_stats = ORGANELLE_ASSEMBLY.out.stats
         .map { meta, tsv -> "mito_stats\t${meta.sample}\t.\t${tsv.name}\tmitogenome" }
 
-    ch_manifest_mito_circular = MITO_CIRCULAR_MAP.out.circular_map
+    ch_manifest_mito_circular = ORGANELLE_ASSEMBLY.out.circular_map
         .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\tmitogenome" }
 
     // ---- Combine all manifest entries into a single TSV ----
@@ -1616,7 +1917,7 @@ workflow {
         .ifEmpty(file('NO_TELOMERES'))
 
     // Collect mitogenome stats for report
-    ch_mito_stats_for_report = MITOHIFI.out.stats
+    ch_mito_stats_for_report = ORGANELLE_ASSEMBLY.out.stats
         .map { meta, tsv -> tsv }
         .collectFile(
             name: 'all_mito_stats.tsv',
@@ -1632,7 +1933,8 @@ workflow {
         ch_telomere_for_report,
         ch_pairwise_summary,
         ch_mito_stats_for_report,
-        ch_teloclip_stats_for_report       
+        ch_teloclip_stats_for_report,
+        ch_summary_report_script       
     )
 }
 /*

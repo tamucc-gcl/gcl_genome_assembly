@@ -8,6 +8,7 @@ process HIC_TADS {
     val window_bp
     val min_contig_bp
     val max_contigs
+    path(tad_book_script)
 
   output:
     tuple val(meta), val(stage),
@@ -37,7 +38,7 @@ process HIC_TADS {
   """
   set -euo pipefail
 
-  python ${projectDir}/py_scripts/make_tad_book.py \\
+  python ${tad_book_script} \\
     --mcool ${mcool} \\
     --resolution ${resolution} \\
     --window_bp ${window_bp} \\

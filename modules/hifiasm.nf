@@ -2,11 +2,19 @@
 ========================================================================================
     HIFIASM MODULE
 ========================================================================================
-    Phased genome assembly using HiFi and Hi-C reads with hifiasm
+    Genome assembly using HiFi (+ optional Hi-C) reads with hifiasm.
     Repo location: modules/hifiasm.nf
 
-    Emits the sample-level assembly (both haplotypes) as tuple(meta, hap1, hap2).
-    main.nf forks this into per-haplotype tuple(meta, fasta) via forkHaplotypeMeta().
+    Ploidy is meta-driven (Phase 2):
+      - n_hap == 2 (diploid): phased hap1 + hap2 (Hi-C phasing if params.hifiasm_useHiC).
+        Emits two FASTAs: <sample>.hap1.p_ctg.fasta, <sample>.hap2.p_ctg.fasta.
+      - n_hap == 1 (haploid/collapsed): forces --primary and DISABLES Hi-C phasing
+        (Hi-C, if present, is still used downstream for scaffolding the single assembly).
+        Emits one FASTA: <sample>.primary.p_ctg.fasta (from the p_ctg graph).
+
+    Output `assemblies` is therefore variable-arity: a single FASTA (haploid) or two
+    (diploid). main.nf zips forkHaplotypeMeta(meta) against it (coercing to a list), so
+    haploid yields one (primary, fasta) and diploid two (hapN, fasta) tuples.
 ========================================================================================
 */
 
@@ -20,32 +28,46 @@ process HIFIASM {
     tuple val(meta), path(hifi_fastq), path(hic_r1), path(hic_r2)
 
     output:
-    tuple val(meta), path("${meta.sample}.hap1.p_ctg.fasta"), path("${meta.sample}.hap2.p_ctg.fasta"), emit: assemblies
-    tuple val(meta), path("${meta.sample}.hifiasm.log"), emit: log
-    tuple val(meta), path("${meta.sample}.hap1.p_ctg.gfa"), emit: gfa_hap1
-    tuple val(meta), path("${meta.sample}.hap2.p_ctg.gfa"), emit: gfa_hap2
+    tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.fasta"), emit: assemblies
+    tuple val(meta), path("${meta.sample}.hifiasm.log"),                     emit: log
+    tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.gfa"),   emit: gfa
 
     script:
     telomere_motif = params.telomere_motif ?: 'CCCTAA'  // Default to human telomeric repeat if not provided
-    primary_flag = params.hifiasm_primary ? '--primary' : ''
-    dualscaf_flag = params.hifiasm_dualScaf ? '--dual-scaf' : ''
-    hic_opts = params.hifiasm_useHiC ? "--h1 ${hic_r1} --h2 ${hic_r2}" : ''
 
-    // Determine source GFA naming pattern
-    // HiFi-only + primary: *.p_ctg.gfa / *.a_ctg.gfa (no hap1/hap2)
-    // HiFi-only default:   *.bp.hap1.p_ctg.gfa / *.bp.hap2.p_ctg.gfa
-    // Hi-C (any):          *.hic.hap1.p_ctg.gfa / *.hic.hap2.p_ctg.gfa
+    // ---- ploidy-driven mode (Phase 2) ----
+    // Haploid -> collapsed primary assembly: --primary, no Hi-C phasing.
+    // Hi-C phasing also requires Hi-C to actually be present (HiFi-only rows -> off).
+    def haploid  = (meta.n_hap == 1)
+    def useHiC   = !haploid && params.hifiasm_useHiC && meta.hic
+    def primary  = haploid || params.hifiasm_primary
+
+    primary_flag  = primary ? '--primary' : ''
+    dualscaf_flag = params.hifiasm_dualScaf ? '--dual-scaf' : ''
+    hic_opts      = useHiC ? "--h1 ${hic_r1} --h2 ${hic_r2}" : ''
 
     // Handle 'auto' parameters - omit flag entirely for auto behavior
-    hgsize_opt = params.hifiasm_hgSize == 'auto' ? '' : "--hg-size ${params.hifiasm_hgSize}"
-    homcov_opt = params.hifiasm_homCov == 'auto' ? '' : "--hom-cov ${params.hifiasm_homCov}"
+    hgsize_opt   = params.hifiasm_hgSize   == 'auto' ? '' : "--hg-size ${params.hifiasm_hgSize}"
+    homcov_opt   = params.hifiasm_homCov   == 'auto' ? '' : "--hom-cov ${params.hifiasm_homCov}"
     purgemax_opt = params.hifiasm_purgeMax == 'auto' ? '' : "--purge-max ${params.hifiasm_purgeMax}"
 
-    use_primary_alt = params.hifiasm_primary && !params.hifiasm_useHiC
-    prefix = params.hifiasm_useHiC ? 'hic.' : 'bp.'
-
+    // Source GFA naming:
+    //   primary (no Hi-C):  *.p_ctg.gfa / *.a_ctg.gfa
+    //   HiFi-only default:  *.bp.hap1.p_ctg.gfa / *.bp.hap2.p_ctg.gfa
+    //   Hi-C phased:        *.hic.hap1.p_ctg.gfa / *.hic.hap2.p_ctg.gfa
+    use_primary_alt = primary && !useHiC
+    prefix = useHiC ? 'hic.' : 'bp.'
     gfa1 = use_primary_alt ? "${meta.sample}.p_ctg.gfa" : "${meta.sample}.${prefix}hap1.p_ctg.gfa"
     gfa2 = use_primary_alt ? "${meta.sample}.a_ctg.gfa" : "${meta.sample}.${prefix}hap2.p_ctg.gfa"
+
+    // Haploid: single primary output from gfa1 (== <sample>.p_ctg.gfa).
+    // Diploid: two haplotype outputs from gfa1/gfa2.
+    def conversion_cmds
+    if (haploid) {
+        conversion_cmds = "gfatools gfa2fa ${gfa1} > ${meta.sample}.primary.p_ctg.fasta\n    cp ${gfa1} ${meta.sample}.primary.p_ctg.gfa"
+    } else {
+        conversion_cmds = "gfatools gfa2fa ${gfa1} > ${meta.sample}.hap1.p_ctg.fasta\n    gfatools gfa2fa ${gfa2} > ${meta.sample}.hap2.p_ctg.fasta\n    cp ${gfa1} ${meta.sample}.hap1.p_ctg.gfa\n    cp ${gfa2} ${meta.sample}.hap2.p_ctg.gfa"
+    }
 
     """
     hifiasm \\
@@ -94,21 +116,24 @@ process HIFIASM {
         ${hifi_fastq} \\
         2>&1 | tee ${meta.sample}.hifiasm.log
 
-    # Convert GFA to FASTA
-    gfatools gfa2fa ${gfa1} > ${meta.sample}.hap1.p_ctg.fasta
-    gfatools gfa2fa ${gfa2} > ${meta.sample}.hap2.p_ctg.fasta
-
-    # Copy GFAs to standardized names (preserves originals too)
-    cp ${gfa1} ${meta.sample}.hap1.p_ctg.gfa
-    cp ${gfa2} ${meta.sample}.hap2.p_ctg.gfa
+    # Convert GFA to FASTA (+ copy GFAs to standardized names)
+    ${conversion_cmds}
     """
 
     stub:
-    """
-    touch ${meta.sample}.hap1.p_ctg.fasta
-    touch ${meta.sample}.hap2.p_ctg.fasta
-    touch ${meta.sample}.hifiasm.log
-    touch ${meta.sample}.hap1.p_ctg.gfa
-    touch ${meta.sample}.hap2.p_ctg.gfa
-    """
+    def haploid = (meta.n_hap == 1)
+    if (haploid)
+        """
+        touch ${meta.sample}.primary.p_ctg.fasta
+        touch ${meta.sample}.primary.p_ctg.gfa
+        touch ${meta.sample}.hifiasm.log
+        """
+    else
+        """
+        touch ${meta.sample}.hap1.p_ctg.fasta
+        touch ${meta.sample}.hap2.p_ctg.fasta
+        touch ${meta.sample}.hap1.p_ctg.gfa
+        touch ${meta.sample}.hap2.p_ctg.gfa
+        touch ${meta.sample}.hifiasm.log
+        """
 }

@@ -103,15 +103,17 @@ message("\n=== Processing Data ===")
 # Extract sample_id from haplotype_id for joining
 if (!is.null(bam_metrics)) {
   bam_metrics <- bam_metrics %>%
-    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""),
-           haplotype_id = str_extract(haplotype_id, 'hap[12]'),
+    mutate(sample_id = str_replace(haplotype_id, "_(hap[12]|primary)$", ""),
+           haplotype_id = str_extract(haplotype_id, 'hap[12]|primary'),
+           haplotype_id = if_else(haplotype_id == 'primary', 'hap1', haplotype_id),
            .before = everything())
 }
 
 if (!is.null(pairs_metrics)) {
   pairs_metrics <- pairs_metrics %>%
-    mutate(sample_id = str_replace(haplotype_id, "_hap[12]$", ""),
-           haplotype_id = str_extract(haplotype_id, 'hap[12]'),
+    mutate(sample_id = str_replace(haplotype_id, "_(hap[12]|primary)$", ""),
+           haplotype_id = str_extract(haplotype_id, 'hap[12]|primary'),
+           haplotype_id = if_else(haplotype_id == 'primary', 'hap1', haplotype_id),
            .before = everything())
 }
 
@@ -119,29 +121,22 @@ if (!is.null(pairs_metrics)) {
 #### Join together for nice single output ####
 
 # --- 1. Determine pipeline stages present ---
+# --- Build stage levels and labels ---
+# Finalized assembly is QC'd unconditionally as 'final' (ASSEMBLY_QC_FINAL); teloclip-extended
+# is its own intermediate (ASSEMBLY_QC_TELOCLIP, pre-FINALIZE); gap_filled is 'gap_fill'.
+# Absent stages (e.g. teloclip off, or short-read which has none of these) drop via fct_drop().
 all_assembly_stages <- unique(assembly_qc$qc_label)
-has_teloclip <- 'teloclip_extended' %in% all_assembly_stages
-last_assembly_stage <- if (has_teloclip) 'teloclip_extended' else 'gap_filled'
-
-message(sprintf("  Teloclip detected: %s", has_teloclip))
+last_assembly_stage <- 'final'
 message(sprintf("  Final assembly stage: %s", last_assembly_stage))
 
-# --- 2. Build dynamic stage levels and labels ---
 stage_levels <- c('contig', 'contig_mito_filtered', 'contig_purged',
                   'contig_corrected', 'contig_decontam',
                   'scaffold', 'scaffold_corrected', 'scaffold_round2',
-                  'gap_filled')
+                  'gap_filled', 'teloclip_extended', 'final')
 
 stage_labels <- c('ctg.base', 'ctg.mito', 'ctg.purged', 'ctg.cor', 'ctg.deco',
                   'scaf.base', 'scaf.cor', 'scaf2',
-                  'final')  # gap_filled is "final" by default
-
-if (has_teloclip) {
-  # If teloclip ran, gap_filled becomes intermediate and teloclip is "final"
-  stage_labels[length(stage_labels)] <- 'gap_fill'
-  stage_levels <- c(stage_levels, 'teloclip_extended')
-  stage_labels <- c(stage_labels, 'final')
-}
+                  'gap_fill', 'teloclip', 'final')
 
 # --- 3. Process assembly QC ---
 fixed_assembly <- assembly_qc %>%
@@ -184,48 +179,55 @@ message(sprintf("  Stage resolution: last_ctg=%s, first_scaf=%s, scaf2=%s, last_
                 last_ctg_stage, first_scaf_stage, scaf2_stage, last_scaf_stage))
 
 # --- 4. Process BAM metrics ---
-fixed_bam <- bam_metrics %>%
-  select(-source_file) %>%
-  pivot_longer(cols = where(is.numeric),
-               names_to = 'metric') %>%
-  pivot_wider(names_from = haplotype_id) %>%
-  mutate(stage = case_when(
-           checkpoint == 'contig_raw_map'          ~ last_ctg_stage,
-           checkpoint == 'scaffold_round2_raw_map' ~ last_scaf_stage,
-           checkpoint == 'final_raw_map'           ~ 'final'
-         ) %>%
-           factor(levels = asm_stage_levels),
-         .keep = 'unused',
-         .before = 'metric') %>%
-  filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
-  arrange(stage) %>%
-  mutate(analysis = 'mapped_hic')
+fixed_bam <- NULL
+
+if (!is.null(bam_metrics)) {
+  fixed_bam <- bam_metrics %>%
+    select(-source_file) %>%
+    pivot_longer(cols = where(is.numeric),
+                names_to = 'metric') %>%
+    pivot_wider(names_from = haplotype_id) %>%
+    mutate(stage = case_when(
+            checkpoint == 'contig_raw_map'          ~ last_ctg_stage,
+            checkpoint == 'scaffold_round2_raw_map' ~ last_scaf_stage,
+            checkpoint == 'final_raw_map'           ~ 'final'
+          ) %>%
+            factor(levels = asm_stage_levels),
+          .keep = 'unused',
+          .before = 'metric') %>%
+    filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
+    arrange(stage) %>%
+    mutate(analysis = 'mapped_hic')
+}
 
 # --- 5. Process pairs metrics ---
-fixed_pairs <- pairs_metrics %>%
-  select(-source_file) %>%
-  pivot_longer(cols = where(is.numeric),
-               names_to = 'metric',
-               values_drop_na = TRUE) %>%
-  pivot_wider(names_from = haplotype_id) %>%
-  filter(!metric %in% c('cis_pairs_scaffold', 'trans_pairs_scaffold', 'trans_to_cis_scaffold')) %>%
-  mutate(metric = str_remove_all(metric, c('_contig|_scaffold')),
-         metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
-                            metric == 'pairs_total' ~ 'retained_pairs',
-                            TRUE ~ metric),
-         stage = case_when(
-           checkpoint == 'contig_filtered'          ~ last_ctg_stage,
-           checkpoint == 'scaffold_space'           ~ first_scaf_stage,
-           checkpoint == 'scaffold_round2_space'    ~ scaf2_stage,
-           checkpoint == 'scaffold_round2_filtered' ~ scaf2_stage,
-           checkpoint == 'final_filtered'           ~ 'final'
-         ) %>%
-           factor(levels = asm_stage_levels),
-         .keep = 'unused',
-         .before = 'metric') %>%
-  filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
-  arrange(stage) %>%
-  mutate(analysis = 'hic_contact')
+fixed_pairs <- NULL
+if (!is.null(pairs_metrics)) {
+  fixed_pairs <- pairs_metrics %>%
+    select(-source_file) %>%
+    pivot_longer(cols = where(is.numeric),
+                names_to = 'metric',
+                values_drop_na = TRUE) %>%
+    pivot_wider(names_from = haplotype_id) %>%
+    filter(!metric %in% c('cis_pairs_scaffold', 'trans_pairs_scaffold', 'trans_to_cis_scaffold')) %>%
+    mutate(metric = str_remove_all(metric, c('_contig|_scaffold')),
+          metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
+                              metric == 'pairs_total' ~ 'retained_pairs',
+                              TRUE ~ metric),
+          stage = case_when(
+            checkpoint == 'contig_filtered'          ~ last_ctg_stage,
+            checkpoint == 'scaffold_space'           ~ first_scaf_stage,
+            checkpoint == 'scaffold_round2_space'    ~ scaf2_stage,
+            checkpoint == 'scaffold_round2_filtered' ~ scaf2_stage,
+            checkpoint == 'final_filtered'           ~ 'final'
+          ) %>%
+            factor(levels = asm_stage_levels),
+          .keep = 'unused',
+          .before = 'metric') %>%
+    filter(!is.na(stage)) %>%   # Drop checkpoints that didn't resolve
+    arrange(stage) %>%
+    mutate(analysis = 'hic_contact')
+}
 
 # --- 6. Combine and write (deduplicate in case checkpoints overlap) ---
 full_qc_data <- bind_rows(fixed_assembly, fixed_bam, fixed_pairs) %>%

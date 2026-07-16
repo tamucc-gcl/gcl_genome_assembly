@@ -72,6 +72,7 @@ process PAIRWISE_ALIGNMENT {
     input:
     tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2)
     val(pafr_ready)
+    path(dotplot_script)
     
     output:
     tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.paf.gz"), emit: paf
@@ -153,7 +154,7 @@ process PAIRWISE_ALIGNMENT {
     fi
     
     # Generate dotplot
-    Rscript ${projectDir}/r_scripts/dotplot_paf.R \\
+    Rscript ${dotplot_script} \\
         --paf "${out_prefix}.paf.gz" \\
         --ref "${haplotype_id1}" \\
         --query "${haplotype_id2}" \\

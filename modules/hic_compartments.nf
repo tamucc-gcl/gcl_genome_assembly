@@ -9,6 +9,7 @@ process HIC_COMPARTMENTS {
     val resolution
     val min_contig_bp
     val max_contigs
+    path(compartments_script)
 
   output:
     tuple val(meta), val(stage),
@@ -36,7 +37,7 @@ process HIC_COMPARTMENTS {
   """
   set -euo pipefail
 
-  python ${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py \\
+  python ${compartments_script} \\
     --mcool ${mcool} \\
     --resolution ${resolution} \\
     --assembly_id "${assembly_label}" \\

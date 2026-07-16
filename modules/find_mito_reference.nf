@@ -23,16 +23,16 @@ process FIND_MITO_REFERENCE {
     label 'mitohifi'
 
     publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode, saveAs: { filename ->
-        filename == 'mito_reference_info.tsv' ? filename : null
+        filename == 'mito_reference_info.tsv' ? "${taxid}_mito_reference_info.tsv" : null
     }
 
     input:
-    val(species_name)
+    tuple val(taxid), val(species_name)
 
     output:
-    path("*.fasta"),                          emit: ref_fasta
-    path("*.gb"),                             emit: ref_gb
-    path("mito_reference_info.tsv"),          emit: ref_info
+    tuple val(taxid), path("*.fasta"),                 emit: ref_fasta
+    tuple val(taxid), path("*.gb"),                    emit: ref_gb
+    tuple val(taxid), path("mito_reference_info.tsv"), emit: ref_info
 
     script:
     def min_length = params.mitohifi_ref_min_length ?: 14000

@@ -63,8 +63,15 @@ workflow DECONTAMINATE_ASSEMBLY {
         STEP 2: FCS-GX Screening (parallel across all haplotypes)
     ========================================================================================
     */
+    // Per-sample source taxid: meta.taxid (sheet `taxid` column or params.taxid), falling
+    // back to the global params.decon_source_taxid (nested: params.decon.source_taxid).
     ch_cleaned_input
-        .combine(Channel.value(params.decon?.source_taxid ?: 7898))
+        .map { meta, assembly_fasta ->
+            def tax = meta.taxid ?: params.decon?.source_taxid
+            if (tax == null)
+                throw new IllegalArgumentException("Sample '${meta.id}': decontamination requires a taxid — set a per-row 'taxid' in the sample sheet, or --taxid / --decon_source_taxid.")
+            tuple(meta, assembly_fasta, tax)
+        }
         .combine(gxdb_dir)
         .combine(Channel.value(stage))
         .set { ch_fcs_gx_input }

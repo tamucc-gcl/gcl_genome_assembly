@@ -87,7 +87,7 @@ mito_stats_rows <- manifest %>% filter(type == "mito_stats")
 
 all_hap_ids <- assemblies$id %>% sort()
 all_sample_ids <- all_hap_ids %>%
-  str_replace("_hap[12]$", "") %>%
+  str_replace("_(hap[12]|primary)$", "") %>%
   unique() %>%
   sort()
 
@@ -161,13 +161,18 @@ if (nrow(assemblies) > 0) {
   asm_table <- assemblies %>%
     arrange(id) %>%
     mutate(
-      sample_id = str_replace(id, "_hap[12]$", ""),
-      hap = str_extract(id, "hap[12]$"),
+      sample_id = str_replace(id, "_(hap[12]|primary)$", ""),
+      hap = str_extract(id, "hap[12]|primary"),
+      hap = if_else(hap == "primary", "hap1", hap),
       link = sprintf("[%s](%s)", filename, rel_path(subdir, filename))
     ) %>%
     select(sample_id, hap, link) %>%
-    pivot_wider(names_from = hap, values_from = link, values_fill = "—") %>%
-    rename(Sample = sample_id, `Haplotype 1` = hap1, `Haplotype 2` = hap2)
+    pivot_wider(names_from = hap, values_from = link, values_fill = "—")
+  # Haploid samples only produce a hap1 column; ensure both exist before renaming.
+  if (!"hap1" %in% names(asm_table)) asm_table$hap1 <- "—"
+  if (!"hap2" %in% names(asm_table)) asm_table$hap2 <- "—"
+  asm_table <- asm_table %>%
+    select(Sample = sample_id, `Haplotype 1` = hap1, `Haplotype 2` = hap2)
   
   md <- c(md, "### Assembly Files", "", make_markdown_table(asm_table), "")
 } else {
@@ -201,7 +206,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                  names_to = "haplotype",
                  values_to = "value",
                  values_drop_na = TRUE) %>%
-    filter(metric %in% c("hifi_depth", "Total length", "L90", "auN",
+    filter(metric %in% c("coverage", "Total length", "L90", "auN",
                          "complete", "Largest contig", "GC (%)", "qv",
                          "kmer_completeness"))
   
@@ -210,7 +215,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     fmt_value <- function(value, metric) {
       case_when(
         metric == "complete"                          ~ percent(value, accuracy = 0.1),
-        metric == "hifi_depth"                        ~ comma(value, accuracy = 0.1),
+        metric == "coverage"                        ~ comma(value, accuracy = 0.1),
         metric == "Total length"                      ~ comma(value, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"),
         metric %in% c("Largest contig", "auN")        ~ comma(value, accuracy = 0.1, scale = 1/1e6, suffix = " Mb"),
         metric %in% c("GC (%)", "kmer_completeness")  ~ percent(value, scale = 1, accuracy = 0.1),
@@ -226,7 +231,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       "auN"                = "auN",
       "L90"                = "L90",
       "GC (%)"             = "GC (%)",
-      "hifi_depth"         = "HiFi Depth",
+      "coverage"         = "Coverage",
       "complete"           = "BUSCO Complete",
       "qv"                 = "QV",
       "kmer_completeness"  = "K-mer Completeness"
@@ -237,17 +242,28 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     diploid_metrics <- c("qv", "kmer_completeness")
     
     # Per-haplotype metrics: format as "hap1 / hap2" slash notation
+    # Per-haplotype metrics: format as "hap1 / hap2" slash notation
     per_hap <- overview_long %>%
       filter(!metric %in% diploid_metrics, haplotype %in% c("hap1", "hap2")) %>%
       mutate(value_fmt = fmt_value(value, metric)) %>%
       select(sample_id, metric, haplotype, value_fmt) %>%
-      pivot_wider(names_from = haplotype, values_from = value_fmt, values_fill = "—") %>%
+      pivot_wider(names_from = haplotype, values_from = value_fmt, values_fill = "—")
+    # Haploid samples only produce hap1; add hap2 so the slash notation renders "value / —".
+    if (!"hap1" %in% names(per_hap)) per_hap$hap1 <- "—"
+    if (!"hap2" %in% names(per_hap)) per_hap$hap2 <- "—"
+    per_hap <- per_hap %>%
       mutate(combined = paste(hap1, "/", hap2)) %>%
       select(sample_id, metric, combined)
     
-    # Diploid metrics: single value
+    # Diploid-level metrics: prefer the combined ('both') value; for haploid
+    # (no 'both' line) fall back to the single hap1 value.
     diploid <- overview_long %>%
-      filter(metric %in% diploid_metrics, haplotype == "both") %>%
+      filter(metric %in% diploid_metrics, haplotype %in% c("both", "hap1", "hap2")) %>%
+      mutate(haplotype = factor(haplotype, levels = c("both", "hap1", "hap2"))) %>%
+      group_by(sample_id, metric) %>%
+      arrange(haplotype, .by_group = TRUE) %>%
+      slice(1) %>%
+      ungroup() %>%
       mutate(combined = fmt_value(value, metric)) %>%
       select(sample_id, metric, combined)
     
@@ -277,7 +293,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
            !str_detect(metric, ">=")) %>%
     mutate(value_fmt = case_when(
       analysis == "busco" ~ percent(value, accuracy = 0.1),
-      metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
+      metric == "coverage" ~ comma(value, accuracy = 0.1),
       metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
       TRUE ~ comma(value, accuracy = 1)
     )) %>%
@@ -345,18 +361,21 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
   md <- c(md, "</tr>")
   
   for (sid in all_sample_ids) {
-    hap1_id <- paste0(sid, "_hap1")
-    hap2_id <- paste0(sid, "_hap2")
+    # Resolve this sample's haplotype ids from the manifest instead of assuming
+    # hap1/hap2: diploid -> [sid_hap1, sid_hap2], haploid -> [sid_primary].
+    sample_haps <- sort(all_hap_ids[str_replace(all_hap_ids, "_(hap[12]|primary)$", "") == sid])
+    slot1_id <- sample_haps[1]
+    slot2_id <- if (length(sample_haps) >= 2) sample_haps[2] else NA_character_
     
     md <- c(md, "<tr>")
     
     # Sample name
     md <- c(md, sprintf('  <td><b>%s</b></td>', sid))
     
-    # Snail plots
+    # Snail plots (slot 1 = hap1/primary, slot 2 = hap2 or — for haploid)
     if (has_snails) {
-      for (hid in c(hap1_id, hap2_id)) {
-        snail_row <- snail_plots %>% filter(id == hid)
+      for (hid in c(slot1_id, slot2_id)) {
+        snail_row <- if (!is.na(hid)) snail_plots %>% filter(id == hid) else snail_plots[0, ]
         if (nrow(snail_row) > 0) {
           src <- rel_path(snail_row$subdir[1], snail_row$filename[1])
           md <- c(md, sprintf('  <td>%s</td>', img_tag(src, hid, width = img_w)))
@@ -368,8 +387,8 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
     
     # Contact maps (pick best resolution)
     if (has_cmaps) {
-      for (hid in c(hap1_id, hap2_id)) {
-        hap_cmaps <- contact_maps %>% filter(id == hid)
+      for (hid in c(slot1_id, slot2_id)) {
+        hap_cmaps <- if (!is.na(hid)) contact_maps %>% filter(id == hid) else contact_maps[0, ]
         best <- pick_best_contact_map(hap_cmaps)
         if (!is.null(best) && nrow(best) > 0) {
           src <- rel_path(best$subdir[1], best$filename[1])
@@ -380,32 +399,35 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
       }
     }
     
-    # Within-sample dotplot (hap1 vs hap2)
+    # Within-sample dotplot (hap1 vs hap2) — diploid only; haploid has no pair
     if (has_dots) {
-      # Look for dotplot where id==hap1 and id2==hap2 (or vice versa)
-      dot_row <- dotplots %>%
-        filter(
-          (id == hap1_id & id2 == hap2_id) |
-            (id == hap2_id & id2 == hap1_id)
-        )
+      dot_row <- if (!is.na(slot2_id)) {
+        dotplots %>%
+          filter(
+            (id == slot1_id & id2 == slot2_id) |
+              (id == slot2_id & id2 == slot1_id)
+          )
+      } else dotplots[0, ]
       if (nrow(dot_row) > 0) {
         src <- rel_path(dot_row$subdir[1], dot_row$filename[1])
-        md <- c(md, sprintf('  <td>%s</td>', img_tag(src, paste(hap1_id, "vs", hap2_id), width = img_w)))
+        md <- c(md, sprintf('  <td>%s</td>', img_tag(src, paste(slot1_id, "vs", slot2_id), width = img_w)))
       } else {
         md <- c(md, "  <td>—</td>")
       }
     }
     
-    # Within-sample riparian plot (hap1 vs hap2)
+    # Within-sample riparian plot (hap1 vs hap2) — diploid only
     if (has_riparian) {
-      rip_row <- riparian_plots %>%
-        filter(
-          (id == hap1_id & id2 == hap2_id) |
-            (id == hap2_id & id2 == hap1_id)
-        )
+      rip_row <- if (!is.na(slot2_id)) {
+        riparian_plots %>%
+          filter(
+            (id == slot1_id & id2 == slot2_id) |
+              (id == slot2_id & id2 == slot1_id)
+          )
+      } else riparian_plots[0, ]
       if (nrow(rip_row) > 0) {
         src <- rel_path(rip_row$subdir[1], rip_row$filename[1])
-        md <- c(md, sprintf('  <td>%s</td>', img_tag(src, paste(hap1_id, "vs", hap2_id, "riparian"), width = img_w)))
+        md <- c(md, sprintf('  <td>%s</td>', img_tag(src, paste(slot1_id, "vs", slot2_id, "riparian"), width = img_w)))
       } else {
         md <- c(md, "  <td>—</td>")
       }
@@ -430,10 +452,10 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
     n_total <- nrow(dotplots)
     n_within <- sum(
       dotplots %>%
-        mutate(s1 = str_replace(id, "_hap[12]$", ""),
-               s2 = str_replace(id2, "_hap[12]$", "")) %>%
+        mutate(s1 = str_replace(id, "_(hap[12]|primary)$", ""),
+               s2 = str_replace(id2, "_(hap[12]|primary)$", "")) %>%
         pull(s1) == dotplots %>%
-        mutate(s2 = str_replace(id2, "_hap[12]$", "")) %>%
+        mutate(s2 = str_replace(id2, "_(hap[12]|primary)$", "")) %>%
         pull(s2)
     )
     n_cross <- n_total - n_within
@@ -502,7 +524,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
            !str_detect(metric, ">=")) %>%
     mutate(value_fmt = case_when(
       analysis == "busco" ~ percent(value, accuracy = 0.1),
-      metric == "hifi_depth" ~ comma(value, accuracy = 0.1),
+      metric == "coverage" ~ comma(value, accuracy = 0.1),
       metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
       TRUE ~ comma(value, accuracy = 1)
     ))

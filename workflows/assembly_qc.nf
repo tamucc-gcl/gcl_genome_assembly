@@ -33,13 +33,14 @@ include { MERQURY }             from '../modules/merqury.nf'
 include { BUSCO }               from '../modules/busco.nf'
 include { MAPPING_QC }          from '../modules/mapping_qc.nf'
 include { COMBINE_ASSEMBLY_QC } from '../modules/combine_assembly_qc.nf'
+combine_qc_script    = file("${projectDir}/r_scripts/combine_individual_assembly_qc.R", checkIfExists: true)
 
 workflow ASSEMBLY_QC {
     take:
     assemblies   // channel: tuple(meta, fasta)          — per-haplotype
     hifi_reads   // channel: tuple(meta, hifi_fastq)      — per-sample (sample-level meta)
     meryl_db     // channel: tuple(meta, meryl_db)        — per-sample (sample-level meta)
-    busco_db     // value:   path to pre-downloaded BUSCO lineage database
+    busco_db     // value:   MAP taxid -> busco_lineage (passed straight through to BUSCO)
     qc_label     // value:   label for output subfolder
 
     main:
@@ -56,23 +57,20 @@ workflow ASSEMBLY_QC {
         .map { key, metas, fastas ->
             def sample_id = metas[0].sample
             def ordered = [metas, fastas].transpose().sort { it[0].haplotype }
-            tuple(sample_id, ordered.collect { it[1] })
+            tuple(sample_id,
+                  ordered.collect { it[1] },                              // [fastas]  (1 haploid | 2 diploid)
+                  ordered.collect { "${sample_id}.${it[0].haplotype}" })  // [labels]  sample.hap1/.hap2 | sample.primary
         }
-        .set { ch_paired_assemblies }   // (sample_id, [hap1_fa, hap2_fa])
+        .set { ch_paired_assemblies }   // (sample_id, [fastas], [labels])
 
-    // QUAST — per-sample, both haplotypes (Phase 1: exactly two)
-    ch_paired_assemblies
-        .map { sample_id, fastas -> tuple(sample_id, fastas[0], fastas[1]) }
-        .set { ch_quast_input }
-
-    QUAST(ch_quast_input)
+    // QUAST — per-sample; 1 (haploid) or 2 (diploid) assemblies + matching labels
+    QUAST(ch_paired_assemblies)
 
     // MERQURY — join re-paired assemblies with the sample's meryl DB (by sample_id)
     ch_paired_assemblies
-        .map { sample_id, fastas -> tuple(sample_id, fastas[0], fastas[1]) }
+        .map { sample_id, fastas, labels -> tuple(sample_id, fastas) }
         .join( meryl_db.map { meta, db -> tuple(meta.sample, db) } )
-        .map { sample_id, hap1, hap2, db -> tuple(sample_id, hap1, hap2, db) }
-        .set { ch_merqury_input }
+        .set { ch_merqury_input }   // (sample_id, [fastas], db)
 
     MERQURY(ch_merqury_input)
 
@@ -144,7 +142,7 @@ workflow ASSEMBLY_QC {
         }
         .set { ch_all_qc_labeled }
 
-    COMBINE_ASSEMBLY_QC(ch_all_qc_labeled)
+    COMBINE_ASSEMBLY_QC(ch_all_qc_labeled, combine_qc_script)
 
     emit:
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary   // (sample_id, qc_label, summary_tsv)

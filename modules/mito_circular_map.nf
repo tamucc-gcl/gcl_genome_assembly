@@ -23,6 +23,7 @@ process MITO_CIRCULAR_MAP {
 
     input:
     tuple val(meta), path(genbank)
+    path(mito_circular_script)
 
     output:
     tuple val(meta), path("${meta.sample}_mito_circular.png"), emit: circular_map
@@ -32,7 +33,7 @@ process MITO_CIRCULAR_MAP {
     """
     set -euo pipefail
 
-    python3 ${projectDir}/py_scripts/plot_mito_circular.py \\
+    python3 ${mito_circular_script} \\
         --genbank ${genbank} \\
         --sample_id ${meta.sample} \\
         --output ${meta.sample}_mito_circular.png \\

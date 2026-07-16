@@ -42,6 +42,16 @@ message("QC Label: ", qc_label, "\n")
 library(tidyverse)
 library(jsonlite)
 
+#### Helpers ####
+# Normalize a haplotype label from an assembly/file name (Phase 2 haploid support).
+#   hap1/hap2 -> hap1/hap2
+#   primary   -> hap1   (a haploid/collapsed assembly lands in the hap1 column; hap2/both = NA)
+#   both/Both -> both   (merqury combined line, diploid only)
+norm_hap <- function(x) {
+  h <- str_to_lower(str_extract(x, regex('hap[0-9]|primary|both', ignore_case = TRUE)))
+  if_else(h == 'primary', 'hap1', h)
+}
+
 #### Debugging ####
 list.dirs(input_dir)
 list.files(input_dir, recursive = TRUE)
@@ -49,7 +59,7 @@ list.files(input_dir, recursive = TRUE)
 #### Get Data ####
 quast_out <- file.path(input_dir, 'quast/transposed_report.tsv') %>%
   read_tsv(show_col_types = FALSE) %>%
-  mutate(haplotype = str_extract(Assembly, 'hap[0-9]'),
+  mutate(haplotype = norm_hap(Assembly),
          .before = everything(),
          .keep = 'unused') %>%
   pivot_longer(cols = -haplotype,
@@ -61,7 +71,7 @@ busco_out <- list.files(file.path(input_dir, 'busco'),
            pattern = 'short_summary.*json',
            recursive = TRUE, full.names = TRUE) %>%
   tibble(filepath  = .) %>%
-  mutate(haplotype = str_extract(filepath, 'hap[0-9]')) %>%
+  mutate(haplotype = norm_hap(filepath)) %>%
   rowwise(haplotype) %>%
   reframe(read_json(filepath) %>%
             as_tibble() %>%
@@ -81,9 +91,9 @@ mapping_out <- list.files(file.path(input_dir, 'mapping'),
                           pattern = 'avg_depth.txt',
                           full.names = TRUE, recursive = TRUE) %>%
   tibble(file = .) %>%
-  mutate(haplotype = str_extract(file, 'hap[0-9]')) %>%
+  mutate(haplotype = norm_hap(file)) %>%
   rowwise(haplotype) %>%
-  reframe(hifi_depth = read_lines(file) %>% 
+  reframe(coverage = read_lines(file) %>% 
             as.numeric()) %>%
   pivot_longer(cols = -haplotype,
                names_to = 'metric') %>%
@@ -93,8 +103,7 @@ mapping_out <- list.files(file.path(input_dir, 'mapping'),
 qv_out <- read_tsv(file.path(input_dir, 'merqury', str_c(sample_id, 'qv', sep = '.')),
                    col_names = c('assembly_id', 'error_kmer', 'total_assembly_kmer', 'qv', 'error_rate'),
                    show_col_types = FALSE) %>%
-  mutate(haplotype = str_extract(assembly_id, '(hap[0-9])|(Both)') %>%
-           str_to_lower(),
+  mutate(haplotype = norm_hap(assembly_id),
          .before = everything(),
          .keep = 'unused') %>%
   pivot_longer(cols = -haplotype,
@@ -105,7 +114,7 @@ qv_out <- read_tsv(file.path(input_dir, 'merqury', str_c(sample_id, 'qv', sep = 
 completeness_out <- read_tsv(file.path(input_dir, 'merqury', str_c(sample_id, 'completeness.stats', sep = '.')),
                          col_names = c('assembly_id', 'kmer_set', 'kmer_found', 'total_hifi_kmer', 'kmer_completeness'),
                          show_col_types = FALSE) %>%
-  mutate(haplotype = str_extract(assembly_id, '(hap[0-9])|(both)'),
+  mutate(haplotype = norm_hap(assembly_id),
          .before = everything(),
          .keep = 'unused') %>%
   select(-kmer_set) %>%
@@ -116,7 +125,7 @@ completeness_out <- read_tsv(file.path(input_dir, 'merqury', str_c(sample_id, 'c
 
 #### Join it all together ####
 joined_data <- bind_rows(.id = 'analysis',
-          mapped_hifi = mapping_out,
+                         mapped_reads  = mapping_out,
           quast = quast_out,
           busco = busco_out,
           merqury_qv = qv_out,
@@ -126,6 +135,14 @@ joined_data <- bind_rows(.id = 'analysis',
   mutate(sample_id = sample_id,
          qc_label = qc_label,
          .before = everything())
+
+# Guarantee a uniform hap1/hap2/both schema so downstream (compile_qc.R) is ploidy-agnostic.
+# Haploid samples only produce a hap1 column here; hap2/both are added as NA.
+for (col in c('hap1', 'hap2', 'both')) {
+  if (!col %in% names(joined_data)) joined_data[[col]] <- NA
+}
+joined_data <- joined_data %>%
+  select(sample_id, qc_label, analysis, metric, hap1, hap2, both)
 
 # Output filename now includes qc_label to prevent collisions
 output_filename <- str_c(sample_id, '_', qc_label, '_qc_summary.tsv')
