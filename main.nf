@@ -1275,7 +1275,7 @@ workflow {
                 params.tad_window_bp ?: 500000,
                 params.tad_min_contig_bp ?: 5000000,
                 params.tad_max_contigs ?: 0,
-                ch_tads_script
+                ch_tad_book_script
             )
         }
     }
