@@ -105,7 +105,7 @@ params.spades_kmers        = '21,33,55,77'   // -k
 params.spades_cov_cutoff   = 'auto'          // --cov-cutoff (a number, or 'auto')
 params.spades_mode         = '--isolate'     // '--isolate' | '--careful' | '--sc' | '' for none
 params.spades_extra        = ''              // any extra spades.py flags, verbatim
-params.spades_output_level = 'contigs'       // 'contigs' | 'scaffolds' — which FASTA feeds downstream
+params.spades_output_level = 'scaffolds'       // 'contigs' | 'scaffolds' — which FASTA feeds downstream
 
 // ---- Genome-size estimation (jellyfish + GenomeScope2) ----
 params.genomescope_kmer    = 21              // jellyfish -m / genomescope -k
