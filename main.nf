@@ -1190,7 +1190,7 @@ workflow {
 
         // The teloclip-extended assembly becomes the "final" assembly
         ch_final_assembly = TELOCLIP_EXTEND.out.extended_assembly
-        ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats
+        ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats.ifEmpty(file('NO_TELOCLIP'))
     } else {
         // No teloclip — gap-filled assembly IS the final assembly
         ch_final_assembly = ch_post_gap_fill
@@ -1351,7 +1351,7 @@ workflow {
         COLLECT_PAIRWISE_RESULTS(
             PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
         )
-        ch_pairwise_summary = COLLECT_PAIRWISE_RESULTS.out.summary
+        ch_pairwise_summary = COLLECT_PAIRWISE_RESULTS.out.summary.ifEmpty(file('NO_PAIRWISE'))
     } else {
         ch_pairwise_summary = Channel.of(file('NO_PAIRWISE'))
     }
