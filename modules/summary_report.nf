@@ -31,6 +31,8 @@ process SUMMARY_REPORT {
     path(pairwise_summary)      // pairwise_alignment_summary.tsv  OR  NO_PAIRWISE
     path(mito_stats)            // all_mito_stats.tsv or NO_MITO_STATS
     path(teloclip_stats)        // all_teloclip_stats.tsv or NO_TELOCLIP_STATS
+    path(sample_taxonomy)       // NEW: sample_taxonomy.tsv or NO_TAXONOMY
+    path(genome_size)           // NEW: genome_sizes.tsv or NO_GENOME_SIZE
     path(summary_report_script) // R script to generate the summary report
 
     output:
@@ -45,6 +47,8 @@ process SUMMARY_REPORT {
         --pairwise_summary ${pairwise_summary} \\
         --mito_stats ${mito_stats} \\
         --teloclip_stats ${teloclip_stats} \\
+        --sample_taxonomy ${sample_taxonomy} \\
+        --genome_size ${genome_size} \\
         --output assembly_report.md
     """
 

@@ -34,7 +34,8 @@ parser$add_argument("--output",           default = "assembly_report.md", help =
 parser$add_argument("--img_width",        default = 500, type = "integer", help = "Image display width in pixels")
 parser$add_argument("--mito_stats",       required = TRUE, help = "Mitogenome stats TSV (or NO_MITO_STATS)")
 parser$add_argument("--teloclip_stats",   required = TRUE, help = "Teloclip extension stats TSV (or NO_TELOCLIP)")
-
+parser$add_argument("--sample_taxonomy", default = "NO_TAXONOMY",    help = "Per-sample taxonomy TSV (sample/taxid/species/kingdom/busco_lineage) or NO_TAXONOMY")
+parser$add_argument("--genome_size",     default = "NO_GENOME_SIZE", help = "Per-sample genome-size estimate TSV (sample/est_genome_size_bp) or NO_GENOME_SIZE")
 
 args <- parser$parse_args()
 
@@ -177,6 +178,46 @@ if (nrow(assemblies) > 0) {
   md <- c(md, "### Assembly Files", "", make_markdown_table(asm_table), "")
 } else {
   md <- c(md, "*No final assemblies found in manifest.*", "")
+}
+
+# ---- Sample taxonomy & genome-size estimate (4b-i) ----
+read_side_tsv <- function(path, sentinel) {
+  if (str_detect(basename(path), sentinel) || !file.exists(path) || file.size(path) == 0) return(NULL)
+  tryCatch(read_tsv(path, col_types = cols(.default = "c")),
+           error = function(e) { message("WARNING: ", e$message); NULL })
+}
+
+tax_tbl  <- read_side_tsv(args$sample_taxonomy, "NO_TAXONOMY")
+size_tbl <- read_side_tsv(args$genome_size,     "NO_GENOME_SIZE")
+
+if (!is.null(tax_tbl) || !is.null(size_tbl)) {
+  info <- tibble(sample = all_sample_ids)
+  if (!is.null(tax_tbl))  info <- left_join(info, tax_tbl,  by = "sample")
+  if (!is.null(size_tbl)) info <- left_join(info, size_tbl, by = "sample")
+
+  if ("est_genome_size_bp" %in% names(info)) {
+    info <- info %>%
+      mutate(est_genome_size = {
+        v <- suppressWarnings(as.numeric(str_remove_all(est_genome_size_bp, "[, ]")))
+        ifelse(is.na(v), "—", comma(v, accuracy = 0.01, scale = 1/1e9, suffix = " Gb"))
+      }) %>%
+      select(-est_genome_size_bp)
+  }
+
+  col_map <- c(sample = "Sample", species = "Species", taxid = "Taxid",
+               kingdom = "Kingdom", busco_lineage = "BUSCO Lineage",
+               est_genome_size = "Est. Genome Size")
+  present <- intersect(names(col_map), names(info))
+  info_disp <- info %>%
+    select(all_of(present)) %>%
+    mutate(across(everything(), ~ replace_na(as.character(.x), "—")))
+  names(info_disp) <- col_map[present]
+
+  md <- c(md,
+          "### Sample Taxonomy & Genome-Size Estimate", "",
+          "Per-sample organism identity (resolved from the NCBI taxid) and the k-mer-based",
+          "haploid genome-size estimate from [GenomeScope2](https://github.com/tbenavi1/genomescope2.0).", "",
+          make_markdown_table(info_disp), "")
 }
 
 # =============================================================================
@@ -650,48 +691,73 @@ has_teloclip <- !str_detect(basename(teloclip_path), "NO_TELOCLIP") &&
 if (has_teloclip) {
   teloclip_data <- tryCatch(read_tsv(teloclip_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(teloclip_data) && nrow(teloclip_data) > 0) {
-    
-    # ---- FIX 1: Extract haplotype_id by stripping _scaffold_N suffix ----
-    # Contig names follow the pattern {haplotype_id}_scaffold_{N},
-    # e.g. "Sde-CBau_104_hap1_scaffold_2" or "Sde_CLim_110_hap2_scaffold_7".
-    # The old regex (^[^_]+_[^_]+_hap[12]) assumed exactly two underscore-
-    # delimited tokens before _hap, which fails when the haplotype_id itself
-    # contains extra underscores (e.g. Sde_CLim_110_hap2).
-    teloclip_summary <- teloclip_data %>%
+
+    # Assign each extended contig to its haplotype by PREFIX-matching the known
+    # hap ids. teloclip prefixes every contig with "{meta.id}_", so this is robust
+    # to the contig suffix (hifiasm _ptgNl, YaHS _scaffold_N, SPAdes _NODE_..).
+    # (The old code stripped "_scaffold_N", which unscaffolded HiFi contigs don't
+    #  have -> every contig became its own group -> one row per contig.)
+    assign_hap <- function(ctg) {
+      hits <- all_hap_ids[startsWith(ctg, paste0(all_hap_ids, "_"))]
+      if (length(hits) == 0) return(NA_character_)
+      hits[which.max(nchar(hits))]           # longest match wins
+    }
+
+    tc <- teloclip_data %>%
       filter(extension_length > 0) %>%
-      mutate(haplotype_id = str_remove(contig, "_scaffold_\\d+$")) %>%
+      mutate(haplotype_id = vapply(contig, assign_hap, character(1))) %>%
+      filter(!is.na(haplotype_id))
+
+    teloclip_summary <- tc %>%
       group_by(haplotype_id) %>%
       summarise(
-        extensions = n(),
-        total_bp_added = sum(extension_length),
+        contigs_extended  = n_distinct(contig),
+        extensions        = n(),
+        total_bp_added    = sum(extension_length),
         mean_extension_bp = round(mean(extension_length)),
-        max_extension_bp = max(extension_length),
+        max_extension_bp  = max(extension_length),
         .groups = "drop"
-      )
-    
+      ) %>%
+      arrange(haplotype_id)
+
     md <- c(md,
             "#### Telomere Extension (teloclip)", "",
             "Soft-clipped HiFi read overhangs containing telomeric motifs were used to",
-            "extend scaffold ends missing telomeric sequence.", ""
+            "extend contig/scaffold ends missing telomeric sequence. Per-haplotype summary:", ""
     )
-    
+
     if (nrow(teloclip_summary) > 0) {
       tc_table <- teloclip_summary %>%
         mutate(
-          total_bp_added = scales::comma(total_bp_added),
-          mean_extension_bp = scales::comma(mean_extension_bp),
-          max_extension_bp = scales::comma(max_extension_bp)
+          total_bp_added    = comma(total_bp_added),
+          mean_extension_bp = comma(mean_extension_bp),
+          max_extension_bp  = comma(max_extension_bp)
         ) %>%
         rename(
-          Haplotype = haplotype_id,
-          Extensions = extensions,
-          `Total bp Added` = total_bp_added,
+          Haplotype             = haplotype_id,
+          `Contigs Extended`    = contigs_extended,
+          `Total Extensions`    = extensions,
+          `Total bp Added`      = total_bp_added,
           `Mean Extension (bp)` = mean_extension_bp,
-          `Max Extension (bp)` = max_extension_bp
+          `Max Extension (bp)`  = max_extension_bp
         )
       md <- c(md, make_markdown_table(tc_table), "")
+
+      tc_detail <- tc %>%
+        transmute(
+          Haplotype = haplotype_id,
+          Contig    = str_remove(contig, paste0("^", haplotype_id, "_")),
+          End       = end,
+          `Extension (bp)` = comma(extension_length)
+        ) %>%
+        arrange(Haplotype, Contig)
+      md <- c(md,
+              make_collapsible(
+                make_markdown_table(tc_detail),
+                sprintf("Click to expand: per-contig extension detail (%s extensions)", nrow(tc_detail))
+              )
+      )
     }
-    
   }
 } else {
   md <- c(md,

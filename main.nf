@@ -1926,6 +1926,23 @@ workflow {
         )
         .ifEmpty(file('NO_MITO_STATS'))
 
+    // ---- Per-sample taxonomy + genome-size estimate (4b-i Increment 4) ----
+    ch_sample_taxonomy_tsv = ch_sample_identity
+        .map { sample, tax ->
+            "${sample}\t${tax.taxid}\t${tax.name}\t${tax.kingdom}\t${tax.busco_lineage}"
+        }
+        .collectFile(name: 'sample_taxonomy.tsv',
+                     seed: 'sample\ttaxid\tspecies\tkingdom\tbusco_lineage',
+                     newLine: true)
+        .ifEmpty(file('NO_TAXONOMY'))
+
+    ch_genome_size_tsv = ESTIMATE_GENOME_SIZE.out.size
+        .map { meta, size_file -> "${meta.sample}\t${size_file.text.trim()}" }
+        .collectFile(name: 'genome_sizes.tsv',
+                     seed: 'sample\test_genome_size_bp',
+                     newLine: true)
+        .ifEmpty(file('NO_GENOME_SIZE'))
+
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
         ch_report_manifest,
@@ -1934,6 +1951,8 @@ workflow {
         ch_pairwise_summary,
         ch_mito_stats_for_report,
         ch_teloclip_stats_for_report,
+        ch_sample_taxonomy_tsv,
+        ch_genome_size_tsv,
         ch_summary_report_script       
     )
 }
