@@ -319,6 +319,52 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       pivot_wider(names_from = metric_label, values_from = combined, values_fill = "") %>%
       rename(Sample = sample_id)
     
+    # --- Est. Genome Size + % of Estimate (report-improvement batch) ---
+    # Est. Genome Size: per-sample haploid estimate (GenomeScope2, via --genome_size).
+    # % of Estimate: per-hap (each haplotype's assembled Total length / the sample's
+    # haploid estimate) so it reads directly against the "Total Length" row above.
+    gs_path <- args$genome_size
+    est <- NULL
+    if (!str_detect(basename(gs_path), "NO_GENOME_SIZE") &&
+        file.exists(gs_path) && file.size(gs_path) > 0) {
+      est <- tryCatch(
+        read_tsv(gs_path, show_col_types = FALSE) %>%
+          transmute(
+            sample_id = as.character(sample),
+            est_bp    = suppressWarnings(as.numeric(str_remove_all(as.character(est_genome_size_bp), "[, ]")))
+          ) %>%
+          filter(!is.na(est_bp)),
+        error = function(e) { message("WARNING (genome-size cols): ", e$message); NULL }
+      )
+    }
+
+    if (!is.null(est) && nrow(est) > 0) {
+      pct_tbl <- overview_long %>%
+        filter(metric == "Total length", haplotype %in% c("hap1", "hap2")) %>%
+        select(sample_id, haplotype, total_len = value) %>%
+        inner_join(est, by = "sample_id") %>%
+        mutate(pct = percent(total_len / est_bp, accuracy = 1)) %>%
+        select(sample_id, haplotype, pct) %>%
+        pivot_wider(names_from = haplotype, values_from = pct, values_fill = "—")
+      if (!"hap1" %in% names(pct_tbl)) pct_tbl$hap1 <- "—"
+      if (!"hap2" %in% names(pct_tbl)) pct_tbl$hap2 <- "—"
+      pct_tbl <- pct_tbl %>% transmute(sample_id, `% of Estimate` = paste(hap1, "/", hap2))
+
+      size_cols <- est %>%
+        transmute(sample_id,
+                  `Est. Genome Size` = comma(est_bp, accuracy = 0.01, scale = 1/1e9, suffix = " Gb")) %>%
+        left_join(pct_tbl, by = "sample_id")
+
+      overview_wide <- overview_wide %>%
+        left_join(size_cols, by = c("Sample" = "sample_id")) %>%
+        mutate(across(c(`Est. Genome Size`, `% of Estimate`),
+                      ~ replace_na(as.character(.x), "—")))
+      if ("Total Length" %in% names(overview_wide)) {
+        overview_wide <- overview_wide %>%
+          relocate(`Est. Genome Size`, `% of Estimate`, .after = `Total Length`)
+      }
+    }
+
     md <- c(md, make_markdown_table(overview_wide), "")
   }
   
