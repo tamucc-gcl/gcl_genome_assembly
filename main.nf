@@ -1898,6 +1898,14 @@ workflow {
     ch_manifest_mito_circular = ORGANELLE_ASSEMBLY.out.circular_map
         .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\tmitogenome" }
 
+    // ---- GenomeScope profiles (linear_plot.png per sample) ----
+    // ESTIMATE_GENOME_SIZE.out.results: tuple(meta, <sample>_genomescope dir)
+    // publishDir: ${params.outdir}/qc/genome_size → qc/genome_size/<sample>_genomescope/linear_plot.png
+    ch_manifest_genomescope = ESTIMATE_GENOME_SIZE.out.results
+        .map { meta, gs_dir ->
+            "genomescope_plot\t${meta.sample}\t.\tlinear_plot.png\tqc/genome_size/${gs_dir.name}"
+        }
+
     // ---- Combine all manifest entries into a single TSV ----
     ch_manifest_assemblies
         .mix(ch_manifest_snails)
@@ -1906,6 +1914,7 @@ workflow {
         .mix(ch_manifest_riparian)
         .mix(ch_manifest_compiled_csv)
         .mix(ch_manifest_qc_plots)
+        .mix(ch_manifest_genomescope)
         .mix(ch_manifest_assembly_report)
         .mix(ch_manifest_mito_gb)
         .mix(ch_manifest_mito_stats)
@@ -1948,6 +1957,7 @@ workflow {
                      seed: 'sample\test_genome_size_bp',
                      newLine: true)
         .ifEmpty(file('NO_GENOME_SIZE'))
+
 
     // ---- Per-sample run info (evidence + strategy) for the report header ----
     ch_run_info_tsv = ch_input

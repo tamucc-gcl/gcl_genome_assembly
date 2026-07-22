@@ -91,6 +91,7 @@ report_htmls   <- manifest %>% filter(type == "assembly_report_html")
 mito_assemblies <- manifest %>% filter(type == "mitogenome")
 mito_gene_maps  <- manifest %>% filter(type == "mito_gene_map")
 mito_stats_rows <- manifest %>% filter(type == "mito_stats")
+genomescope_plots <- manifest %>% filter(type == "genomescope_plot")
 
 all_hap_ids <- assemblies$id %>% sort()
 all_sample_ids <- all_hap_ids %>%
@@ -602,6 +603,25 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
         }
       }
     }
+
+    # --- GenomeScope profiles (per-sample k-mer spectra + model fit) ---
+    if (nrow(genomescope_plots) > 0) {
+      gs_w <- args$img_width
+      md <- c(md,
+        "### GenomeScope Profiles", "",
+        "K-mer spectra with the fitted [GenomeScope2](https://github.com/tbenavi1/genomescope2.0)",
+        "model — visual support for the haploid genome-size estimate (peak position), plus",
+        "heterozygosity and repeat content. One profile per sample.", "")
+
+      gs <- genomescope_plots %>% arrange(id)
+      md <- c(md, "<table>", "<tr><th>Sample</th><th>GenomeScope Profile</th></tr>")
+      for (i in seq_len(nrow(gs))) {
+        src <- rel_path(gs$subdir[i], gs$filename[i])
+        md <- c(md, sprintf("<tr><td><b>%s</b></td><td>%s</td></tr>",
+                            gs$id[i], img_tag(src, gs$id[i], width = gs_w)))
+      }
+      md <- c(md, "</table>", "")
+    }
     
     # Contact maps (pick best resolution)
     if (has_cmaps) {
@@ -688,88 +708,100 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
 }
 
 # =============================================================================
-# Section 4: QC trend plots + cross-stage table
+# Section 4: QC trend plots + cross-stage table (only meaningful with >1 stage)
 # =============================================================================
-if (!is.null(qc_data) && nrow(qc_data) > 0 && nrow(qc_plots) > 0) {
+n_stages <- if (!is.null(qc_data) && nrow(qc_data) > 0 && "stage" %in% names(qc_data))
+              n_distinct(qc_data$stage) else 0L
+
+if (!is.null(qc_data) && nrow(qc_data) > 0) {
   md <- c(md, "## 4. Assembly QC Across Pipeline Stages", "")
-  
-  plot_lines <- character()
-  plot_lines <- c(plot_lines, "### QC Trend Plots", "")
-  
-  plot_order <- c("busco", "kmer", "quast_misc", "contig_count", "contig_length", "trans_cis")
-  plot_labels <- c(
-    busco = "BUSCO Completeness",
-    kmer = "K-mer QV & Completeness",
-    quast_misc = "QUAST Assembly Metrics",
-    contig_count = "Contig/Scaffold Counts",
-    contig_length = "Assembly Size",
-    trans_cis = "Hi-C Trans:Cis Ratio"
-  )
-  
-  ordered_plots <- qc_plots %>%
-    mutate(plot_key = str_remove(filename, "\\.png$")) %>%
-    mutate(order = match(plot_key, plot_order)) %>%
-    arrange(order, filename)
-  
-  for (i in seq_len(nrow(ordered_plots))) {
-    row <- ordered_plots[i, ]
-    src <- rel_path(row$subdir, row$filename)
-    label <- plot_labels[row$plot_key]
-    if (is.na(label)) label <- row$plot_key
-    
-    plot_lines <- c(plot_lines,
-                    sprintf("#### %s", label), "",
-                    img_tag(src, label, width = 800), "")
-  }
-  
-  # Cross-stage comparison table (normalise BUSCO before formatting)
-  cross_stage <- qc_data %>%
-    mutate(
-      across(c(hap1, hap2), ~ case_when(
-        metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
-          . / .[metric == "total_busco"],
-        TRUE ~ .
-      )),
-      .by = c(sample_id, stage)
-    ) %>%
-    pivot_longer(cols = c(hap1, hap2, both),
-                 names_to = "haplotype",
-                 values_to = "value",
-                 values_drop_na = TRUE) %>%
-    filter(!(metric %in% c("error_rate", "error_kmer", "total_assembly_kmer") & analysis == "merqury"),
-           !(metric %in% c("kmer_found", "total_hifi_kmer") & analysis == "merqury"),
-           metric != "total_busco",
-           !str_detect(metric, ">=")) %>%
-    mutate(value_fmt = case_when(
-      analysis == "busco" ~ percent(value, accuracy = 0.1),
-      metric == "coverage" ~ comma(value, accuracy = 0.1),
-      metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
-      TRUE ~ comma(value, accuracy = 1)
-    ))
-  
-  if (nrow(cross_stage) > 0) {
-    cross_table <- cross_stage %>%
-      select(sample_id, metric, stage, haplotype, value_fmt) %>%
-      pivot_wider(names_from = c(stage, haplotype),
-                  values_from = value_fmt, values_fill = "") %>%
-      select(sample_id, metric,
-             matches("_hap1$"), matches("_hap2$"), matches("_both$")) %>%
-      mutate(sample_id = if_else(lag(sample_id, default = "") == sample_id, "", sample_id)) %>%
-      rename(Sample = sample_id, Metric = metric)
-    
-    plot_lines <- c(plot_lines,
-                    make_collapsible(
-                      c("#### Cross-Stage Metrics Table", "",
-                        make_markdown_table(cross_table)),
-                      "Click to expand: Assembly metrics across all pipeline stages"
-                    )
+
+  if (n_stages > 1) {
+    plot_lines <- character()
+
+    # Trend plots only if COMPILE_FINAL_QC emitted them
+    if (nrow(qc_plots) > 0) {
+      plot_lines <- c(plot_lines, "### QC Trend Plots", "")
+      plot_order <- c("busco", "kmer", "quast_misc", "contig_count", "contig_length", "trans_cis")
+      plot_labels <- c(
+        busco = "BUSCO Completeness",
+        kmer = "K-mer QV & Completeness",
+        quast_misc = "QUAST Assembly Metrics",
+        contig_count = "Contig/Scaffold Counts",
+        contig_length = "Assembly Size",
+        trans_cis = "Hi-C Trans:Cis Ratio"
+      )
+      ordered_plots <- qc_plots %>%
+        mutate(plot_key = str_remove(filename, "\\.png$")) %>%
+        mutate(order = match(plot_key, plot_order)) %>%
+        arrange(order, filename)
+      for (i in seq_len(nrow(ordered_plots))) {
+        row <- ordered_plots[i, ]
+        src <- rel_path(row$subdir, row$filename)
+        label <- plot_labels[row$plot_key]
+        if (is.na(label)) label <- row$plot_key
+        plot_lines <- c(plot_lines,
+                        sprintf("#### %s", label), "",
+                        img_tag(src, label, width = 800), "")
+      }
+    }
+
+    # Cross-stage comparison table (normalise BUSCO before formatting)
+    cross_stage <- qc_data %>%
+      mutate(
+        across(c(hap1, hap2), ~ case_when(
+          metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
+            . / .[metric == "total_busco"],
+          TRUE ~ .
+        )),
+        .by = c(sample_id, stage)
+      ) %>%
+      pivot_longer(cols = c(hap1, hap2, both),
+                   names_to = "haplotype",
+                   values_to = "value",
+                   values_drop_na = TRUE) %>%
+      filter(!(metric %in% c("error_rate", "error_kmer", "total_assembly_kmer") & analysis == "merqury"),
+             !(metric %in% c("kmer_found", "total_hifi_kmer") & analysis == "merqury"),
+             metric != "total_busco",
+             !str_detect(metric, ">=")) %>%
+      mutate(value_fmt = case_when(
+        analysis == "busco" ~ percent(value, accuracy = 0.1),
+        metric == "coverage" ~ comma(value, accuracy = 0.1),
+        metric %in% c("GC (%)", "kmer_completeness") ~ percent(value, accuracy = 0.1, scale = 1),
+        TRUE ~ comma(value, accuracy = 1)
+      ))
+
+    if (nrow(cross_stage) > 0) {
+      cross_table <- cross_stage %>%
+        select(sample_id, metric, stage, haplotype, value_fmt) %>%
+        pivot_wider(names_from = c(stage, haplotype),
+                    values_from = value_fmt, values_fill = "") %>%
+        select(sample_id, metric,
+               matches("_hap1$"), matches("_hap2$"), matches("_both$")) %>%
+        mutate(sample_id = if_else(lag(sample_id, default = "") == sample_id, "", sample_id)) %>%
+        rename(Sample = sample_id, Metric = metric)
+
+      plot_lines <- c(plot_lines,
+                      make_collapsible(
+                        c("#### Cross-Stage Metrics Table", "",
+                          make_markdown_table(cross_table)),
+                        "Click to expand: Assembly metrics across all pipeline stages"
+                      )
+      )
+    }
+
+    md <- c(md,
+            make_collapsible(plot_lines,
+                             "Click to expand: QC trend plots and cross-stage comparison")
     )
+  } else {
+    md <- c(md,
+      paste("*Only the final QC stage is present, so per-stage trend plots and",
+            "cross-stage comparisons aren't shown — they populate automatically once",
+            "earlier stages are recorded (purge_dups, scaffolding, gap-filling, etc.).",
+            "Full final-assembly metrics are in [section 2](#2-assembly-qc-summary).*"),
+      "")
   }
-  
-  md <- c(md,
-          make_collapsible(plot_lines,
-                           "Click to expand: QC trend plots and cross-stage comparison")
-  )
 }
 
 # =============================================================================
