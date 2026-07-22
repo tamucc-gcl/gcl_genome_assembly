@@ -38,6 +38,10 @@ parser$add_argument("--sample_taxonomy", default = "NO_TAXONOMY",    help = "Per
 parser$add_argument("--genome_size",     default = "NO_GENOME_SIZE", help = "Per-sample genome-size estimate TSV (sample/est_genome_size_bp) or NO_GENOME_SIZE")
 parser$add_argument("--workflow_info", default = "NO_WORKFLOW_INFO", help = "Workflow provenance TSV (key/value) or NO_WORKFLOW_INFO")
 parser$add_argument("--run_info",      default = "NO_RUN_INFO",      help = "Per-sample run-info TSV (sample/evidence/strategy) or NO_RUN_INFO")
+parser$add_argument("--flag_busco", default = 90, type = "double", help = "Status flag: warn if BUSCO complete percent below this")
+parser$add_argument("--flag_qv",    default = 40, type = "double", help = "Status flag: warn if Merqury QV below this")
+parser$add_argument("--flag_kmer",  default = 90, type = "double", help = "Status flag: warn if k-mer completeness percent below this")
+parser$add_argument("--flag_size_pct", default = 0, type = "double", help = "Status flag: warn if assembled length deviates from estimate by more than this percent (0 = off)")
 
 args <- parser$parse_args()
 
@@ -420,7 +424,79 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       }
     }
 
+    # --- Per-sample QC Status flag (report-improvement batch) ---
+    # ✅ = all checks pass · ⚠️ = one or more below the configured threshold. Worst-case
+    # (min) across haplotypes per sample. Thresholds are organism-dependent, so they're
+    # per-run tunable via --flag_busco / --flag_qv / --flag_kmer / --flag_size_pct.
+    thr_busco <- suppressWarnings(as.numeric(args$flag_busco))
+    thr_qv    <- suppressWarnings(as.numeric(args$flag_qv))
+    thr_kmer  <- suppressWarnings(as.numeric(args$flag_kmer))
+    thr_size  <- suppressWarnings(as.numeric(args$flag_size_pct))   # ±% window; <= 0 disables
+
+    verdict_src <- overview_long %>%
+      filter(metric %in% c("complete", "qv", "kmer_completeness")) %>%
+      group_by(sample_id, metric) %>%
+      summarise(value = suppressWarnings(min(value, na.rm = TRUE)), .groups = "drop") %>%
+      pivot_wider(names_from = metric, values_from = value)
+    for (m in c("complete", "qv", "kmer_completeness"))
+      if (!m %in% names(verdict_src)) verdict_src[[m]] <- NA_real_
+
+    # Size check: per-hap assembled length / haploid estimate; keep the hap furthest from
+    # 1.0. Reuses `est` from the est-size block above; off unless --flag_size_pct > 0
+    # (estimates are only meaningful once ploidy is correct).
+    size_dev <- tibble(sample_id = character(), size_ratio = numeric())
+    if (thr_size > 0 && !is.null(est) && nrow(est) > 0) {
+      size_dev <- overview_long %>%
+        filter(metric == "Total length", haplotype %in% c("hap1", "hap2")) %>%
+        select(sample_id, total_len = value) %>%
+        inner_join(est, by = "sample_id") %>%
+        mutate(ratio = total_len / est_bp) %>%
+        group_by(sample_id) %>%
+        slice_max(abs(ratio - 1), n = 1, with_ties = FALSE) %>%
+        ungroup() %>%
+        select(sample_id, size_ratio = ratio)
+    }
+    verdict_src <- verdict_src %>% left_join(size_dev, by = "sample_id")
+    if (!"size_ratio" %in% names(verdict_src)) verdict_src$size_ratio <- NA_real_
+
+    # 'complete' is a 0–1 fraction (normalised upstream); qv & kmer_completeness are 0–100.
+    verdict <- verdict_src %>%
+      rowwise() %>%
+      mutate(
+        flags = paste(c(
+          if (!is.na(complete)          && complete * 100 < thr_busco)   sprintf("BUSCO<%g%%", thr_busco),
+          if (!is.na(qv)                && qv < thr_qv)                  sprintf("QV<%g", thr_qv),
+          if (!is.na(kmer_completeness) && kmer_completeness < thr_kmer) sprintf("k-mer<%g%%", thr_kmer),
+          if (thr_size > 0 && !is.na(size_ratio) &&
+              abs(size_ratio - 1) * 100 > thr_size)                      sprintf("size %s", percent(size_ratio, accuracy = 1))
+        ), collapse = ", "),
+        Status = if (nchar(flags) == 0) "✅" else "⚠️"
+      ) %>%
+      ungroup() %>%
+      select(sample_id, Status, flags)
+
+    overview_wide <- overview_wide %>%
+      left_join(verdict %>% select(sample_id, Status), by = c("Sample" = "sample_id")) %>%
+      mutate(Status = replace_na(Status, "—")) %>%
+      relocate(Status, .after = Sample)
+
     md <- c(md, make_markdown_table(overview_wide), "")
+
+    crit <- sprintf("BUSCO complete ≥ %g%%, QV ≥ %g, k-mer completeness ≥ %g%%",
+                    thr_busco, thr_qv, thr_kmer)
+    if (thr_size > 0)
+      crit <- paste0(crit, sprintf(", assembled length within ±%g%% of estimate", thr_size))
+    md <- c(md,
+      paste0("> **Status:** ✅ all checks pass · ⚠️ below threshold (", crit,
+             "). Thresholds are per-run tunable."),
+      "")
+    flagged <- verdict %>% filter(nchar(flags) > 0)
+    if (nrow(flagged) > 0) {
+      md <- c(md,
+        paste0("Flagged: ",
+               paste(sprintf("**%s** (%s)", flagged$sample_id, flagged$flags), collapse = "; ")),
+        "")
+    }
   }
   
   # --- Detailed final assembly table (collapsible) ---

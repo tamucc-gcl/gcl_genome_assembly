@@ -53,6 +53,10 @@ process SUMMARY_REPORT {
         --genome_size ${genome_size} \\
         --workflow_info ${workflow_info} \\
         --run_info ${run_info} \\
+        --flag_busco ${params.qc_flag_busco} \\
+        --flag_qv ${params.qc_flag_qv} \\
+        --flag_kmer ${params.qc_flag_kmer} \\
+        --flag_size_pct ${params.qc_flag_size_pct} \\
         --output assembly_report.md
     """
 

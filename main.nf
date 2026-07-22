@@ -207,6 +207,12 @@ params.make_final_contact_maps = true
 params.report_stage = 'final'
 params.finalize_min_scaffold_size = 1000000
 
+// Report Parameters
+params.qc_flag_busco = 90    // report Status: warn if BUSCO complete % below this
+params.qc_flag_qv    = 40    // report Status: warn if Merqury QV below this
+params.qc_flag_kmer  = 90    // report Status: warn if k-mer completeness % below this
+params.qc_flag_size_pct = 15  // report Status: warn if |assembled/estimate − 1| exceeds this %; 0 = off
+
 // Dotplot Params
 params.run_pairwise_alignments = true
 params.pairwise_alignment_preset = 'asm5'  // minimap2 preset for assembly vs assembly alignment
