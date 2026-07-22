@@ -36,6 +36,8 @@ parser$add_argument("--mito_stats",       required = TRUE, help = "Mitogenome st
 parser$add_argument("--teloclip_stats",   required = TRUE, help = "Teloclip extension stats TSV (or NO_TELOCLIP)")
 parser$add_argument("--sample_taxonomy", default = "NO_TAXONOMY",    help = "Per-sample taxonomy TSV (sample/taxid/species/kingdom/busco_lineage) or NO_TAXONOMY")
 parser$add_argument("--genome_size",     default = "NO_GENOME_SIZE", help = "Per-sample genome-size estimate TSV (sample/est_genome_size_bp) or NO_GENOME_SIZE")
+parser$add_argument("--workflow_info", default = "NO_WORKFLOW_INFO", help = "Workflow provenance TSV (key/value) or NO_WORKFLOW_INFO")
+parser$add_argument("--run_info",      default = "NO_RUN_INFO",      help = "Per-sample run-info TSV (sample/evidence/strategy) or NO_RUN_INFO")
 
 args <- parser$parse_args()
 
@@ -104,6 +106,58 @@ qc_data <- tryCatch(
   error = function(e) { message("WARNING: ", e$message); NULL }
 )
 
+# --- Run Summary (provenance + inputs + stages) ---
+wf <- NULL
+if (!str_detect(basename(args$workflow_info), "NO_WORKFLOW_INFO") &&
+    file.exists(args$workflow_info) && file.size(args$workflow_info) > 0) {
+  wf <- tryCatch(
+    { d <- read_tsv(args$workflow_info, col_types = cols(.default = "c")); setNames(d$value, d$key) },
+    error = function(e) NULL)
+}
+ri <- NULL
+if (!str_detect(basename(args$run_info), "NO_RUN_INFO") &&
+    file.exists(args$run_info) && file.size(args$run_info) > 0) {
+  ri <- tryCatch(read_tsv(args$run_info, col_types = cols(.default = "c")), error = function(e) NULL)
+}
+
+prov <- character()
+if (!is.null(wf)) {
+  gv <- function(k) if (k %in% names(wf) && !is.na(wf[[k]])) wf[[k]] else "unknown"
+  rev_bit <- if (gv("commit") != "unknown")
+               sprintf("%s / `%s`", gv("revision"), substr(gv("commit"), 1, 10)) else gv("revision")
+  prov <- c(
+    sprintf("- **Pipeline:** %s %s (%s)", gv("pipeline"), gv("version"), rev_bit),
+    sprintf("- **Nextflow:** %s  ·  **Profile:** %s  ·  **Run:** %s  ·  **Started:** %s",
+            gv("nextflow"), gv("profile"), gv("run_name"), gv("start"))
+  )
+}
+
+n_samples   <- length(all_sample_ids)
+sample_line <- sprintf("- **Samples:** %d", n_samples)
+if (!is.null(ri) && nrow(ri) > 0) {
+  as_lgl <- function(x) tolower(as.character(x)) %in% c("true","t","1","yes")
+  parts <- c(sprintf("HiFi %d", sum(as_lgl(ri$hifi))),
+             sprintf("Hi-C %d", sum(as_lgl(ri$hic))),
+             sprintf("short-read %d", sum(as_lgl(ri$shortread))))
+  if (sum(as_lgl(ri$tellseq)) > 0) parts <- c(parts, sprintf("TellSeq %d", sum(as_lgl(ri$tellseq))))
+  asm <- ri %>% count(assembler) %>% mutate(l = sprintf("%s (%d)", assembler, n))
+  sample_line <- c(
+    sprintf("- **Samples:** %d  ·  **Inputs (samples with):** %s", n_samples, paste(parts, collapse = " · ")),
+    sprintf("- **Assemblers:** %s", paste(asm$l, collapse = ", "))
+  )
+}
+
+stages_line <- character()
+if (!is.null(qc_data) && nrow(qc_data) > 0 && "stage" %in% names(qc_data)) {
+  ord <- c("ctg.base","ctg.mito","ctg.purged","ctg.cor","ctg.deco",
+           "scaf.r1","scaf.r2","gap_fill","teloclip","final")
+  st  <- unique(qc_data$stage)
+  st  <- c(intersect(ord, st), sort(setdiff(st, ord)))
+  if (length(st) > 0) stages_line <- sprintf("- **QC stages present:** %s", paste(st, collapse = " → "))
+}
+
+run_summary <- c("## Run Summary", "", prov, sample_line, stages_line, "")
+
 # =============================================================================
 # Build the report
 # =============================================================================
@@ -114,6 +168,7 @@ md <- c(md,
         "",
         sprintf("> Generated: **%s**", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
         "",
+        run_summary,
         "---",
         "",
         "## Table of Contents",

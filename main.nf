@@ -1943,6 +1943,33 @@ workflow {
                      newLine: true)
         .ifEmpty(file('NO_GENOME_SIZE'))
 
+    // ---- Per-sample run info (evidence + strategy) for the report header ----
+    ch_run_info_tsv = ch_input
+        .map { meta, reads ->
+            [ meta.sample, meta.hifi, meta.hic, meta.tellseq, meta.shortread,
+              meta.assembler, meta.n_hap, meta.ploidy, meta.dedup, meta.mito_tool ]
+                .collect { it == null ? '' : it }.join('\t')
+        }
+        .collectFile(name: 'run_info.tsv',
+                     seed: ['sample','hifi','hic','tellseq','shortread',
+                            'assembler','n_hap','ploidy','dedup','mito_tool'].join('\t'),
+                     newLine: true)
+        .ifEmpty(file('NO_RUN_INFO'))
+
+    // ---- Workflow provenance for the report header ----
+    ch_workflow_info = Channel.of(
+            [ 'pipeline', workflow.manifest.name    ?: 'gcl_genome_assembly' ],
+            [ 'version',  workflow.manifest.version  ?: 'unknown' ],
+            [ 'revision', workflow.revision          ?: 'unknown' ],
+            [ 'commit',   workflow.commitId          ?: 'unknown' ],
+            [ 'run_name', workflow.runName           ?: 'unknown' ],
+            [ 'profile',  workflow.profile           ?: 'unknown' ],
+            [ 'nextflow', "${nextflow.version}" ],
+            [ 'start',    "${workflow.start}" ]
+        )
+        .map { k, v -> "${k}\t${v}" }
+        .collectFile(name: 'workflow_info.tsv', seed: 'key\tvalue', newLine: true)
+
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
         ch_report_manifest,
@@ -1953,6 +1980,8 @@ workflow {
         ch_teloclip_stats_for_report,
         ch_sample_taxonomy_tsv,
         ch_genome_size_tsv,
+        ch_workflow_info,
+        ch_run_info_tsv,
         ch_summary_report_script       
     )
 }

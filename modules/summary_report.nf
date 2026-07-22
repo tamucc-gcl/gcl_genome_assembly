@@ -33,6 +33,8 @@ process SUMMARY_REPORT {
     path(teloclip_stats)        // all_teloclip_stats.tsv or NO_TELOCLIP_STATS
     path(sample_taxonomy)       // NEW: sample_taxonomy.tsv or NO_TAXONOMY
     path(genome_size)           // NEW: genome_sizes.tsv or NO_GENOME_SIZE
+    path(workflow_info)         // NEW: workflow_info.tsv (key/value)
+    path(run_info)              // NEW: run_info.tsv (per-sample) or NO_RUN_INFO
     path(summary_report_script) // R script to generate the summary report
 
     output:
@@ -49,6 +51,8 @@ process SUMMARY_REPORT {
         --teloclip_stats ${teloclip_stats} \\
         --sample_taxonomy ${sample_taxonomy} \\
         --genome_size ${genome_size} \\
+        --workflow_info ${workflow_info} \\
+        --run_info ${run_info} \\
         --output assembly_report.md
     """
 

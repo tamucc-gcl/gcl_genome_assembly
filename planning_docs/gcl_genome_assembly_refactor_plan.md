@@ -329,6 +329,23 @@ A menu; each item re-runs only the report processes. Constraint: everything must
 (was the second half of 4b-i)
 - **Retire the now-redundant identity params.** The taxid→name/kingdom/BUSCO-lineage derivation is already delivered via `RESOLVE_TAXONOMY` (Increments 1–4); what remains is retiring `mitohifi_species` and `decon_source_taxid` and reconciling `taxid`/`species` into the unified scheme. Cache-affecting (touches `FIND_MITO_REFERENCE` / decon), hence grouped here, not with the report work.
 - **Full parameter unification** (was §10). One consistent scheme across the ~40+ params (hifiasm/SPAdes/jellyfish/genomescope/organelle/decon): grouped/namespaced, consistent names (`hifiasm_k` vs `spades_kmers`), defined once in `nextflow.config`, sane defaults, fully overridable per-run, no lost tunability. **Formalize the column↔param duality**: `pick` resolves `assembler`/`ploidy`/`n_hap`/`dedup`/`mito_tool`/identity as *row column > global param > derived default*; declare + document the undeclared globals with null defaults.
+- [ ] **Move `ploidy` out of `meta` into a per-sample side-channel** (same pattern as the taxonomy side-channel). `meta` is part of every per-sample task hash, so editing the sheet's `ploidy` column currently rehashes a sample's *entire* chain — even though `ploidy` is consumed by only two processes (`ESTIMATE_GENOME_SIZE` → genomescope `-p`; `HIFIASM` → `--n-hap`). The topology field `n_hap` is *derived* from `ploidy` once at parse time and already lives in `meta`, so `ploidy` itself doesn't need to. Carry it in a per-sample side-channel keyed by `sample`, join at point of use, drop `meta.ploidy`. After the move, editing `ploidy` rehashes only genome-size (+ hifiasm for HiFi samples). The move is a `meta`-shape change → one cache bust, which is why it rides this pass's single reset. (Discovered 2026-07-22: short-read test estimates were wrong at `-p 6` for a diploid — deferred the fix to here rather than burn the cache mid-report-iteration; results left intentionally wrong meanwhile.)
+
+- [ ] **Audit every `meta` field for cache-invalidation scope.** Principle: a field in `meta` is an input to every per-sample task, so changing it invalidates that sample's *entire* chain — correct for identity/topology/DAG-shaping fields, wasteful for "leaf" tuning knobs consumed by one or two processes (which should be side-channeled, like taxonomy already is and `ploidy` will be). For each field decide **stay in meta** vs **move to a side-channel**. Seed verdicts:
+
+  | meta field | consumed by | verdict |
+  |---|---|---|
+  | `id`, `sample`, `haplotype` | naming/grouping everywhere | **stay** — identity |
+  | `n_hap` | fork + `groupKey` | **stay** — topology |
+  | `hifi`, `hic`, `tellseq`, `shortread`, `long_reads` | evidence gating (which processes run) | **stay** — changing them changes the DAG |
+  | `assembler` | `CONTIG_ASSEMBLY` branch | **stay** — different assembly |
+  | `dedup` | conditioning branch (purge_dups/redundans/none) | **stay** (borderline) — changes the assembly |
+  | `mito_tool` | `ORGANELLE_ASSEMBLY` branch + mito-filter gate | **stay** (borderline) — changes the assembly |
+  | `taxid` | decon (`FCS_GX_SCREEN --taxid`) | **stay** — changes the cleaned assembly (derived name/kingdom/lineage already side-channeled) |
+  | `ploidy` | genomescope `-p`, hifiasm `--n-hap` | **move** — leaf knob; `n_hap` already carries the topology effect |
+  | `species` | `FIND_MITO_REFERENCE` (HiFi only) | **review** — being folded into the taxid-primary identity anyway |
+
+  Confirm the two "borderline" fields (`dedup`, `mito_tool`) are genuinely consumed as branch selectors (not merely carried) — if so, full invalidation is defensible since they change the assembly. Deliverable: fields that don't need to be in `meta` move to side-channels; record the final split in the caching notes (future-projects §D).
 
 ### Parked micro-items
 - Post-Pilon QC stage (`contig_polished` on `PILON.out`, gated `run_all_qc && run_pilon`) — add if the polishing QV-delta is wanted.
