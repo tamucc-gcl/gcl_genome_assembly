@@ -1957,18 +1957,25 @@ workflow {
         .ifEmpty(file('NO_RUN_INFO'))
 
     // ---- Workflow provenance for the report header ----
-    ch_workflow_info = Channel.of(
-            [ 'pipeline', workflow.manifest.name    ?: 'gcl_genome_assembly' ],
-            [ 'version',  workflow.manifest.version  ?: 'unknown' ],
-            [ 'revision', workflow.revision          ?: 'unknown' ],
-            [ 'commit',   workflow.commitId          ?: 'unknown' ],
-            [ 'run_name', workflow.runName           ?: 'unknown' ],
-            [ 'profile',  workflow.profile           ?: 'unknown' ],
-            [ 'nextflow', "${nextflow.version}" ],
-            [ 'start',    "${workflow.start}" ]
-        )
-        .map { k, v -> "${k}\t${v}" }
-        .collectFile(name: 'workflow_info.tsv', seed: 'key\tvalue', newLine: true)
+    // Render to plain Strings HERE. workflow.start is a java.time.OffsetDateTime and
+    // nextflow.version is a VersionNumber; if either reaches a channel still inside a
+    // GString, Kryo can't serialize it ("Unable to create serializer ... OffsetDateTime").
+    // .toString() on each line collapses the embedded objects to their string form first.
+    def wf_lines = [
+            "key\tvalue",
+            "pipeline\t${workflow.manifest.name   ?: 'gcl_genome_assembly'}",
+            "version\t${workflow.manifest.version ?: 'unknown'}",
+            "revision\t${workflow.revision        ?: 'unknown'}",
+            "commit\t${workflow.commitId          ?: 'unknown'}",
+            "run_name\t${workflow.runName         ?: 'unknown'}",
+            "profile\t${workflow.profile          ?: 'unknown'}",
+            "nextflow\t${nextflow.version}",
+            "start\t${workflow.start}"
+        ].collect { it.toString() }.join('\n')
+
+    ch_workflow_info = Channel
+        .of(wf_lines)
+        .collectFile(name: 'workflow_info.tsv', newLine: true)
 
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
