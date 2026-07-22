@@ -42,6 +42,10 @@ parser$add_argument("--flag_busco", default = 90, type = "double", help = "Statu
 parser$add_argument("--flag_qv",    default = 40, type = "double", help = "Status flag: warn if Merqury QV below this")
 parser$add_argument("--flag_kmer",  default = 90, type = "double", help = "Status flag: warn if k-mer completeness percent below this")
 parser$add_argument("--flag_size_pct", default = 0, type = "double", help = "Status flag: warn if assembled length deviates from estimate by more than this percent (0 = off)")
+parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Configured BUSCO fallback lineage (params.busco_lineage), for provenance flagging")
+parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
+parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
+parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
 
@@ -185,6 +189,7 @@ md <- c(md,
         "5. [Mitochondrial Genome](#5-mitochondrial-genome)",
         "6. [Telomere Detection](#6-telomere-detection)",
         "7. [Pairwise Alignment Summary](#7-pairwise-alignment-summary)",
+        "8. [Methods and Citations](#8-methods-and-citations)",
         "",
         "---",
         ""
@@ -498,6 +503,50 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                paste(sprintf("**%s** (%s)", flagged$sample_id, flagged$flags), collapse = "; ")),
         "")
     }
+
+    flagged <- verdict %>% filter(nchar(flags) > 0)
+    if (nrow(flagged) > 0) {
+      md <- c(md,
+        paste0("Flagged: ",
+               paste(sprintf("**%s** (%s)", flagged$sample_id, flagged$flags), collapse = "; ")),
+        "")
+    }
+
+    # --- BUSCO lineage provenance (report-improvement batch) ---
+    # Which lineage each BUSCO % was scored against, and how it was chosen: per-sample
+    # from the NCBI taxid (section 1), else the configured fallback.
+    if (!is.null(tax_tbl) && "busco_lineage" %in% names(tax_tbl)) {
+      lin <- tax_tbl %>%
+        filter(sample %in% overview_wide$Sample) %>%
+        transmute(sample,
+                  lineage = ifelse(is.na(busco_lineage) | busco_lineage == "", "—", busco_lineage))
+      fb <- tolower(trimws(as.character(args$busco_fallback)))
+      uniq_lin <- sort(unique(lin$lineage[lin$lineage != "—"]))
+
+      note <- paste0("> **BUSCO lineage:** completeness is scored per sample against the lineage ",
+                     "resolved from its NCBI taxid (section 1); where a specific clade can't be ",
+                     "resolved it falls back to `params.busco_lineage`")
+      if (nchar(fb) > 0) note <- paste0(note, sprintf(" (here `%s`)", args$busco_fallback))
+      note <- paste0(note, ".")
+      if (length(uniq_lin) == 1) {
+        note <- paste0(note, sprintf(" All samples scored against `%s`.", uniq_lin))
+      } else if (length(uniq_lin) > 1) {
+        pairs <- lin %>% arrange(sample) %>%
+          mutate(s = sprintf("%s → `%s`", sample, lineage)) %>% pull(s)
+        note <- paste0(note, " Per sample: ", paste(pairs, collapse = "; "), ".")
+      }
+      md <- c(md, note, "")
+
+      if (nchar(fb) > 0) {
+        on_fb <- sort(lin$sample[tolower(lin$lineage) == fb])
+        if (length(on_fb) > 0) {
+          md <- c(md,
+            sprintf("⚠️ Scored against the broad fallback lineage (completeness may read high): %s.",
+                    paste(sprintf("**%s**", on_fb), collapse = ", ")),
+            "")
+        }
+      }
+    }
   }
   
   # --- Detailed final assembly table (collapsible) ---
@@ -603,25 +652,6 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
         }
       }
     }
-
-    # --- GenomeScope profiles (per-sample k-mer spectra + model fit) ---
-    if (nrow(genomescope_plots) > 0) {
-      gs_w <- args$img_width
-      md <- c(md,
-        "### GenomeScope Profiles", "",
-        "K-mer spectra with the fitted [GenomeScope2](https://github.com/tbenavi1/genomescope2.0)",
-        "model — visual support for the haploid genome-size estimate (peak position), plus",
-        "heterozygosity and repeat content. One profile per sample.", "")
-
-      gs <- genomescope_plots %>% arrange(id)
-      md <- c(md, "<table>", "<tr><th>Sample</th><th>GenomeScope Profile</th></tr>")
-      for (i in seq_len(nrow(gs))) {
-        src <- rel_path(gs$subdir[i], gs$filename[i])
-        md <- c(md, sprintf("<tr><td><b>%s</b></td><td>%s</td></tr>",
-                            gs$id[i], img_tag(src, gs$id[i], width = gs_w)))
-      }
-      md <- c(md, "</table>", "")
-    }
     
     # Contact maps (pick best resolution)
     if (has_cmaps) {
@@ -705,6 +735,25 @@ if (has_snails || has_cmaps || has_dots || has_riparian) {
               "")
     }
   }
+}
+
+# --- GenomeScope profiles (per-sample k-mer spectra + model fit) ---
+if (nrow(genomescope_plots) > 0) {
+  gs_w <- args$img_width
+  md <- c(md,
+    "### GenomeScope Profiles", "",
+    "K-mer spectra with the fitted [GenomeScope2](https://github.com/tbenavi1/genomescope2.0)",
+    "model — visual support for the haploid genome-size estimate (peak position), plus",
+    "heterozygosity and repeat content. One profile per sample.", "")
+
+  gs <- genomescope_plots %>% arrange(id)
+  md <- c(md, "<table>", "<tr><th>Sample</th><th>GenomeScope Profile</th></tr>")
+  for (i in seq_len(nrow(gs))) {
+    src <- rel_path(gs$subdir[i], gs$filename[i])
+    md <- c(md, sprintf("<tr><td><b>%s</b></td><td>%s</td></tr>",
+                        gs$id[i], img_tag(src, gs$id[i], width = gs_w)))
+  }
+  md <- c(md, "</table>", "")
 }
 
 # =============================================================================
@@ -1090,6 +1139,113 @@ if (!str_detect(basename(pw_path), "NO_PAIRWISE") &&
             )
     )
   }
+}
+
+# =============================================================================
+# Section 8: Methods and Citations
+# =============================================================================
+as_lgl <- function(x) tolower(as.character(x)) %in% c("true", "t", "1", "yes")
+
+sig_sr   <- !is.null(ri) && any(as_lgl(ri$shortread))
+sig_hifi <- !is.null(ri) && any(as_lgl(ri$hifi))
+sig_hic  <- (!is.null(ri) && any(as_lgl(ri$hic))) || nrow(contact_maps) > 0
+sig_mito <- nrow(mito_stats_rows) > 0
+sig_syn  <- nrow(dotplots) > 0 || nrow(riparian_plots) > 0
+has_teloclip <- !str_detect(basename(args$teloclip_stats), "NO_TELOCLIP") &&
+                file.exists(args$teloclip_stats) && file.size(args$teloclip_stats) > 0
+asm_set   <- if (!is.null(ri)) sort(unique(tolower(ri$assembler))) else character()
+ran_purge <- as_lgl(args$ran_purge_dups)
+ran_decon <- as_lgl(args$ran_decontam)
+
+asm_pretty <- c(hifiasm = "hifiasm", spades = "SPAdes")
+asm_names  <- unname(ifelse(asm_set %in% names(asm_pretty), asm_pretty[asm_set], asm_set))
+asm_lbl <- if (length(asm_names) == 0) "the configured assembler" else
+           if (length(asm_names) == 1) asm_names else
+           paste(paste(asm_names[-length(asm_names)], collapse = ", "), "and", asm_names[length(asm_names)])
+
+# --- Methods narrative (reflects this run) ---
+narr <- sprintf("This run processed %d sample%s", n_samples, if (n_samples == 1) "" else "s")
+if (!is.null(ri)) {
+  inp <- c()
+  if (sig_hifi) inp <- c(inp, sprintf("HiFi (%d)", sum(as_lgl(ri$hifi))))
+  if (sig_hic)  inp <- c(inp, sprintf("Hi-C (%d)", sum(as_lgl(ri$hic))))
+  if (sig_sr)   inp <- c(inp, sprintf("short-read (%d)", sum(as_lgl(ri$shortread))))
+  if (!is.null(ri$tellseq) && any(as_lgl(ri$tellseq)))
+    inp <- c(inp, sprintf("TellSeq (%d)", sum(as_lgl(ri$tellseq))))
+  if (length(inp)) narr <- paste0(narr, sprintf(" (%s)", paste(inp, collapse = ", ")))
+}
+narr <- paste0(narr, sprintf(". Genome assembly used %s.", asm_lbl))
+if (sig_sr)    narr <- paste0(narr, " Short-read contigs were reduced, scaffolded and gap-closed with Redundans.")
+if (ran_purge) narr <- paste0(narr, " Haplotypic duplication was removed with purge_dups.")
+narr <- paste0(narr, " Haploid genome size and heterozygosity were estimated from k-mer spectra (Jellyfish + GenomeScope 2).")
+if (ran_decon) narr <- paste0(narr, " Assemblies were screened for contaminants with NCBI FCS (FCS-Adaptor and FCS-GX).")
+if (sig_hic)   narr <- paste0(narr, " Contigs were scaffolded against Hi-C data with YaHS.")
+if (sig_mito)  narr <- paste0(narr, " Organelle genomes were assembled with MitoHiFi.")
+narr <- paste0(narr, " Assembly quality was assessed with BUSCO (per-sample lineage; see section 2), Merqury (consensus QV and k-mer completeness) and QUAST (contiguity), with read coverage from minimap2/SAMtools alignments; telomeric repeats were surveyed with tidk.")
+if (has_teloclip) narr <- paste0(narr, " Scaffold ends were extended into telomeric repeats with teloclip.")
+if (sig_syn)   narr <- paste0(narr, " Synteny was visualised from minimap2 alignments (gggenomes).")
+narr <- paste0(narr, " Per-step parameters and exact software versions are recorded in the pipeline's Nextflow execution reports.")
+
+# --- Tool reference registry ---
+refs <- c(
+  pipeline    = "**gcl_genome_assembly** — TAMU-CC Genomics Core Lab. https://github.com/tamucc-gcl/gcl_genome_assembly",
+  hifiasm     = "**hifiasm** — Cheng et al. (2021) *Nat. Methods* 18:170-175.",
+  spades      = "**SPAdes** — Prjibelski et al. (2020) *Curr. Protoc. Bioinformatics* 70:e102.",
+  redundans   = "**Redundans** — Pryszcz & Gabaldon (2016) *Nucleic Acids Res.* 44:e113.",
+  purge       = "**purge_dups** — Guan et al. (2020) *Bioinformatics* 36:2896-2898.",
+  yahs        = "**YaHS** — Zhou et al. (2023) *Bioinformatics* 39:btac808.",
+  fcs         = "**NCBI FCS** (FCS-GX, FCS-Adaptor) — Astashyn et al. (2024) *Genome Biol.* 25:60.",
+  mitohifi    = "**MitoHiFi** — Uliano-Silva et al. (2023) *BMC Bioinformatics* 24:288.",
+  jellyfish   = "**Jellyfish** — Marçais & Kingsford (2011) *Bioinformatics* 27:764-770.",
+  genomescope = "**GenomeScope 2** — Ranallo-Benavidez et al. (2020) *Nat. Commun.* 11:1432.",
+  busco       = "**BUSCO** — Simão et al. (2021) *Bioinformatics* 31:3210-3212.",
+  merqury     = "**Merqury** — Rhie et al. (2020) *Genome Biol.* 21:245.",
+  quast       = "**QUAST** — Gurevich et al. (2013) *Bioinformatics* 29:1072-1075.",
+  minimap2    = "**minimap2** — Li (2018) *Bioinformatics* 34:3094-3100.",
+  samtools    = "**SAMtools** — Danecek et al. (2021) *GigaScience* 10:giab008.",
+  tidk        = "**tidk** — Brown et al. (2021) *Bioinformatics* 41:btaf049.",
+  teloclip    = "**teloclip** — Taranto. https://github.com/Adamtaranto/teloclip",
+  gggenomes   = "**gggenomes** — Hackl et al. (2024) *arXiv* arXiv:2411.13556"
+)
+
+# --- Select citations matching this run ---
+keys <- "pipeline"
+if (sig_hifi || "hifiasm" %in% asm_set) keys <- c(keys, "hifiasm")
+if ("spades" %in% asm_set)              keys <- c(keys, "spades")
+if (sig_sr)                             keys <- c(keys, "redundans")
+if (ran_purge)                          keys <- c(keys, "purge")
+if (ran_decon)                          keys <- c(keys, "fcs")
+if (sig_hic)                            keys <- c(keys, "yahs")
+if (sig_mito)                           keys <- c(keys, "mitohifi")
+keys <- c(keys, "jellyfish", "genomescope", "busco", "merqury", "quast", "minimap2", "samtools", "tidk")
+if (has_teloclip)                       keys <- c(keys, "teloclip")
+if (sig_syn)                            keys <- c(keys, "gggenomes")
+keys <- unique(keys)
+
+md <- c(md,
+        "## 8. Methods and Citations", "",
+        narr, "",
+        "### Tool References", "",
+        "Primary references for the tools used in this run. Exact versions are recorded in the pipeline's Nextflow execution reports (not reproduced here).", "",
+        paste0("- ", refs[keys]), "")
+
+# --- Software Versions (auto-populates once per-process version capture is enabled) ---
+ver_path <- args$versions
+vers <- NULL
+if (!str_detect(basename(ver_path), "NO_VERSIONS") &&
+    file.exists(ver_path) && file.size(ver_path) > 0) {
+  vers <- tryCatch(read_tsv(ver_path, col_types = cols(.default = "c")),
+                   error = function(e) { message("WARNING (versions): ", e$message); NULL })
+}
+md <- c(md, "### Software Versions", "")
+if (!is.null(vers) && nrow(vers) >= 1 && ncol(vers) >= 2) {
+  names(vers)[1:2] <- c("Tool", "Version")
+  vers_disp <- vers %>% distinct(Tool, .keep_all = TRUE) %>%
+    arrange(tolower(Tool)) %>% select(Tool, Version)
+  md <- c(md, make_markdown_table(vers_disp), "")
+} else {
+  md <- c(md,
+    "*Per-tool versions were not recorded for this run; see the pipeline's Nextflow execution report for the resolved software environment.*", "")
 }
 
 # =============================================================================
