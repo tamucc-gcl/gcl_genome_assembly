@@ -573,6 +573,7 @@ Touches `RESOLVE_TAXONOMY` and the decon/mito consumers → rehashes those + dow
 - **Collapse `species`** — retire the phantom `mitohifi_species` (referenced as a fallback in `meta.nf`, never declared); MitoHiFi's reference name comes from the resolved identity.
 - **Derive `genetic_code`** from kingdom in `RESOLVE_TAXONOMY` (NCBI translation table: vertebrate=2, invertebrate=5, plant=1, fungi=4, …); `mitohifi_genetic_code` becomes a `null` **override**.
 - Emit `genetic_code` alongside `species`/`kingdom`/`busco_lineage` in the **per-sample identity side-channel**, *not* in `meta` (it's consumed only by MitoHiFi, so a side-channel keeps the blast radius off every task hash).
+- **Derive `telomere_motif` from taxonomy.** Clade→motif lookup (order/class granularity where known; current default as fallback), consumed up-front by hifiasm `--telo-m` and by teloclip/tidk. `params.telomere_motif` stays as override. Unify the disagreeing module fallbacks (hifiasm `CCCTAA` vs teloclip/tidk `TTAGGG`) onto the one resolved value. (Consider feeding post-assembly steps the `tidk explore` motif instead of the derived one.)
 
 ---
 
@@ -593,6 +594,7 @@ Touches `RESOLVE_TAXONOMY` and the decon/mito consumers → rehashes those + dow
 - **Pin container tags** — FCS (`fcs-gx.sif` → `latest`) and MitoHiFi (`mitohifi:master`) are non-reproducible; pin to explicit versioned tags.
 - **Track-1 cleanup** — dead includes, `GAP_FILLING` heredoc (free here — everything rehashes anyway).
 - **One real run** — a HiFi+Hi-C sample **and** the short-read set. No `main` parity expected (diverged).
+- **FCS CPU allocation → `task.cpus`.** `FCS_GX_SCREEN` / `FCS_CLEAN_GENOME` (and the diamond-branch calls) currently receive a hardcoded `(params.decon?.cpus ?: 32)` from the `DECONTAM_FCS_AUTO` subworkflow. Move to `task.cpus` inside each process + a proper `cpus` directive (FCS-GX is memory-bound, ~470 GB GX DB resident — size it to a bigmem node), and drop the passed cpu argument. Removes the last `params.decon` remnant.
 
 ---
 
