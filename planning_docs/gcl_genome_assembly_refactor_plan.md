@@ -19,9 +19,9 @@ Task checkboxes: `- [ ]` open · `- [x]` done.
 
 | Field | Value |
 |---|---|
-| Current phase | **Report-improvement batch (pulled forward).** 4b-i identity/taxonomy Increments 1–4 delivered (taxonomy resolution + BUSCO/mito per-sample + genome-size & taxonomy in SUMMARY_REPORT); teloclip per-haplotype summary + the short-read-only report-hang both fixed. Now working the report-improvement menu **before** parameter unification: report/R-script edits only re-hash the terminal report processes, so we iterate freely against the current cache and reset it only once, at param unification. |
-| Phases complete | **Phase 1** (meta-map, byte-identical parity) · **Phase 2** (haploid `--primary`, stub + real) · **Phase 4a** (short-read + organelle stub + evidence-gating + genome-size; real 5-sample run) · **Track 1** (script cache-staging) · **4b-i identity/taxonomy** (Increments 1–4) |
-| Roadmap ahead | Report-improvement batch (now, cache-cheap) → **full parameter unification** (the single cache-reset; STOP for this round). Then future-projects doc: §A short-read organelle (GetOrganelle) → §B scaffolding/linked-read → §C blobtools → §D docs. |
+| Current phase | **Report-improvement batch COMPLETE → full parameter unification (the single cache-reset milestone) is next.** All seven report/QC-readability items delivered — est-genome-size & %-of-estimate columns, run-summary header, per-sample status/verdict flag (BUSCO/QV/k-mer + assembled-vs-estimate), GenomeScope profiles, BUSCO-lineage provenance, the §4 single-stage gate, and the Methods & Citations §8 (including the report side of software-version capture) — plus the short-read-only report-hang and `ch_workflow_info` Kryo fixes. Report edits re-hash only the terminal report processes, so the assembly/QC/scaffolding cache is intact. Next work touches `meta` + the ~40-param surface → the one deliberate full cache reset. |
+| Phases complete | **Phase 1** (meta-map, byte-identical parity) · **Phase 2** (haploid `--primary`, stub + real) · **Phase 4a** (short-read + organelle stub + evidence-gating + genome-size; real 5-sample run) · **Track 1** (script cache-staging) · **4b-i identity/taxonomy** (Increments 1–4) · **Report-improvement batch** (7 items) |
+| Roadmap ahead | **Full parameter unification** — the single cache-reset; STOP for this round. Now bundles: identity-param retirement, the grouped/namespaced param scheme, the `ploidy`→side-channel move, the `meta`-field cache-scope audit, and per-process software-version capture (+ container-tag pinning). Then `gcl_genome_assembly_future_projects.md`: §A organelle (GetOrganelle) → §B scaffolding/linked-read → §C blobtools → §D docs. |
 | Last updated | 2026-07-22 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
 ---
@@ -313,49 +313,52 @@ Split out of this document on 2026-07-07. The old "Phase 4b" is now split: its *
 
 ### DONE this round
 - **Track 1** — script cache-staging: all 10 script-calling processes declare `input: path(script)` (detail in Change Log). ✅
-- **4b-i identity/taxonomy (Increments 1–4)** — `RESOLVE_TAXONOMY` per-sample side-channel; BUSCO per-lineage; mito per-species; genome-size + taxonomy surfaced in SUMMARY_REPORT. ✅ Increments 1–3 validated on real data; Increment 4 + the teloclip per-haplotype fix delivered — **next run confirms the new §1 taxonomy/genome-size table renders; the teloclip summary needs a HiFi run specifically to confirm the per-haplotype collapse.**
+- **4b-i identity/taxonomy (Increments 1–4)** — `RESOLVE_TAXONOMY` per-sample side-channel; BUSCO per-lineage; mito per-species; genome-size + taxonomy in SUMMARY_REPORT. ✅ Increments 1–3 validated on real data; Increment 4 rendered and confirmed (the §1 taxonomy/genome-size table appears in the current reports); the teloclip per-haplotype collapse still needs a HiFi run to confirm.
+- **Report-improvement batch (all 7 items + the short-read-only report-hang & Kryo fixes)** — see the checklist below; every item is R-script / report-process only, so the assembly/QC/scaffolding cache is intact. ✅ *(newest three — BUSCO note, §8, versions placeholder — pending a render-confirm; earlier items seen rendering.)*
 
-### Report-improvement batch *(NOW — cache-cheap; iterate against the current cache)*
-A menu; each item re-runs only the report processes. Constraint: everything must render as GitHub-flavored markdown (tables, `<details>`, `<img>`/`<table>`, task-lists, blockquotes; no scripts/CSS).
-- [ ] **Est. genome size vs assembled size in the §2 overview** — add "Est. Genome Size" + "% of Estimate" columns (both numbers now available). Natural follow-on to Increment 4.
-- [ ] **Run-summary header block** — pipeline version/commit, run date, sample count, input types present (HiFi/Hi-C/short-read), which optional stages ran.
-- [ ] **Per-sample status/verdict flag** — ✅/⚠️ from thresholds (BUSCO complete ≥ X, QV ≥ Y, assembled length within Z% of estimate).
-- [ ] **GenomeScope linear plot per sample** — surface `linear_plot.png` via the manifest in a collapsible next to the taxonomy table.
-- [ ] **BUSCO lineage provenance in §2** — show each sample's `*_odb10` set beside its score so a low score isn't misread as a bad assembly (the plant-vs-fish trap).
-- [ ] **Collapse the giant per-stage detail tables (§4)** — one `<details>` per sample, or default to `final` with intermediates behind a toggle.
-- [ ] **Methods/citations footer** — collapsible tool list + versions + citations.
+### Report-improvement batch *(COMPLETE 2026-07-22 — cache-cheap; re-hashed only the terminal report processes)*
+Everything renders as GitHub-flavored markdown (tables, `<details>`, `<img>`/`<table>`, blockquotes; no scripts/CSS).
+- [x] **Est. genome size vs assembled size (§2 overview)** — "Est. Genome Size" + per-hap "% of Estimate" columns from the `--genome_size` TSV. ✅ validated.
+- [x] **Run-summary header block** — provenance (pipeline/version/commit/profile/run/started) + per-sample input-type counts + assembler tally + QC-stages present. ✅ (needed the `ch_workflow_info` OffsetDateTime/Kryo fix — Change Log.)
+- [x] **Per-sample status/verdict flag** — ✅/⚠️ Status column from configurable thresholds `--flag_busco`/`--flag_qv`/`--flag_kmer` (worst-hap min) + a legend + a flagged-reasons line; extended with the assembled-vs-estimate check (`--flag_size_pct`, symmetric ±window, direction-preserving label, default `0`=off pending the ploidy fix). Thresholds read as `params.qc_flag_*` in-process → cache-cheap. ✅ (at the 90 default all plants flag on BUSCO — normal for `liliopsida_odb10`; use `--qc_flag_busco 80` for discrimination.)
+- [x] **GenomeScope linear plot per sample** — `linear_plot.png` via a new `genomescope_plot` manifest row (`ESTIMATE_GENOME_SIZE.out.results`), rendered as a §3 sub-table. ✅ *(first paste landed inside the §3 per-sample loop → repeated 5× / broke the table; moved out of the loop.)*
+- [x] **BUSCO lineage provenance (§2)** — a note under the overview: per-sample lineage (collapses to "all samples scored against `X`", or a per-sample list), the resolution rule (taxid → else `params.busco_lineage`, passed as `--busco_fallback`), and a ⚠️ flag for any sample scored against the broad fallback lineage. ✅
+- [x] **Collapse the giant per-stage detail tables (§4)** — single-stage gate: with only the `final` stage present, the trend plots + cross-stage table (both degenerate) are replaced by a one-line pointer to §2; full §4 retained for multi-stage (already inside `<details>`). ✅ *(per-sample splitting of the multi-stage tables = optional, deferred.)*
+- [x] **Methods/citations footer (§8)** — run-aware methods narrative + a citation list filtered to the tools that actually ran (gated on `run_info` / manifest filters / `--ran_purge_dups` / `--ran_decontam`) + a Software Versions table (report side of version capture; `--versions`) + a TOC entry. ✅
 
-### Full parameter unification *(LAST — the single cache-reset; STOPPING POINT for this round)*
+### Full parameter unification *(LAST — the single cache-reset; STOPPING POINT)* → see §12
+Now fully specified in **§12 (Parameter Unification & Rework — Implementation Plan)**: snake_case normalize + config move + compat-layer removal (WS-A, cache-safe, `-resume`-gated), identity/taxonomy consolidation (WS-B), and the reset — `ploidy` side-channel, hg_size-from-estimate, `meta` audit, version capture, container pins (WS-C). Naming, collapses, config layout, migration map, and launch-wrapper migration are finalized there.
 (was the second half of 4b-i)
 - **Retire the now-redundant identity params.** The taxid→name/kingdom/BUSCO-lineage derivation is already delivered via `RESOLVE_TAXONOMY` (Increments 1–4); what remains is retiring `mitohifi_species` and `decon_source_taxid` and reconciling `taxid`/`species` into the unified scheme. Cache-affecting (touches `FIND_MITO_REFERENCE` / decon), hence grouped here, not with the report work.
 - **Full parameter unification** (was §10). One consistent scheme across the ~40+ params (hifiasm/SPAdes/jellyfish/genomescope/organelle/decon): grouped/namespaced, consistent names (`hifiasm_k` vs `spades_kmers`), defined once in `nextflow.config`, sane defaults, fully overridable per-run, no lost tunability. **Formalize the column↔param duality**: `pick` resolves `assembler`/`ploidy`/`n_hap`/`dedup`/`mito_tool`/identity as *row column > global param > derived default*; declare + document the undeclared globals with null defaults.
-- [ ] **Move `ploidy` out of `meta` into a per-sample side-channel** (same pattern as the taxonomy side-channel). `meta` is part of every per-sample task hash, so editing the sheet's `ploidy` column currently rehashes a sample's *entire* chain — even though `ploidy` is consumed by only two processes (`ESTIMATE_GENOME_SIZE` → genomescope `-p`; `HIFIASM` → `--n-hap`). The topology field `n_hap` is *derived* from `ploidy` once at parse time and already lives in `meta`, so `ploidy` itself doesn't need to. Carry it in a per-sample side-channel keyed by `sample`, join at point of use, drop `meta.ploidy`. After the move, editing `ploidy` rehashes only genome-size (+ hifiasm for HiFi samples). The move is a `meta`-shape change → one cache bust, which is why it rides this pass's single reset. (Discovered 2026-07-22: short-read test estimates were wrong at `-p 6` for a diploid — deferred the fix to here rather than burn the cache mid-report-iteration; results left intentionally wrong meanwhile.)
-
-- [ ] **Audit every `meta` field for cache-invalidation scope.** Principle: a field in `meta` is an input to every per-sample task, so changing it invalidates that sample's *entire* chain — correct for identity/topology/DAG-shaping fields, wasteful for "leaf" tuning knobs consumed by one or two processes (which should be side-channeled, like taxonomy already is and `ploidy` will be). For each field decide **stay in meta** vs **move to a side-channel**. Seed verdicts:
-
-  | meta field | consumed by | verdict |
-  |---|---|---|
-  | `id`, `sample`, `haplotype` | naming/grouping everywhere | **stay** — identity |
-  | `n_hap` | fork + `groupKey` | **stay** — topology |
-  | `hifi`, `hic`, `tellseq`, `shortread`, `long_reads` | evidence gating (which processes run) | **stay** — changing them changes the DAG |
-  | `assembler` | `CONTIG_ASSEMBLY` branch | **stay** — different assembly |
-  | `dedup` | conditioning branch (purge_dups/redundans/none) | **stay** (borderline) — changes the assembly |
-  | `mito_tool` | `ORGANELLE_ASSEMBLY` branch + mito-filter gate | **stay** (borderline) — changes the assembly |
-  | `taxid` | decon (`FCS_GX_SCREEN --taxid`) | **stay** — changes the cleaned assembly (derived name/kingdom/lineage already side-channeled) |
-  | `ploidy` | genomescope `-p`, hifiasm `--n-hap` | **move** — leaf knob; `n_hap` already carries the topology effect |
-  | `species` | `FIND_MITO_REFERENCE` (HiFi only) | **review** — being folded into the taxid-primary identity anyway |
-
-  Confirm the two "borderline" fields (`dedup`, `mito_tool`) are genuinely consumed as branch selectors (not merely carried) — if so, full invalidation is defensible since they change the assembly. Deliverable: fields that don't need to be in `meta` move to side-channels; record the final split in the caching notes (future-projects §D).
+- **Move `ploidy` out of `meta` into a per-sample side-channel.** It feeds only two consumers — genomescope `-p` and hifiasm `--n-hap` — while `meta.n_hap` already carries assembly topology (fork/groupKey). In `meta`, every ploidy tweak rehashes a sample's entire chain; a `meta.sample`-keyed side-channel (like `ch_qc_reads`) confines it to those two. **Cache-busting → belongs here.** Unblocks flipping the size-vs-estimate default on (once estimates are ploidy-correct: `--qc_flag_size_pct 15`).
+- **Audit every `meta` field for cache-invalidation scope.** `meta` is in every per-sample task hash, so each field there is a caching decision. Seed verdict (confirm during the pass):
+  - **STAY** (genuinely alter the assembly/QC → belong in the hash): `id`, `sample`, `haplotype`, `n_hap`, `hifi`, `hic`, `tellseq`, `shortread`, `long_reads`, `assembler`, `taxid`. `dedup`/`mito_tool` = borderline-stay (they select tools).
+  - **MOVE:** `ploidy` (→ side-channel, above).
+  - **REVIEW:** `species` (largely inert — only `FIND_MITO_REFERENCE` consumes a name; fold into identity-consolidation).
+- **Per-process software-version capture.** Report *display* already shipped with the report batch (R-side `--versions` + the §8 Software Versions table — cache-cheap; prints "not recorded" until emission lands). *Emission* belongs here because it rehashes every process: each module gains `path "versions.tsv", emit: versions` + one-or-more `printf 'tool<TAB>version'` lines at the end of `script:`. New `collect_software_versions.nf` (`COLLECT_SOFTWARE_VERSIONS`) cats+dedups all per-process `versions.tsv` → `software_versions.tsv`; `main.nf` accumulates `<PROC>.out.versions` via `.mix()` → `.collect()` → `COLLECT_SOFTWARE_VERSIONS` → `.ifEmpty(file('NO_VERSIONS'))` → `SUMMARY_REPORT`; `summary_report.nf` adds the `path(software_versions)` input + `--versions` arg. **Lift each tool's exact `--version` incantation from its nf-core module** (purge_dups / merqury / genomescope2 / the FCS container have no clean `--version`). **Sub-task — pin container tags:** FCS (`fcs-gx.sif` → `latest`) and MitoHiFi (`mitohifi:master`) are non-reproducible; pin to explicit versioned tags so the recorded version is deterministic. Free here — everything reruns anyway.
 
 ### Parked micro-items
 - Post-Pilon QC stage (`contig_polished` on `PILON.out`, gated `run_all_qc && run_pilon`) — add if the polishing QV-delta is wanted.
 - Regression-vs-`main` byte-parity — **superseded** (diverged from `main`, validated on real data).
-- Track-1 tidy leftovers (§9): dead-include removal, `GAP_FILLING` heredoc — non-blocking, fold in whenever (report batch is a convenient window since it's the same cache-cheap class).
+- Track-1 tidy leftovers (§9): dead-include removal, `GAP_FILLING` heredoc — non-blocking; fold into the param-unification reset (or any cache-cheap moment).
 
 ---
 
 ## 6. Change Log (implemented)
 
+- **2026-07-22 — Parameter-unification spec finalized → §12 plan.** Locked: full snake_case (hifiasm → descriptive names), all params → `nextflow.config`, compat-layer/derived-maps removed and consumers flattened (decon 26 / diamond 9 / evidence 4 / gxdb 1; yahs maps dead), step-toggles → `run_*`, negatives flipped, base-pair values → `_bp`, `genomescope_kmer`+`merqury_k` → `kmer_size`. Duplicates collapsed: `taxid` (retire `decon_source_taxid`), `species` (retire phantom `mitohifi_species`), `outdir` (config-only), `hifiasm_nHaplotypes` (→ ploidy side-channel). New derivations/data-flow: `genetic_code` from kingdom (WS-B); `hifiasm_haploid_genome_size` from the GenomeScope estimate with an explicit `'auto'` sentinel + serialized HiFi DAG (WS-C); `ploidy` → side-channel (WS-C). Cache split: WS-A value-preserving (`-resume`=0 re-runs), WS-B partial, WS-C the bundled reset (+ version capture, FCS/MitoHiFi container-tag pinning, Track-1 cleanup). Migration map, config layout, launch-wrapper migration, validation, and commit order in §12.
+
+- **2026-07-22 — Report-improvement batch COMPLETE + software-version capture scoped into the param-unification reset.** All seven items landed as R-script / report-process edits (terminal-process re-hash only; assembly/QC/scaffolding cache untouched):
+  1. **§2 est-genome-size columns** — "Est. Genome Size" + per-hap "% of Estimate" from the `--genome_size` TSV, `relocate`d after Total Length. Validated.
+  2. **Run-summary header** — provenance + per-sample input counts + assembler tally + QC-stages, spliced after the Generated line. **Kryo fix:** `workflow.start` (OffsetDateTime) + `nextflow.version` (VersionNumber) were entering `ch_workflow_info` inside GStrings → "Unable to create serializer … OffsetDateTime" at dataflow setup (before SUMMARY_REPORT ran); fixed by rendering the whole block to plain Strings (`[…].collect{ it.toString() }.join('\n')`) before the channel. Validated.
+  3. **Per-sample status/verdict flag** — ✅/⚠️ Status column in §2 from `--flag_busco`/`--flag_qv`/`--flag_kmer` (worst-hap min across haps) + legend + flagged-reasons line; then the assembled-vs-estimate check (`--flag_size_pct`, symmetric `abs(ratio-1)` window, direction-preserving `size NNN%` label, default `0`=off given the ploidy skew). Thresholds referenced as `params.qc_flag_*` directly in the process (no channel/call change) → cache-cheap. Validated (all 5 plants flag on BUSCO at the 90 default — expected for `liliopsida_odb10`; `--qc_flag_busco 80` gives discrimination).
+  4. **GenomeScope profiles (§3)** — `linear_plot.png` per sample via a new `genomescope_plot` manifest row (`ESTIMATE_GENOME_SIZE.out.results`, subdir `qc/genome_size/<sample>_genomescope`), rendered as a Sample/Profile sub-table. First paste mistakenly landed inside the §3 per-sample loop → emitted 5× and broke the main visual `<table>`; moved out of the loop (lesson: content-anchor multi-edit insertions, not line numbers).
+  5. **BUSCO-lineage provenance (§2)** — a note under the overview: per-sample lineage (collapses to "All samples scored against `X`" or a per-sample list), the resolution rule (taxid → else `params.busco_lineage`, passed as `--busco_fallback`), and a ⚠️ line flagging any sample scored against the broad fallback lineage. No new column (overview already 13 wide).
+  6. **§4 single-stage gate** — `n_stages = n_distinct(qc_data$stage)`; when only `final` is present the trend plots (single data point) + cross-stage table (duplicates §2) are replaced by a one-line pointer to §2; full §4 retained for multi-stage (already in `<details>`). Section kept (static TOC/number) with a branch inside.
+  7. **Methods & Citations (§8, new numbered section + TOC entry)** — a run-aware narrative + a citation list, both filtered to the tools that actually ran via report signals (`run_info` assembler/inputs, manifest `contact_maps`/`dotplots`/`mito_stats_rows`, `--ran_purge_dups`, `--ran_decontam`, teloclip sentinel). Confirmed the branch logic first: REDUNDANS is short-read-path (`ch_contigs_by_type.shortread`), purge_dups is HiFi-path (`run_purge_dups`), Hi-C=YaHS, organelle=MitoHiFi, synteny=minimap2+gggenomes, decontam=NCBI FCS. Includes the **Software Versions** table (`--versions`, prints "not recorded" until emission lands).
+  **Software-version capture — split by cache cost.** Report *display* shipped with this batch (R-side; cache-cheap). *Emission* deferred into the **parameter-unification reset** and added to that task list: per-process `versions.tsv` emission (changes every script → full rerun), `COLLECT_SOFTWARE_VERSIONS`, the `.mix→.collect→COLLECT→ifEmpty→SUMMARY_REPORT` wiring, `summary_report.nf --versions`, per-tool `--version` commands to be lifted from nf-core, and a sub-task to pin the FCS (`latest`) / MitoHiFi (`master`) container tags. **Also folded into param-unification:** the `ploidy`→side-channel move (feeds only genomescope `-p` + hifiasm `--n-hap`; `n_hap` already carries topology) and a full `meta`-field cache-scope audit (seed verdict in the roadmap). Render-confirm items (BUSCO note, §8, versions placeholder) pending the next report; earlier items seen rendering.
+  
 - **2026-07-22 — 4b-i Increment 4 delivered (genome-size + taxonomy in SUMMARY_REPORT) + teloclip per-haplotype fix + report batch pulled ahead of param unification.** **Increment 4:** `main.nf` builds two per-sample side TSVs via `collectFile` + `.ifEmpty(sentinel)` — `sample_taxonomy.tsv` (from the `ch_sample_identity` side-channel: sample/taxid/species/kingdom/busco_lineage) and `genome_sizes.tsv` (from `ESTIMATE_GENOME_SIZE.out.size`, reading `size_file.text` per sample) — and passes both into `SUMMARY_REPORT`. `summary_report.nf` gains two `path()` inputs + `--sample_taxonomy`/`--genome_size` args. `generate_summary_report.R` reads both (sentinel-guarded), merges onto the `all_sample_ids` spine, and renders a new **"Sample Taxonomy & Genome-Size Estimate"** table under §1 (Species/Taxid/Kingdom/BUSCO Lineage/Est. Genome Size, Gb-formatted to match §2). Closes the Phase-4a "genome-size into report" loose end AND surfaces resolved organism identity per sample. Cache impact: only `SUMMARY_REPORT` re-hashes (new declared inputs); nothing upstream. **Teloclip fix:** the report was emitting one row PER CONTIG because the haplotype was derived via `str_remove(contig, "_scaffold_\\d+$")` — a no-op on unscaffolded HiFi contigs (`…_ptgNl`), so every contig became its own group. Replaced with **prefix-matching each contig against the known `all_hap_ids`** (teloclip stamps `{meta.id}_` on every contig → robust to any contig suffix), collapsing to a per-haplotype summary (`Contigs Extended / Total Extensions / Total bp Added / Mean / Max`) with the full per-contig/per-end table moved into a `<details>` block. R-script-only (staged input → re-hashes `SUMMARY_REPORT` only). Confirmed by code + schema reading; **validate the collapsed table on a HiFi run.** **Sequencing decision (Jason): report-improvement menu pulled AHEAD of parameter unification.** Rationale: report changes live in staged R/py scripts (+ at most report-process wiring / manifest entries) → they re-hash only the terminal report processes, never the assembly/QC/scaffolding cache; parameter unification touches `meta` + ~40 params → rehashes everything. So iterate all report work first against the current cache, then reset once at param unification. Roadmap reordered accordingly.
 
 - **2026-07-22 — 4b-i Increments 1–3 VALIDATED on real data (mixed HiFi-only + short-read) + short-read-only report-hang found.** 2-sample `final_only` run (`assembly-1427788`, report 2026-07-17): `Sde-CMat_203_hap_hifi` (HiFi-only, collapsed) + `plant` (short-read). SUCCESS, no errors. **Inc 1:** each sample resolved from its own taxid — plant→`Schoenoplectus americanus`/plant/`liliopsida_odb10`, fish→`Spratelloides delicatulus`/animal/`actinopterygii_odb10`; the fish row had `species=null` so the name came from the taxid (old global-`mitohifi_species` inheritance that mislabeled the plant is gone). **Inc 2:** plant BUSCO **83.6% complete** (2704/3236) on `liliopsida_odb10` vs the old ~4.5% on `actinopterygii_odb10`; fish 93.2% (3393/3640) on `actinopterygii_odb10`; `DOWNLOAD_BUSCO_DB` stored both; `busco.nf` selects per-sample by `meta.taxid`. **Inc 3:** `FIND_MITO_REFERENCE (Spratelloides…)` 1/1, MitoHiFi ran for the fish, plant correctly skipped mito. Evidence-gating correct (no Hi-C scheduled; hifiasm-fish / SPAdes+REDUNDANS-plant; teloclip + coverage fish-only). Both reports completed. **Still open in 4b-i:** Increment 4 (genome-size + taxonomy into SUMMARY_REPORT — `ESTIMATE_GENOME_SIZE` runs but is not surfaced; report has no species/genome-size section) + full parameter unification. **BUG (short-read-only report hang):** with NO long-read sample, `SUMMARY_REPORT` never launches. The teloclip block is gated `if (params.run_teloclip_extend)` (global param, default on), and inside it `ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats` — with no long reads, `TELOCLIP_EXTEND` runs 0×, its `.collect()` emits nothing, `COLLECT_TELOCLIP_STATS` never runs, so the channel stays empty and gates the report forever. Same anti-pattern on the pairwise block (`ch_pairwise_summary`, empty when `PAIRWISE_ALIGNMENT` runs 0× → single-sample runs of any type). The mixed run dodged it because the fish supplied teloclip + a cross-sample pair. Fix (2 lines): `.ifEmpty(file('NO_TELOCLIP'))` / `.ifEmpty(file('NO_PAIRWISE'))` on those report-facing channels — the same sentinels the `else` branches emit and `generate_summary_report.R` already handles. Design note for docs: every report-facing channel behind an `if (params.run_X)` needs an `.ifEmpty(sentinel)`, since a param being on no longer implies the sub-step produced output under evidence-gating.
@@ -529,3 +532,278 @@ convenient). Resolved items move to the Change Log.
 ## 11. Documentation / README revamp → moved to `gcl_genome_assembly_future_projects.md` §D
 
 Split out on 2026-07-07. The full docs scope + the running "notes to fold into the docs" list now live in the future-projects doc (§D), to be picked up after the architecture settles.
+
+# 12. Parameter Unification & Rework — Implementation Plan
+*(finalized 2026-07-22 — the single cache-reset milestone; supersedes the "Full parameter unification" bullets in the Forward Roadmap)*
+
+## 12.0 Principle: one disruptive milestone, three workstreams split by cache cost
+
+A Nextflow task hash is over the *rendered* command (params already interpolated), inputs, and container. So **renaming/relocating a param with its value unchanged is cache-safe** — the rendered command is byte-identical and nothing re-runs. The cache bust comes only from (a) removing/adding `meta` fields, (b) changing a process script (version emission), and (c) changing a container tag.
+
+That lets us sequence the disruptive-but-safe work *first*, verify it against the live cache with `-resume`, and only then eat the real reset once:
+
+| WS | Content | Cache class | Gate |
+|----|---------|-------------|------|
+| **A** | snake_case normalize + move all params to config + flatten the derived maps + declare strategy globals | **cache-safe** | `-resume` re-runs **0** processes |
+| **B** | identity/taxonomy consolidation (`taxid`/`species`/`genetic_code`) | partial (RESOLVE_TAXONOMY + decon/mito consumers) | stub + spot-check |
+| **C** | the reset: `ploidy` side-channel, hg_size-from-estimate, `meta` audit, version capture, container pins, Track-1 cleanup | **cache-busting** | one real run |
+
+`-resume` after WS-A is the correctness proof: if any process re-runs, a rename silently changed a rendered command — fix before moving on.
+
+---
+
+## 12.1 Workstream A — Normalize + move to config (CACHE-SAFE)
+
+1. **Relocate** every param from `main.nf` (L37–320) into `nextflow.config`'s `params {}` block, grouped by section (layout in §12.4). `main.nf` keeps no `params.x = …` defaults.
+2. **Rename** per the migration map (§12.5): hifiasm → descriptive, step-toggles → `run_*`, negatives flipped, base-pair values → `_bp`, k-mer → `kmer_size`.
+3. **Kill the compat layer.** Delete the six derived-map blocks (`main.nf` L328–384) and flatten their consumers — ~40 references: `decon` 26, `diamond` 9, `evidence` 4, `gxdb` 1; the two `yahs_round1/2` maps have **0** consumers (delete outright). E.g. `params.decon.run_on_contigs` → `params.run_decon_contigs`.
+4. **Declare the strategy globals** the `pick` resolver reads, as `= null` (keeps `pick`'s *row column > global param > derived default* behavior, now explicit/documented): `assembler`, `ploidy`, `dedup`, `mito_tool`, `n_hap`.
+5. **De-dup `outdir`** (declared in both config L26 and main.nf L38) → config only.
+6. **Update the launch wrapper** (§12.6).
+
+**Gate:** `nextflow run … -resume` re-runs nothing.
+
+---
+
+## 12.2 Workstream B — Identity & taxonomy consolidation (PARTIAL cache impact)
+
+Touches `RESOLVE_TAXONOMY` and the decon/mito consumers → rehashes those + downstream.
+
+- **Collapse `taxid`** — retire `decon_source_taxid`; decon resolves `meta.taxid ?: params.taxid`.
+- **Collapse `species`** — retire the phantom `mitohifi_species` (referenced as a fallback in `meta.nf`, never declared); MitoHiFi's reference name comes from the resolved identity.
+- **Derive `genetic_code`** from kingdom in `RESOLVE_TAXONOMY` (NCBI translation table: vertebrate=2, invertebrate=5, plant=1, fungi=4, …); `mitohifi_genetic_code` becomes a `null` **override**.
+- Emit `genetic_code` alongside `species`/`kingdom`/`busco_lineage` in the **per-sample identity side-channel**, *not* in `meta` (it's consumed only by MitoHiFi, so a side-channel keeps the blast radius off every task hash).
+
+---
+
+## 12.3 Workstream C — The reset (CACHE-BUSTING; bundle + one real run)
+
+- **`ploidy` → per-sample side-channel** keyed on `meta.sample`, feeding genomescope `-p` and hifiasm `--n-hap`. Retire `hifiasm_nHaplotypes` (subsumed — `--n-hap` = organism ploidy). Removing `meta.ploidy` rehashes every sample. Unblocks flipping the size-vs-estimate verdict default on (`--qc_flag_size_pct 15`) once estimates are ploidy-correct.
+- **hg_size from estimate.** Join `ESTIMATE_GENOME_SIZE.out.size` (per-sample haploid bp) → `HIFIASM` on `sample`. Resolve `--hg-size` as **sheet column > `hifiasm_haploid_genome_size` param**, then interpret the result:
+  - `'auto'` → omit `--hg-size` (force hifiasm's internal auto; ignore the estimate)
+  - a size/int (`'3g'`, `1200000000`) → pass it literally
+  - `null`/unset (default) → use the per-sample estimate; if there is none, omit the flag (hifiasm auto is the ultimate fallback)
+
+  `--hg-size` takes raw bp, so the estimate integer passes straight through. This **serializes** jellyfish+GenomeScope before hifiasm on the HiFi path (minutes vs. hours — accepted); SPAdes is unaffected (`--hg-size` is hifiasm-only).
+- **`meta`-field audit.** Confirm the STAY set; drop `ploidy`; drop `species` from `meta` if WS-B leaves it inert.
+  - **STAY:** `id`, `sample`, `haplotype`, `n_hap`, `hifi`, `hic`, `tellseq`, `shortread`, `long_reads`, `assembler`, `taxid`; `dedup`/`mito_tool` (borderline — they select tools).
+  - **MOVE:** `ploidy` (→ side-channel).
+  - **REVIEW:** `species` (→ side-channel/derived; drop from `meta`).
+- **Version capture** (report *display* already shipped, cache-cheap): per-process `path "versions.tsv", emit: versions` + `printf 'tool<TAB>version'` at the end of each `script:`; new `collect_software_versions.nf` (`COLLECT_SOFTWARE_VERSIONS`) cats+dedups → `software_versions.tsv`; `main.nf` accumulates `<PROC>.out.versions` via `.mix()` → `.collect()` → COLLECT → `.ifEmpty(file('NO_VERSIONS'))` → `SUMMARY_REPORT`; `summary_report.nf` adds `path(software_versions)` + `--versions`. Lift each tool's exact `--version` command from its nf-core module (purge_dups / merqury / genomescope2 / FCS have none clean).
+- **Pin container tags** — FCS (`fcs-gx.sif` → `latest`) and MitoHiFi (`mitohifi:master`) are non-reproducible; pin to explicit versioned tags.
+- **Track-1 cleanup** — dead includes, `GAP_FILLING` heredoc (free here — everything rehashes anyway).
+- **One real run** — a HiFi+Hi-C sample **and** the short-read set. No `main` parity expected (diverged).
+
+---
+
+## 12.4 Config `params {}` layout
+
+All params live under grouped, commented sections in `nextflow.config`:
+
+```groovy
+params {
+    // ── Core / run ─────────────────────────────
+    sample_sheet         = null
+    outdir               = 'results'
+    publish_dir_mode     = 'copy'
+    qc_mode              = 'all'
+
+    // ── Organism identity (taxid primary; rest derived, all overridable) ──
+    taxid                = null      // sheet column overrides per-sample
+    species              = null      // optional name override
+    mitohifi_genetic_code = null     // override; else derived from kingdom
+
+    // ── Assembly strategy (column ▸ param ▸ derived default) ──
+    assembler            = null
+    ploidy               = null
+    n_hap                = null
+    dedup                = null
+    mito_tool            = null
+
+    // ── Shared analysis k-mer (GenomeScope + Merqury) ──
+    kmer_size            = 21
+
+    // ── hifiasm ──  (see migration map for the full descriptive set)
+    hifiasm_kmer_length          = 51
+    hifiasm_minimizer_window     = 51
+    hifiasm_haploid_genome_size  = null   // null=use estimate; 'auto'=hifiasm auto; else literal bp
+    // …
+
+    // ── SPAdes ──
+    spades_kmer_list     = '21,33,55,77'
+    // …
+
+    // ── GenomeScope / jellyfish ──
+    jellyfish_hash_size  = '5G'
+
+    // ── redundans / short-read / pilon / busco / merqury ──
+    // ── inspector / hic / yahs (r1,r2) / finalize / contact ──
+    // ── pairwise / riparian / compartments / tads ──
+    // ── telomere / teloclip / tidk / coverage ──
+    // ── databases: db_base, gxdb_*, diamond_* ──
+    // ── decontamination: run_decon_*, decon_*, evidence_* ──
+
+    // ── Step toggles (run_*) ──
+    run_purge_dups = false
+    run_pilon = false
+    run_teloclip_extend = true
+    run_pairwise_alignments = true
+    run_shortread_trim = true
+    run_hic_balance = true
+    run_final_contact_maps = true
+    run_inspector_contigs = true
+    run_inspector_scaffolds = true
+    run_redundans_reduction = true
+    run_redundans_scaffolding = true
+    run_redundans_gapclosing = true
+    run_decon_contigs = true
+    run_decon_scaffolds = false
+    run_fcs_adaptor = false
+    run_blobtools_evidence = false
+    // run_scaffold_round2 stays a derived default (computed, guarded)
+
+    // ── QC verdict thresholds ──
+    qc_flag_busco = 90
+    qc_flag_qv = 40
+    qc_flag_kmer = 90
+    qc_flag_size_pct = 0
+
+    // ── Resources ──
+    max_cpus = 32
+    max_memory = '128.GB'
+    max_time = '240.h'
+}
+```
+
+The `run_scaffold_round2` derived default (currently the guarded `params.containsKey` assignment in main.nf) moves to a single post-`params{}` init step in the config (or a tiny `functions/params.nf`), computed from `run_inspector_scaffolds || run_decon_scaffolds`.
+
+---
+
+## 12.5 Migration map (old → new)
+
+### hifiasm (full descriptive)
+| Old | New |
+|-----|-----|
+| `hifiasm_k` | `hifiasm_kmer_length` |
+| `hifiasm_w` | `hifiasm_minimizer_window` |
+| `hifiasm_f` | `hifiasm_bloom_filter_bits` |
+| `hifiasm_D` | `hifiasm_kmer_drop_factor` |
+| `hifiasm_N` | `hifiasm_max_overlaps` |
+| `hifiasm_r` | `hifiasm_correction_rounds` |
+| `hifiasm_z` | `hifiasm_adapter_trim_bp` |
+| `hifiasm_maxKOCC` | `hifiasm_max_kmer_occurrence` |
+| `hifiasm_hgSize` | `hifiasm_haploid_genome_size` |
+| `hifiasm_a` | `hifiasm_cleaning_rounds` |
+| `hifiasm_m` | `hifiasm_contig_bubble_bp` |
+| `hifiasm_p` | `hifiasm_unitig_bubble_bp` |
+| `hifiasm_n` | `hifiasm_tip_unitig_reads` |
+| `hifiasm_x` | `hifiasm_max_overlap_drop_ratio` |
+| `hifiasm_y` | `hifiasm_min_overlap_drop_ratio` |
+| `hifiasm_u` | `hifiasm_post_join` |
+| `hifiasm_homCov` | `hifiasm_homozygous_coverage` |
+| `hifiasm_lowQ` | `hifiasm_low_quality_percent` |
+| `hifiasm_bCov` | `hifiasm_break_low_coverage` |
+| `hifiasm_hCov` | `hifiasm_break_high_coverage` |
+| `hifiasm_mRate` | `hifiasm_break_mismatch_rate` |
+| `hifiasm_primary` | `hifiasm_primary` *(unchanged)* |
+| `hifiasm_ctgN` | `hifiasm_tip_contig_reads` |
+| `hifiasm_l` | `hifiasm_purge_level` |
+| `hifiasm_s` | `hifiasm_purge_similarity` |
+| `hifiasm_O` | `hifiasm_purge_min_overlap` |
+| `hifiasm_purgeMax` | `hifiasm_purge_max_coverage` |
+| `hifiasm_nHaplotypes` | **retire** → ploidy side-channel |
+| `hifiasm_useHiC` | `hifiasm_use_hic` |
+| `hifiasm_sBase` | `hifiasm_hic_base_similarity` |
+| `hifiasm_nWeight` | `hifiasm_hic_reweight_rounds` |
+| `hifiasm_nPerturb` | `hifiasm_hic_perturb_rounds` |
+| `hifiasm_fPerturb` | `hifiasm_hic_perturb_fraction` |
+| `hifiasm_lMSjoin` | `hifiasm_misjoin_detect_bp` |
+| `hifiasm_dualScaf` | `hifiasm_dual_scaffolding` |
+| `hifiasm_scafGap` | `hifiasm_scaffold_max_gap_bp` |
+| `hifiasm_teloP` | `hifiasm_telo_penalty` |
+| `hifiasm_teloD` | `hifiasm_telo_max_drop` |
+| `hifiasm_teloS` | `hifiasm_telo_min_score` |
+
+### Step toggles → `run_*`
+| Old | New |
+|-----|-----|
+| `redundans_run_reduction` | `run_redundans_reduction` |
+| `redundans_run_scaffolding` | `run_redundans_scaffolding` |
+| `redundans_run_gapclosing` | `run_redundans_gapclosing` |
+| `shortread_trim` | `run_shortread_trim` |
+| `inspector_run_on_contigs` | `run_inspector_contigs` |
+| `inspector_run_on_scaffolds` | `run_inspector_scaffolds` |
+| `hic_balance` | `run_hic_balance` |
+| `make_final_contact_maps` | `run_final_contact_maps` |
+| `decon_run_on_contigs` | `run_decon_contigs` |
+| `decon_run_on_scaffolds` | `run_decon_scaffolds` |
+| `decon_run_fcs_adaptor` | `run_fcs_adaptor` |
+| `decon_make_blobtools_evidence` | `run_blobtools_evidence` |
+
+### Negative polarity flipped (default inverts to preserve behavior)
+| Old (default) | New (default) |
+|-----|-----|
+| `inspector_contig_skip_baseerror` (true) | `inspector_contig_base_error_check` (false) |
+| `inspector_scaffold_skip_baseerror` (true) | `inspector_scaffold_base_error_check` (false) |
+
+### Base-pair suffix `_bp`
+| Old | New |
+|-----|-----|
+| `mitohifi_ref_min_length` | `mitohifi_ref_min_bp` |
+| `redundans_min_length` | `redundans_min_contig_bp` |
+| `inspector_contig_min_contig_length` | `inspector_contig_min_contig_bp` |
+| `inspector_contig_min_assembly_error_size` | `inspector_contig_min_assembly_error_bp` |
+| `inspector_contig_max_assembly_error_size` | `inspector_contig_max_assembly_error_bp` |
+| `inspector_scaffold_min_contig_length` | `inspector_scaffold_min_contig_bp` |
+| `inspector_scaffold_min_assembly_error_size` | `inspector_scaffold_min_assembly_error_bp` |
+| `inspector_scaffold_max_assembly_error_size` | `inspector_scaffold_max_assembly_error_bp` |
+| `scaffold_min_size` | `scaffold_min_bp` |
+| `finalize_min_scaffold_size` | `finalize_min_scaffold_bp` |
+| `bin_size` | `coverage_bin_bp` |
+| `min_len` | `coverage_min_bp` |
+| `evidence_blob_min_contig_len` | `evidence_blob_min_contig_bp` |
+
+*(Already conform: `*_min_aln_bp`, `riparian_min_seq_bp`, `compartment_min_contig_bp`, `tad_window_bp`, `tad_min_contig_bp`. `jellyfish_hash_size` unchanged — memory, not bp.)*
+
+### Unprefixed coverage-book trio
+| Old | New |
+|-----|-----|
+| `bin_size` | `coverage_bin_bp` |
+| `min_len` | `coverage_min_bp` |
+| `min_mapq` | `coverage_min_mapq` |
+
+### k-mer + collapses / derivations
+| Old | New / Action |
+|-----|-----|
+| `spades_kmers` | `spades_kmer_list` |
+| `genomescope_kmer` + `merqury_k` | **collapse** → `kmer_size` (shared analysis k) |
+| `decon_source_taxid` | **retire** → `taxid` |
+| `mitohifi_species` (phantom) | **retire** → `species` |
+| `mitohifi_genetic_code` (2) | `null` **override**; derived from kingdom |
+| `outdir` (main.nf dup) | **retire** → config `outdir` |
+| `hifiasm_nHaplotypes` | **retire** → ploidy side-channel |
+
+---
+
+## 12.6 Launch-wrapper migration
+
+Update the production launch script to the new names — the renames in §12.5 are the complete old→new set to apply. Highest-likelihood hits in a typical wrapper: the hifiasm block, `*_kmers`/`*_k` → `*_kmer_length`/`kmer_size`, the `run_*` toggles (`make_final_contact_maps`, `decon_run_on_*`, `shortread_trim`), the retired identity params (`decon_source_taxid`, `mitohifi_species`), and any `--hifiasm_hgSize`/`--hifiasm_nHaplotypes` (now `--hifiasm_haploid_genome_size` / handled by ploidy). Keep `main` (production S. delicatulus) on its current wrapper until the refactor branch is promoted.
+
+---
+
+## 12.7 Validation
+
+- **Stub after each workstream** — DAG builds, channel shapes hold.
+- **`-resume` after WS-A** → **0** processes re-run (the value-preservation proof; also catches any rename that silently changed a rendered command).
+- **One real run after WS-C** — HiFi+Hi-C sample + short-read set; eyeball the report, confirm versions populate and hg_size flows from the estimate.
+- No `main` byte-parity (diverged; validated on real data instead).
+
+---
+
+## 12.8 Recommended commit order (one branch)
+
+1. WS-A relocate+rename+flatten+declare → **`-resume` gate**.
+2. Launch-wrapper update.
+3. WS-B identity/taxonomy (`taxid`/`species`/`genetic_code`).
+4. WS-C: `ploidy` side-channel + hg_size-from-estimate → `meta` audit → version capture → container pins → Track-1 cleanup.
+5. One real run → confirm → merge.

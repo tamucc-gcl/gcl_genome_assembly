@@ -504,14 +504,6 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
         "")
     }
 
-    flagged <- verdict %>% filter(nchar(flags) > 0)
-    if (nrow(flagged) > 0) {
-      md <- c(md,
-        paste0("Flagged: ",
-               paste(sprintf("**%s** (%s)", flagged$sample_id, flagged$flags), collapse = "; ")),
-        "")
-    }
-
     # --- BUSCO lineage provenance (report-improvement batch) ---
     # Which lineage each BUSCO % was scored against, and how it was chosen: per-sample
     # from the NCBI taxid (section 1), else the configured fallback.
