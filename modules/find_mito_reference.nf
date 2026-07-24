@@ -35,7 +35,7 @@ process FIND_MITO_REFERENCE {
     tuple val(taxid), path("mito_reference_info.tsv"), emit: ref_info
 
     script:
-    def min_length = params.mitohifi_ref_min_length ?: 14000
+    def min_length = params.mitohifi_ref_min_bp ?: 14000
     """
     set -euo pipefail
 

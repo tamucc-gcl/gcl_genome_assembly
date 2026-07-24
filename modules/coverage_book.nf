@@ -10,7 +10,7 @@ process COVERAGE_BOOK {
     
     output:
     tuple val(meta), path("*.sorted.bam"), path("*.sorted.bam.bai"), emit: bam
-    tuple val(meta), path("*.cov.${params.bin_size}.bw"),                           emit: bigwig
+    tuple val(meta), path("*.cov.${params.coverage_bin_bp}.bw"),                           emit: bigwig
     tuple val(meta), path("*.coverage_book.pdf"),                    emit: pdf
     
     when:
@@ -41,19 +41,19 @@ process COVERAGE_BOOK {
     # Generate coverage BigWig
     bamCoverage \\
         -b ${prefix}.sorted.bam \\
-        -o ${prefix}.cov.${params.bin_size}.bw \\
-        --binSize ${params.bin_size} \\
+        -o ${prefix}.cov.${params.coverage_bin_bp}.bw \\
+        --binSize ${params.coverage_bin_bp} \\
         --numberOfProcessors ${task.cpus} \\
         --ignoreDuplicates \\
-        --minMappingQuality ${params.min_mapq}
+        --minMappingQuality ${params.coverage_min_mapq}
     
     # Generate coverage book PDF
     python3 ${coverage_book_script} \\
-        --bw ${prefix}.cov.${params.bin_size}.bw \\
+        --bw ${prefix}.cov.${params.coverage_bin_bp}.bw \\
         --fai ${assembly}.fai \\
         --out_pdf ${prefix}.coverage_book.pdf \\
-        --bin_size ${params.bin_size} \\
-        --min_len ${params.min_len}
+        --bin_size ${params.coverage_bin_bp} \\
+        --min_len ${params.coverage_min_bp}
     """
     
     stub:
@@ -61,7 +61,7 @@ process COVERAGE_BOOK {
     """
     touch ${prefix}.sorted.bam
     touch ${prefix}.sorted.bam.bai
-    touch ${prefix}.cov.${params.bin_size}.bw
+    touch ${prefix}.cov.${params.coverage_bin_bp}.bw
     touch ${prefix}.coverage_book.pdf
     """
 }

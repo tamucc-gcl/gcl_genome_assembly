@@ -34,7 +34,7 @@ process SPADES {
     tuple val(meta), path("${meta.sample}.spades.log"),           emit: log
 
     script:
-    def kmers    = params.spades_kmers      ?: '21,33,55,77'
+    def kmers    = params.spades_kmer_list      ?: '21,33,55,77'
     def cov_opt  = params.spades_cov_cutoff ? "--cov-cutoff ${params.spades_cov_cutoff}" : '--cov-cutoff auto'
     def mode     = params.containsKey('spades_mode') ? params.spades_mode : '--isolate'  // '--isolate' | '--careful' | '--sc' | '' ...
     def extra    = params.spades_extra      ?: ''

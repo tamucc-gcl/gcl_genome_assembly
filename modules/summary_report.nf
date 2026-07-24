@@ -59,7 +59,7 @@ process SUMMARY_REPORT {
         --flag_size_pct ${params.qc_flag_size_pct} \\
         --busco_fallback ${params.busco_lineage} \\
         --ran_purge_dups ${params.run_purge_dups} \\
-        --ran_decontam ${params.decon?.run_on_contigs ?: false} \\
+        --ran_decontam ${params.run_decon_contigs ?: false} \\
         --output assembly_report.md
     """
 

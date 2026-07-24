@@ -17,7 +17,7 @@
       - Short-read + downstream scaffolding (Hi-C / long-read / linked-read):
         turn the internal scaffolding/gap-closing off (reduction only) so the finishing
         chain does the scaffolding, OR leave them on to "scaffold the scaffolds".
-        Set params.redundans_run_scaffolding / params.redundans_run_gapclosing = false.
+        Set params.run_redundans_scaffolding / params.run_redundans_gapclosing = false.
 
     Single collapsed assembly in, single conditioned assembly out (meta.n_hap == 1,
     the 'primary' path). All knobs are params (Elvis / containsKey defaults here; mirror
@@ -40,14 +40,14 @@ process REDUNDANS {
 
     script:
     // --- stage toggles: the user-facing on/off for redundans' internal steps ---
-    def do_reduction   = params.containsKey('redundans_run_reduction')   ? params.redundans_run_reduction   : true
-    def do_scaffolding = params.containsKey('redundans_run_scaffolding') ? params.redundans_run_scaffolding : true
-    def do_gapclosing  = params.containsKey('redundans_run_gapclosing')  ? params.redundans_run_gapclosing  : true
+    def do_reduction   = params.containsKey('redundans_run_reduction')   ? params.run_redundans_reduction   : true
+    def do_scaffolding = params.containsKey('redundans_run_scaffolding') ? params.run_redundans_scaffolding : true
+    def do_gapclosing  = params.containsKey('redundans_run_gapclosing')  ? params.run_redundans_gapclosing  : true
 
     // --- reduction params ---
     def identity  = params.redundans_identity   ?: 0.51
     def overlap   = params.redundans_overlap    ?: 0.80
-    def minlen    = params.redundans_min_length ?: 200
+    def minlen    = params.redundans_min_contig_bp ?: 200
 
     // --- scaffolding params ---
     def joins     = params.redundans_joins      ?: 5

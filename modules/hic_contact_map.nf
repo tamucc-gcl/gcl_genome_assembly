@@ -39,7 +39,7 @@ process HIC_CONTACT_MAP {
     // Resolutions to plot
     def plot_resolutions    = (params.hic_plot_resolutions ?: "1000000,500000,100000").toString()
     // Make balancing optional (default: false for speed; set true when you need it)
-    def do_balance          = (params.hic_balance ?: false) as boolean
+    def do_balance          = (params.run_hic_balance ?: false) as boolean
     // MapQ: raw maps often need strict; filtered can be lower because you already filtered upstream
     def min_mapq_raw        = (params.hic_min_mapq_raw ?: 30) as int
     def min_mapq_filtered   = (params.hic_min_mapq_filtered ?: 1) as int
@@ -177,7 +177,7 @@ process HIC_CONTACT_MAP {
     without remapping or re-parsing a BAM.
 
     Key feature: Optionally filters to major scaffolds only for cleaner visualization
-    - Set params.scaffold_min_size to filter (e.g., 10000000 for scaffolds >10 Mb)
+    - Set params.scaffold_min_bp to filter (e.g., 10000000 for scaffolds >10 Mb)
     - Set to 0 or null to include all scaffolds
 
     Note: The plotting/stats steps are intentionally kept consistent with HIC_CONTACT_MAP.
@@ -204,8 +204,8 @@ process HIC_CONTACT_MAP_FROM_PAIRS {
     def resolutions         = (params.hic_resolutions ?: "1000000,500000,100000,50000,10000").toString()
     def base_bin            = (params.hic_base_bin ?: "10000").toString()
     def plot_resolutions    = (params.hic_plot_resolutions ?: "1000000,500000,100000").toString()
-    def do_balance          = (params.hic_balance ?: false) as boolean
-    def min_scaffold_size   = params.scaffold_min_size ?: 0  // 0 = include all scaffolds
+    def do_balance          = (params.run_hic_balance ?: false) as boolean
+    def min_scaffold_size   = params.scaffold_min_bp ?: 0  // 0 = include all scaffolds
     
     """
     set -euo pipefail

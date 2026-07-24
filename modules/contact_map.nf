@@ -29,8 +29,8 @@ process CONTACT_MAP {
     def resolutions       = (params.hic_resolutions ?: "2500000,1000000,500000,250000,100000,50000,25000,10000").toString()
     def base_bin          = (params.hic_base_bin ?: "10000").toString()
     def plot_resolutions  = (params.hic_plot_resolutions ?: "1000000,500000,250000,100000").toString()
-    def do_balance        = (params.hic_balance ?: false) as boolean
-    def min_scaffold_size = params.scaffold_min_size ?: 0  // 0 = include all scaffolds
+    def do_balance        = (params.run_hic_balance ?: false) as boolean
+    def min_scaffold_size = params.scaffold_min_bp ?: 0  // 0 = include all scaffolds
 
     """
     set -euo pipefail

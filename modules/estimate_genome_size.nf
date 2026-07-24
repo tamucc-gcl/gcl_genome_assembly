@@ -35,7 +35,7 @@ process ESTIMATE_GENOME_SIZE {
     tuple val(meta), path("${meta.sample}.genome_size.txt"), emit: size
 
     script:
-    def k        = params.genomescope_kmer    ?: 21
+    def k        = params.kmer_size    ?: 21
     def ploidy   = meta.ploidy ?: (meta.n_hap ?: 2)   // organism ploidy, per-sample from the sheet
     def jf_hash  = params.jellyfish_hash_size ?: '5G'
     def read_list = (reads instanceof List ? reads : [reads])

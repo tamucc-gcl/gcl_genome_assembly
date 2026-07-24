@@ -42,8 +42,8 @@ log.info """\
     =========================================
     Sample sheet : ${params.sample_sheet}
     Output dir   : ${params.outdir}
-    Inspector    : ${params.inspector_run_on_contigs ? 'Contigs' : ''}${params.inspector_run_on_scaffolds ? ' Scaffolds' : ''}${!params.inspector_run_on_contigs && !params.inspector_run_on_scaffolds ? 'Disabled' : ''}
-    Decontamination: ${params.decon.run_on_contigs ? 'Contigs' : ''}${params.decon.run_on_scaffolds ? ' Scaffolds' : ''}${!params.decon.run_on_contigs && !params.decon.run_on_scaffolds ? 'Disabled' : ''}
+    Inspector    : ${params.run_inspector_contigs ? 'Contigs' : ''}${params.run_inspector_scaffolds ? ' Scaffolds' : ''}${!params.run_inspector_contigs && !params.run_inspector_scaffolds ? 'Disabled' : ''}
+    Decontamination: ${params.run_decon_contigs ? 'Contigs' : ''}${params.run_decon_scaffolds ? ' Scaffolds' : ''}${!params.run_decon_contigs && !params.run_decon_scaffolds ? 'Disabled' : ''}
     Scaffold Round 2: ${params.run_scaffold_round2 ? 'Enabled' : 'Disabled'}
     Gap Filling  : Enabled
     =========================================
@@ -194,7 +194,7 @@ workflow {
     //    RESOLVE_TAXONOMY and (when enabled) the decon evidence branch.
     DOWNLOAD_TAXDUMP(
         Channel.value( file(params.diamond_taxdump_dir) ),
-        Channel.value( (params.diamond?.force ?: false) as boolean )
+        Channel.value( (params.diamond_force ?: false) as boolean )
     )
     ch_taxdump     = DOWNLOAD_TAXDUMP.out.taxdump_dir
     ch_taxdump_dir = ch_taxdump          // reused by the decon evidence branch
@@ -239,7 +239,7 @@ workflow {
         Only executes if decontamination is requested
     ========================================================================================
     */
-    if (params.decon.run_on_contigs || params.decon.run_on_scaffolds) {
+    if (params.run_decon_contigs || params.run_decon_scaffolds) {
         SETUP_DECONTAM_DBS(ch_taxdump)
         
         // Store outputs for later use
@@ -319,7 +319,7 @@ workflow {
         .filter { meta, reads -> meta.shortread }
         .map    { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) }
 
-    if (params.shortread_trim) {
+    if (params.run_shortread_trim) {
         TRIM_SHORTREAD(ch_shortread_raw)
         ch_shortread_reads = TRIM_SHORTREAD.out.trimmed_reads
     } else {
@@ -485,17 +485,17 @@ workflow {
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies (Inspector)
     ====================================================================================
     */
-    if (params.inspector_run_on_contigs) {
+    if (params.run_inspector_contigs) {
         ch_hifiasm_output
             .map { meta, fasta -> [ meta.sample, meta, fasta ] }
             .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
             .map { sample, meta, fasta, hifi_fastq ->
                 def correction_params = [
                     min_depth: params.inspector_contig_min_depth,
-                    min_contig_length: params.inspector_contig_min_contig_length,
-                    min_contig_length_assemblyerror: params.inspector_contig_min_contig_length_assemblyerror,
-                    min_assembly_error_size: params.inspector_contig_min_assembly_error_size,
-                    max_assembly_error_size: params.inspector_contig_max_assembly_error_size,
+                    min_contig_length: params.inspector_contig_min_contig_bp,
+                    min_contig_length_assemblyerror: params.inspector_contig_assemblyerror_min_bp,
+                    min_assembly_error_size: params.inspector_contig_min_assembly_error_bp,
+                    max_assembly_error_size: params.inspector_contig_max_assembly_error_bp,
                     skip_baseerror: !params.inspector_contig_base_error_check
                 ]
                 tuple(meta, fasta, hifi_fastq, "contig", correction_params)
@@ -521,7 +521,7 @@ workflow {
     */
     ch_assemblies_for_decontam = ch_hifi_conditioned.mix(ch_shortread_conditioned)
 
-    if (params.decon.run_on_contigs) {
+    if (params.run_decon_contigs) {
         DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
         ch_decontaminated_contigs = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
     } else {
@@ -624,7 +624,7 @@ workflow {
         STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies (Inspector)
     ====================================================================================
     */
-    if (params.inspector_run_on_scaffolds) {
+    if (params.run_inspector_scaffolds) {
         // Combine each scaffolded haplotype with its sample's HiFi reads (key on meta.sample)
         SCAFFOLD_HIC_ROUND1.out.scaffolds
             .map { meta, scaffold -> [ meta.sample, meta, scaffold ] }
@@ -632,10 +632,10 @@ workflow {
             .map { sample, meta, scaffold, hifi_fastq ->
                 def correction_params = [
                     min_depth: params.inspector_scaffold_min_depth,
-                    min_contig_length: params.inspector_scaffold_min_contig_length,
-                    min_contig_length_assemblyerror: params.inspector_scaffold_min_contig_length_assemblyerror,
-                    min_assembly_error_size: params.inspector_scaffold_min_assembly_error_size,
-                    max_assembly_error_size: params.inspector_scaffold_max_assembly_error_size,
+                    min_contig_length: params.inspector_scaffold_min_contig_bp,
+                    min_contig_length_assemblyerror: params.inspector_scaffold_assemblyerror_min_bp,
+                    min_assembly_error_size: params.inspector_scaffold_min_assembly_error_bp,
+                    max_assembly_error_size: params.inspector_scaffold_max_assembly_error_bp,
                     skip_baseerror: !params.inspector_scaffold_base_error_check
                 ]
                 tuple(meta, scaffold, hifi_fastq, "scaffold", correction_params)
@@ -656,7 +656,7 @@ workflow {
         Works on either original scaffolds OR corrected scaffolds (if Inspector was run)
     ========================================================================================
     */
-    if (params.decon.run_on_scaffolds) {
+    if (params.run_decon_scaffolds) {
         // Decontaminate scaffolds (parallel across all haplotypes)
         DECONTAMINATE_ASSEMBLY_SCAFFOLD(
             ch_scaffolds_for_decontam,
@@ -854,7 +854,7 @@ workflow {
     */
     // 1. Contact Maps for Final Assemblies
     //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
-    if (params.make_final_contact_maps) {
+    if (params.run_final_contact_maps) {
         // Combine final per-hap assemblies with sample Hi-C reads (key on meta.sample)
         ch_finalized_assembly
             .map { meta, final_fa -> [ meta.sample, meta, final_fa ] }
@@ -902,7 +902,7 @@ workflow {
 
         CONTACT_MAP_FINAL(ch_contact_map_final_input)
 
-        if (params.hic_balance) {
+        if (params.run_hic_balance) {
             HIC_COMPARTMENTS(
                 CONTACT_MAP_FINAL.out.mcool,
                 params.compartment_resolution ?: 250000,
@@ -1107,7 +1107,7 @@ workflow {
                 .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) },
         "raw"
     )
-    if (params.shortread_trim) {
+    if (params.run_shortread_trim) {
         SHORTREAD_QC_TRIMMED(TRIM_SHORTREAD.out.trimmed_reads, "trimmed")
     }
     
@@ -1164,7 +1164,7 @@ workflow {
     }
 
     // QC Inspector-corrected contigs
-    if (run_all_qc && params.inspector_run_on_contigs) {
+    if (run_all_qc && params.run_inspector_contigs) {
         ASSEMBLY_QC_CONTIG_CORRECTED(
             CORRECT_MISASSEMBLIES_CONTIG.out.corrected,
             ch_qc_reads,
@@ -1175,7 +1175,7 @@ workflow {
     }
 
     // QC decontaminated contigs
-    if (run_all_qc && params.decon.run_on_contigs) {
+    if (run_all_qc && params.run_decon_contigs) {
         ASSEMBLY_QC_CONTIG_DECONTAM(
             DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
             ch_qc_reads,
@@ -1197,7 +1197,7 @@ workflow {
     }
 
     // QC Inspector-corrected scaffolds
-    if (run_all_qc && params.inspector_run_on_scaffolds) {
+    if (run_all_qc && params.run_inspector_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_CORRECTED(
             CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected,
             ch_qc_reads,
@@ -1208,7 +1208,7 @@ workflow {
     }
 
     // QC decontaminated scaffolds
-    if (run_all_qc && params.decon.run_on_scaffolds) {
+    if (run_all_qc && params.run_decon_scaffolds) {
         ASSEMBLY_QC_SCAFFOLD_DECONTAM(
             DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
             ch_qc_reads,
@@ -1268,10 +1268,10 @@ workflow {
         Generate Optional Decontamination Evidence
     ========================================================================================
     */
-    if (params.decon.run_on_contigs) {
+    if (params.run_decon_contigs) {
         // Optional: Generate evidence for decontamination decisions
         // This runs in parallel with Hi-C mapping preparation
-        if (params.decon.make_blobtools_evidence) {
+        if (params.run_blobtools_evidence) {
             GENERATE_DECONTAM_EVIDENCE(
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
                 DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants,
@@ -1284,10 +1284,10 @@ workflow {
         }
     }
 
-    if (params.decon.run_on_scaffolds) {
+    if (params.run_decon_scaffolds) {
         // Optional: Generate evidence for scaffold decontamination
         // This runs in parallel with scaffold QC
-        if (params.decon.make_blobtools_evidence) {
+        if (params.run_blobtools_evidence) {
             GENERATE_DECONTAM_EVIDENCE(
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
                 DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants,
@@ -1319,13 +1319,13 @@ workflow {
 
         if (params.run_purge_dups)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
-        if (params.inspector_run_on_contigs)
+        if (params.run_inspector_contigs)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
-        if (params.decon.run_on_contigs)
+        if (params.run_decon_contigs)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
-        if (params.inspector_run_on_scaffolds)
+        if (params.run_inspector_scaffolds)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
-        if (params.decon.run_on_scaffolds)
+        if (params.run_decon_scaffolds)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
         if (params.run_scaffold_round2)
             ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
@@ -1359,7 +1359,7 @@ workflow {
             .mix(HIC_BAM_METRICS_SCAFFOLD.out.metrics)
     }
     
-    if (params.make_final_contact_maps) {
+    if (params.run_final_contact_maps) {
         ch_all_bam_metrics = ch_all_bam_metrics
             .mix(HIC_BAM_METRICS_FINAL.out.metrics)
     }
@@ -1376,7 +1376,7 @@ workflow {
             .mix(HIC_PAIRS_METRICS_SCAFFOLDSCAF.out.metrics)
     }
     
-    if (params.make_final_contact_maps) {
+    if (params.run_final_contact_maps) {
         ch_all_pairs_metrics = ch_all_pairs_metrics
             .mix(HIC_PAIRS_METRICS_FINAL.out.metrics)
     }
@@ -1458,7 +1458,7 @@ workflow {
     // ---- Contact maps (conditional) ----
     // CONTACT_MAP_FINAL.out.contact_maps: tuple(haplotype_id, stage, png_files)
     // publishDir: ${params.outdir}/contact_maps
-    if (params.make_final_contact_maps) {
+    if (params.run_final_contact_maps) {
         ch_manifest_contact_maps = CONTACT_MAP_FINAL.out.contact_maps
             .flatMap { meta, stage, pngs ->
                 def png_list = pngs instanceof List ? pngs : [pngs]

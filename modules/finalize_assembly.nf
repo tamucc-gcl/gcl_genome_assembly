@@ -30,8 +30,8 @@ process FINALIZE_ASSEMBLY {
     script:
     // Sequences >= this size are treated as chromosomal scaffolds.
     // Anything smaller is classified as an unplaced contig.
-    // Default 1 Mb; override with params.finalize_min_scaffold_size
-    def min_scaffold = params.finalize_min_scaffold_size ?: 1000000
+    // Default 1 Mb; override with params.finalize_min_scaffold_bp
+    def min_scaffold = params.finalize_min_scaffold_bp ?: 1000000
     """
     set -euo pipefail
 

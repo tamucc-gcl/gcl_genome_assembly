@@ -27,7 +27,7 @@ process BUILD_MERYL_DB {
     tuple val(meta), path("${meta.id}.meryl"), emit: meryl_db
 
     script:
-    def k = params.merqury_k ?: 21
+    def k = params.kmer_size ?: 21
     """
     # Build k-mer database from the sample's QC reads (1 HiFi FASTQ, or R1+R2 for PE).
     meryl count \\
