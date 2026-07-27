@@ -37,6 +37,8 @@ workflow CONTIG_ASSEMBLY {
 
     take:
     ch_reads   // tuple(meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2)
+    ch_traits   // tuple(sample, {telomere_motif, ploidy, haploid_genome_size})
+    ch_gsize    // tuple(sample, genome_size_txt)
 
     main:
     ch_reads
@@ -49,7 +51,11 @@ workflow CONTIG_ASSEMBLY {
     // --- hifiasm branch: HiFi (+ optional Hi-C). Null Hi-C (HiFi-only rows) -> empty list
     //     so path staging accepts it; HIFIASM gates Hi-C phasing on meta.hic. ---
     HIFIASM(
-        ch_by_assembler.hifiasm.map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta, hifi, hic1 ?: [], hic2 ?: []) }
+        ch_by_assembler.hifiasm
+            .map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta.sample, meta, hifi, hic1 ?: [], hic2 ?: []) }
+            .join( ch_traits )
+            .join( ch_gsize )
+            .map { sample, meta, hifi, hic1, hic2, traits, gsize -> tuple(meta, hifi, hic1, hic2, traits, gsize) }
     )
 
     // --- spades branch: PE short reads. ---
@@ -63,4 +69,5 @@ workflow CONTIG_ASSEMBLY {
 
     emit:
     assemblies = ch_assemblies
+    versions   = HIFIASM.out.versions.mix(SPADES.out.versions)
 }

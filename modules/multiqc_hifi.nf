@@ -17,6 +17,7 @@ process MULTIQC_HIFI {
     output:
     path("multiqc_report.html"), emit: report
     path("multiqc_report_data"),        emit: data
+    path "versions.tsv", emit: versions
     
     script:
     """
@@ -26,6 +27,8 @@ process MULTIQC_HIFI {
         --title "HiFi Raw Reads QC" \\
         --comment "Quality control metrics for HiFi reads" \\
         .
+
+    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
     
     stub:
@@ -33,5 +36,6 @@ process MULTIQC_HIFI {
     mkdir -p multiqc_report_data
     touch multiqc_report.html
     touch multiqc_report_data/multiqc_data.json
+    touch versions.tsv
     """
 }

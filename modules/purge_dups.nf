@@ -30,6 +30,7 @@ process PURGE_DUPS {
     tuple val(meta), path("${meta.id}.purged.fa"), emit: purged_assembly
     tuple val(meta), path("${meta.id}.haplotigs.fa"), emit: haplotigs
     tuple val(meta), path("${meta.id}.purge_dups.log"), emit: log
+    path "versions.tsv", emit: versions
 
     script:
     def minimap_threads = Math.max(1, task.cpus - 4)
@@ -118,6 +119,7 @@ process PURGE_DUPS {
 
     echo "" | tee -a ${meta.id}.purge_dups.log
     echo "=== purge_dups completed successfully ===" | tee -a ${meta.id}.purge_dups.log
+    printf 'purge_dups\t%s\n' "$( purge_dups -h 2>&1 | sed -n 's/^Version:[[:space:]]*//p' | head -n1 || true )" > versions.tsv
     """
 
     stub:
@@ -125,5 +127,6 @@ process PURGE_DUPS {
     touch ${meta.id}.purged.fa
     touch ${meta.id}.haplotigs.fa
     touch ${meta.id}.purge_dups.log
+    touch versions.tsv
     """
 }

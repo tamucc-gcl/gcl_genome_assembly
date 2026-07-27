@@ -24,6 +24,7 @@ process CONTACT_MAP {
     tuple val(meta), val(stage), path("${meta.id}_${stage}.mcool"), emit: mcool
     tuple val(meta), val(stage), path("${meta.id}_${stage}_*bp_contact_map.png"), emit: contact_maps
     tuple val(meta), val(stage), path("${meta.id}_${stage}_contact_stats.txt"), emit: stats
+    path "versions.tsv", emit: versions
 
     script:
     def resolutions       = (params.hic_resolutions ?: "2500000,1000000,500000,250000,100000,50000,25000,10000").toString()
@@ -154,6 +155,8 @@ process CONTACT_MAP {
         echo "Plot resolutions: ${plot_resolutions}"
         echo "Balancing: ${do_balance}"
     } > ${meta.id}_${stage}_contact_stats.txt
+
+    cooler --version 2>&1 | sed 's/.*version //' > versions.tsv
     """
 
     stub:
@@ -162,5 +165,6 @@ process CONTACT_MAP {
     touch ${meta.id}_${stage}.mcool
     touch ${meta.id}_${stage}_1000000bp_contact_map.png
     touch ${meta.id}_${stage}_contact_stats.txt
+    touch versions.tsv
     """
 }

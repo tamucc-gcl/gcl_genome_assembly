@@ -35,6 +35,7 @@ process SUMMARY_REPORT {
     path(genome_size)           // NEW: genome_sizes.tsv or NO_GENOME_SIZE
     path(workflow_info)         // NEW: workflow_info.tsv (key/value)
     path(run_info)              // NEW: run_info.tsv (per-sample) or NO_RUN_INFO
+    path(software_versions)
     path(summary_report_script) // R script to generate the summary report
 
     output:
@@ -60,6 +61,7 @@ process SUMMARY_REPORT {
         --busco_fallback ${params.busco_lineage} \\
         --ran_purge_dups ${params.run_purge_dups} \\
         --ran_decontam ${params.run_decon_contigs ?: false} \\
+        --versions ${software_versions} \\
         --output assembly_report.md
     """
 

@@ -37,6 +37,7 @@ process REDUNDANS {
     output:
     tuple val(meta), path("${meta.sample}.redundans.fasta"), emit: assembly
     path("${meta.sample}_redundans"),                        emit: workdir
+    path "versions.tsv", emit: versions
 
     script:
     // --- stage toggles: the user-facing on/off for redundans' internal steps ---
@@ -108,6 +109,8 @@ process REDUNDANS {
     else echo "ERROR: no redundans output FASTA found in \$outdir" >&2; exit 1
     fi
     cp \$final ${meta.sample}.redundans.fasta
+
+    printf 'Redundans\t%s\n' "$(redundans.py --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:
@@ -115,5 +118,6 @@ process REDUNDANS {
     mkdir -p ${meta.sample}_redundans
     touch ${meta.sample}_redundans/scaffolds.reduced.fa
     touch ${meta.sample}.redundans.fasta
+    touch versions.tsv
     """
 }

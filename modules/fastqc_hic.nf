@@ -21,6 +21,7 @@ process FASTQC_HIC {
     output:
     tuple val(meta), path("*.html"), emit: fastqc_html
     tuple val(meta), path("*.zip"),  emit: fastqc_zip
+    path "versions.tsv", emit: versions
 
     script:
     """
@@ -29,6 +30,8 @@ process FASTQC_HIC {
         --outdir . \\
         ${hic_r1} \\
         ${hic_r2}
+
+    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
 
     stub:
@@ -37,5 +40,6 @@ process FASTQC_HIC {
     touch ${hic_r1.baseName}_fastqc.zip
     touch ${hic_r2.baseName}_fastqc.html
     touch ${hic_r2.baseName}_fastqc.zip
+    touch versions.tsv
     """
 }

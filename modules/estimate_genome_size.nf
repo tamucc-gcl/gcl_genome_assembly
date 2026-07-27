@@ -28,15 +28,15 @@ process ESTIMATE_GENOME_SIZE {
     publishDir "${params.outdir}/qc/genome_size", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(reads)
+    tuple val(meta), path(reads), val(ploidy)
 
     output:
     tuple val(meta), path("${meta.sample}_genomescope"),     emit: results
     tuple val(meta), path("${meta.sample}.genome_size.txt"), emit: size
+    path "versions.tsv", emit: versions
 
     script:
     def k        = params.kmer_size    ?: 21
-    def ploidy   = meta.ploidy ?: (meta.n_hap ?: 2)   // organism ploidy, per-sample from the sheet
     def jf_hash  = params.jellyfish_hash_size ?: '5G'
     def read_list = (reads instanceof List ? reads : [reads])
     def read_streams = read_list.collect { "<(zcat -f ${it})" }.join(' ')
@@ -65,6 +65,8 @@ process ESTIMATE_GENOME_SIZE {
     else
         echo "NA" > ${meta.sample}.genome_size.txt
     fi
+    printf 'Jellyfish\t%s\n' "$(jellyfish --version 2>&1 | sed 's/jellyfish //')" > versions.tsv
+    printf 'GenomeScope\t%s\n' "$( genomescope2 -v 2>&1 | sed -n 's/^GenomeScope //p' | head -n1 || true )" >> versions.tsv
     """
 
     stub:
@@ -75,5 +77,6 @@ process ESTIMATE_GENOME_SIZE {
     touch ${meta.sample}_genomescope/transformed_linear_plot.png
     touch ${meta.sample}_genomescope/model.txt
     echo "415000000" > ${meta.sample}.genome_size.txt
+    touch versions.tsv
     """
 }

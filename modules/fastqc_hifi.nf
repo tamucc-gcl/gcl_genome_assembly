@@ -20,6 +20,7 @@ process FASTQC_HIFI {
     output:
     tuple val(meta), path("*.html"), emit: fastqc_html
     tuple val(meta), path("*.zip"),  emit: fastqc_zip
+    path "versions.tsv", emit: versions
 
     script:
     """
@@ -27,11 +28,14 @@ process FASTQC_HIFI {
         --threads ${task.cpus} \\
         --outdir . \\
         ${hifi_fastq}
+    
+    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
 
     stub:
     """
     touch ${hifi_fastq.baseName}_fastqc.html
     touch ${hifi_fastq.baseName}_fastqc.zip
+    touch versions.tsv
     """
 }

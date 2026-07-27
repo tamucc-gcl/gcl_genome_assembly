@@ -82,6 +82,9 @@ def buildMeta(Map a) {
                     (ploidyStr == 'diploid') ? 2 :
                     (ploidyStr?.isInteger()  ? ploidyStr.toInteger() : null)
 
+    // Optional per-sample haploid genome size (column > global param). null -> estimate / auto.
+    def hgsize = pick(a.haploid_genome_size, 'haploid_genome_size') { null }
+
     def dedup     = pick(a.dedup,     'dedup') {
         if (assembler == 'hifiasm')
             (params.containsKey('run_purge_dups') && params.run_purge_dups) ? 'purge_dups' : 'none'
@@ -130,6 +133,7 @@ def buildMeta(Map a) {
         sample:      sample,
         haplotype:   null,
         ploidy:      ploidyNum,        // organism ploidy (genomescope -p, hifiasm --n-hap)
+        haploid_genome_size: hgsize,   // per-sample --hg-size override; side-channel, stripped in main
         n_hap:       n_hap,            // output haplotype count (assembly fork + groupKey)
         species:     species,         // organism species — organelle ref + kingdom lookup (4b)
         taxid:       taxid,            // optional NCBI taxid — alternative to species (4b)

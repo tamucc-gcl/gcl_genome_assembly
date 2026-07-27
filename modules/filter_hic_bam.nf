@@ -26,6 +26,7 @@ process FILTER_HIC_BAM {
     tuple val(meta), val(stage), path("${meta.id}.pairs.gz"), emit: pairs
     tuple val(meta), val(stage), path("${meta.id}_parse_stats.txt"), emit: parse_stats
     tuple val(meta), val(stage), path("${meta.id}_dedup_stats.txt"), emit: dedup_stats
+    path "versions.tsv", emit: versions
 
     script:
     """
@@ -173,6 +174,9 @@ process FILTER_HIC_BAM {
     rm -f ${meta.id}.pairsam.gz
     rm -f ${meta.id}.dups.pairs.gz
     rm -f chrom.sizes
+
+    printf 'pairtools\t%s\n' "$(pairtools --version 2>&1 | sed 's/pairtools, version //')" > versions.tsv
+    printf 'samtools\t%s\n'  "$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
     """
 
     stub:
@@ -183,5 +187,6 @@ process FILTER_HIC_BAM {
     touch ${meta.id}.pairs.gz
     touch ${meta.id}_parse_stats.txt
     touch ${meta.id}_dedup_stats.txt
+    touch versions.tsv
     """
 }

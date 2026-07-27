@@ -13,11 +13,13 @@ process FCS_GX_SCREEN {
     tuple val(meta), path("*.fcs_gx_report.txt"), emit: action_report
     tuple val(meta), path("*.taxonomy.rpt"),      emit: taxonomy_report
     tuple val(meta), path("gx_out/fcs_gx_stdout.log"), emit: stdout_log
+    path "versions.tsv", emit: versions
 
   stub:
   """
   mkdir -p gx_out
   touch ${meta.id}.fcs_gx_report.txt ${meta.id}.taxonomy.rpt gx_out/fcs_gx_stdout.log
+  touch versions.tsv
   """
 
   script:
@@ -50,5 +52,7 @@ process FCS_GX_SCREEN {
   # Add id to filenames for clarity
   mv gx_out/*.fcs_gx_report.txt ${meta.id}.fcs_gx_report.txt || true
   mv gx_out/*.taxonomy.rpt ${meta.id}.taxonomy.rpt || true
+
+  printf 'FCS-GX\t%s\n' "$( /app/bin/gx --help 2>&1 | sed -n 's/.*git:\(v[0-9.]*\).*/\1/p' | head -n1 || true )" > versions.tsv
   """
 }

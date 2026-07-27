@@ -25,6 +25,7 @@ process MAPPING_QC {
 
     output:
     tuple val(meta), path("${meta.id}_mapping_stats"), emit: results
+    path "versions.tsv", emit: versions
 
     script:
     def preset = meta.hifi ? 'map-hifi' : ( meta.long_reads ? 'map-ont' : 'sr' )
@@ -58,6 +59,9 @@ process MAPPING_QC {
         } END {
         print sum / len
         }' ${meta.id}_mapping_stats/coverage.txt > ${meta.id}_mapping_stats/avg_depth.txt
+
+    printf 'minimap2\t%s\n' "$(minimap2 --version 2>&1)" > versions.tsv
+    printf 'samtools\t%s\n' "$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
     """
 
     stub:
@@ -68,5 +72,6 @@ process MAPPING_QC {
     touch ${meta.id}_mapping_stats/coverage.txt
     touch ${meta.id}_mapping_stats/depth_summary.txt
     touch ${meta.id}_mapping_stats/avg_depth.txt
+    touch versions.tsv
     """
 }

@@ -39,6 +39,7 @@ workflow ORGANELLE_ASSEMBLY {
     take:
     ch_reads       // tuple(meta, hifi_fastq, sr_r1, sr_r2)
     ch_mito_ref    // tuple(taxid, ref_fasta, ref_gb) — per resolved species
+    ch_gcode       // tuple(taxid, genetic_code)
 
     main:
     ch_reads
@@ -55,7 +56,8 @@ workflow ORGANELLE_ASSEMBLY {
     ch_org.hifi
         .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.taxid?.toString(), meta, hifi_fastq) }
         .combine( ch_mito_ref, by: 0 )
-        .map { taxid, meta, hifi_fastq, ref_fa, ref_gb -> tuple(meta, hifi_fastq, ref_fa, ref_gb) }
+        .combine( ch_gcode,    by: 0 )
+        .map { taxid, meta, hifi_fastq, ref_fa, ref_gb, gcode -> tuple(meta, hifi_fastq, ref_fa, ref_gb, gcode) }
         .set { ch_mitohifi_input }
     MITOHIFI(ch_mitohifi_input)
 
@@ -70,4 +72,5 @@ workflow ORGANELLE_ASSEMBLY {
     annotation   = MITOHIFI.out.annotation
     stats        = MITOHIFI.out.stats
     circular_map = MITO_CIRCULAR_MAP.out.circular_map
+    versions = MITOHIFI.out.versions
 }

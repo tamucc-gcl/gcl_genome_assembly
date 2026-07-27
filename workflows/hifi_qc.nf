@@ -30,4 +30,5 @@ workflow HIFI_QC {
     fastqc_zip = FASTQC_HIFI.out.fastqc_zip
     multiqc_report = MULTIQC_HIFI.out.report
     multiqc_data = MULTIQC_HIFI.out.data
+    versions       = FASTQC_HIFI.out.versions.mix(MULTIQC_HIFI.out.versions)
 }

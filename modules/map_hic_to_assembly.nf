@@ -31,6 +31,8 @@ process MAP_HIC_TO_ASSEMBLY {
           path("${meta.id}_mapping_stats.txt"),
           emit: stats
 
+    path "versions.tsv", emit: versions
+
     script:
     def extra_args = (params.bwa_mem2_hic_args ?: "").toString()
     """
@@ -68,6 +70,8 @@ process MAP_HIC_TO_ASSEMBLY {
     samtools flagstat -@ ${task.cpus} \\
       ${meta.id}.sorted.bam \\
       > ${meta.id}_mapping_stats.txt
+
+    bwa-mem2 version 2>&1 | head -n1 > versions.tsv
     """
 
     stub:
@@ -75,5 +79,6 @@ process MAP_HIC_TO_ASSEMBLY {
     touch ${meta.id}.sorted.bam
     touch ${meta.id}.sorted.bam.bai
     touch ${meta.id}_mapping_stats.txt
+    touch versions.tsv
     """
 }

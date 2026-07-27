@@ -27,6 +27,7 @@ process SCAFFOLD_HIC {
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.agp"), emit: agp
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.bin"), emit: bin
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}.yahs.log"), emit: log
+    path "versions.tsv", emit: versions
 
     script:
     // Extract parameters from round_params map
@@ -115,6 +116,8 @@ process SCAFFOLD_HIC {
     cp -f "\${bin_candidate}" "${meta.id}${round_suffix}_scaffolds_final.bin"
 
     echo "[YAHS ${round ?: 'round1'}] Scaffolding complete for ${meta.id}"
+    
+    printf 'YaHS\t%s\n' "$(yahs --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:
@@ -124,5 +127,6 @@ process SCAFFOLD_HIC {
     touch ${meta.id}${round_suffix}_scaffolds_final.agp
     touch ${meta.id}${round_suffix}_scaffolds_final.bin
     touch ${meta.id}${round_suffix}.yahs.log
+    touch versions.tsv
     """
 }

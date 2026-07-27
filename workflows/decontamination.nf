@@ -64,7 +64,7 @@ workflow DECONTAM_FCS_AUTO {
      */
     gx = FCS_GX_SCREEN(
       cleaned_input,
-      (params.decon_source_taxid ?: 7898),  // 7898 = Actinopterygii fallback
+      (params.taxid ?: 7898),
       gxdb.out_dir,
       (params.decon?.cpus ?: 32)
     )

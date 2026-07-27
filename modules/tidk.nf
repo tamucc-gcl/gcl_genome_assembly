@@ -41,6 +41,7 @@ process TIDK_EXPLORE {
 
     output:
     tuple val(haplotype_id), path("${haplotype_id}_tidk_explore.tsv"), emit: explore
+    path "versions.tsv", emit: versions
 
     script:
     def min_len = params.tidk_explore_minimum ?: 5
@@ -53,11 +54,13 @@ process TIDK_EXPLORE {
         --maximum ${max_len} \\
         ${assembly_fasta} \\
         > ${haplotype_id}_tidk_explore.tsv
+    printf 'tidk\t%s\n' "$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
     """
 
     stub:
     """
     printf "id\\trepeat\\tcount\\n" > ${haplotype_id}_tidk_explore.tsv
+    touch versions.tsv
     """
 }
 
@@ -80,14 +83,15 @@ process TIDK_SEARCH {
     publishDir "${params.outdir}/telomeres/search", mode: params.publish_dir_mode
 
     input:
-    tuple val(haplotype_id), path(assembly_fasta)
+    tuple val(haplotype_id), path(assembly_fasta), val(telomere_motif)
 
     output:
     tuple val(haplotype_id), path("${haplotype_id}_telomeric_repeat_windows.tsv"), emit: search_tsv
     tuple val(haplotype_id), path("${haplotype_id}_telomeric_repeat_windows.bedgraph"), emit: search_bedgraph
+    path "versions.tsv", emit: versions
 
     script:
-    def motif  = params.telomere_motif ?: 'TTAGGG'
+    def motif  = telomere_motif
     def window = params.tidk_search_window ?: 10000
     """
     set -euo pipefail
@@ -109,12 +113,15 @@ process TIDK_SEARCH {
         --dir . \\
         --extension bedgraph \\
         ${assembly_fasta}
+    
+    printf 'tidk\t%s\n' "$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
     """
 
     stub:
     """
     touch ${haplotype_id}_telomeric_repeat_windows.tsv
     touch ${haplotype_id}_telomeric_repeat_windows.bedgraph
+    touch versions.tsv
     """
 }
 
@@ -139,6 +146,7 @@ process TIDK_PLOT {
 
     output:
     tuple val(haplotype_id), path("${haplotype_id}_tidk.svg"), emit: plot
+    path "versions.tsv", emit: versions
 
     script:
     def height = params.tidk_plot_height ?: 200
@@ -151,11 +159,14 @@ process TIDK_PLOT {
         --height ${height} \\
         --width ${width} \\
         --output ${haplotype_id}_tidk
+    
+    printf 'tidk\t%s\n' "$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
     """
 
     stub:
     """
     touch ${haplotype_id}_tidk.svg
+    touch versions.tsv
     """
 }
 

@@ -67,9 +67,9 @@ workflow DECONTAMINATE_ASSEMBLY {
     // back to the global params.decon_source_taxid (nested: params.decon_source_taxid).
     ch_cleaned_input
         .map { meta, assembly_fasta ->
-            def tax = meta.taxid ?: params.decon_source_taxid
+            def tax = meta.taxid ?: params.taxid
             if (tax == null)
-                throw new IllegalArgumentException("Sample '${meta.id}': decontamination requires a taxid — set a per-row 'taxid' in the sample sheet, or --taxid / --decon_source_taxid.")
+                throw new IllegalArgumentException("Sample '${meta.id}': decontamination requires a taxid — set a per-row 'taxid' in the sample sheet, or --taxid.")
             tuple(meta, assembly_fasta, tax)
         }
         .combine(gxdb_dir)
@@ -98,4 +98,5 @@ workflow DECONTAMINATE_ASSEMBLY {
     contaminants = FCS_CLEAN_GENOME.out.contaminants_fasta      // tuple(meta, fasta)
     action_report = FCS_GX_SCREEN.out.action_report             // tuple(meta, report)
     taxonomy_report = FCS_GX_SCREEN.out.taxonomy_report         // tuple(meta, report)
+    versions = FCS_GX_SCREEN.out.versions
 }

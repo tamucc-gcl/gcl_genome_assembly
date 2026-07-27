@@ -32,6 +32,7 @@ process SPADES {
     tuple val(meta), path("${meta.sample}.scaffolds.fasta"),      emit: scaffolds, optional: true
     tuple val(meta), path("${meta.sample}.assembly_graph.gfa"),   emit: gfa,       optional: true
     tuple val(meta), path("${meta.sample}.spades.log"),           emit: log
+    path "versions.tsv", emit: versions
 
     script:
     def kmers    = params.spades_kmer_list      ?: '21,33,55,77'
@@ -59,6 +60,8 @@ process SPADES {
     if [ -f ${meta.sample}_spades/scaffolds.fasta ]; then cp ${meta.sample}_spades/scaffolds.fasta ${meta.sample}.scaffolds.fasta; fi
     if [ -f ${meta.sample}_spades/assembly_graph_with_scaffolds.gfa ]; then cp ${meta.sample}_spades/assembly_graph_with_scaffolds.gfa ${meta.sample}.assembly_graph.gfa; fi
     cp ${meta.sample}_spades/spades.log ${meta.sample}.spades.log
+
+    printf 'SPAdes\t%s\n' "$(spades.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
     """
 
     stub:
@@ -67,5 +70,6 @@ process SPADES {
     touch ${meta.sample}.scaffolds.fasta
     touch ${meta.sample}.assembly_graph.gfa
     touch ${meta.sample}.spades.log
+    touch versions.tsv
     """
 }

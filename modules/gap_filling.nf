@@ -23,6 +23,7 @@ process GAP_FILLING {
     tuple val(meta), path("${meta.id}.fasta"), emit: filled_assembly
     tuple val(meta), path("${meta.id}.gap_fill_detail"), emit: details
     tuple val(meta), path("${meta.id}_gap_filling_report.txt"), emit: report
+    path "versions.tsv", emit: versions
 
     script:
     """
@@ -114,6 +115,7 @@ Report: ${meta.id}_gap_filling_report.txt
 ================================================================================
 EOF
 
+    printf 'TGSGapCloser\t%s\n' "$( tgsgapcloser -h 2>&1 | sed -n 's/.*Version : \([0-9.]*\).*/\1/p' | head -n1 || true )" > versions.tsv
     """
 
     stub:
@@ -121,5 +123,6 @@ EOF
     touch ${meta.id}.fasta
     touch ${meta.id}.gap_fill_detail
     touch ${meta.id}_gap_filling_report.txt
+    touch versions.tsv
     """
 }

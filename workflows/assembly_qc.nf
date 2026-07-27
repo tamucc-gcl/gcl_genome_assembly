@@ -147,4 +147,5 @@ workflow ASSEMBLY_QC {
     emit:
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary   // (sample_id, qc_label, summary_tsv)
     busco_results    = BUSCO.out.results                 // per-haplotype (meta, results)
+    versions       = QUAST.out.versions.mix(MERQURY.out.versions).mix(BUSCO.out.versions).mix(MAPPING_QC.out.versions)
 }

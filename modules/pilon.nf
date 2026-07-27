@@ -26,6 +26,7 @@ process PILON {
     output:
     tuple val(meta), path("${meta.sample}.pilon.fasta"), emit: assembly
     tuple val(meta), path("${meta.sample}.pilon.changes"), emit: changes, optional: true
+    path "versions.tsv", emit: versions
 
     script:
     def mem_gb = task.memory ? task.memory.toGiga() : 32
@@ -57,11 +58,14 @@ process PILON {
     if [ -f ${meta.sample}.pilon.${rounds}.changes ]; then
         cp ${meta.sample}.pilon.${rounds}.changes ${meta.sample}.pilon.changes
     fi
+
+    printf 'Pilon\t%s\n' "$(pilon --version 2>&1 | sed 's/.*version //;s/ .*//')" > versions.tsv
     """
 
     stub:
     """
     touch ${meta.sample}.pilon.fasta
     touch ${meta.sample}.pilon.changes
+    touch versions.tsv
     """
 }

@@ -32,4 +32,5 @@ workflow HIC_QC {
     fastqc_zip = FASTQC_HIC.out.fastqc_zip
     multiqc_report = MULTIQC_HIC.out.report
     multiqc_data = MULTIQC_HIC.out.data
+    versions       = FASTQC_HIC.out.versions.mix(MULTIQC_HIC.out.versions)
 }

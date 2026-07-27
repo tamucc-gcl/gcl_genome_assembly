@@ -36,19 +36,36 @@ nextflow.enable.dsl=2
 // ============================================================================
 
 // Print pipeline header
+// helpers for the startup banner
+def onOff  = { it ? 'Enabled' : 'Disabled' }
+def stages = { c, s -> ([c ? 'Contigs' : null, s ? 'Scaffolds' : null].findAll().join(' + ')) ?: 'Disabled' }
+def orAuto = { v, src -> (v == null || v == 'auto') ? "auto (${src})" : v.toString() }
+
 log.info """\
-    =========================================
-    GENOME ASSEMBLY PIPELINE
-    =========================================
-    Sample sheet : ${params.sample_sheet}
-    Output dir   : ${params.outdir}
-    Inspector    : ${params.run_inspector_contigs ? 'Contigs' : ''}${params.run_inspector_scaffolds ? ' Scaffolds' : ''}${!params.run_inspector_contigs && !params.run_inspector_scaffolds ? 'Disabled' : ''}
-    Decontamination: ${params.run_decon_contigs ? 'Contigs' : ''}${params.run_decon_scaffolds ? ' Scaffolds' : ''}${!params.run_decon_contigs && !params.run_decon_scaffolds ? 'Disabled' : ''}
-    Scaffold Round 2: ${params.run_scaffold_round2 ? 'Enabled' : 'Disabled'}
-    Gap Filling  : Enabled
-    =========================================
-    """
-    .stripIndent()
+    ============================================================
+     GENOME ASSEMBLY PIPELINE  ${workflow.manifest.version ?: ''}
+    ============================================================
+     Run              : ${workflow.runName}${workflow.revision ? "  (${workflow.revision})" : ''}
+     Profile          : ${workflow.profile}
+     Sample sheet     : ${params.sample_sheet}
+     Output dir       : ${params.outdir}
+    ------------------------------------------------------------
+     purge_dups       : ${onOff(params.run_purge_dups)}
+     Pilon polish     : ${onOff(params.run_pilon)}
+     Inspector        : ${stages(params.run_inspector_contigs, params.run_inspector_scaffolds)}
+     Decontamination  : ${stages(params.run_decon_contigs, params.run_decon_scaffolds)}${params.run_fcs_adaptor ? '  (+FCS-adaptor)' : ''}
+     Scaffold round 2 : ${onOff(params.run_scaffold_round2)}
+     Gap filling      : Enabled
+     Hi-C contact maps: ${onOff(params.run_final_contact_maps)}
+     Pairwise synteny : ${params.run_pairwise_alignments ? params.pairwise_alignment_mode : 'Disabled'}
+     Teloclip extend  : ${onOff(params.run_teloclip_extend)}
+    ------------------------------------------------------------
+     Analysis k-mer   : ${params.kmer_size}
+     Genetic code     : ${orAuto(params.mitochondria_genetic_code , 'from taxid')}
+     Telomere motif   : ${orAuto(params.telomere_motif, 'from taxid')}
+     Haploid genome size: ${orAuto(params.haploid_genome_size, 'from estimate')}
+    ============================================================
+    """.stripIndent()
 
 /*
 ========================================================================================
@@ -120,7 +137,7 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 ========================================================================================
 */
 include { RESOLVE_TAXONOMY } from './modules/resolve_taxonomy.nf'
-include { buscoLineageFor; kingdomFlag; organismName } from './functions/taxonomy.nf'
+include { buscoLineageFor; kingdomFlag; organismName; geneticCodeFor; telomereMotifFor } from './functions/taxonomy.nf'
 include { DOWNLOAD_TAXDUMP } from './modules/download_taxdump.nf'
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
@@ -168,6 +185,7 @@ include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
 include { HIC_TADS } from './modules/hic_tads.nf'
 include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
+include { COLLECT_SOFTWARE_VERSIONS } from './modules/collect_software_versions.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
 ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
@@ -188,6 +206,13 @@ workflow {
     
     // Parse sample sheet -> per-sample tuple(meta, reads)
     ch_input = parseSampleSheet(params.sample_sheet)
+
+    // ploidy + haploid-size overrides ride sample-keyed side-channels (genomescope/hifiasm only),
+    // so ploidy/size tweaks stay off the per-sample task hash.
+    ch_ploidy_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, (meta.ploidy ?: (meta.n_hap ?: 2))) }
+    ch_hgsize_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, meta.haploid_genome_size) }   // column>param, or null
+    ch_input            = ch_input.map { meta, reads -> tuple(meta.findAll { k, v -> !(k in ['ploidy', 'haploid_genome_size']) }, reads) }
+    ch_versions = Channel.empty()
 
     // ── Ensure the NCBI taxdump once, up front. Idempotent: the module skips the download
     //    when names.dmp/nodes.dmp are already present at the target path. Needed by
@@ -213,9 +238,11 @@ workflow {
         .splitCsv(sep: '\t', header: true)
         .map { row ->
             tuple(row.taxid.toString(),
-                  [ name         : organismName(row),
-                    kingdom      : kingdomFlag(row),
-                    busco_lineage: buscoLineageFor(row) ]) }
+                  [ name          : organismName(row),
+                    kingdom       : kingdomFlag(row),
+                    busco_lineage : buscoLineageFor(row),
+                    genetic_code  : geneticCodeFor(row),
+                    telomere_motif: telomereMotifFor(row) ]) }
 
     // Per-sample identity side-channel: (sample, {taxid, name, kingdom, busco_lineage}).
     ch_sample_identity = ch_input
@@ -223,14 +250,32 @@ workflow {
         .filter { taxid, sample, override -> taxid != null }
         .combine(ch_taxonomy, by: 0)                       // many samples per taxid
         .map { taxid, sample, override, tax ->
-            tuple(sample, [ taxid        : taxid,
-                            name         : override ?: tax.name,
-                            kingdom      : tax.kingdom,
-                            busco_lineage: tax.busco_lineage ]) }
+            tuple(sample, [ taxid         : taxid,
+                            name          : override ?: tax.name,
+                            kingdom       : tax.kingdom,
+                            busco_lineage : tax.busco_lineage,
+                            genetic_code  : (params.mitochondria_genetic_code ?: tax.genetic_code),
+                            telomere_motif: (params.telomere_motif        ?: tax.telomere_motif) ]) }
 
     ch_sample_identity.subscribe { sample, tax ->
-        log.info "  resolved '${sample}': taxid=${tax.taxid}  name='${tax.name}'  kingdom=${tax.kingdom}  busco=${tax.busco_lineage}"
+        log.info "  resolved '${sample}': taxid=${tax.taxid}  name='${tax.name}'  kingdom=${tax.kingdom}  busco=${tax.busco_lineage}  gcode=${tax.genetic_code}  telo=${tax.telomere_motif}"
     }
+
+    // Per-taxid resolved mito genetic code (param override wins over taxonomy-derived).
+    ch_gcode_by_taxid = ch_taxonomy
+        .map { taxid, tax -> tuple(taxid, (params.mitochondria_genetic_code ?: tax.genetic_code)) }
+
+    // Per-taxid resolved telomere motif (param override wins over taxonomy-derived).
+    ch_telo_by_taxid = ch_taxonomy
+        .map { taxid, tax -> tuple(taxid, (params.telomere_motif ?: tax.telomere_motif)) }
+
+    // Bundled per-sample hifiasm inputs: telomere motif (from resolved identity), organism ploidy,
+    // and the haploid-size override. One join-by-sample instead of three separate side inputs.
+    ch_hifiasm_traits = ch_sample_identity
+        .map { sample, id -> tuple(sample, id.telomere_motif) }
+        .join( ch_ploidy_by_sample )
+        .join( ch_hgsize_by_sample )
+        .map { sample, telo, ploidy, hg -> tuple(sample, [ telomere_motif: telo, ploidy: ploidy, haploid_genome_size: hg ]) }
 
     /*
     ========================================================================================
@@ -322,6 +367,7 @@ workflow {
     if (params.run_shortread_trim) {
         TRIM_SHORTREAD(ch_shortread_raw)
         ch_shortread_reads = TRIM_SHORTREAD.out.trimmed_reads
+        ch_versions = ch_versions.mix(TRIM_SHORTREAD.out.versions)
     } else {
         ch_shortread_reads = ch_shortread_raw
     }
@@ -377,11 +423,14 @@ workflow {
     ch_reads_all
         .map { meta, hifi_fastq, r1, r2, sr1, sr2 ->
             def gs_reads = (meta.assembler == 'spades') ? [ sr1, sr2 ] : [ hifi_fastq ]
-            tuple(meta, gs_reads)
+            tuple(meta.sample, meta, gs_reads)
         }
+        .join(ch_ploidy_by_sample)
+        .map { sample, meta, gs_reads, ploidy -> tuple(meta, gs_reads, ploidy) }
         .set { ch_gsize_input }
 
     ESTIMATE_GENOME_SIZE(ch_gsize_input)
+    ch_versions = ch_versions.mix(ESTIMATE_GENOME_SIZE.out.versions)
 
 
     /*
@@ -393,8 +442,10 @@ workflow {
     */
     ORGANELLE_ASSEMBLY(
         ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
-        ch_mito_ref_by_taxid
+        ch_mito_ref_by_taxid,
+        ch_gcode_by_taxid
     )
+    ch_versions = ch_versions.mix(ORGANELLE_ASSEMBLY.out.versions)
 
     /*
     ========================================================================================
@@ -404,7 +455,12 @@ workflow {
     ========================================================================================
     */
 
-    CONTIG_ASSEMBLY(ch_reads_all)
+    CONTIG_ASSEMBLY(
+        ch_reads_all,
+        ch_hifiasm_traits,
+        ESTIMATE_GENOME_SIZE.out.size.map { meta, f -> tuple(meta.sample, f) }
+    )
+    ch_versions = ch_versions.mix(CONTIG_ASSEMBLY.out.versions)
 
     // Fork sample-level assembly into per-hap contigs: diploid -> hap1+hap2, haploid/spades -> one primary.
     CONTIG_ASSEMBLY.out.assemblies
@@ -455,6 +511,7 @@ workflow {
 
         PURGE_DUPS(ch_purge_dups_input)
         ch_hifiasm_output = PURGE_DUPS.out.purged_assembly      // per-haplotype (meta, fasta)
+        ch_versions = ch_versions.mix(PURGE_DUPS.out.versions)
     } else {
         ch_hifiasm_output = ch_mito_filtered                    // per-haplotype (meta, fasta)
     }
@@ -467,6 +524,7 @@ workflow {
         .set { ch_redundans_input }
 
     REDUNDANS(ch_redundans_input)
+    ch_versions = ch_versions.mix(REDUNDANS.out.versions)
 
     if (params.run_pilon) {
         REDUNDANS.out.assembly
@@ -476,6 +534,7 @@ workflow {
             .set { ch_pilon_input }
         PILON(ch_pilon_input)
         ch_shortread_conditioned = PILON.out.assembly
+        ch_versions = ch_versions.mix(PILON.out.versions)
     } else {
         ch_shortread_conditioned = REDUNDANS.out.assembly
     }
@@ -504,6 +563,7 @@ workflow {
 
         CORRECT_MISASSEMBLIES_CONTIG(ch_correction_input)
         ch_hifi_conditioned = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
+        ch_versions = ch_versions.mix(CORRECT_MISASSEMBLIES_CONTIG.out.versions)
     } else {
         ch_hifi_conditioned = ch_hifiasm_output                           // per-hap (meta, fasta)
     }
@@ -524,6 +584,7 @@ workflow {
     if (params.run_decon_contigs) {
         DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
         ch_decontaminated_contigs = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
+        ch_versions = ch_versions.mix(DECONTAMINATE_ASSEMBLY_CONTIG.out.versions)
     } else {
         ch_decontaminated_contigs = ch_assemblies_for_decontam
     }
@@ -606,6 +667,7 @@ workflow {
         .set { ch_scaffolding_round1_input }
 
     SCAFFOLD_HIC_ROUND1(ch_scaffolding_round1_input)
+    ch_versions = ch_versions.mix(SCAFFOLD_HIC_ROUND1.out.versions)
 
     // checkpoint: scaffold_space (relabel contigs->scaffolds via round1 AGP; no remap)
     FILTER_HIC_BAM.out.pairs
@@ -802,6 +864,7 @@ workflow {
     
     // Run gap filling
     GAP_FILLING(ch_gap_filling_input)
+    ch_versions = ch_versions.mix(GAP_FILLING.out.versions)
 
     // Gap-filled Hi-C scaffolds + HiFi-only contigs (which correctly skipped gap-fill) both
     // continue to teloclip/finalize.
@@ -820,10 +883,13 @@ workflow {
         ch_post_gap_fill
             .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
             .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-            .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta, filled_fa, hifi_fastq) }
+            .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta.taxid?.toString(), meta, filled_fa, hifi_fastq) }
+            .combine( ch_telo_by_taxid, by: 0 )
+            .map { taxid, meta, filled_fa, hifi_fastq, telo -> tuple(meta, filled_fa, hifi_fastq, telo) }
             .set { ch_teloclip_input }
 
         TELOCLIP_EXTEND(ch_teloclip_input)
+        ch_versions = ch_versions.mix(TELOCLIP_EXTEND.out.versions)
 
         // Collect teloclip stats across all haplotypes
         COLLECT_TELOCLIP_STATS(
@@ -928,6 +994,12 @@ workflow {
         .map { meta, fa -> tuple(meta.id, fa) }
         .set { ch_final_by_id }
 
+    ch_finalized_assembly
+        .map { meta, fa -> tuple(meta.taxid?.toString(), meta.id, fa) }
+        .combine( ch_telo_by_taxid, by: 0 )
+        .map { taxid, id, fa, telo -> tuple(id, fa, telo) }
+        .set { ch_final_by_id_telo }
+
     // 3. Dotplots of final assemblies vs each other (hap1 vs hap2)
     /*
     ========================================================================================
@@ -1025,6 +1097,7 @@ workflow {
         ch_quast_assemblies.collect(),
         ch_quast_labels.flatten().collect()
     )
+    ch_versions = ch_versions.mix(QUAST_FINAL.out.versions)
 
     /*
     ========================================================================================
@@ -1033,9 +1106,10 @@ workflow {
     */
     // 1. Explore: discover telomere motif de novo
     TIDK_EXPLORE(ch_final_by_id)
+    ch_versions = ch_versions.mix(TIDK_EXPLORE.out.versions)
 
     // 2. Search: windowed telomere repeat quantification
-    TIDK_SEARCH(ch_final_by_id)
+    TIDK_SEARCH(ch_final_by_id_telo)
 
     // 3. Plot: SVG visualization per haplotype
     TIDK_PLOT(TIDK_SEARCH.out.search_tsv)
@@ -1065,6 +1139,7 @@ workflow {
     ========================================================================================
     */
     BUILD_MERYL_DB(ch_qc_reads)
+    ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
 
     /*
     ========================================================================================
@@ -1081,6 +1156,7 @@ workflow {
                 .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
         "raw"
     )
+    ch_versions = ch_versions.mix(HIC_QC_RAW.out.versions)
 
     /*
     ========================================================================================
@@ -1090,6 +1166,7 @@ workflow {
     HIFI_QC(
         BAM_TO_FASTQ.out.fastq
     )
+    ch_versions = ch_versions.mix(HIFI_QC.out.versions)
 
     /*
     ========================================================================================
@@ -1107,6 +1184,7 @@ workflow {
                 .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) },
         "raw"
     )
+    ch_versions = ch_versions.mix(SHORTREAD_QC_RAW.out.versions)
     if (params.run_shortread_trim) {
         SHORTREAD_QC_TRIMMED(TRIM_SHORTREAD.out.trimmed_reads, "trimmed")
     }
@@ -1262,6 +1340,7 @@ workflow {
         ch_busco_db,
         'final'
     )
+    ch_versions = ch_versions.mix(ASSEMBLY_QC_FINAL.out.versions)
 
     /*
     ========================================================================================
@@ -1580,11 +1659,10 @@ workflow {
     // ---- Per-sample taxonomy + genome-size estimate (4b-i Increment 4) ----
     ch_sample_taxonomy_tsv = ch_sample_identity
         .map { sample, tax ->
-            "${sample}\t${tax.taxid}\t${tax.name}\t${tax.kingdom}\t${tax.busco_lineage}"
-        }
-        .collectFile(name: 'sample_taxonomy.tsv',
-                     seed: 'sample\ttaxid\tspecies\tkingdom\tbusco_lineage',
-                     newLine: true)
+            "${sample}\t${tax.taxid}\t${tax.name}\t${tax.kingdom}\t${tax.busco_lineage}\t${tax.genetic_code}\t${tax.telomere_motif}" }
+        .collectFile(name: 'sample_taxonomy.tsv', newLine: true,
+                     seed: 'sample\ttaxid\tspecies\tkingdom\tbusco_lineage\tgenetic_code\ttelomere_motif',
+                     sort: false)
         .ifEmpty(file('NO_TAXONOMY'))
 
     ch_genome_size_tsv = ESTIMATE_GENOME_SIZE.out.size
@@ -1597,9 +1675,11 @@ workflow {
 
     // ---- Per-sample run info (evidence + strategy) for the report header ----
     ch_run_info_tsv = ch_input
-        .map { meta, reads ->
+        .map { meta, reads -> tuple(meta.sample, meta) }
+        .join(ch_ploidy_by_sample)
+        .map { sample, meta, ploidy ->
             [ meta.sample, meta.hifi, meta.hic, meta.tellseq, meta.shortread,
-              meta.assembler, meta.n_hap, meta.ploidy, meta.dedup, meta.mito_tool ]
+              meta.assembler, meta.n_hap, ploidy, meta.dedup, meta.mito_tool ]
                 .collect { it == null ? '' : it }.join('\t')
         }
         .collectFile(name: 'run_info.tsv',
@@ -1629,6 +1709,8 @@ workflow {
         .of(wf_lines)
         .collectFile(name: 'workflow_info.tsv', newLine: true)
 
+    COLLECT_SOFTWARE_VERSIONS(ch_versions.collect())
+
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
         ch_report_manifest,
@@ -1641,6 +1723,7 @@ workflow {
         ch_genome_size_tsv,
         ch_workflow_info,
         ch_run_info_tsv,
+        COLLECT_SOFTWARE_VERSIONS.out.versions,
         ch_summary_report_script       
     )
 }

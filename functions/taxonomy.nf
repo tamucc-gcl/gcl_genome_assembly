@@ -65,3 +65,32 @@ def buscoLineageFor(Map r) {
     }
     return 'eukaryota_odb10'
 }
+
+// NCBI mitochondrial genetic code (MitoHiFi -o). Clade-specific; verify/extend for your taxa.
+def geneticCodeFor(Map r) {
+    def lin = (r.lineage ?: '').toString().toLowerCase()
+    if (lin.contains('viridiplantae'))   return 1    // plant mito: standard code
+    if (lin.contains('fungi'))           return 4    // mold/protozoan mito (yeast = 3)
+    if (lin.contains('metazoa')) {
+        if (lin.contains('vertebrata') || lin.contains('craniata'))            return 2   // vertebrate mito
+        if (lin.contains('echinodermata') || lin.contains('platyhelminthes'))  return 9
+        if (lin.contains('cnidaria') || lin.contains('porifera'))              return 4
+        return 5    // invertebrate mito (arthropods, molluscs, nematodes, ...)
+    }
+    return 1        // standard-code fallback
+}
+
+// Canonical telomere repeat, C-rich strand to match the existing 'CCCTAA' default.
+// Only well-characterised clades mapped; else the vertebrate-style fallback. Tools search
+// both strands, but VERIFY this convention suits hifiasm --telo-m / tidk, and extend freely.
+def telomereMotifFor(Map r) {
+    def lin = (r.lineage ?: '').toString().toLowerCase()
+    if (lin.contains('viridiplantae'))   return 'CCCTAAA'   // plants: (TTTAGGG)n
+    if (lin.contains('metazoa')) {
+        if (lin.contains('vertebrata') || lin.contains('craniata')) return 'CCCTAA'   // (TTAGGG)n
+        if (lin.contains('insecta'))     return 'CCTAA'     // many insects: (TTAGG)n
+        if (lin.contains('nematoda'))    return 'GCCTAA'    // e.g. C. elegans: (TTAGGC)n
+        return 'CCCTAA'
+    }
+    return 'CCCTAA'
+}

@@ -25,16 +25,15 @@ process HIFIASM {
     publishDir "${params.outdir}/assembly/contig/hifiasm", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(hifi_fastq), path(hic_r1), path(hic_r2)
+    tuple val(meta), path(hifi_fastq), path(hic_r1), path(hic_r2), val(traits), path(gsize_file)
 
     output:
     tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.fasta"), emit: assemblies
     tuple val(meta), path("${meta.sample}.hifiasm.log"),                     emit: log
     tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.gfa"),   emit: gfa
+    path "versions.tsv", emit: versions
 
     script:
-    telomere_motif = params.telomere_motif ?: 'CCCTAA'  // Default to human telomeric repeat if not provided
-
     // ---- ploidy-driven mode (Phase 2) ----
     // Haploid -> collapsed primary assembly: --primary, no Hi-C phasing.
     // Hi-C phasing also requires Hi-C to actually be present (HiFi-only rows -> off).
@@ -47,7 +46,9 @@ process HIFIASM {
     hic_opts      = useHiC ? "--h1 ${hic_r1} --h2 ${hic_r2}" : ''
 
     // Handle 'auto' parameters - omit flag entirely for auto behavior
-    hgsize_opt   = params.hifiasm_haploid_genome_size   == 'auto' ? '' : "--hg-size ${params.hifiasm_haploid_genome_size}"
+    def telomere_motif = traits.telomere_motif
+    def ploidy         = traits.ploidy
+    def hg_override    = traits.haploid_genome_size
     homcov_opt   = params.hifiasm_homozygous_coverage   == 'auto' ? '' : "--hom-cov ${params.hifiasm_homozygous_coverage}"
     purgemax_opt = params.hifiasm_purge_max_coverage == 'auto' ? '' : "--purge-max ${params.hifiasm_purge_max_coverage}"
 
@@ -70,6 +71,20 @@ process HIFIASM {
     }
 
     """
+    # --- resolve hifiasm --hg-size ---
+    # override wins: 'auto' -> let hifiasm estimate (omit flag); a value -> use it verbatim.
+    # else the per-sample GenomeScope estimate (digits only); empty/NA -> omit (hifiasm estimates).
+    HG_OPT=""
+    HG_OVR="${hg_override}"
+    if [ "\${HG_OVR}" = "auto" ]; then
+        HG_OPT=""
+    elif [ -n "\${HG_OVR}" ] && [ "\${HG_OVR}" != "null" ]; then
+        HG_OPT="--hg-size \${HG_OVR}"
+    else
+        EST="\$(tr -cd '0-9' < ${gsize_file} 2>/dev/null || true)"
+        [ -n "\${EST}" ] && HG_OPT="--hg-size \${EST}"
+    fi
+
     hifiasm \\
         -o ${meta.sample} \\
         -t ${task.cpus} \\
@@ -81,7 +96,7 @@ process HIFIASM {
         -r ${params.hifiasm_correction_rounds} \\
         -z ${params.hifiasm_adapter_trim_bp} \\
         --max-kocc ${params.hifiasm_max_kmer_occurrence} \\
-        ${hgsize_opt} \\
+        \${HG_OPT} \\
         -a ${params.hifiasm_cleaning_rounds} \\
         -m ${params.hifiasm_contig_bubble_bp} \\
         -p ${params.hifiasm_unitig_bubble_bp} \\
@@ -100,7 +115,7 @@ process HIFIASM {
         -s ${params.hifiasm_purge_similarity} \\
         -O ${params.hifiasm_purge_min_overlap} \\
         ${purgemax_opt} \\
-        --n-hap ${params.hifiasm_nHaplotypes} \\
+        --n-hap ${ploidy} \\
         ${dualscaf_flag} \\
         --scaf-gap ${params.hifiasm_scaffold_max_gap_bp} \\
         --telo-m ${telomere_motif} \\
@@ -118,6 +133,8 @@ process HIFIASM {
 
     # Convert GFA to FASTA (+ copy GFAs to standardized names)
     ${conversion_cmds}
+
+    printf 'hifiasm\t%s\n' "$(hifiasm --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:
@@ -127,6 +144,7 @@ process HIFIASM {
         touch ${meta.sample}.primary.p_ctg.fasta
         touch ${meta.sample}.primary.p_ctg.gfa
         touch ${meta.sample}.hifiasm.log
+        touch versions.tsv
         """
     else
         """
@@ -135,5 +153,6 @@ process HIFIASM {
         touch ${meta.sample}.hap1.p_ctg.gfa
         touch ${meta.sample}.hap2.p_ctg.gfa
         touch ${meta.sample}.hifiasm.log
+        touch versions.tsv
         """
 }

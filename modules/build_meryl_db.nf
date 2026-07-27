@@ -25,6 +25,7 @@ process BUILD_MERYL_DB {
 
     output:
     tuple val(meta), path("${meta.id}.meryl"), emit: meryl_db
+    path "versions.tsv", emit: versions
 
     script:
     def k = params.kmer_size ?: 21
@@ -36,11 +37,13 @@ process BUILD_MERYL_DB {
         memory=${task.memory.toGiga()} \\
         ${reads} \\
         output ${meta.id}.meryl
+    printf 'meryl\t%s\n' "$(meryl --version 2>&1 | sed 's/meryl //')" > versions.tsv
     """
 
     stub:
     """
     mkdir -p ${meta.id}.meryl
     touch ${meta.id}.meryl/merylIndex
+    touch versions.tsv
     """
 }
