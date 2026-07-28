@@ -1,43 +1,50 @@
 #!/usr/bin/env nextflow
 /*
 ========================================================================================
-    STANDALONE TEST HARNESS — short-read organelle assembly
+    STANDALONE TEST HARNESS — short-read organelle assembly (SHORTREAD_ORGANELLE)
 ========================================================================================
     Repo location: test/test_shortread_organelle.nf
 
-    Runs SHORTREAD_ORGANELLE in isolation (no BAM->fastq, no hifiasm, no QC), so the
-    GetOrganelle path can be developed and tested on its own, then dropped into the main
-    pipeline unchanged — main.nf's ORGANELLE_ASSEMBLY calls the SAME subworkflow.
+    Exercises SHORTREAD_ORGANELLE in isolation by handing it the SAME TWO channels its
+    parent (ORGANELLE_ASSEMBLY, driven by main.nf) builds — nothing is re-derived here.
+    This validates the real input contract:
+
+      ch_reads      tuple(meta, sr1, sr2)                                    <- ch_reads_all (other branch)
+      ch_organelle  tuple(taxid, [ [type,recursion,kmers,coverage], ... ])   <- ch_organelle_by_taxid
+
+    In the full pipeline ch_organelle_by_taxid is computed from resolved taxonomy; here you
+    PROVIDE the specs explicitly (one CSV row per organelle target per taxid), so you control
+    exactly what the module receives — e.g. a single embplant_mt row for a mito-only run.
+    -w / --getorganelle_from_assembly / --getorganelle_min_depth stay global params, exactly
+    as in production.
 
     Usage:
-      nextflow run test/test_shortread_organelle.nf \\
-          -c nextflow.config \\
-          --organelle_samplesheet test/organelle_samplesheet.csv \\
-          --outdir results_orgtest
-      # add -stub for a wiring smoke-test (no real assembly)
+      nextflow run test/test_shortread_organelle.nf \
+          -c nextflow.config -profile slurm \
+          --reads_samplesheet test/organelle_reads.csv \
+          --organelle_specs   test/organelle_specs.csv \
+          --outdir results_orgtest_mt
 
-    Samplesheet (header required):
-      sample,taxid,kingdom,reads_1,reads_2
-        kingdom : plant | animal | fungi | other   (plant => pt+mt targets; else mt)
-        taxid   : grouping key only in this harness (taxonomy is NOT resolved here); set it
-                  to the real NCBI taxid so it matches how the full pipeline keys things
-        reads_* : trimmed Illumina PE fastq(.gz)
+    reads sheet : sample,taxid,reads_1,reads_2
+    specs sheet : taxid,type,recursion,kmers,coverage      (quote the kmers field)
 ========================================================================================
 */
 
 nextflow.enable.dsl = 2
 
 include { SHORTREAD_ORGANELLE } from '../workflows/shortread_organelle.nf'
-include { organelleTypesFor; getorganelleRecursionFor; getorganelleKmersFor; getorganelleCoverageFor } from '../functions/taxonomy.nf'
 
-params.organelle_samplesheet = null
+params.reads_samplesheet = null
+params.organelle_specs   = null
 
 workflow {
-    if( !params.organelle_samplesheet )
-        error "Provide --organelle_samplesheet <csv> with columns: sample,taxid,kingdom,reads_1,reads_2"
+    if( !params.reads_samplesheet || !params.organelle_specs )
+        error "Provide --reads_samplesheet (sample,taxid,reads_1,reads_2) and --organelle_specs (taxid,type,recursion,kmers,coverage)"
 
-    // short-read samples: tuple(meta, r1, r2)
-    ch_reads = Channel.fromPath( params.organelle_samplesheet, checkIfExists: true )
+    // ch_reads — exactly as ORGANELLE_ASSEMBLY hands it down: tuple(meta, sr1, sr2).
+    // GETORGANELLE uses meta.sample (tag/filenames) and meta.taxid (fan-out key); a richer
+    // meta from the real sample sheet would be functionally identical for this unit.
+    ch_reads = Channel.fromPath( params.reads_samplesheet, checkIfExists: true )
         .splitCsv( header: true )
         .map { row ->
             tuple( [ sample: row.sample, taxid: row.taxid ],
@@ -45,27 +52,22 @@ workflow {
                    file(row.reads_2, checkIfExists: true) )
         }
 
-    // per-taxid organelle specs, built from the SAME helpers the pipeline uses (kingdom-driven
-    // here). Read the sheet a second time so we never double-consume a single channel.
-    ch_organelle = Channel.fromPath( params.organelle_samplesheet, checkIfExists: true )
+    // ch_organelle — exactly as ch_organelle_by_taxid: tuple(taxid, [ spec-map, ... ]).
+    // One CSV row per (taxid, organelle target); grouped into the per-taxid spec list.
+    ch_organelle = Channel.fromPath( params.organelle_specs, checkIfExists: true )
         .splitCsv( header: true )
         .map { row ->
-            def types = params.getorganelle_organelle_types
-                            ? params.getorganelle_organelle_types.tokenize(',')*.trim()
-                            : organelleTypesFor( [ kingdom: row.kingdom ] )
-            def specs = types.collect { t ->
-                [ type      : t,
-                  recursion : (params.getorganelle_recursion ?: getorganelleRecursionFor(t)),
-                  kmers     : (params.getorganelle_kmers     ?: getorganelleKmersFor(t)),
-                  coverage  : (params.getorganelle_coverage  ?: getorganelleCoverageFor(t)) ]
-            }
-            tuple( row.taxid?.toString(), specs )
+            tuple( row.taxid.toString(),
+                   [ type      : row.type,
+                     recursion : (row.recursion as Integer),
+                     kmers     : row.kmers,
+                     coverage  : (row.coverage as Integer) ] )
         }
-        .unique()
+        .groupTuple()
 
     SHORTREAD_ORGANELLE( ch_reads, ch_organelle )
 
-    // console summary of the status contract (also published to --outdir)
+    // console summary of the status contract (also published under --outdir)
     SHORTREAD_ORGANELLE.out.stats
         .map { meta, org_type, tsv -> "[status] ${meta.sample}\t${org_type}\t" + tsv.text.trim().readLines().last() }
         .view()
