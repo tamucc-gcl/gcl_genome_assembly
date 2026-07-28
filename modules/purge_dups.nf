@@ -119,7 +119,7 @@ process PURGE_DUPS {
 
     echo "" | tee -a ${meta.id}.purge_dups.log
     echo "=== purge_dups completed successfully ===" | tee -a ${meta.id}.purge_dups.log
-    printf 'purge_dups\t%s\n' "$( purge_dups -h 2>&1 | sed -n 's/^Version:[[:space:]]*//p' | head -n1 || true )" > versions.tsv
+    printf 'purge_dups\t%s\n' "\$( purge_dups -h 2>&1 | sed -n 's/^Version:[[:space:]]*//p' | head -n1 || true )" > versions.tsv
     """
 
     stub:

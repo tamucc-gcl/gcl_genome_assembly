@@ -33,7 +33,7 @@ process MULTIQC_HIC {
         --comment "${comment}" \\
         .
 
-    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
+    printf 'FastQC\t%s\n' "\$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
     
     stub:

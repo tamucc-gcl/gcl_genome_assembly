@@ -157,7 +157,7 @@ EOF
 
     echo "[MITOHIFI] Complete: \$(date)"
 
-    printf 'MitoHiFi\t%s\n' "$(mitohifi.py -v 2>&1 | sed 's/^MitoHiFi //' | head -n1)" > versions.tsv
+    printf 'MitoHiFi\t%s\n' "\$(mitohifi.py -v 2>&1 | sed 's/^MitoHiFi //' | head -n1)" > versions.tsv
     """
 
     stub:

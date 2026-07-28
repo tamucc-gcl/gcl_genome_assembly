@@ -21,7 +21,7 @@ process MAP_READS_MINIMAP2 {
 
   samtools index -@ ${task.cpus} reads.bam
 
-  printf 'minimap2\t%s\n' "$(minimap2 --version 2>&1)" > versions.tsv
-  printf 'samtools\t%s\n' "$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
+  printf 'minimap2\t%s\n' "\$(minimap2 --version 2>&1)" > versions.tsv
+  printf 'samtools\t%s\n' "\$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
   """
 }

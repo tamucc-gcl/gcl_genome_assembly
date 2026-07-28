@@ -117,7 +117,7 @@ process SCAFFOLD_HIC {
 
     echo "[YAHS ${round ?: 'round1'}] Scaffolding complete for ${meta.id}"
     
-    printf 'YaHS\t%s\n' "$(yahs --version 2>&1 | head -n1)" > versions.tsv
+    printf 'YaHS\t%s\n' "\$(yahs --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:

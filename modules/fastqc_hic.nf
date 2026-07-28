@@ -31,7 +31,7 @@ process FASTQC_HIC {
         ${hic_r1} \\
         ${hic_r2}
 
-    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
+    printf 'FastQC\t%s\n' "\$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
 
     stub:

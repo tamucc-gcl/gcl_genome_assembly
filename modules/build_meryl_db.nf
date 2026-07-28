@@ -37,7 +37,7 @@ process BUILD_MERYL_DB {
         memory=${task.memory.toGiga()} \\
         ${reads} \\
         output ${meta.id}.meryl
-    printf 'meryl\t%s\n' "$(meryl --version 2>&1 | sed 's/meryl //')" > versions.tsv
+    printf 'meryl\t%s\n' "\$(meryl --version 2>&1 | sed 's/meryl //')" > versions.tsv
     """
 
     stub:

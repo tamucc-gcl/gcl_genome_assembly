@@ -61,7 +61,7 @@ process SPADES {
     if [ -f ${meta.sample}_spades/assembly_graph_with_scaffolds.gfa ]; then cp ${meta.sample}_spades/assembly_graph_with_scaffolds.gfa ${meta.sample}.assembly_graph.gfa; fi
     cp ${meta.sample}_spades/spades.log ${meta.sample}.spades.log
 
-    printf 'SPAdes\t%s\n' "$(spades.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
+    printf 'SPAdes\t%s\n' "\$(spades.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
     """
 
     stub:

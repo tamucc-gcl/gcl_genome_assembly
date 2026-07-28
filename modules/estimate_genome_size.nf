@@ -65,8 +65,8 @@ process ESTIMATE_GENOME_SIZE {
     else
         echo "NA" > ${meta.sample}.genome_size.txt
     fi
-    printf 'Jellyfish\t%s\n' "$(jellyfish --version 2>&1 | sed 's/jellyfish //')" > versions.tsv
-    printf 'GenomeScope\t%s\n' "$( genomescope2 -v 2>&1 | sed -n 's/^GenomeScope //p' | head -n1 || true )" >> versions.tsv
+    printf 'Jellyfish\t%s\n' "\$(jellyfish --version 2>&1 | sed 's/jellyfish //')" > versions.tsv
+    printf 'GenomeScope\t%s\n' "\$( genomescope2 -v 2>&1 | sed -n 's/^GenomeScope //p' | head -n1 || true )" >> versions.tsv
     """
 
     stub:

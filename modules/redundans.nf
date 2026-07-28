@@ -110,7 +110,7 @@ process REDUNDANS {
     fi
     cp \$final ${meta.sample}.redundans.fasta
 
-    printf 'Redundans\t%s\n' "$(redundans.py --version 2>&1 | head -n1)" > versions.tsv
+    printf 'Redundans\t%s\n' "\$(redundans.py --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:

@@ -32,7 +32,7 @@ process QUAST {
         --output-dir ${sample_id}_quast \\
         --contig-thresholds 10000,50000,100000,500000,1000000,5000000,10000000
 
-    printf 'QUAST\t%s\n' "$(quast.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
+    printf 'QUAST\t%s\n' "\$(quast.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
     """
 
     stub:
@@ -80,7 +80,7 @@ process QUAST_FINAL {
         --output-dir quast_final \\
         --contig-thresholds 10000,50000,100000,500000,1000000,5000000,10000000
 
-    printf 'QUAST\t%s\n' "$(quast.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
+    printf 'QUAST\t%s\n' "\$(quast.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
     """
 
     stub:

@@ -205,7 +205,7 @@ fi)
 EOF
 
 
-    printf 'Inspector\t%s\n' "$(inspector.py --version 2>&1 | sed 's/Inspector_v//' | head -n1)" > versions.tsv
+    printf 'Inspector\t%s\n' "\$(inspector.py --version 2>&1 | sed 's/Inspector_v//' | head -n1)" > versions.tsv
     """
 
     stub:

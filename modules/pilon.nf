@@ -59,7 +59,7 @@ process PILON {
         cp ${meta.sample}.pilon.${rounds}.changes ${meta.sample}.pilon.changes
     fi
 
-    printf 'Pilon\t%s\n' "$(pilon --version 2>&1 | sed 's/.*version //;s/ .*//')" > versions.tsv
+    printf 'Pilon\t%s\n' "\$(pilon --version 2>&1 | sed 's/.*version //;s/ .*//')" > versions.tsv
     """
 
     stub:

@@ -38,7 +38,7 @@ process BUSCO {
         --offline \\
         --download_path ${params.busco_downloads ?: '/path/to/busco_downloads'}
 
-    printf 'BUSCO\t%s\n' "$(busco --version 2>&1 | sed 's/BUSCO //')" > versions.tsv
+    printf 'BUSCO\t%s\n' "\$(busco --version 2>&1 | sed 's/BUSCO //')" > versions.tsv
     """
 
     stub:

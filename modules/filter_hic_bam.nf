@@ -175,8 +175,8 @@ process FILTER_HIC_BAM {
     rm -f ${meta.id}.dups.pairs.gz
     rm -f chrom.sizes
 
-    printf 'pairtools\t%s\n' "$(pairtools --version 2>&1 | sed 's/pairtools, version //')" > versions.tsv
-    printf 'samtools\t%s\n'  "$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
+    printf 'pairtools\t%s\n' "\$(pairtools --version 2>&1 | sed 's/pairtools, version //')" > versions.tsv
+    printf 'samtools\t%s\n'  "\$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
     """
 
     stub:

@@ -54,7 +54,7 @@ process TIDK_EXPLORE {
         --maximum ${max_len} \\
         ${assembly_fasta} \\
         > ${haplotype_id}_tidk_explore.tsv
-    printf 'tidk\t%s\n' "$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
+    printf 'tidk\t%s\n' "\$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
     """
 
     stub:
@@ -114,7 +114,7 @@ process TIDK_SEARCH {
         --extension bedgraph \\
         ${assembly_fasta}
     
-    printf 'tidk\t%s\n' "$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
+    printf 'tidk\t%s\n' "\$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
     """
 
     stub:
@@ -160,7 +160,7 @@ process TIDK_PLOT {
         --width ${width} \\
         --output ${haplotype_id}_tidk
     
-    printf 'tidk\t%s\n' "$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
+    printf 'tidk\t%s\n' "\$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
     """
 
     stub:

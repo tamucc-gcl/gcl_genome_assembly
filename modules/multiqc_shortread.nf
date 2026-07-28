@@ -33,7 +33,7 @@ process MULTIQC_SHORTREAD {
         --comment "Quality control metrics for short-read (Illumina) paired-end reads (${qc_label})" \\
         .
 
-    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
+    printf 'FastQC\t%s\n' "\$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
 
     stub:

@@ -51,7 +51,7 @@ process TRIM_SHORTREAD {
         --html ${meta.sample}_fastp.html \\
         --json ${meta.sample}_fastp.json ${extra}
     
-    printf 'fastp\t%s\n' "$(fastp --version 2>&1)" > versions.tsv
+    printf 'fastp\t%s\n' "\$(fastp --version 2>&1)" > versions.tsv
     """
 
     stub:

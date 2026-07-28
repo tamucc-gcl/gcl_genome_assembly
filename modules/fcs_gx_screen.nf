@@ -53,6 +53,6 @@ process FCS_GX_SCREEN {
   mv gx_out/*.fcs_gx_report.txt ${meta.id}.fcs_gx_report.txt || true
   mv gx_out/*.taxonomy.rpt ${meta.id}.taxonomy.rpt || true
 
-  printf 'FCS-GX\t%s\n' "$( /app/bin/gx --help 2>&1 | sed -n 's/.*git:\(v[0-9.]*\).*/\1/p' | head -n1 || true )" > versions.tsv
+  printf 'FCS-GX\t%s\n' "\$( /app/bin/gx --help 2>&1 | sed -n 's/.*git:\(v[0-9.]*\).*/\1/p' | head -n1 || true )" > versions.tsv
   """
 }

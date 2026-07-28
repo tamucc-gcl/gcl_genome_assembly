@@ -134,7 +134,7 @@ process HIFIASM {
     # Convert GFA to FASTA (+ copy GFAs to standardized names)
     ${conversion_cmds}
 
-    printf 'hifiasm\t%s\n' "$(hifiasm --version 2>&1 | head -n1)" > versions.tsv
+    printf 'hifiasm\t%s\n' "\$(hifiasm --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:

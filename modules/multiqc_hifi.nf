@@ -28,7 +28,7 @@ process MULTIQC_HIFI {
         --comment "Quality control metrics for HiFi reads" \\
         .
 
-    printf 'FastQC\t%s\n' "$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
+    printf 'FastQC\t%s\n' "\$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
     
     stub:

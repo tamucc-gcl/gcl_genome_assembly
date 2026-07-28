@@ -160,7 +160,7 @@ PYEOF
 
     echo "[TELOCLIP] Done: ${meta.id}"
 
-    printf 'teloclip\t%s\n' "$(teloclip --version 2>&1 | sed 's/^teloclip, version //')" > versions.tsv
+    printf 'teloclip\t%s\n' "\$(teloclip --version 2>&1 | sed 's/^teloclip, version //')" > versions.tsv
     """
 
     stub:
