@@ -54,7 +54,8 @@ process GETORGANELLE {
     def cov       = org.coverage
     def rounds    = org.recursion
     def kmers     = org.kmers
-    def wflag     = params.getorganelle_word_size ? "-w ${params.getorganelle_word_size}" : ''
+    def wsize     = org.word_size ?: params.getorganelle_word_size
+    def wflag     = wsize ? "-w ${wsize}" : ''
     def extra     = params.getorganelle_extra_args ?: ''
     def do_prune  = (params.getorganelle_from_assembly == false) ? 'false' : 'true'
     def min_depth = params.getorganelle_min_depth ?: 10

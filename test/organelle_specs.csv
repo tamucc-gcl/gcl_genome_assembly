@@ -1,2 +1,4 @@
-taxid,type,recursion,kmers,coverage
-999999,embplant_mt,30,"21,45,65,85,105,127",50
+taxid,type,recursion,kmers,coverage,word_size
+999999,embplant_mt,30,21;45;65;85;105;127,50,95
+999999,embplant_pt,15,21;45;65;85;105;127,100,85
+7460,animal_mt,10,21;45;65;85;105,100,
