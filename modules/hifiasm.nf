@@ -79,10 +79,16 @@ process HIFIASM {
     if [ "\${HG_OVR}" = "auto" ]; then
         HG_OPT=""
     elif [ -n "\${HG_OVR}" ] && [ "\${HG_OVR}" != "null" ]; then
-        HG_OPT="--hg-size \${HG_OVR}"
+        case "\${HG_OVR}" in
+            *[kKmMgG]) HG_OPT="--hg-size \${HG_OVR}" ;;                                              # already suffixed → verbatim
+            *)         HG_OPT="--hg-size \$(awk -v b="\${HG_OVR}" 'BEGIN{ printf "%dk", int(b/1000) }')" ;;  # bare bp → add k
+        esac
     else
+        # GenomeScope estimate is bp; hifiasm --hg-size needs INT + k/m/g suffix
         EST="\$(tr -cd '0-9' < ${gsize_file} 2>/dev/null || true)"
-        [ -n "\${EST}" ] && HG_OPT="--hg-size \${EST}"
+        if [ -n "\${EST}" ] && [ "\${EST}" != "0" ]; then
+            HG_OPT="--hg-size \$(awk -v b="\${EST}" 'BEGIN{ printf "%dk", int(b/1000) }')"
+        fi
     fi
 
     hifiasm \\
