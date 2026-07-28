@@ -125,13 +125,12 @@ process GETORGANELLE {
     CANON="\${SAMPLE}.\${ORG}.fasta"
     n=0
     if [ -n "\${PICK}" ]; then
-        : > "\${CANON}"
         while IFS= read -r line; do
             case "\${line}" in
                 ">"*) n=\$((n+1)); printf '>%s.%s.%s.%d %s\\n' "\${SAMPLE}" "\${ORG}" "\${STATUS}" "\${n}" "\${line#>}" ;;
                 *)    printf '%s\\n' "\${line}" ;;
             esac
-        done < "\${PICK}"
+        done < "\${PICK}" > "\${CANON}"
     fi
 
     if [ -n "\${GRAPHDIR}" ]; then
