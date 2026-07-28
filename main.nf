@@ -139,7 +139,7 @@ include { FINAL_VIZ } from './workflows/final_viz.nf'
 ========================================================================================
 */
 include { RESOLVE_TAXONOMY } from './modules/resolve_taxonomy.nf'
-include { buscoLineageFor; kingdomFlag; organismName; geneticCodeFor; telomereMotifFor } from './functions/taxonomy.nf'
+include { buscoLineageFor; kingdomFlag; organismName; geneticCodeFor; telomereMotifFor; organelleTypesFor; getorganelleRecursionFor; getorganelleKmersFor; getorganelleCoverageFor } from './functions/taxonomy.nf'
 include { DOWNLOAD_TAXDUMP } from './modules/download_taxdump.nf'
 
 include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
@@ -266,6 +266,24 @@ workflow {
     // Per-taxid resolved telomere motif (param override wins over taxonomy-derived).
     ch_telo_by_taxid = ch_taxonomy
         .map { taxid, tax -> tuple(taxid, (params.telomere_motif ?: tax.telomere_motif)) }
+
+    // Per-taxid organelle-assembly specs for GetOrganelle (short-read path). Types from the
+    // resolved kingdom (plant => plastid + mito; else mito); per-organelle -R/-k/coverage
+    // defaults from the taxonomy helpers, each param-overridable. Side-channel (not meta), so
+    // tuning these re-runs only GetOrganelle.
+    ch_organelle_by_taxid = ch_taxonomy
+        .map { taxid, tax ->
+            def types = params.getorganelle_organelle_types
+                            ? params.getorganelle_organelle_types.tokenize(',')*.trim()
+                            : organelleTypesFor(tax)
+            def specs = types.collect { t ->
+                [ type      : t,
+                  recursion : (params.getorganelle_recursion ?: getorganelleRecursionFor(t)),
+                  kmers     : (params.getorganelle_kmers     ?: getorganelleKmersFor(t)),
+                  coverage  : (params.getorganelle_coverage  ?: getorganelleCoverageFor(t)) ]
+            }
+            tuple(taxid, specs)
+        }
 
     // Bundled per-sample hifiasm inputs: telomere motif (from resolved identity), organism ploidy,
     // and the haploid-size override. One join-by-sample instead of three separate side inputs.
@@ -441,7 +459,8 @@ workflow {
     ORGANELLE_ASSEMBLY(
         ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
         ch_mito_ref_by_taxid,
-        ch_gcode_by_taxid
+        ch_gcode_by_taxid,
+        ch_organelle_by_taxid
     )
     ch_versions = ch_versions.mix(ORGANELLE_ASSEMBLY.out.versions)
 

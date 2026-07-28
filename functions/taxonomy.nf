@@ -94,3 +94,46 @@ def telomereMotifFor(Map r) {
     }
     return 'CCCTAA'
 }
+
+// ── GetOrganelle: short-read organelle targets + per-organelle defaults ──────────────
+// organelleTypesFor takes either an already-resolved kingdom flag ('plant'/'animal'/'fungi'
+// /'other', as stored in ch_taxonomy) or a raw lineage/kingdom map (falls back to kingdomFlag).
+def organelleTypesFor(Map r) {
+    def k = (r.kingdom ?: '').toString().toLowerCase()
+    if( !(k in ['plant','animal','fungi','other']) ) k = kingdomFlag(r)
+    switch( k ) {
+        case 'plant':  return ['embplant_pt', 'embplant_mt']   // plastid + plant mito
+        case 'fungi':  return ['fungus_mt']
+        case 'animal': return ['animal_mt']
+        default:       return ['animal_mt']                     // conservative: mito only
+    }
+}
+
+// GetOrganelle -R (max extension rounds). Plastid converges fast; plant mito needs more.
+def getorganelleRecursionFor(String organelle) {
+    switch( organelle ) {
+        case 'embplant_pt': return 15
+        case 'embplant_mt': return 30
+        default:            return 10
+    }
+}
+
+// GetOrganelle -k ladder. Full ladder to 127 for the large embryophyte organelles.
+def getorganelleKmersFor(String organelle) {
+    switch( organelle ) {
+        case 'embplant_pt':
+        case 'embplant_mt': return '21,45,65,85,105,127'
+        default:            return '21,45,65,85,105'
+    }
+}
+
+// Target organelle coverage for --reduce-reads-for-coverage. The single most important lever:
+// deep WGS over-covers organelles (30,000x observed) into error hairballs; capping to ~50-100x
+// gives a clean plastome/mito-sized graph in minutes. NEVER pass 'inf'.
+def getorganelleCoverageFor(String organelle) {
+    switch( organelle ) {
+        case 'embplant_pt': return 100
+        case 'embplant_mt': return 50
+        default:            return 100
+    }
+}
