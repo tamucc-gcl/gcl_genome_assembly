@@ -130,6 +130,8 @@ include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_CONTIG } from './work
 include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_SCAFFOLD } from './workflows/decontaminate_assembly.nf'
 include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evidence.nf'
 
+//Final Visualization
+include { FINAL_VIZ } from './workflows/final_viz.nf'
 
 /*
 ========================================================================================
@@ -164,9 +166,7 @@ include { FILTER_HIC_BAM as FILTER_HIC_BAM_FINAL } from './modules/filter_hic_ba
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
-include { TIDK_EXPLORE; TIDK_SEARCH; TIDK_PLOT; TIDK_SUMMARIZE; COLLECT_TIDK_RESULTS } from './modules/tidk.nf'
 include { TELOCLIP_EXTEND; COLLECT_TELOCLIP_STATS } from './modules/teloclip.nf'
-include { QUAST_FINAL } from './modules/quast.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIG } from './modules/hic_mapping_metrics.nf'
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hic_mapping_metrics.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from './modules/hic_mapping_metrics.nf'
@@ -175,8 +175,6 @@ include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAI
 include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
-include { SETUP_PAFR; PAIRWISE_ALIGNMENT; COLLECT_PAIRWISE_RESULTS } from './modules/pairwise_alignment.nf'
-include { RIPARIAN_PLOT } from './modules/riparian_plot.nf'
 //include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
@@ -1007,121 +1005,10 @@ workflow {
         Generates all pairwise alignments for dotplot visualization grid
     ========================================================================================
     */
-    if (params.run_pairwise_alignments) {
-        SETUP_PAFR()
-
-        // Collect all final assemblies, SORT for deterministic ordering, then generate pairs
-        ch_final_by_id 
-            .toSortedList { a, b -> a[0] <=> b[0] }
-            .flatMap { assemblies ->
-                def pairs = []
-
-                if (params.pairwise_alignment_mode == 'within_sample') {
-                    // Only compare hap1 vs hap2 within each sample.
-                    // A haploid sample has a single 'primary' assembly and therefore no
-                    // within-sample comparison — it is intentionally excluded below by the
-                    // haps.size() == 2 check (its group has size 1).
-                    def grouped = assemblies.groupBy { haplotype_id, fasta ->
-                        haplotype_id.replaceAll(/_(hap[12]|primary)$/, '')
-                    }
-                    grouped.each { sample_id, haps ->
-                        if (haps.size() == 2) {
-                            def sorted = haps.sort { it[0] }
-                            pairs << tuple(sorted[0][0], sorted[0][1], sorted[1][0], sorted[1][1])
-                        }
-                    }
-                } else {
-                    // Generate all unique pairs (i < j to avoid duplicates and self-alignments)
-                    for (int i = 0; i < assemblies.size(); i++) {
-                        for (int j = i + 1; j < assemblies.size(); j++) {
-                            def (id1, fa1) = assemblies[i]
-                            def (id2, fa2) = assemblies[j]
-                            pairs << tuple(id1, fa1, id2, fa2)
-                        }
-                    }
-                }
-
-                return pairs
-            }
-            .set { ch_pairwise_input }
-
-        // FIX: pass SETUP_PAFR.out.ready as second argument
-        PAIRWISE_ALIGNMENT(ch_pairwise_input, SETUP_PAFR.out.ready, ch_dotplot_script)
-
-        // Riparian plot input — uses ch_final_assembly
-        ch_paf_with_asm1 = PAIRWISE_ALIGNMENT.out.paf
-            .map { hap1, hap2, paf -> tuple(hap1, hap2, paf) }
-            .combine(ch_final_by_id, by: 0)
-
-        ch_riparian_input = ch_paf_with_asm1
-            .map { hap1, hap2, paf, fasta1 -> tuple(hap2, hap1, fasta1, paf) }
-            .combine(ch_final_by_id, by: 0)
-            .map { hap2, hap1, fasta1, paf, fasta2 ->
-                tuple(hap1, fasta1, hap2, fasta2, paf)
-            }
-
-        RIPARIAN_PLOT(ch_riparian_input, ch_riparian_script)
-
-        COLLECT_PAIRWISE_RESULTS(
-            PAIRWISE_ALIGNMENT.out.qc.map { id1, id2, qc_file -> qc_file }.collect()
-        )
-        ch_pairwise_summary = COLLECT_PAIRWISE_RESULTS.out.summary.ifEmpty(file('NO_PAIRWISE'))
-    } else {
-        ch_pairwise_summary = Channel.of(file('NO_PAIRWISE'))
-    }
-
-    /*
-    ========================================================================================
-        QUAST Final Comparison - All Gap-Filled Genomes
-    ========================================================================================
-    */
-    // Collect all gap-filled assemblies with their labels for cross-sample comparison
-    ch_final_by_id
-        .toSortedList { a, b -> a[0] <=> b[0] }
-        .map { list ->
-            def labels = list.collect { it[0] }
-            def assemblies = list.collect { it[1] }
-            tuple(assemblies, labels)
-        }
-        .set { ch_quast_final_input }
-
-    ch_quast_final_input
-        .map { assemblies, labels -> assemblies }
-        .set { ch_quast_assemblies }
-
-    ch_quast_final_input
-        .map { assemblies, labels -> labels }
-        .set { ch_quast_labels }
-
-    QUAST_FINAL(
-        ch_quast_assemblies.collect(),
-        ch_quast_labels.flatten().collect()
-    )
-    ch_versions = ch_versions.mix(QUAST_FINAL.out.versions)
-
-    /*
-    ========================================================================================
-        Telomere Detection in Final Assemblies
-    ========================================================================================
-    */
-    // 1. Explore: discover telomere motif de novo
-    TIDK_EXPLORE(ch_final_by_id)
-    ch_versions = ch_versions.mix(TIDK_EXPLORE.out.versions)
-
-    // 2. Search: windowed telomere repeat quantification
-    TIDK_SEARCH(ch_final_by_id_telo)
-
-    // 3. Plot: SVG visualization per haplotype
-    TIDK_PLOT(TIDK_SEARCH.out.search_tsv)
-
-    // 4. Summarize: per-scaffold presence/absence (backward-compatible with old format)
-    TIDK_SUMMARIZE(TIDK_SEARCH.out.search_tsv)
-
-    // 5. Collect all results
-    COLLECT_TIDK_RESULTS(
-        TIDK_SUMMARIZE.out.summary.map   { haplotype_id, summary   -> summary   }.collect(),
-        TIDK_SUMMARIZE.out.telomeres.map { haplotype_id, telomeres -> telomeres }.collect()
-    )
+    FINAL_VIZ(ch_final_by_id, ch_final_by_id_telo, ch_dotplot_script, ch_riparian_script)
+    ch_versions            = ch_versions.mix(FINAL_VIZ.out.versions)
+    ch_pairwise_summary    = FINAL_VIZ.out.pairwise_summary
+    ch_telomere_for_report = FINAL_VIZ.out.telomere_summary
 
     // 6. NCBI output files for GenBank submission (if enabled)
     
@@ -1550,10 +1437,10 @@ workflow {
     }
 
     // ---- Pairwise dotplots (conditional) ----
-    // PAIRWISE_ALIGNMENT.out.dotplot: tuple(id1, id2, png)
+    // FINAL_VIZ.out.dotplot: tuple(id1, id2, png)
     // publishDir: ${params.outdir}/pairwise_alignments
     if (params.run_pairwise_alignments) {
-        ch_manifest_dotplots = PAIRWISE_ALIGNMENT.out.dotplot
+        ch_manifest_dotplots = FINAL_VIZ.out.dotplot
             .map { id1, id2, png ->
                 "dotplot\t${id1}\t${id2}\t${png.name}\tpairwise_alignments"
             }
@@ -1562,10 +1449,10 @@ workflow {
     }
 
     // ---- Pairwise riparian plots (conditional) ----
-    // RIPARIAN_PLOT.out.riparian: tuple(id1, id2, png)
+    // FINAL_VIZ.out.riparian: tuple(id1, id2, png)
     // publishDir: ${params.outdir}/pairwise_alignments
     if (params.run_pairwise_alignments) {
-        ch_manifest_riparian = RIPARIAN_PLOT.out.riparian
+        ch_manifest_riparian = FINAL_VIZ.out.riparian
             .map { id1, id2, png ->
                 "riparian\t${id1}\t${id2}\t${png.name}\tpairwise_alignments"
             }
@@ -1574,7 +1461,7 @@ workflow {
     }
 
     // ---- tidk plot SVGs for manifest ----
-    ch_manifest_tidk_plots = TIDK_PLOT.out.plot
+    ch_manifest_tidk_plots = FINAL_VIZ.out.tidk_plot
         .map { hap_id, svg ->
             "tidk_plot\t${hap_id}\t.\t${svg.name}\ttelomeres/plots"
         }
@@ -1641,10 +1528,6 @@ workflow {
             newLine: true
         )
         .set { ch_report_manifest }
-
-    // ---- Handle optional telomere output ----
-    ch_telomere_for_report = COLLECT_TIDK_RESULTS.out.summary
-        .ifEmpty(file('NO_TELOMERES'))
 
     // Collect mitogenome stats for report
     ch_mito_stats_for_report = ORGANELLE_ASSEMBLY.out.stats
