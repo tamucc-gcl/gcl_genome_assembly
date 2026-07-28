@@ -115,7 +115,7 @@ Report: ${meta.id}_gap_filling_report.txt
 ================================================================================
 EOF
 
-    printf 'TGSGapCloser\t%s\n' "\$( tgsgapcloser -h 2>&1 | sed -n 's/.*Version : \([0-9.]*\).*/\1/p' | head -n1 || true )" > versions.tsv
+    printf 'TGSGapCloser\t%s\n' "\$( tgsgapcloser -h 2>&1 | sed -n 's/.*Version : \\([0-9.]*\\).*/\\1/p' | head -n1 || true )" > versions.tsv
     """
 
     stub:
