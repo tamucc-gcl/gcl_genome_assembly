@@ -37,7 +37,7 @@ process GETORGANELLE {
     tag "${meta.sample}:${org.type}"
     label 'getorganelle'
 
-    publishDir "${params.outdir}/organelle/getorganelle/${org.type}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(sr1), path(sr2), val(org)

@@ -34,7 +34,7 @@ mito_circular_script = file(params.mito_circular_script    ?: "${projectDir}/py_
 process ANNOTATION_NOTE {
     tag "${meta.sample}:${org_type}"
     label 'tiny'
-    publishDir "${params.outdir}/organelle/annotation/${org_type}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), val(org_type)
@@ -111,10 +111,8 @@ workflow ORGANELLE_ANNOTATION {
     ANNOTATION_NOTE( br.note.map { meta, org, status, fa -> tuple(meta, org) } )
 
     emit:
-    mitogenome   = ANNOTATE_MITO.out.mitogenome
     annotation   = ANNOTATE_MITO.out.annotation
     mito_stats   = ANNOTATE_MITO.out.stats
-    mito_contigs = ANNOTATE_MITO.out.contigs
     gene_map     = ANNOTATE_MITO.out.gene_map
     circular_map = MITO_CIRCULAR_MAP.out.circular_map
     notes        = ANNOTATION_NOTE.out.note

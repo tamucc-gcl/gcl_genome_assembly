@@ -29,7 +29,7 @@
 process ANNOTATE_MITO {
     tag "${meta.sample}:${org_type}"
     label 'mitos'
-    publishDir "${params.outdir}/organelle/annotation/${org_type}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), val(org_type), val(status), val(gcode), val(refseq), path(fasta)
@@ -37,10 +37,8 @@ process ANNOTATE_MITO {
     path gb_script
 
     output:
-    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mitogenome.fasta"),   emit: mitogenome
     tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mitogenome.gb"),      emit: annotation
     tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mito_stats.tsv"),     emit: stats
-    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mito_contigs.fasta"), emit: contigs
     tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_gene_map.png"),       emit: gene_map, optional: true
     tuple val(meta), val(org_type), path("${meta.sample}_${org_type}.mitos.bed"),          emit: bed,      optional: true
     path "versions.tsv", emit: versions
@@ -66,9 +64,6 @@ process ANNOTATE_MITO {
     BED=\$(find mitos_out -name 'result.bed' | head -n1 || true)
     PNG=\$(find mitos_out -name 'result.png' | head -n1 || true)
 
-    # MitoHiFi-style FASTA outputs: mitogenome + contigs are the assembly
-    cp "${fasta}" "\${SAMPLE}_\${ORG}_mitogenome.fasta"
-    cp "${fasta}" "\${SAMPLE}_\${ORG}_mito_contigs.fasta"
     [ -n "\${BED}" ] && cp "\${BED}" "\${SAMPLE}_\${ORG}.mitos.bed" || true
     [ -n "\${PNG}" ] && cp "\${PNG}" "\${SAMPLE}_\${ORG}_gene_map.png" || true
 
@@ -103,10 +98,7 @@ process ANNOTATE_MITO {
 
     stub:
     """
-    echo ">mitogenome_${meta.sample}" > ${meta.sample}_${org_type}_mitogenome.fasta
-    echo "ACGTACGTACGT" >> ${meta.sample}_${org_type}_mitogenome.fasta
-    cp ${meta.sample}_${org_type}_mitogenome.fasta ${meta.sample}_${org_type}_mito_contigs.fasta
-    printf 'LOCUS stub\\n//\\n' > ${meta.sample}_${org_type}_mitogenome.gb
+    printf 'LOCUS       stub\\n//\\n' > ${meta.sample}_${org_type}_mitogenome.gb
     printf 'sample_id\\tmitogenome_length\\tcircular\\tgene_count\\ttrna_count\\trrna_count\\tgenetic_code\\n%s\\t16000\\tyes\\t13\\t22\\t2\\t2\\n' "${meta.sample}" > ${meta.sample}_${org_type}_mito_stats.tsv
     touch versions.tsv
     """

@@ -98,7 +98,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 
 //Organelle assembly/annotation
-include { ORGANELLE_ASSEMBLY } from './workflows/organelle_assembly.nf'
+include { ORGANELLE } from './workflows/organelle.nf'
 
 //Short-read qc #Hi-C, SSL, TellSeq
 include { SHORTREAD_QC as SHORTREAD_QC_RAW }     from './workflows/shortread_qc.nf'
@@ -148,7 +148,7 @@ include { TRIM_HIC } from './modules/trim_hic.nf'
 include { ESTIMATE_GENOME_SIZE } from './modules/estimate_genome_size.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
-include { FILTER_MITO_CONTIGS } from './modules/filter_mito_contigs.nf'
+include { FILTER_ORGANELLE } from './modules/filter_organelle.nf'
 
 include { TRIM_SHORTREAD } from './modules/trim_shortread.nf'
 include { REDUNDANS }      from './modules/redundans.nf'
@@ -280,7 +280,8 @@ workflow {
                 [ type      : t,
                   recursion : (params.getorganelle_recursion ?: getorganelleRecursionFor(t)),
                   kmers     : (params.getorganelle_kmers     ?: getorganelleKmersFor(t)),
-                  coverage  : (params.getorganelle_coverage  ?: getorganelleCoverageFor(t)) ]
+                  coverage  : (params.getorganelle_coverage  ?: getorganelleCoverageFor(t)),
+                  word_size : params.getorganelle_word_size ]
             }
             tuple(taxid, specs)
         }
@@ -456,13 +457,13 @@ workflow {
         Depends on: BAM_TO_FASTQ + FIND_MITO_REFERENCE
     ========================================================================================
     */
-    ORGANELLE_ASSEMBLY(
+    ORGANELLE(
         ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
         ch_mito_ref_by_taxid,
         ch_gcode_by_taxid,
         ch_organelle_by_taxid
     )
-    ch_versions = ch_versions.mix(ORGANELLE_ASSEMBLY.out.versions)
+    ch_versions = ch_versions.mix(ORGANELLE.out.versions)
 
     /*
     ========================================================================================
@@ -502,15 +503,20 @@ workflow {
         both haplotypes via combine). A single FILTER_MITO_CONTIGS handles both.
     ====================================================================================
     */
+    // Bait with ALL organelle assemblies for the sample (mito + plastid), grouped into a list.
+    ch_organelle_baits = ORGANELLE.out.assemblies
+        .map { meta, fa -> tuple(meta.sample, fa) }
+        .groupTuple()
+
     ch_contigs_by_type.hifi
-        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-        .combine( ORGANELLE_ASSEMBLY.out.mitogenome.map { meta, mfa -> [ meta.sample, mfa ] }, by: 0 )
-        .map { sample, meta, fasta, mito_fa -> tuple(meta, fasta, mito_fa) }
-        .set { ch_mito_filter_input }
+        .map { meta, fasta -> tuple(meta.sample, meta, fasta) }
+        .combine( ch_organelle_baits, by: 0 )
+        .map { sample, meta, fasta, baits -> tuple(meta, fasta, baits) }
+        .set { ch_organelle_filter_input }
 
-    FILTER_MITO_CONTIGS(ch_mito_filter_input)
+    FILTER_ORGANELLE(ch_organelle_filter_input)
 
-    ch_mito_filtered = FILTER_MITO_CONTIGS.out.filtered   // per-haplotype tuple(meta, fasta)
+    ch_mito_filtered = FILTER_ORGANELLE.out.filtered   // per-haplotype tuple(meta, fasta)
 
     /*
     ====================================================================================
@@ -1510,14 +1516,14 @@ workflow {
 
     // ---- Mitogenome assembly ----
     // publishDir: ${params.outdir}/mitogenome/${sample_id}
-    ch_manifest_mito_gb = ORGANELLE_ASSEMBLY.out.annotation
-        .map { meta, gb -> "mito_genbank\t${meta.sample}\t.\t${gb.name}\tmitogenome" }
+    ch_manifest_mito_gb = ORGANELLE.out.annotation
+        .map { meta, gb -> "mito_genbank\t${meta.sample}\t.\t${gb.name}\torganelle" }
 
-    ch_manifest_mito_stats = ORGANELLE_ASSEMBLY.out.stats
-        .map { meta, tsv -> "mito_stats\t${meta.sample}\t.\t${tsv.name}\tmitogenome" }
+    ch_manifest_mito_stats = ORGANELLE.out.stats
+        .map { meta, tsv -> "mito_stats\t${meta.sample}\t.\t${tsv.name}\torganelle" }
 
-    ch_manifest_mito_circular = ORGANELLE_ASSEMBLY.out.circular_map
-        .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\tmitogenome" }
+    ch_manifest_mito_circular = ORGANELLE.out.circular_map
+        .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\torganelle" }
 
     // ---- GenomeScope profiles (linear_plot.png per sample) ----
     // ESTIMATE_GENOME_SIZE.out.results: tuple(meta, <sample>_genomescope dir)
@@ -1549,7 +1555,7 @@ workflow {
         .set { ch_report_manifest }
 
     // Collect mitogenome stats for report
-    ch_mito_stats_for_report = ORGANELLE_ASSEMBLY.out.stats
+    ch_mito_stats_for_report = ORGANELLE.out.stats
         .map { meta, tsv -> tsv }
         .collectFile(
             name: 'all_mito_stats.tsv',

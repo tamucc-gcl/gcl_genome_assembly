@@ -27,7 +27,7 @@ process MITOHIFI {
     tag "${meta.sample}"
     label 'mitohifi'
 
-    publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(hifi_fastq), path(ref_fasta), path(ref_gb), val(genetic_code)
