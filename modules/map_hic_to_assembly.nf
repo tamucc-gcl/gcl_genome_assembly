@@ -35,6 +35,11 @@ process MAP_HIC_TO_ASSEMBLY {
 
     script:
     def extra_args = (params.bwa_mem2_hic_args ?: "").toString()
+    // samtools sort memory, scaled to the SLURM allocation:
+    // ~1/4 of task.memory for sort buffers — bwa-mem2 (index + mapping, running concurrently
+    // in the same pipe) gets the bulk — split across a capped sort-thread count.
+    def sort_threads = Math.min(task.cpus as int, 16)
+    def sort_mem_mb  = Math.max(768L, (task.memory.toMega() / 4 / sort_threads) as long)
     """
     set -euo pipefail
     export LC_ALL=C
@@ -58,7 +63,7 @@ process MAP_HIC_TO_ASSEMBLY {
     # -------------------------------------------------------------------------
     bwa-mem2 mem -t ${task.cpus} -5SP ${extra_args} ${assembly_fasta} ${hic_r1} ${hic_r2} \
     | samtools view -@ ${task.cpus} -b - \
-    | samtools sort -@ ${task.cpus} -o ${meta.id}.sorted.bam -
+    | samtools sort -@ ${sort_threads} -m ${sort_mem_mb}M -o ${meta.id}.sorted.bam -
     samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
 
     # CSI index works on unsorted BAMs

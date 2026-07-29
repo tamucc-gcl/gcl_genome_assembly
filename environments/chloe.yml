@@ -1,0 +1,13 @@
+# Conda environment for Chloë (plant plastid annotation).
+# Chloë itself is a Julia package installed from GitHub + a references repo (handled by the
+# SETUP_CHLOE module, which clones and instantiates into params.chloe_downloads). This env
+# just provides Julia and git. Referenced from nextflow.config:
+#     withLabel: chloe { conda = "${projectDir}/envs/chloe.yml" ... }
+name: chloe
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - julia>=1.9
+  - git
+  - curl
