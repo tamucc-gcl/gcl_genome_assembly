@@ -1,17 +1,16 @@
 #!/usr/bin/env nextflow
-// Standalone test for SHORTREAD_ORGANELLE — provides ch_reads + ch_organelle explicitly.
-//   reads sheet: sample,taxid,reads_1,reads_2
-//   specs sheet: taxid,type,recursion,kmers,coverage,word_size   (k-list uses ';'; word_size blank => auto)
 nextflow.enable.dsl = 2
 
-include { SHORTREAD_ORGANELLE } from '../workflows/shortread_organelle.nf'
+include { SHORTREAD_ORGANELLE }  from '../workflows/shortread_organelle.nf'
+include { ORGANELLE_ANNOTATION } from '../workflows/organelle_annotation.nf'
 
 params.reads_samplesheet = null
 params.organelle_specs   = null
+params.gcode_samplesheet = null
 
 workflow {
     if( !params.reads_samplesheet || !params.organelle_specs )
-        error "Provide --reads_samplesheet (sample,taxid,reads_1,reads_2) and --organelle_specs (taxid,type,recursion,kmers,coverage,word_size)"
+        error "Provide --reads_samplesheet and --organelle_specs (and --gcode_samplesheet to annotate mito)"
 
     ch_reads = Channel.fromPath( params.reads_samplesheet, checkIfExists: true )
         .splitCsv( header: true )
@@ -31,9 +30,21 @@ workflow {
         }
         .groupTuple()
 
+    ch_gcode = params.gcode_samplesheet
+        ? Channel.fromPath( params.gcode_samplesheet, checkIfExists: true )
+              .splitCsv( header: true )
+              .map { row -> tuple( row.taxid.toString(), (row.genetic_code as Integer) ) }
+        : Channel.empty()
+
     SHORTREAD_ORGANELLE( ch_reads, ch_organelle )
+    ORGANELLE_ANNOTATION( SHORTREAD_ORGANELLE.out.assembly, SHORTREAD_ORGANELLE.out.stats, ch_gcode )
 
     SHORTREAD_ORGANELLE.out.stats
-        .map { meta, org_type, tsv -> "[status] ${meta.sample}\t${org_type}\t" + tsv.text.trim().readLines().last() }
-        .view()
+        .map { meta, org, tsv -> "[assembly]      ${meta.sample}\t${org}\t" + tsv.text.trim().readLines().last() }.view()
+    ORGANELLE_ANNOTATION.out.mito_annotation
+        .map { meta, org, f -> "[mito-annot]    ${meta.sample}\t${org}\t${f.name}" }.view()
+    ORGANELLE_ANNOTATION.out.plastid_annotation
+        .map { meta, org, f -> "[plastid-annot] ${meta.sample}\t${org}\t${f.name}" }.view()
+    ORGANELLE_ANNOTATION.out.plant_mito_note
+        .map { meta, org, f -> "[plant-mito]    ${meta.sample}\t${org}\tnote: ${f.name}" }.view()
 }

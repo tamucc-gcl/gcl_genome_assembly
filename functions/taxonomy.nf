@@ -137,3 +137,11 @@ def getorganelleCoverageFor(String organelle) {
         default:            return 100
     }
 }
+
+// MITOS2 RefSeq set per mito clade (metazoan vs fungal). Pre-installed from Zenodo.
+def mitosRefseqFor(String organelle) {
+    switch( organelle ) {
+        case 'fungus_mt': return 'refseq89f'
+        default:          return 'refseq89m'   // animal_mt (metazoan)
+    }
+}
