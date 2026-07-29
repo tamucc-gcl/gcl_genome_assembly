@@ -132,6 +132,7 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 
 //Final Visualization
 include { FINAL_VIZ } from './workflows/final_viz.nf'
+include { FINAL_HIC_MAPS } from './workflows/final_hic_maps.nf'
 
 /*
 ========================================================================================
@@ -159,10 +160,8 @@ include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './module
 include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
 include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
 include { MAP_HIC_TO_ASSEMBLY as MAP_HIC_TO_SCAFFOLD } from './modules/map_hic_to_assembly.nf'
-include { MAP_HIC_TO_ASSEMBLY as MAP_HIC_TO_FINAL } from './modules/map_hic_to_assembly.nf'
 include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
 include { FILTER_HIC_BAM as FILTER_HIC_BAM_SCAFFOLD } from './modules/filter_hic_bam.nf'
-include { FILTER_HIC_BAM as FILTER_HIC_BAM_FINAL } from './modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
 include { GAP_FILLING } from './modules/gap_filling.nf'
@@ -171,15 +170,11 @@ include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PA
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hic_mapping_metrics.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from './modules/hic_mapping_metrics.nf'
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLDSCAF } from './modules/hic_mapping_metrics.nf'
-include { HIC_BAM_METRICS as HIC_BAM_METRICS_FINAL; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_FINAL } from './modules/hic_mapping_metrics.nf'
 include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
-include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 //include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
-include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
-include { HIC_TADS } from './modules/hic_tads.nf'
 include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
@@ -962,71 +957,12 @@ workflow {
     // 1. Contact Maps for Final Assemblies
     //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
     if (params.run_final_contact_maps) {
-        // Combine final per-hap assemblies with sample Hi-C reads (key on meta.sample)
-        ch_finalized_assembly
-            .map { meta, final_fa -> [ meta.sample, meta, final_fa ] }
-            .combine( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
-            .map { sample, meta, final_fa, hic_r1, hic_r2 ->
-                tuple(meta, final_fa, hic_r1, hic_r2, 'final')
-            }
-            .set { ch_final_hic_map_input }
-
-        MAP_HIC_TO_FINAL(ch_final_hic_map_input)
-
-        // checkpoint: final_raw_map (BAM-level only)
-        MAP_HIC_TO_FINAL.out.bam
-            .map { meta, stage, bam, bai -> tuple(meta, "final_raw_map", bam, bai) }
-            .set { ch_final_raw_bam_qc }
-
-        HIC_BAM_METRICS_FINAL(ch_final_raw_bam_qc)
-
-        MAP_HIC_TO_FINAL.out.bam
-            .join(ch_finalized_assembly)
-            .map { meta, stage, bam, bai, final_fa ->
-                tuple(meta, "final", bam, bai, final_fa)
-            }
-            .set { ch_final_filter_input }
-
-        FILTER_HIC_BAM_FINAL(ch_final_filter_input)
-
-        // checkpoint: final_filtered (pairs-level + retention); already in final names -> []
-        FILTER_HIC_BAM_FINAL.out.pairs
-            .join(FILTER_HIC_BAM_FINAL.out.parse_stats)
-            .join(FILTER_HIC_BAM_FINAL.out.dedup_stats)
-            .map { meta, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                tuple(meta, "final_filtered", pairs_gz, [], parse_stats, dedup_stats)
-            }
-            .set { ch_final_pairs_qc }
-
-        HIC_PAIRS_METRICS_FINAL(ch_final_pairs_qc)
-
-        FILTER_HIC_BAM_FINAL.out.pairs
-            .join(ch_finalized_assembly)
-            .map { meta, stage, pairs_gz, final_fasta ->
-                tuple(meta, pairs_gz, final_fasta, "final")
-            }
-            .set { ch_contact_map_final_input }
-
-        CONTACT_MAP_FINAL(ch_contact_map_final_input)
-
-        if (params.run_hic_balance) {
-            HIC_COMPARTMENTS(
-                CONTACT_MAP_FINAL.out.mcool,
-                params.compartment_resolution ?: 250000,
-                params.compartment_min_contig_bp ?: 5000000,
-                params.compartment_max_contigs ?: 30,
-                ch_compartments_script
-            )
-
-            HIC_TADS(
-                CONTACT_MAP_FINAL.out.mcool,
-                params.tad_resolution ?: 50000,
-                params.tad_window_bp ?: 500000,
-                params.tad_min_contig_bp ?: 5000000,
-                params.tad_max_contigs ?: 0,
-                ch_tad_book_script
-            )
-        }
+        FINAL_HIC_MAPS(
+            ch_finalized_assembly,
+            TRIM_HIC.out.trimmed_reads,
+            ch_compartments_script,
+            ch_tad_book_script
+        )
     }
 
     // String-id view of the finalized per-hap assemblies for the leaf viz/QUAST steps.
@@ -1370,7 +1306,7 @@ workflow {
     
     if (params.run_final_contact_maps) {
         ch_all_bam_metrics = ch_all_bam_metrics
-            .mix(HIC_BAM_METRICS_FINAL.out.metrics)
+            .mix(FINAL_HIC_MAPS.out.bam_metrics)
     }
     
     // Collect all pairs metrics
@@ -1387,7 +1323,7 @@ workflow {
     
     if (params.run_final_contact_maps) {
         ch_all_pairs_metrics = ch_all_pairs_metrics
-            .mix(HIC_PAIRS_METRICS_FINAL.out.metrics)
+            .mix(FINAL_HIC_MAPS.out.pairs_metrics)
     }
     
     // Compile final QC report
@@ -1443,7 +1379,7 @@ workflow {
     REPORTING(
         ch_finalized_assembly,
         SNAIL_PLOT_FINAL.out.snail,
-        params.run_final_contact_maps ? CONTACT_MAP_FINAL.out.contact_maps : Channel.empty(),
+        params.run_final_contact_maps ? FINAL_HIC_MAPS.out.contact_maps : Channel.empty(),
         FINAL_VIZ.out.dotplot,
         FINAL_VIZ.out.riparian,
         FINAL_VIZ.out.tidk_plot,
