@@ -106,7 +106,7 @@ include { SHORTREAD_QC as SHORTREAD_QC_TRIMMED } from './workflows/shortread_qc.
 
 // Assembly QC
 include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_MITO_FILTERED } from './workflows/assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_ORGANELLE_FILTERED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_PURGED } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_REDUNDANS } from './workflows/assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
@@ -489,44 +489,62 @@ workflow {
         }
         .set { ch_contigs }                                // per-haplotype tuple(meta, fasta)
 
-    ch_contigs
-        .branch { meta, fasta ->
-            hifi:      meta.hifi
-            shortread: true
-        }
-        .set { ch_contigs_by_type }
-
     /*
     ====================================================================================
-        STEP 4a: Remove Mitochondrial Contigs from Nuclear Assembly
-        ch_contigs is per-haplotype; attach the per-sample mitogenome (one fans out to
-        both haplotypes via combine). A single FILTER_MITO_CONTIGS handles both.
+        STEP 4a: Remove Organelle Contigs from Nuclear Assemblies (mito + plastid)
+        Runs on ALL contigs (HiFi and short-read), each baited by that sample's own
+        organelle assemblies (ORGANELLE.out.assemblies). Samples that produced no organelle
+        pass through untouched. The filtered contigs are then forked by read type into the
+        HiFi and short-read conditioning paths.
     ====================================================================================
     */
-    // Bait with ALL organelle assemblies for the sample (mito + plastid), grouped into a list.
+    // Per-sample bait = ALL organelle assemblies for the sample (mito + plastid).
     ch_organelle_baits = ORGANELLE.out.assemblies
         .map { meta, fa -> tuple(meta.sample, fa) }
         .groupTuple()
 
-    ch_contigs_by_type.hifi
-        .map { meta, fasta -> tuple(meta.sample, meta, fasta) }
+    // Only samples that actually produced an organelle get filtered; the rest pass through
+    // untouched (so a failed organelle assembly can't drop a whole nuclear assembly).
+    ch_bait_samples = ch_organelle_baits.map { sample, baits -> sample }.collect()
+
+    ch_contigs
+        .combine( ch_bait_samples )
+        .branch { meta, fasta, bait_samples ->
+            has_bait: bait_samples.contains(meta.sample)
+            no_bait:  true
+        }
+        .set { ch_contigs_baitsplit }
+
+    ch_contigs_baitsplit.has_bait
+        .map { meta, fasta, s -> tuple(meta.sample, meta, fasta) }
         .combine( ch_organelle_baits, by: 0 )
         .map { sample, meta, fasta, baits -> tuple(meta, fasta, baits) }
         .set { ch_organelle_filter_input }
 
     FILTER_ORGANELLE(ch_organelle_filter_input)
 
-    ch_mito_filtered = FILTER_ORGANELLE.out.filtered   // per-haplotype tuple(meta, fasta)
+    ch_organelle_filtered = FILTER_ORGANELLE.out.filtered
+        .mix( ch_contigs_baitsplit.no_bait.map { meta, fasta, s -> tuple(meta, fasta) } )
+
+    // Fork the FILTERED contigs into the read-type-specific conditioning paths.
+    ch_organelle_filtered
+        .branch { meta, fasta ->
+            hifi:      meta.hifi
+            shortread: true
+        }
+        .set { ch_filtered_by_type }
+
+    ch_organelle_filtered_hifi = ch_filtered_by_type.hifi   // HiFi filtered -> PURGE_DUPS / QC
 
     /*
     ====================================================================================
         STEP 4b: PURGE DUPLICATES (optional)
-        ch_mito_filtered is per-haplotype; attach per-sample HiFi reads (combine by sample),
-        one PURGE_DUPS over both haplotypes.
+        ch_organelle_filtered_hifi is per-haplotype; attach per-sample HiFi reads (combine
+        by sample), one PURGE_DUPS over both haplotypes.
     ====================================================================================
     */
     if (params.run_purge_dups) {
-        ch_mito_filtered
+        ch_organelle_filtered_hifi
             .map { meta, fasta -> [ meta.sample, meta, fasta ] }
             .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
             .map { sample, meta, fasta, hifi_reads -> tuple(meta, fasta, hifi_reads) }
@@ -536,11 +554,12 @@ workflow {
         ch_hifiasm_output = PURGE_DUPS.out.purged_assembly      // per-haplotype (meta, fasta)
         ch_versions = ch_versions.mix(PURGE_DUPS.out.versions)
     } else {
-        ch_hifiasm_output = ch_mito_filtered                    // per-haplotype (meta, fasta)
+        ch_hifiasm_output = ch_organelle_filtered_hifi          // per-haplotype (meta, fasta)
     }
 
     // Short-read conditioning: REDUNDANS (reduce/scaffold/gap-close) -> optional Pilon.
-    ch_contigs_by_type.shortread
+    // Fed by the organelle-filtered short-read contigs (was ch_contigs_by_type.shortread).
+    ch_filtered_by_type.shortread
         .map { meta, fasta -> [ meta.sample, meta, fasta ] }
         .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
         .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
@@ -1122,14 +1141,14 @@ workflow {
         )
     }
 
-    // QC mito-filtered contigs
+    // QC organelle-filtered contigs (HiFi + short-read)
     if (run_all_qc) {
-        ASSEMBLY_QC_MITO_FILTERED(
-            ch_mito_filtered,
+        ASSEMBLY_QC_ORGANELLE_FILTERED(
+            ch_organelle_filtered,
             ch_qc_reads,
             BUILD_MERYL_DB.out.meryl_db,
             ch_busco_db,
-            'contig_mito_filtered'
+            'contig_organelle_filtered'
         )
     }
 
@@ -1304,7 +1323,7 @@ workflow {
     if (run_all_qc) {
         ch_all_assembly_summaries = ch_all_assembly_summaries
             .mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
-            .mix(ASSEMBLY_QC_MITO_FILTERED.out.assembly_summary)
+            .mix(ASSEMBLY_QC_ORGANELLE_FILTERED.out.assembly_summary)
             .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
             .mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
 
