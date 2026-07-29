@@ -1,39 +1,28 @@
 /*
 ========================================================================================
-    ANNOTATE_MITO — metazoan / fungal mitogenome annotation (MITOS2)
+    ANNOTATE_MITO — metazoan / fungal mitogenome annotation (MITOS2)  ->  MitoHiFi-style output
 ========================================================================================
     Repo location: modules/annotate_mito.nf
 
-    MITOS2 (runmitos.py) is the standard de-novo annotator for METAZOAN mitogenomes (and
-    fungal, via refseq89f). It is NOT appropriate for plant mitochondria — those route
-    elsewhere (currently deferred).
+    Runs MITOS2 (runmitos), then converts its BED annotation to a GenBank file, and emits the
+    SAME file set MitoHiFi produces so downstream (report, circular map, filtering) treats a
+    short-read mitogenome identically to a HiFi one:
 
-    Requirements:
-      - conda: mitos>=2  (bioconda)
-      - a RefSeq reference set pre-installed from Zenodo (record 2672835 -> newer version),
-        e.g. refseq89m (Metazoa) / refseq89f (Fungi), living under params.mitos_downloads.
-        Set up once, like the GetOrganelle DB.
+      <sample>_<org>_mitogenome.fasta   the assembly (== MitoHiFi mitogenome)
+      <sample>_<org>_mitogenome.gb      GenBank from MITOS2 (== MitoHiFi annotation) -> feeds the circular map
+      <sample>_<org>_mito_stats.tsv     same columns + counting as MitoHiFi's stats
+      <sample>_<org>_mito_contigs.fasta candidate contigs (== the assembly here)
+      <sample>_<org>_gene_map.png       MITOS linear gene diagram (optional)
+      <sample>_<org>.mitos.bed          raw MITOS annotation (optional)
 
-    MITOS2 annotates ONE sequence per run. A closed metazoan mitogenome is a single record,
-    so we pass the assembly as-is. (A fragmented/multi-record mito would need the longest
-    record selected first — a follow-up if one ever shows up here.)
-
-    Invocation is the minimal, cross-version-verified form:
-        runmitos.py -i <fasta> -c <code> -o <dir> -R <db_parent> -r <refseqNN> [--linear]
-    (No --noplots: the plural/singular of that flag varies by version, so we leave it off
-     rather than guess; plots are harmless extra output in the raw dir.)
+    Requirements: conda mitos=2.1.10 (binary is `runmitos`, bundles biopython for the converter);
+    RefSeq set pre-fetched by DOWNLOAD_MITOS_DB (refseq89m animal / refseq89f fungus).
+    MITOS annotates ONE sequence per run — a closed metazoan mito is a single record.
 
     Input:
-      tuple(meta, org_type, status, gcode, refseq, fasta)
-        status ∈ {circular, linear}   -> --linear when not circular
-        gcode                          NCBI mito genetic code (geneticCodeFor)
-        refseq                         reference set name (refseq89m animal / refseq89f fungus)
-      val mitos_db                     parent dir holding the refseq set(s)
-    Output:
-      bed  tuple(meta, org_type, <sample>.<org>.mitos.bed)   MITOS annotation (optional: absent on failure)
-      gff  optional GFF
-      faa  optional protein predictions
-      raw  full MITOS output dir
+      tuple(meta, org_type, status, gcode, refseq, fasta)   status in {circular,linear}
+      val  mitos_db     parent dir for the refseq set(s)
+      path gb_script    mitos_to_genbank.py
 ========================================================================================
 */
 
@@ -45,16 +34,20 @@ process ANNOTATE_MITO {
     input:
     tuple val(meta), val(org_type), val(status), val(gcode), val(refseq), path(fasta)
     val mitos_db
+    path gb_script
 
     output:
-    tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.mitos.bed"), emit: bed, optional: true
-    tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.mitos.gff"), emit: gff, optional: true
-    tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.mitos.faa"), emit: faa, optional: true
-    tuple val(meta), val(org_type), path("mitos_out"),                            emit: raw
+    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mitogenome.fasta"),   emit: mitogenome
+    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mitogenome.gb"),      emit: annotation
+    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mito_stats.tsv"),     emit: stats
+    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_mito_contigs.fasta"), emit: contigs
+    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}_gene_map.png"),       emit: gene_map, optional: true
+    tuple val(meta), val(org_type), path("${meta.sample}_${org_type}.mitos.bed"),          emit: bed,      optional: true
     path "versions.tsv", emit: versions
 
     script:
     def linear = (status == 'circular') ? '' : '--linear'
+    def circ   = (status == 'circular') ? '--circular' : ''
     """
     set -eu
     SAMPLE="${meta.sample}"
@@ -70,21 +63,51 @@ process ANNOTATE_MITO {
         ${linear} \\
         --noplots || echo "[ANNOTATE_MITO] runmitos exited non-zero; collecting whatever landed"
 
-    # MITOS writes result.* into -o (sometimes a subdir); collect wherever they land
-    bed=\$(find mitos_out -name 'result.bed' | head -n1 || true)
-    gff=\$(find mitos_out -name 'result.gff' | head -n1 || true)
-    faa=\$(find mitos_out -name 'result.faa' | head -n1 || true)
-    [ -n "\${bed}" ] && cp "\${bed}" "\${SAMPLE}.\${ORG}.mitos.bed" || true
-    [ -n "\${gff}" ] && cp "\${gff}" "\${SAMPLE}.\${ORG}.mitos.gff" || true
-    [ -n "\${faa}" ] && cp "\${faa}" "\${SAMPLE}.\${ORG}.mitos.faa" || true
+    BED=\$(find mitos_out -name 'result.bed' | head -n1 || true)
+    PNG=\$(find mitos_out -name 'result.png' | head -n1 || true)
+
+    # MitoHiFi-style FASTA outputs: mitogenome + contigs are the assembly
+    cp "${fasta}" "\${SAMPLE}_\${ORG}_mitogenome.fasta"
+    cp "${fasta}" "\${SAMPLE}_\${ORG}_mito_contigs.fasta"
+    [ -n "\${BED}" ] && cp "\${BED}" "\${SAMPLE}_\${ORG}.mitos.bed" || true
+    [ -n "\${PNG}" ] && cp "\${PNG}" "\${SAMPLE}_\${ORG}_gene_map.png" || true
+
+    # MITOS BED -> GenBank (single record, CDS/tRNA/rRNA + /gene + /product) for the circular map + report
+    GB="\${SAMPLE}_\${ORG}_mitogenome.gb"
+    if [ -n "\${BED}" ]; then
+        python "${gb_script}" \\
+            --fasta "${fasta}" \\
+            --bed "\${BED}" \\
+            --sample_id "\${SAMPLE}" \\
+            --organelle "\${ORG}" \\
+            --genetic_code ${gcode} \\
+            ${circ} \\
+            --output "\${GB}"
+    else
+        echo "[ANNOTATE_MITO] no result.bed; emitting empty GenBank"
+        : > "\${GB}"
+    fi
+
+    # stats — SAME columns and counting rules as MitoHiFi's mito_stats.tsv
+    MITO_LEN=\$(grep -v '^>' "${fasta}" | tr -d '\\n' | wc -c)
+    CIRCULAR=\$([ "${status}" = "circular" ] && echo yes || echo no)
+    GENE_COUNT=\$(grep -c '^ */gene=' "\${GB}" 2>/dev/null || true)
+    TRNA_COUNT=\$(grep -c '/product="tRNA' "\${GB}" 2>/dev/null || true)
+    RRNA_COUNT=\$(grep -c 'rRNA' "\${GB}" 2>/dev/null || true)
+    printf 'sample_id\\tmitogenome_length\\tcircular\\tgene_count\\ttrna_count\\trrna_count\\tgenetic_code\\n' > "\${SAMPLE}_\${ORG}_mito_stats.tsv"
+    printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\${SAMPLE}" "\${MITO_LEN}" "\${CIRCULAR}" "\${GENE_COUNT:-0}" "\${TRNA_COUNT:-0}" "\${RRNA_COUNT:-0}" "${gcode}" >> "\${SAMPLE}_\${ORG}_mito_stats.tsv"
+    echo "[ANNOTATE_MITO] \${SAMPLE} \${ORG}: len=\${MITO_LEN} circular=\${CIRCULAR} genes=\${GENE_COUNT:-0} tRNA=\${TRNA_COUNT:-0} rRNA=\${RRNA_COUNT:-0}"
 
     printf 'MITOS2\\t%s\\n' "\$(runmitos --version 2>&1 | head -n1 || echo NA)" > versions.tsv
     """
 
     stub:
     """
-    mkdir -p mitos_out
-    printf '# stub\\n' > ${meta.sample}.${org_type}.mitos.bed
+    echo ">mitogenome_${meta.sample}" > ${meta.sample}_${org_type}_mitogenome.fasta
+    echo "ACGTACGTACGT" >> ${meta.sample}_${org_type}_mitogenome.fasta
+    cp ${meta.sample}_${org_type}_mitogenome.fasta ${meta.sample}_${org_type}_mito_contigs.fasta
+    printf 'LOCUS stub\\n//\\n' > ${meta.sample}_${org_type}_mitogenome.gb
+    printf 'sample_id\\tmitogenome_length\\tcircular\\tgene_count\\ttrna_count\\trrna_count\\tgenetic_code\\n%s\\t16000\\tyes\\t13\\t22\\t2\\t2\\n' "${meta.sample}" > ${meta.sample}_${org_type}_mito_stats.tsv
     touch versions.tsv
     """
 }

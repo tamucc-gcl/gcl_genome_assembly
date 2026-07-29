@@ -49,8 +49,12 @@ workflow {
     SHORTREAD_ORGANELLE.out.stats
         .map { meta, org, tsv -> "[assembly]      ${meta.sample}\t${org}\t" + tsv.text.trim().readLines().last() }
         .view()
-    ORGANELLE_ANNOTATION.out.mito_annotation
-        .map { meta, org, f -> "[mito-annot] ${meta.sample}\t${org}\t${f.name}" }.view()
+    ORGANELLE_ANNOTATION.out.annotation
+        .map { meta, org, f -> "[mito-gb]       ${meta.sample}\t${org}\t${f.name}" }.view()
+    ORGANELLE_ANNOTATION.out.mito_stats
+        .map { meta, org, f -> "[mito-stats]    ${meta.sample}\t${org}\t" + f.text.trim().readLines().last() }.view()
+    ORGANELLE_ANNOTATION.out.circular_map
+        .map { meta, f -> "[mito-circular] ${meta.sample}\t${f.name}" }.view()
     ORGANELLE_ANNOTATION.out.notes
-        .map { meta, org, f -> "[note]       ${meta.sample}\t${org}\t${f.name}" }.view()
+        .map { meta, org, f -> "[note]          ${meta.sample}\t${org}\t${f.name}" }.view()
 }

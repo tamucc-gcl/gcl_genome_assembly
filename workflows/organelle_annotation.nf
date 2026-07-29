@@ -4,34 +4,33 @@
 ========================================================================================
     Repo location: workflows/organelle_annotation.nf
 
-    Sibling to SHORTREAD_ORGANELLE; consumes its .out.assembly (+ .out.stats for status) and
-    routes each organelle:
+    Routes each organelle:
+      animal_mt / fungus_mt     -> MITOS2 (ANNOTATE_MITO) -> MitoHiFi-style outputs; circular
+                                   ones additionally get a circular gene map via MITO_CIRCULAR_MAP
+                                   (the same module/script the HiFi path uses)
+      embplant_pt / embplant_mt -> GeSeq note (no trusted CLI annotator)
 
-      animal_mt / fungus_mt     -> MITOS2 (ANNOTATE_MITO); refseq89m / refseq89f; --linear if not circular
-      embplant_pt / embplant_mt -> NO CLI annotator we trust; emit a note pointing to GeSeq (web),
-                                   which annotates both plant plastid and plant mitochondrial genomes
-
-    Genetic code for the mito branch comes from ch_gcode (geneticCodeFor). Circular-vs-linear
-    status is joined in from ch_stats. Owns its MITOS DB download, gated on whether a
-    metazoan/fungal mito is actually present.
+    Emits the same channel shapes as the MitoHiFi path (mitogenome / annotation / stats /
+    contigs / gene_map / circular_map) so a short-read mito is interchangeable downstream,
+    plus `notes` for the plant organelles.
 
     take:
       ch_assembly  tuple(meta, org_type, fasta)     SHORTREAD_ORGANELLE.out.assembly
       ch_stats     tuple(meta, org_type, stats_tsv) SHORTREAD_ORGANELLE.out.stats
-      ch_gcode     tuple(taxid, genetic_code)       mito genetic code per taxon
-    emit:
-      mito_annotation  tuple(meta, org_type, bed)
-      notes            tuple(meta, org_type, note)   GeSeq pointer for plant organelles (report)
-      versions
+      ch_gcode     tuple(taxid, genetic_code)
 ========================================================================================
 */
 
 include { DOWNLOAD_MITOS_DB } from '../modules/download_mitos_db.nf'
 include { ANNOTATE_MITO }     from '../modules/annotate_mito.nf'
+include { MITO_CIRCULAR_MAP } from '../modules/mito_circular_map.nf'
 include { mitosRefseqFor }    from '../functions/taxonomy.nf'
 
-// Plant organelles: no CLI annotator we trust. Emit a note (picked up by the report) pointing
-// to GeSeq, which handles both plant plastid and plant mitochondrial genomes.
+// Scripts (params let the standalone test point at the repo's py_scripts/; default is production layout).
+mito_gb_script       = file(params.mitos_to_genbank_script ?: "${projectDir}/py_scripts/mitos_to_genbank.py", checkIfExists: true)
+mito_circular_script = file(params.mito_circular_script    ?: "${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
+
+// Plant organelles: no CLI annotator we trust -> GeSeq note (handles both plant plastid + mito).
 process ANNOTATION_NOTE {
     tag "${meta.sample}:${org_type}"
     label 'tiny'
@@ -66,7 +65,7 @@ workflow ORGANELLE_ANNOTATION {
     ch_gcode
 
     main:
-    // Attach status (circular/linear) from stats onto each assembly, keyed by (sample, org_type).
+    // status (circular/linear) per assembly, keyed by (sample, org_type)
     ch_status = ch_stats.map { meta, org, tsv ->
         def cols = tsv.text.trim().readLines().last().split('\t')
         tuple( [meta.sample, org], (cols.size() > 2 ? cols[2] : 'unknown') )
@@ -84,7 +83,7 @@ workflow ORGANELLE_ANNOTATION {
         }
         .set { br }
 
-    // -- metazoan / fungal mito -> MITOS2 --
+    // -- metazoan / fungal mito -> MITOS2 (MitoHiFi-style outputs) --
     ch_mitos_db = DOWNLOAD_MITOS_DB(
                       br.mito.map { meta, org, status, fa -> params.mitos_downloads }.unique(),
                       params.mitos_refseq_sets,
@@ -97,13 +96,27 @@ workflow ORGANELLE_ANNOTATION {
         .map { taxid, meta, org, status, fa, gcode ->
                tuple(meta, org, status, gcode, (params.mitos_refseq ?: mitosRefseqFor(org)), fa) }
         .set { ch_mito_in }
-    ANNOTATE_MITO( ch_mito_in, ch_mitos_db )
+    ANNOTATE_MITO( ch_mito_in, ch_mitos_db, mito_gb_script )
+
+    // circular mitos -> circular gene map (reuse the HiFi module + script). Join status back on.
+    ANNOTATE_MITO.out.annotation
+        .map { meta, org, gb -> tuple([meta.sample, org], meta, gb) }
+        .join( br.mito.map { meta, org, status, fa -> tuple([meta.sample, org], status) } )
+        .filter { key, meta, gb, status -> status == 'circular' }
+        .map { key, meta, gb, status -> tuple(meta, gb) }
+        .set { ch_circular_gb }
+    MITO_CIRCULAR_MAP( ch_circular_gb, mito_circular_script )
 
     // -- plant plastid + plant mito -> GeSeq note --
     ANNOTATION_NOTE( br.note.map { meta, org, status, fa -> tuple(meta, org) } )
 
     emit:
-    mito_annotation = ANNOTATE_MITO.out.bed
-    notes           = ANNOTATION_NOTE.out.note
-    versions        = ANNOTATE_MITO.out.versions
+    mitogenome   = ANNOTATE_MITO.out.mitogenome
+    annotation   = ANNOTATE_MITO.out.annotation
+    mito_stats   = ANNOTATE_MITO.out.stats
+    mito_contigs = ANNOTATE_MITO.out.contigs
+    gene_map     = ANNOTATE_MITO.out.gene_map
+    circular_map = MITO_CIRCULAR_MAP.out.circular_map
+    notes        = ANNOTATION_NOTE.out.note
+    versions     = ANNOTATE_MITO.out.versions
 }
