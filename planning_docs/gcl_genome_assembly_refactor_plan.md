@@ -19,9 +19,9 @@ Task checkboxes: `- [ ]` open · `- [x]` done.
 
 | Field | Value |
 |---|---|
-| Current phase | **Report-improvement batch COMPLETE → full parameter unification (the single cache-reset milestone) is next.** All seven report/QC-readability items delivered — est-genome-size & %-of-estimate columns, run-summary header, per-sample status/verdict flag (BUSCO/QV/k-mer + assembled-vs-estimate), GenomeScope profiles, BUSCO-lineage provenance, the §4 single-stage gate, and the Methods & Citations §8 (including the report side of software-version capture) — plus the short-read-only report-hang and `ch_workflow_info` Kryo fixes. Report edits re-hash only the terminal report processes, so the assembly/QC/scaffolding cache is intact. Next work touches `meta` + the ~40-param surface → the one deliberate full cache reset. |
+| Current phase | **Full parameter unification COMPLETE (2026-07-29) — validated end-to-end on all three input shapes. See §13 for the as-built architecture and the §12.0 cache-model correction.** All of WS-A/B/C plus version capture landed as one combined reset; the report-improvement batch preceded it. Remaining work is `gcl_genome_assembly_future_projects.md` (§A–D) plus the parked collapsed-primary/purge_dups follow-up. |
 | Phases complete | **Phase 1** (meta-map, byte-identical parity) · **Phase 2** (haploid `--primary`, stub + real) · **Phase 4a** (short-read + organelle stub + evidence-gating + genome-size; real 5-sample run) · **Track 1** (script cache-staging) · **4b-i identity/taxonomy** (Increments 1–4) · **Report-improvement batch** (7 items) |
-| Roadmap ahead | **Full parameter unification** — the single cache-reset; STOP for this round. Now bundles: identity-param retirement, the grouped/namespaced param scheme, the `ploidy`→side-channel move, the `meta`-field cache-scope audit, and per-process software-version capture (+ container-tag pinning). Then `gcl_genome_assembly_future_projects.md`: §A organelle (GetOrganelle) → §B scaffolding/linked-read → §C blobtools → §D docs. |
+| Roadmap ahead | **Full parameter unification — DONE (§13)**. Next: gcl_genome_assembly_future_projects.md §A→§D, and the parked collapsed-primary assembly-quality item. |
 | Last updated | 2026-07-22 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
 ---
@@ -535,6 +535,7 @@ Split out on 2026-07-07. The full docs scope + the running "notes to fold into t
 
 # 12. Parameter Unification & Rework — Implementation Plan
 *(finalized 2026-07-22 — the single cache-reset milestone; supersedes the "Full parameter unification" bullets in the Forward Roadmap)*
+*(finalized 2026-07-22; **IMPLEMENTED 2026-07-29 — see §13 for as-built + divergences. NOTE: §12.0's "renaming a param is cache-safe" premise was wrong and is retracted in §13.1**)*
 
 ## 12.0 Principle: one disruptive milestone, three workstreams split by cache cost
 
@@ -809,3 +810,64 @@ Update the production launch script to the new names — the renames in §12.5 a
 3. WS-B identity/taxonomy (`taxid`/`species`/`genetic_code`).
 4. WS-C: `ploidy` side-channel + hg_size-from-estimate → `meta` audit → version capture → container pins → Track-1 cleanup.
 5. One real run → confirm → merge.
+
+# 13. Parameter Unification & Rework — Implementation Closeout
+*(COMPLETED 2026-07-29 — supersedes the cache-tiering framing of §12.0; §12 remains as the plan of record, this is the "as-built" retrospective)*
+
+**Validated end-to-end in one combined run** across all three input shapes:
+- `Sde-CMat_203_hap_hifi` — HiFi-only, diploid, **phased** (`n_hap=2`, `--primary` off)
+- `plant` — short-read (SPAdes), diploid organism / collapsed output (`n_hap=1`)
+- `Sde-CMat_203_hap` — HiFi + Hi-C, run **phased** (`n_hap=2`) so Hi-C is used for scaffolding on top of ~1.2 Gb/hap contigs
+
+All three carry assembly → decontam → (scaffold) → gap-fill → finalize → QC → report; the §8 Software Versions table populates; `FINAL_VIZ` runs as a subworkflow; hifiasm ran with an estimate-derived `--hg-size …k`.
+
+---
+
+## 13.1 Cache-model correction *(this supersedes §12.0 — it was wrong)*
+
+§12.0 claimed a task hash is over the **rendered** command (params already interpolated), so "renaming/relocating a param with its value unchanged is cache-safe." **That is false for Nextflow 23.10.** A process is hashed over the **literal source text of its `script:` block** (with `${params.x}` un-interpolated), plus inputs and container. Consequences:
+
+- Renaming a param **reference inside a script block** (`${params.old}` → `${params.new}`) busts that process's cache **even when the value is identical** — the hashed source text changed.
+- Conversely, changing a param **value** does *not* bust cache (the well-known "`-resume` ignores params" gotcha), because the source text is unchanged.
+
+So the three-tier split collapsed: **WS-A was not cache-safe**, and `-resume` after WS-A re-ran nearly everything (confirmed empirically). The correct strategy — and what we did — was to **batch WS-A + WS-B + WS-C (and version capture) into a single combined change and eat one full rerun.** The §12.0 table's "cache class / gate" column and the "`-resume` re-runs 0" claim for WS-A should be read as **retracted**; treat the whole unification as one reset.
+
+---
+
+## 13.2 Architecture as built (and where it diverged from §12)
+
+**WS-A — normalize + config move.** As planned: all ~180 params → `nextflow.config` `params{}` (grouped); full snake_case (hifiasm → descriptive); step-toggles → `run_*`; six negative-polarity flags flipped (defaults inverted to preserve behavior); base-pair params → `_bp`; `genomescope_kmer`+`merqury_k` → `kmer_size`; collapses (`taxid` retiring `decon_source_taxid`; retired phantom `mitohifi_species`; `outdir` config-only); six derived-map blocks deleted and ~40 consumers flattened. Executed via a **tested Python script** (`ws_a_rename.py`) doing whole-token `params.<old>`→`params.<new>` + nested-map/safe-navigation flattening (validated: 201 substitutions, no over-match).
+
+**WS-B — identity/taxonomy derivation.** Implemented as **pure functions in `functions/taxonomy.nf`** (`geneticCodeFor()`, `telomereMotifFor()`), not inside `RESOLVE_TAXONOMY`. `ch_sample_identity` (per-sample, sample-keyed) carries `genetic_code` + `telomere_motif`, with param overrides applied there (`params.mitochondria_genetic_code ?: tax.genetic_code`, `params.telomere_motif ?: tax.telomere_motif`). **Divergence:** `mitohifi_genetic_code` → renamed **`mitochondria_genetic_code`** (assembler-agnostic — the plant path uses mitofinder, not MitoHiFi). Module telomere fallbacks unified onto the one resolved value; consumed by hifiasm `--telo-m` and teloclip/tidk.
+
+**WS-C — side-channels, hg-size, versions.**
+- `ploidy` stripped from `meta` → **`ch_ploidy_by_sample`** side-channel feeding genomescope `-p` and hifiasm `--n-hap`; `hifiasm_nHaplotypes` retired (`--n-hap` = organism ploidy). `n_hap` **stays** in `meta` (fork topology / groupKey — distinct from ploidy).
+- **Divergence:** `hifiasm_haploid_genome_size` → renamed **`haploid_genome_size`** (organism property; a scaffolder/short-read tool could use it too).
+- **Divergence (consolidation):** the three per-sample hifiasm extras — `telomere_motif` + `ploidy` + `haploid_genome_size` — were bundled into **one `hifiasm_traits` map**, taking HIFIASM from 8 inputs → **6** and CONTIG_ASSEMBLY from 5 takes → **3**. Telomere for hifiasm now sources from `ch_sample_identity` (teloclip/tidk keep their per-taxid wiring).
+- `haploid_genome_size` resolution: **sheet column > `haploid_genome_size` param > per-sample GenomeScope estimate > `'auto'` (omit `--hg-size`)** — the per-sample column added per the plan's intent, via `pick`.
+- **Divergence (correction):** §12.3's "`--hg-size` takes raw bp, so the estimate passes straight through" is **wrong** — hifiasm requires `INT(k/m/g)`. The estimate (clean bp, e.g. `1440136438`) is converted to a **`k` suffix** (`printf "%dk", int(bp/1000)` → `1440136k`). The override branch is suffix-aware (passes `1.4g` verbatim; converts a bare bp integer).
+- **Version capture:** every tool module emits `path "versions.tsv", emit: versions` + `printf 'tool\tversion'`; `collect_software_versions.nf` (`COLLECT_SOFTWARE_VERSIONS`) cats+dedups → `software_versions.tsv`; `main.nf` threads `ch_versions` via `.mix()` at each invoked call site (and via the assembly + QC subworkflow `versions` emits) → `.collect()` → COLLECT → `SUMMARY_REPORT --versions`. Emitting tools: hifiasm, SPAdes, Redundans, purge_dups, YaHS, BUSCO, meryl, QUAST, Jellyfish+GenomeScope, minimap2+samtools, tidk, fastp, Pilon, teloclip, MitoHiFi, FCS-GX, Inspector, TGSGapCloser, FastQC, MultiQC (+ bwa-mem2/cooler/pairtools on the Hi-C path).
+- **Container pins:** FCS-GX `latest` → **v0.5.5**, MitoHiFi `master` → **3.2.1** (tags confirmed from the cached images).
+- **FCS cpus → `task.cpus`: NO-OP.** The live decon path is `DECONTAMINATE_ASSEMBLY` (calls FCS directly at its `label:fcs` allocation, no cpus arg). The hardcoded `params.decon?.cpus` refs live only in **`decontamination.nf` (`DECONTAM_FCS_AUTO`)**, which `main.nf` does not include — orphaned/dead code (cleanup candidate).
+
+**NEW (not in §12) — `FINAL_VIZ` subworkflow.** The entry `workflow {}` crossed Groovy's **64 KB single-compiled-unit limit** (68,075 > 65,535) once the version accumulator landed. Extracted the pairwise + `QUAST_FINAL` + tidk block (~112 lines) into `workflows/final_viz.nf` (takes `ch_final_by_id`, `ch_final_by_id_telo`, dotplot/riparian scripts; emits pairwise summary, dotplot, riparian, tidk plot, telomere summary, versions). This also folded the `QUAST_FINAL`/`TIDK_EXPLORE` version mixes into one `FINAL_VIZ.out.versions`.
+
+---
+
+## 13.3 Implementation gotchas *(for the next refactor)*
+
+1. **Nextflow cache = `script:` source text**, not the rendered command (see §13.1). Batch all script-touching changes into one reset; don't trust `-resume` to spare a value-preserving rename.
+2. **GString escaping in `"""…"""` script blocks.** Bash command substitution `$(…)` must be `\$(…)` — a bare `$(` is a Groovy lexer error (`token recognition error at '('`). And `sed` BRE groups/backrefs must be **doubled**: `\(…\)` → `\\(…\\)`, `\1` → `\\1` (Groovy consumes one backslash level before bash/sed see it). Both bit the version-emission lines.
+3. **hifiasm `--hg-size` needs `INT(k/m/g)`** — a bare bp integer → "wrong genome size". Convert bp → `k` suffix.
+4. **`versions.tsv` must be written at the task work-dir root.** Modules that `cd` into a subdirectory (e.g. `merqury.nf`) must write `> ../versions.tsv` (or `cd ..` first), or Nextflow reports "Missing output file" while the tool exits 0.
+5. **64 KB compiled-unit limit.** A single Nextflow `workflow`/process can't exceed 65,535 chars of source. When the entry workflow approaches it, extract a self-contained block into a named subworkflow (as `FINAL_VIZ`).
+6. **Collapsed-primary (`n_hap=1`) bloat.** With `run_purge_dups` off, hifiasm `--primary` on a diploid retains het/alt redundancy — the collapsed `Sde-CMat_203_hap` primary came out ~2 Gb vs ~1.2 Gb for a phased hap. That inflates the Hi-C BAM and blew past the `map_hic` memory (peak VMSize ~121 GB > the 120 GB request → `malloc` failure → SIGPIPE / exit 141). **Running that sample phased (`n_hap=2`) sidesteps it.** `map_hic` memory was sized for the phased hap (~90–110 GB); a bloated collapsed primary needs more, and the sort is now bounded + node-scaled (`samtools sort -@ min(cpus,16) -m task.memory/4/threads`).
+
+---
+
+## 13.4 Still parked (follow-ups)
+
+- **Collapsed-primary assembly quality** — for `n_hap=1` samples, enable `purge_dups` (or revisit the `--hg-size` value) so the primary lands near haploid size; this is the real fix for the Hi-C-mapping resource blowup on collapsed samples. QUAST the primary to quantify the bloat.
+- **FCS-adaptor** — not currently wired to run; when enabled, add its `versions.tsv` line (container `git:` tag, like FCS-GX).
+- **Dead-code removal** — orphaned `decontamination.nf` / `DECONTAM_FCS_AUTO`; stale `meta.ploidy`/`haploid_genome_size` doc comments in `spades.nf` / `estimate_genome_size.nf`.
+- **Future projects** (`gcl_genome_assembly_future_projects.md`): §A GetOrganelle short-read organelle, §B linked-read scaffolding, §C blobtools resurrection (+ diamond/minimap2 `task.cpus`), §D docs/README.
