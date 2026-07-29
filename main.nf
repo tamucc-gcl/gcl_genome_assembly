@@ -502,7 +502,7 @@ workflow {
     ch_bait_samples = ch_organelle_baits.map { sample, baits -> sample }.collect()
 
     ch_contigs
-        .combine( ch_bait_samples )
+        .combine( ch_bait_samples.map { [ it ] } )   // [ it ] stops .combine() from spreading the sample list into the tuple
         .branch { meta, fasta, bait_samples ->
             has_bait: bait_samples.contains(meta.sample)
             no_bait:  true
