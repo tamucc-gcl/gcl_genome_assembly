@@ -34,7 +34,7 @@ process MERQURY {
         ${asm_args} \\
         ${sample_id}
     
-    printf 'meryl\t%s\n' "\$(meryl --version 2>&1 | sed 's/meryl //')" > versions.tsv
+    printf 'meryl\t%s\n' "$(meryl --version 2>&1 | sed 's/meryl //')" > ../versions.tsv
     """
 
     stub:
