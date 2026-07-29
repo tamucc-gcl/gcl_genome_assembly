@@ -176,14 +176,13 @@ include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 include { CONTACT_MAP as CONTACT_MAP_FINAL } from './modules/contact_map.nf'
 //include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
-include { SUMMARY_REPORT } from './modules/summary_report'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { HIC_COMPARTMENTS } from './modules/hic_compartments.nf'
 include { HIC_TADS } from './modules/hic_tads.nf'
 include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
+include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
-include { COLLECT_SOFTWARE_VERSIONS } from './modules/collect_software_versions.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
 ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
@@ -1439,219 +1438,31 @@ workflow {
     COVERAGE_BOOK(ch_coverage_book_input, ch_coverage_book_script)
 
     // =========================================================================
-    //  SUMMARY REPORT — Build manifest and call the process
-    //
-    //  Verified publishDir paths from each module:
-    //    FINALIZE_ASSEMBLY  → ${params.outdir}/assembly/final
-    //    GAP_FILLING        → ${params.outdir}/assembly/scaffold/gap_filling
-    //    SNAIL_PLOT         → ${params.outdir}/snail_plots
-    //    CONTACT_MAP        → ${params.outdir}/contact_maps
-    //    PAIRWISE_ALIGNMENT → ${params.outdir}/pairwise_alignments
-    //    COMPILE_FINAL_QC   → ${params.outdir}/qc/assembly
-    //    ASSEMBLY_REPORT    → ${params.outdir}/reports
+    //  SUMMARY REPORT  (manifest assembly + report -> workflows/reporting.nf)
     // =========================================================================
-
-    // ---- Final genome assemblies ----
-    // FINALIZE_ASSEMBLY.out.assembly: tuple(haplotype_id, fasta)
-    // publishDir: ${params.outdir}/assembly/final
-    ch_manifest_assemblies = FINALIZE_ASSEMBLY.out.assembly
-        .map { meta, fasta -> "assembly\t${meta.id}\t.\t${fasta.name}\tassembly/final" }
-
-    // ---- Snail plots (final) ----
-    // SNAIL_PLOT_FINAL.out.snail: tuple(haplotype_id, qc_label, svg)
-    // publishDir: ${params.outdir}/snail_plots
-    ch_manifest_snails = SNAIL_PLOT_FINAL.out.snail
-        .map { hap_id, qc_label, svg ->
-            "snail\t${hap_id}\t.\t${svg.name}\tsnail_plots"
-        }
-
-    // ---- Contact maps (conditional) ----
-    // CONTACT_MAP_FINAL.out.contact_maps: tuple(haplotype_id, stage, png_files)
-    // publishDir: ${params.outdir}/contact_maps
-    if (params.run_final_contact_maps) {
-        ch_manifest_contact_maps = CONTACT_MAP_FINAL.out.contact_maps
-            .flatMap { meta, stage, pngs ->
-                def png_list = pngs instanceof List ? pngs : [pngs]
-                png_list.collect { png ->
-                    "contact_map\t${meta.id}\t.\t${png.name}\tcontact_maps"
-                }
-            }
-    } else {
-        ch_manifest_contact_maps = Channel.empty()
-    }
-
-    // ---- Pairwise dotplots (conditional) ----
-    // FINAL_VIZ.out.dotplot: tuple(id1, id2, png)
-    // publishDir: ${params.outdir}/pairwise_alignments
-    if (params.run_pairwise_alignments) {
-        ch_manifest_dotplots = FINAL_VIZ.out.dotplot
-            .map { id1, id2, png ->
-                "dotplot\t${id1}\t${id2}\t${png.name}\tpairwise_alignments"
-            }
-    } else {
-        ch_manifest_dotplots = Channel.empty()
-    }
-
-    // ---- Pairwise riparian plots (conditional) ----
-    // FINAL_VIZ.out.riparian: tuple(id1, id2, png)
-    // publishDir: ${params.outdir}/pairwise_alignments
-    if (params.run_pairwise_alignments) {
-        ch_manifest_riparian = FINAL_VIZ.out.riparian
-            .map { id1, id2, png ->
-                "riparian\t${id1}\t${id2}\t${png.name}\tpairwise_alignments"
-            }
-    } else {
-        ch_manifest_riparian = Channel.empty()
-    }
-
-    // ---- tidk plot SVGs for manifest ----
-    ch_manifest_tidk_plots = FINAL_VIZ.out.tidk_plot
-        .map { hap_id, svg ->
-            "tidk_plot\t${hap_id}\t.\t${svg.name}\ttelomeres/plots"
-        }
-    
-
-    // ---- Compiled QC CSV from COMPILE_FINAL_QC ----
-    // publishDir: ${params.outdir}/qc/assembly
-    ch_manifest_compiled_csv = COMPILE_FINAL_QC.out.metrics
-        .map { csv ->
-            "compiled_qc\t.\t.\t${csv.name}\tqc/assembly"
-        }
-
-    // ---- QC trend plots (PNGs) from COMPILE_FINAL_QC ----
-    // publishDir: ${params.outdir}/qc/assembly
-    ch_manifest_qc_plots = COMPILE_FINAL_QC.out.plots
-        .flatten()
-        .map { png ->
-            "qc_plot\t.\t.\t${png.name}\tqc/assembly"
-        }
-
-    // ---- Interactive HTML report from ASSEMBLY_REPORT ----
-    // publishDir: ${params.outdir}/reports
-    ch_manifest_assembly_report = ASSEMBLY_REPORT.out.report_html
-        .map { html ->
-            "assembly_report_html\t.\t.\t${html.name}\treports"
-        }
-
-    // ---- Mitogenome assembly ----
-    // publishDir: ${params.outdir}/mitogenome/${sample_id}
-    ch_manifest_mito_gb = ORGANELLE.out.annotation
-        .map { meta, gb -> "mito_genbank\t${meta.sample}\t.\t${gb.name}\torganelle" }
-
-    ch_manifest_mito_stats = ORGANELLE.out.stats
-        .map { meta, tsv -> "mito_stats\t${meta.sample}\t.\t${tsv.name}\torganelle" }
-
-    ch_manifest_mito_circular = ORGANELLE.out.circular_map
-        .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\torganelle" }
-
-    // ---- GenomeScope profiles (linear_plot.png per sample) ----
-    // ESTIMATE_GENOME_SIZE.out.results: tuple(meta, <sample>_genomescope dir)
-    // publishDir: ${params.outdir}/qc/genome_size → qc/genome_size/<sample>_genomescope/linear_plot.png
-    ch_manifest_genomescope = ESTIMATE_GENOME_SIZE.out.results
-        .map { meta, gs_dir ->
-            "genomescope_plot\t${meta.sample}\t.\tlinear_plot.png\tqc/genome_size/${gs_dir.name}"
-        }
-
-    // ---- Combine all manifest entries into a single TSV ----
-    ch_manifest_assemblies
-        .mix(ch_manifest_snails)
-        .mix(ch_manifest_contact_maps)
-        .mix(ch_manifest_dotplots)
-        .mix(ch_manifest_riparian)
-        .mix(ch_manifest_compiled_csv)
-        .mix(ch_manifest_qc_plots)
-        .mix(ch_manifest_genomescope)
-        .mix(ch_manifest_assembly_report)
-        .mix(ch_manifest_mito_gb)
-        .mix(ch_manifest_mito_stats)
-        .mix(ch_manifest_mito_circular)
-        .mix(ch_manifest_tidk_plots)
-        .collectFile(
-            name: 'report_manifest.tsv',
-            seed: 'type\tid\tid2\tfilename\tsubdir',
-            newLine: true
-        )
-        .set { ch_report_manifest }
-
-    // Collect mitogenome stats for report
-    ch_mito_stats_for_report = ORGANELLE.out.stats
-        .map { meta, tsv -> tsv }
-        .collectFile(
-            name: 'all_mito_stats.tsv',
-            keepHeader: true,
-            skip: 1
-        )
-        .ifEmpty(file('NO_MITO_STATS'))
-
-    // ---- Per-sample taxonomy + genome-size estimate (4b-i Increment 4) ----
-    ch_sample_taxonomy_tsv = ch_sample_identity
-        .map { sample, tax ->
-            "${sample}\t${tax.taxid}\t${tax.name}\t${tax.kingdom}\t${tax.busco_lineage}\t${tax.genetic_code}\t${tax.telomere_motif}" }
-        .collectFile(name: 'sample_taxonomy.tsv', newLine: true,
-                     seed: 'sample\ttaxid\tspecies\tkingdom\tbusco_lineage\tgenetic_code\ttelomere_motif',
-                     sort: false)
-        .ifEmpty(file('NO_TAXONOMY'))
-
-    ch_genome_size_tsv = ESTIMATE_GENOME_SIZE.out.size
-        .map { meta, size_file -> "${meta.sample}\t${size_file.text.trim()}" }
-        .collectFile(name: 'genome_sizes.tsv',
-                     seed: 'sample\test_genome_size_bp',
-                     newLine: true)
-        .ifEmpty(file('NO_GENOME_SIZE'))
-
-
-    // ---- Per-sample run info (evidence + strategy) for the report header ----
-    ch_run_info_tsv = ch_input
-        .map { meta, reads -> tuple(meta.sample, meta) }
-        .join(ch_ploidy_by_sample)
-        .map { sample, meta, ploidy ->
-            [ meta.sample, meta.hifi, meta.hic, meta.tellseq, meta.shortread,
-              meta.assembler, meta.n_hap, ploidy, meta.dedup, meta.mito_tool ]
-                .collect { it == null ? '' : it }.join('\t')
-        }
-        .collectFile(name: 'run_info.tsv',
-                     seed: ['sample','hifi','hic','tellseq','shortread',
-                            'assembler','n_hap','ploidy','dedup','mito_tool'].join('\t'),
-                     newLine: true)
-        .ifEmpty(file('NO_RUN_INFO'))
-
-    // ---- Workflow provenance for the report header ----
-    // Render to plain Strings HERE. workflow.start is a java.time.OffsetDateTime and
-    // nextflow.version is a VersionNumber; if either reaches a channel still inside a
-    // GString, Kryo can't serialize it ("Unable to create serializer ... OffsetDateTime").
-    // .toString() on each line collapses the embedded objects to their string form first.
-    def wf_lines = [
-            "key\tvalue",
-            "pipeline\t${workflow.manifest.name   ?: 'gcl_genome_assembly'}",
-            "version\t${workflow.manifest.version ?: 'unknown'}",
-            "revision\t${workflow.revision        ?: 'unknown'}",
-            "commit\t${workflow.commitId          ?: 'unknown'}",
-            "run_name\t${workflow.runName         ?: 'unknown'}",
-            "profile\t${workflow.profile          ?: 'unknown'}",
-            "nextflow\t${nextflow.version}",
-            "start\t${workflow.start}"
-        ].collect { it.toString() }.join('\n')
-
-    ch_workflow_info = Channel
-        .of(wf_lines)
-        .collectFile(name: 'workflow_info.tsv', newLine: true)
-
-    COLLECT_SOFTWARE_VERSIONS(ch_versions.collect())
-
-    // ---- Call SUMMARY_REPORT ----
-    SUMMARY_REPORT(
-        ch_report_manifest,
+    REPORTING(
+        ch_finalized_assembly,
+        SNAIL_PLOT_FINAL.out.snail,
+        params.run_final_contact_maps ? CONTACT_MAP_FINAL.out.contact_maps : Channel.empty(),
+        FINAL_VIZ.out.dotplot,
+        FINAL_VIZ.out.riparian,
+        FINAL_VIZ.out.tidk_plot,
         COMPILE_FINAL_QC.out.metrics,
+        COMPILE_FINAL_QC.out.plots,
+        ASSEMBLY_REPORT.out.report_html,
+        ORGANELLE.out.annotation,
+        ORGANELLE.out.stats,
+        ORGANELLE.out.circular_map,
+        ESTIMATE_GENOME_SIZE.out.results,
+        ESTIMATE_GENOME_SIZE.out.size,
+        ch_sample_identity,
+        ch_input,
+        ch_ploidy_by_sample,
         ch_telomere_for_report,
         ch_pairwise_summary,
-        ch_mito_stats_for_report,
         ch_teloclip_stats_for_report,
-        ch_sample_taxonomy_tsv,
-        ch_genome_size_tsv,
-        ch_workflow_info,
-        ch_run_info_tsv,
-        COLLECT_SOFTWARE_VERSIONS.out.versions,
-        ch_summary_report_script       
+        ch_versions,
+        ch_summary_report_script
     )
 }
 /*
