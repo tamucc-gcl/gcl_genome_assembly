@@ -1,29 +1,7 @@
 /*
-========================================================================================
-    ANNOTATE_PLASTID — plant plastome annotation (Chloë)
-========================================================================================
-    Repo location: modules/annotate_plastid.nf
-
-    Chloë (ian-small/Chloe.jl) is optimised for angiosperm chloroplast genomes. Verified CLI:
-        julia --project=<chloe> <chloe>/chloe.jl annotate <fasta>
-    Default output is GFF, written next to the input as <input>.chloe.gff. References are
-    auto-found as a sibling of the chloe folder (SETUP_CHLOE clones them there).
-
-    We copy the input to a real local file first (cp -L) so Chloë writes its output into the
-    task workdir even if Nextflow staged the input as a symlink.
-
-    NOTE: annotation quality tracks assembly contiguity — a fragmented (multi-record) plastome
-    will annotate but genes spanning fragment boundaries may come back partial.
-
-    Input:
-      tuple(meta, org_type, fasta)
-      val chloe_dir   the SETUP_CHLOE install dir
-    Output:
-      gff  tuple(meta, org_type, <sample>.<org>.chloe.gff)   (optional: absent on failure)
-      raw  all Chloë outputs
-========================================================================================
+    ANNOTATE_PLASTID — plant plastome annotation (Chloë). Drops sub-<min_len> records,
+    array-guards the GFF glob (never grabs the input), degrades to a note on failure.
 */
-
 process ANNOTATE_PLASTID {
     tag "${meta.sample}:${org_type}"
     label 'chloe'
@@ -34,11 +12,13 @@ process ANNOTATE_PLASTID {
     val chloe_dir
 
     output:
-    tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.chloe.gff"), emit: gff, optional: true
-    tuple val(meta), val(org_type), path("chloe_raw"),                            emit: raw, optional: true
+    tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.chloe.gff"),           emit: gff,  optional: true
+    tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.annotation_note.txt"), emit: note, optional: true
+    tuple val(meta), val(org_type), path("chloe_raw"),                                       emit: raw,  optional: true
     path "versions.tsv", emit: versions
 
     script:
+    def min_len = params.chloe_min_contig ?: 200
     """
     set -eu
     shopt -s nullglob
@@ -46,19 +26,29 @@ process ANNOTATE_PLASTID {
     SAMPLE="${meta.sample}"
     ORG="${org_type}"
 
-    # real local copy so Chloë's "write next to input" lands in the workdir
-    cp -L "${fasta}" input.fa
+    awk '/^>/{h=\$0; next}{s[h]=s[h]\$0} END{for(k in s) if(length(s[k])>=${min_len}) printf "%s\\n%s\\n", k, s[k]}' "${fasta}" > input.fa
+    NREC=\$(grep -c '^>' input.fa || echo 0)
+    echo "[ANNOTATE_PLASTID] \${NREC} record(s) >= ${min_len} bp fed to Chloe"
 
     julia --project="${chloe_dir}/chloe" "${chloe_dir}/chloe/chloe.jl" annotate input.fa \\
-        || echo "[ANNOTATE_PLASTID] chloe exited non-zero; collecting whatever landed"
+        || echo "[ANNOTATE_PLASTID] chloe exited non-zero"
 
     mkdir -p chloe_raw
     produced=( *.chloe.gff *.chloe.sff *.gff *.sff )
     [ \${#produced[@]} -gt 0 ] && cp "\${produced[@]}" chloe_raw/ 2>/dev/null || true
 
-    # canonical annotation = the GFF (prefer *.chloe.gff)
-    gff=\$(ls -S *.chloe.gff *.gff 2>/dev/null | head -n1 || true)
-    [ -n "\${gff}" ] && cp "\${gff}" "\${SAMPLE}.\${ORG}.chloe.gff" || true
+    gffs=( *.chloe.gff *.gff )
+    if [ \${#gffs[@]} -gt 0 ]; then
+        cp "\$(ls -S "\${gffs[@]}" | head -n1)" "\${SAMPLE}.\${ORG}.chloe.gff"
+        echo "[ANNOTATE_PLASTID] annotation written"
+    else
+        cat > "\${SAMPLE}.\${ORG}.annotation_note.txt" <<'EOF'
+Plastome assembled but Chloe produced no annotation. Chloe expects a complete/circular plastome;
+a fragmented assembly can crash its ORF finder. Options: improve plastome contiguity, or annotate
+manually with GeSeq (web): https://chlorobox.mpimp-golm.mpg.de/geseq.html
+EOF
+        echo "[ANNOTATE_PLASTID] no GFF produced; wrote annotation_note.txt"
+    fi
 
     V=\$(git -C "${chloe_dir}/chloe" rev-parse --short HEAD 2>/dev/null || echo NA)
     printf 'Chloe\\t%s\\n' "\$V" > versions.tsv
