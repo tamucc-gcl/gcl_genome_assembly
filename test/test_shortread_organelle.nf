@@ -1,4 +1,9 @@
 #!/usr/bin/env nextflow
+// Standalone test: SHORTREAD_ORGANELLE (assembly) -> ORGANELLE_ANNOTATION (annotation).
+// Hands both subworkflows the same channels their parents build; nothing is re-derived.
+//   reads sheet : sample,taxid,reads_1,reads_2
+//   specs sheet : taxid,type,recursion,kmers,coverage,word_size   (k-list uses ';'; word_size blank => auto)
+//   gcode sheet : taxid,genetic_code   (mito annotation code; only taxa with animal_mt/fungus_mt need a row)
 nextflow.enable.dsl = 2
 
 include { SHORTREAD_ORGANELLE }  from '../workflows/shortread_organelle.nf'
@@ -30,6 +35,7 @@ workflow {
         }
         .groupTuple()
 
+    // genetic codes for the mito annotation branch (empty if no gcode sheet -> mito annotation skipped)
     ch_gcode = params.gcode_samplesheet
         ? Channel.fromPath( params.gcode_samplesheet, checkIfExists: true )
               .splitCsv( header: true )
@@ -39,12 +45,12 @@ workflow {
     SHORTREAD_ORGANELLE( ch_reads, ch_organelle )
     ORGANELLE_ANNOTATION( SHORTREAD_ORGANELLE.out.assembly, SHORTREAD_ORGANELLE.out.stats, ch_gcode )
 
+    // ---- console summaries ----
     SHORTREAD_ORGANELLE.out.stats
-        .map { meta, org, tsv -> "[assembly]      ${meta.sample}\t${org}\t" + tsv.text.trim().readLines().last() }.view()
+        .map { meta, org, tsv -> "[assembly]      ${meta.sample}\t${org}\t" + tsv.text.trim().readLines().last() }
+        .view()
     ORGANELLE_ANNOTATION.out.mito_annotation
-        .map { meta, org, f -> "[mito-annot]    ${meta.sample}\t${org}\t${f.name}" }.view()
-    ORGANELLE_ANNOTATION.out.plastid_annotation
-        .map { meta, org, f -> "[plastid-annot] ${meta.sample}\t${org}\t${f.name}" }.view()
-    ORGANELLE_ANNOTATION.out.plant_mito_note
-        .map { meta, org, f -> "[plant-mito]    ${meta.sample}\t${org}\tnote: ${f.name}" }.view()
+        .map { meta, org, f -> "[mito-annot] ${meta.sample}\t${org}\t${f.name}" }.view()
+    ORGANELLE_ANNOTATION.out.notes
+        .map { meta, org, f -> "[note]       ${meta.sample}\t${org}\t${f.name}" }.view()
 }

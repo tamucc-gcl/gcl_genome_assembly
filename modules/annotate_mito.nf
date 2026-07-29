@@ -61,13 +61,14 @@ process ANNOTATE_MITO {
     ORG="${org_type}"
 
     mkdir -p mitos_out
-    runmitos.py \\
+    runmitos \\
         -i "${fasta}" \\
         -c ${gcode} \\
         -o mitos_out \\
         -R "${mitos_db}" \\
         -r ${refseq} \\
-        ${linear} || echo "[ANNOTATE_MITO] runmitos.py exited non-zero; collecting whatever landed"
+        ${linear} \\
+        --noplots || echo "[ANNOTATE_MITO] runmitos exited non-zero; collecting whatever landed"
 
     # MITOS writes result.* into -o (sometimes a subdir); collect wherever they land
     bed=\$(find mitos_out -name 'result.bed' | head -n1 || true)
@@ -77,7 +78,7 @@ process ANNOTATE_MITO {
     [ -n "\${gff}" ] && cp "\${gff}" "\${SAMPLE}.\${ORG}.mitos.gff" || true
     [ -n "\${faa}" ] && cp "\${faa}" "\${SAMPLE}.\${ORG}.mitos.faa" || true
 
-    printf 'MITOS2\\t%s\\n' "\$(python -c 'import mitos; print(mitos.__version__)' 2>/dev/null || echo NA)" > versions.tsv
+    printf 'MITOS2\\t%s\\n' "\$(runmitos --version 2>&1 | head -n1 || echo NA)" > versions.tsv
     """
 
     stub:

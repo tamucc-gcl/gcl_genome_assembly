@@ -5,40 +5,34 @@
     Repo location: workflows/organelle_annotation.nf
 
     Sibling to SHORTREAD_ORGANELLE; consumes its .out.assembly (+ .out.stats for status) and
-    routes each organelle to the right annotator:
+    routes each organelle:
 
-      animal_mt / fungus_mt  -> MITOS2 (ANNOTATE_MITO), refseq89m / refseq89f, --linear if not circular
-      embplant_pt            -> Chloë  (ANNOTATE_PLASTID)
-      embplant_mt            -> NO annotator (no maintained CLI tool); emit a note pointing to
-                                GeSeq (web) for the report
+      animal_mt / fungus_mt     -> MITOS2 (ANNOTATE_MITO); refseq89m / refseq89f; --linear if not circular
+      embplant_pt / embplant_mt -> NO CLI annotator we trust; emit a note pointing to GeSeq (web),
+                                   which annotates both plant plastid and plant mitochondrial genomes
 
-    Genetic code for the mito branch comes from ch_gcode (geneticCodeFor); plastid code (11)
-    is handled inside Chloë. Circular-vs-linear status is joined in from ch_stats.
-
-    Owns its DB/setup (DOWNLOAD_MITOS_DB, SETUP_CHLOE), gated on whether the relevant organelle
-    types are actually present — same self-contained pattern as SHORTREAD_ORGANELLE.
+    Genetic code for the mito branch comes from ch_gcode (geneticCodeFor). Circular-vs-linear
+    status is joined in from ch_stats. Owns its MITOS DB download, gated on whether a
+    metazoan/fungal mito is actually present.
 
     take:
       ch_assembly  tuple(meta, org_type, fasta)     SHORTREAD_ORGANELLE.out.assembly
       ch_stats     tuple(meta, org_type, stats_tsv) SHORTREAD_ORGANELLE.out.stats
       ch_gcode     tuple(taxid, genetic_code)       mito genetic code per taxon
     emit:
-      mito_annotation     tuple(meta, org_type, bed)
-      plastid_annotation  tuple(meta, org_type, gff)
-      plant_mito_note     tuple(meta, org_type, note)   GeSeq pointer for the report
+      mito_annotation  tuple(meta, org_type, bed)
+      notes            tuple(meta, org_type, note)   GeSeq pointer for plant organelles (report)
       versions
 ========================================================================================
 */
 
 include { DOWNLOAD_MITOS_DB } from '../modules/download_mitos_db.nf'
-include { SETUP_CHLOE }       from '../modules/setup_chloe.nf'
 include { ANNOTATE_MITO }     from '../modules/annotate_mito.nf'
-include { ANNOTATE_PLASTID }  from '../modules/annotate_plastid.nf'
 include { mitosRefseqFor }    from '../functions/taxonomy.nf'
 
-// Plant mitochondrion: no maintained CLI annotator. Emit a note (picked up by the report)
-// telling the user to annotate manually with GeSeq.
-process PLANT_MITO_NOTE {
+// Plant organelles: no CLI annotator we trust. Emit a note (picked up by the report) pointing
+// to GeSeq, which handles both plant plastid and plant mitochondrial genomes.
+process ANNOTATION_NOTE {
     tag "${meta.sample}:${org_type}"
     label 'tiny'
     publishDir "${params.outdir}/organelle/annotation/${org_type}", mode: params.publish_dir_mode
@@ -50,11 +44,12 @@ process PLANT_MITO_NOTE {
     tuple val(meta), val(org_type), path("${meta.sample}.${org_type}.annotation_note.txt"), emit: note
 
     script:
+    def what = (org_type == 'embplant_pt') ? 'Plastome' : 'Plant mitochondrion'
     """
     cat > "${meta.sample}.${org_type}.annotation_note.txt" <<'EOF'
-Plant mitochondrion assembled but NOT automatically annotated.
-There is no maintained command-line annotator for plant mitogenomes; annotate manually with
-GeSeq (web-only): https://chlorobox.mpimp-golm.mpg.de/geseq.html
+${what} assembled but not automatically annotated: no maintained command-line annotator is
+suitable for it in this pipeline. Annotate manually with GeSeq (web-only), which handles both
+plant plastid and plant mitochondrial genomes: https://chlorobox.mpimp-golm.mpg.de/geseq.html
 EOF
     """
 
@@ -84,13 +79,12 @@ workflow ORGANELLE_ANNOTATION {
 
     ch_asm
         .branch { meta, org, status, fa ->
-            mito:    org.endsWith('_mt') && org != 'embplant_mt'   // animal_mt, fungus_mt
-            plastid: org == 'embplant_pt'
-            plantmt: org == 'embplant_mt'
+            mito: org.endsWith('_mt') && org != 'embplant_mt'          // animal_mt, fungus_mt
+            note: org == 'embplant_mt' || org == 'embplant_pt'         // plant organelles -> GeSeq note
         }
         .set { br }
 
-    // ── metazoan / fungal mito → MITOS2 ──────────────────────────────────────
+    // -- metazoan / fungal mito -> MITOS2 --
     ch_mitos_db = DOWNLOAD_MITOS_DB(
                       br.mito.map { meta, org, status, fa -> params.mitos_downloads }.unique(),
                       params.mitos_refseq_sets,
@@ -105,19 +99,11 @@ workflow ORGANELLE_ANNOTATION {
         .set { ch_mito_in }
     ANNOTATE_MITO( ch_mito_in, ch_mitos_db )
 
-    // ── plant plastid → Chloë ────────────────────────────────────────────────
-    ch_chloe = SETUP_CHLOE(
-                   br.plastid.map { meta, org, status, fa -> params.chloe_downloads }.unique(),
-                   params.chloe_force_setup
-               ).dir.first()
-    ANNOTATE_PLASTID( br.plastid.map { meta, org, status, fa -> tuple(meta, org, fa) }, ch_chloe )
-
-    // ── plant mito → no annotation, GeSeq note for the report ────────────────
-    PLANT_MITO_NOTE( br.plantmt.map { meta, org, status, fa -> tuple(meta, org) } )
+    // -- plant plastid + plant mito -> GeSeq note --
+    ANNOTATION_NOTE( br.note.map { meta, org, status, fa -> tuple(meta, org) } )
 
     emit:
-    mito_annotation    = ANNOTATE_MITO.out.bed
-    plastid_annotation = ANNOTATE_PLASTID.out.gff
-    plant_mito_note    = PLANT_MITO_NOTE.out.note
-    versions           = ANNOTATE_MITO.out.versions.mix( ANNOTATE_PLASTID.out.versions )
+    mito_annotation = ANNOTATE_MITO.out.bed
+    notes           = ANNOTATION_NOTE.out.note
+    versions        = ANNOTATE_MITO.out.versions
 }
