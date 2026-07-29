@@ -60,6 +60,7 @@ process FILTER_ORGANELLE {
     # 2) Flag contigs by identity + query coverage
     #    PAF: qname qlen qstart qend strand tname tlen tstart tend matches alnlen mapq
     awk -v min_id=${min_identity} -v min_cov=${min_coverage} '
+    BEGIN { OFS="\t" }
     {
         qname=\$1; qlen=\$2; matches=\$10; alnlen=\$11
         pid  = (alnlen > 0) ? (matches/alnlen)*100 : 0
