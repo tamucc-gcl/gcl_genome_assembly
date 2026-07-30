@@ -61,9 +61,15 @@ process MAP_HIC_TO_ASSEMBLY {
     # 1) Map Hi-C reads + collate by queryname
     #    samtools collate keeps mates together for pairtools
     # -------------------------------------------------------------------------
+    # Map to an unsorted BAM first, then sort as a separate step.
+    # (A fused bwa|view|sort pipe keeps sort running under bwa's backpressure for the
+    #  whole mapping run; on large Hi-C sets that long-lived pipe dies mid-merge -> SIGPIPE/141.)
     bwa-mem2 mem -t ${task.cpus} -5SP ${extra_args} ${assembly_fasta} ${hic_r1} ${hic_r2} \
-    | samtools view -@ ${task.cpus} -b - \
-    | samtools sort -@ ${sort_threads} -m ${sort_mem_mb}M -o ${meta.id}.sorted.bam -
+      | samtools view -@ ${task.cpus} -b -o ${meta.id}.unsorted.bam -
+    samtools sort -@ ${sort_threads} -m ${sort_mem_mb}M -T "\$PWD/${meta.id}.sorttmp" \
+      -o ${meta.id}.sorted.bam ${meta.id}.unsorted.bam
+    rm -f ${meta.id}.unsorted.bam
+
     samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
 
     # CSI index works on unsorted BAMs
