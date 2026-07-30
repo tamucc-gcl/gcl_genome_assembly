@@ -26,9 +26,8 @@ include { ANNOTATE_MITO }     from '../modules/annotate_mito.nf'
 include { MITO_CIRCULAR_MAP } from '../modules/mito_circular_map.nf'
 include { mitosRefseqFor }    from '../functions/taxonomy.nf'
 
-// Scripts (params let the standalone test point at the repo's py_scripts/; default is production layout).
-mito_gb_script       = file(params.mitos_to_genbank_script ?: "${projectDir}/py_scripts/mitos_to_genbank.py", checkIfExists: true)
-mito_circular_script = file(params.mito_circular_script    ?: "${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
+mito_gb_script       = file("${projectDir}/py_scripts/mitos_to_genbank.py", checkIfExists: true)
+mito_circular_script = file("${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
 
 // Plant organelles: no CLI annotator we trust -> GeSeq note (handles both plant plastid + mito).
 process ANNOTATION_NOTE {

@@ -25,7 +25,7 @@ include { MITO_CIRCULAR_MAP }    from '../modules/mito_circular_map.nf'
 include { SHORTREAD_ORGANELLE }  from './shortread_organelle.nf'
 include { ORGANELLE_ANNOTATION } from './organelle_annotation.nf'
 
-mito_circular_script = file(params.mito_circular_script ?: "${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
+mito_circular_script = file("${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
 
 workflow ORGANELLE {
 
