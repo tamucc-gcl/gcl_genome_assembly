@@ -1077,6 +1077,9 @@ workflow {
     // QC stage selector: 'all_stages' (default) runs QC at every checkpoint;
     // 'final_only' runs QC on the final assembly only.
     def run_all_qc = ( (params.qc_mode ?: 'all_stages') != 'final_only' )
+    // Assembly-QC summary accumulator — appended inside each stage's guard below,
+    // consumed by COMPILE_FINAL_QC (replaces the old centralized collection block).
+    ch_all_assembly_summaries = Channel.empty()
 
      // QC raw hifiasm contigs (per-hap fork — was HIFIASM.out.assemblies triple)
     if (run_all_qc) {
@@ -1087,6 +1090,7 @@ workflow {
             ch_busco_db,
             'contig'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
     }
 
     // QC organelle-filtered contigs (HiFi + short-read)
@@ -1098,6 +1102,7 @@ workflow {
             ch_busco_db,
             'contig_organelle_filtered'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_ORGANELLE_FILTERED.out.assembly_summary)
     }
 
     // QC purged contigs
@@ -1109,6 +1114,7 @@ workflow {
             ch_busco_db,
             'contig_purged'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
     }
 
     // QC redundans-reduced short-read contigs — short-read analogue of purge_dups, reported
@@ -1118,6 +1124,7 @@ workflow {
             ch_shortread_conditioned, ch_qc_reads, BUILD_MERYL_DB.out.meryl_db, ch_busco_db,
             'contig_purged'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
     }
 
     // QC Inspector-corrected contigs
@@ -1129,6 +1136,7 @@ workflow {
             ch_busco_db,
             'contig_corrected'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
     }
 
     // QC decontaminated contigs
@@ -1140,6 +1148,7 @@ workflow {
             ch_busco_db,
             'contig_decontam'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
     }
 
     // QC round-1 scaffolds
@@ -1151,6 +1160,7 @@ workflow {
             ch_busco_db,
             'scaffold'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
     }
 
     // QC Inspector-corrected scaffolds
@@ -1162,6 +1172,7 @@ workflow {
             ch_busco_db,
             'scaffold_corrected'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
     }
 
     // QC decontaminated scaffolds
@@ -1173,6 +1184,7 @@ workflow {
             ch_busco_db,
             'scaffold_decontam'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
     }
 
     // QC round-2 scaffolds
@@ -1184,6 +1196,7 @@ workflow {
             ch_busco_db,
             'scaffold_round2'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
     }
 
     // QC gap-filled genomes — intermediate HiFi-path stage (short-read has no gap-fill).
@@ -1195,6 +1208,7 @@ workflow {
             ch_busco_db,
             'gap_filled'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     }
 
     // QC teloclip-extended assembly (pre-FINALIZE) — kept independent of the final QC so the
@@ -1208,6 +1222,7 @@ workflow {
             ch_busco_db,
             'teloclip_extended'
         )
+        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
     }
 
     // Final QC — ALWAYS runs on the finalized assembly (post-FINALIZE), independent of
@@ -1219,6 +1234,7 @@ workflow {
         ch_busco_db,
         'final'
     )
+    ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
     ch_versions = ch_versions.mix(ASSEMBLY_QC_FINAL.out.versions)
 
     /*
@@ -1265,46 +1281,6 @@ workflow {
     ========================================================================================
     */
     
-    // Collect all assembly QC summaries (respecting qc_mode + which steps ran)
-    ch_all_assembly_summaries = Channel.empty()
-
-    if (run_all_qc) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
-            .mix(ASSEMBLY_QC_ORGANELLE_FILTERED.out.assembly_summary)
-            .mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
-            .mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
-
-        if (params.run_purge_dups)
-            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
-        if (params.run_inspector_contigs)
-            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
-        if (params.run_decon_contigs)
-            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
-        if (params.run_inspector_scaffolds)
-            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
-        if (params.run_decon_scaffolds)
-            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
-        if (params.run_scaffold_round2)
-            ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
-    }
-
-    // Gap-filled summary — intermediate HiFi-path stage.
-    if (run_all_qc) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
-    }
-
-    // Teloclip-extended summary — intermediate; only when teloclip ran under run_all_qc.
-    if (run_all_qc && params.run_teloclip_extend) {
-        ch_all_assembly_summaries = ch_all_assembly_summaries
-            .mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
-    }
-
-    // Final summary — always (ASSEMBLY_QC_FINAL runs unconditionally).
-    ch_all_assembly_summaries = ch_all_assembly_summaries
-        .mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
-
     ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
 
     
