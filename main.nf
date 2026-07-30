@@ -657,7 +657,13 @@ workflow {
         .map { meta, stage, bam, bai -> tuple(meta, "contig_raw_map", bam, bai) }
         .set { ch_hic_raw_bam_for_qc }
 
+    // Hi-C QC-metric accumulators — appended at each metrics step below and
+    // consumed by COMPILE_FINAL_QC (kept here so the QC phase needs only these two channels).
+    ch_all_bam_metrics   = Channel.empty()
+    ch_all_pairs_metrics = Channel.empty()
+
     HIC_BAM_METRICS_CONTIG(ch_hic_raw_bam_for_qc)
+    ch_all_bam_metrics = ch_all_bam_metrics.mix(HIC_BAM_METRICS_CONTIG.out.metrics)
 
     // Assemblies channel for the filter / scaffold joins (meta, fasta)
     ch_individual_haplotypes
@@ -689,6 +695,7 @@ workflow {
         .set { ch_hic_pairs_contig_filtered_for_qc }
 
     HIC_PAIRS_METRICS_CONTIG(ch_hic_pairs_contig_filtered_for_qc)
+    ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_CONTIG.out.metrics)
     
     /*
     ====================================================================================
@@ -716,6 +723,7 @@ workflow {
         .set { ch_hic_pairs_scaffold_space_for_qc }
 
     HIC_PAIRS_METRICS_CONTIGSCAF(ch_hic_pairs_scaffold_space_for_qc)
+    ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_CONTIGSCAF.out.metrics)
 
     /*
     ====================================================================================
@@ -805,6 +813,7 @@ workflow {
             .set { ch_hic_scaffold_raw_bam_for_qc }
 
         HIC_BAM_METRICS_SCAFFOLD(ch_hic_scaffold_raw_bam_for_qc)
+        ch_all_bam_metrics = ch_all_bam_metrics.mix(HIC_BAM_METRICS_SCAFFOLD.out.metrics)
 
         /*
         ================================================================================
@@ -830,6 +839,7 @@ workflow {
             .set { ch_hic_pairs_scaffold_round2_filtered_for_qc }
 
         HIC_PAIRS_METRICS_SCAFFOLD(ch_hic_pairs_scaffold_round2_filtered_for_qc)
+        ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_SCAFFOLD.out.metrics)
 
 
         /*
@@ -858,6 +868,7 @@ workflow {
             .set { ch_hic_pairs_scaffold_round2_space_for_qc }
 
         HIC_PAIRS_METRICS_SCAFFOLDSCAF(ch_hic_pairs_scaffold_round2_space_for_qc)
+        ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_SCAFFOLDSCAF.out.metrics)
         
     } else {
         log.info "[INFO] Skipping second round of scaffolding (no scaffold correction or decontamination)"
@@ -963,6 +974,8 @@ workflow {
             ch_compartments_script,
             ch_tad_book_script
         )
+        ch_all_bam_metrics   = ch_all_bam_metrics.mix(FINAL_HIC_MAPS.out.bam_metrics)
+        ch_all_pairs_metrics = ch_all_pairs_metrics.mix(FINAL_HIC_MAPS.out.pairs_metrics)
     }
 
     // String-id view of the finalized per-hap assemblies for the leaf viz/QUAST steps.
@@ -1294,37 +1307,6 @@ workflow {
 
     ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
 
-    // Collect all BAM metrics
-    // Start with ones that always run
-    ch_all_bam_metrics = HIC_BAM_METRICS_CONTIG.out.metrics
-    
-    // Add conditional BAM metrics
-    if (params.run_scaffold_round2) {
-        ch_all_bam_metrics = ch_all_bam_metrics
-            .mix(HIC_BAM_METRICS_SCAFFOLD.out.metrics)
-    }
-    
-    if (params.run_final_contact_maps) {
-        ch_all_bam_metrics = ch_all_bam_metrics
-            .mix(FINAL_HIC_MAPS.out.bam_metrics)
-    }
-    
-    // Collect all pairs metrics
-    // Start with ones that always run
-    ch_all_pairs_metrics = HIC_PAIRS_METRICS_CONTIG.out.metrics
-        .mix(HIC_PAIRS_METRICS_CONTIGSCAF.out.metrics)
-    
-    // Add conditional pairs metrics
-    if (params.run_scaffold_round2) {
-        ch_all_pairs_metrics = ch_all_pairs_metrics
-            .mix(HIC_PAIRS_METRICS_SCAFFOLD.out.metrics)
-            .mix(HIC_PAIRS_METRICS_SCAFFOLDSCAF.out.metrics)
-    }
-    
-    if (params.run_final_contact_maps) {
-        ch_all_pairs_metrics = ch_all_pairs_metrics
-            .mix(FINAL_HIC_MAPS.out.pairs_metrics)
-    }
     
     // Compile final QC report
     // Extract just the TSV files from tuples and collect
