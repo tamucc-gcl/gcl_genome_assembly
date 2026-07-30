@@ -24,7 +24,8 @@ process MAP_HIC_TO_ASSEMBLY {
     output:
     tuple val(meta), val(stage),
           path("${meta.id}.sorted.bam"),
-          path("${meta.id}.sorted.bam.bai"),
+          //path("${meta.id}.sorted.bam.bai"),
+          path("${meta.id}.sorted.bam.csi"),
           emit: bam
 
     tuple val(meta), val(stage),
@@ -70,10 +71,8 @@ process MAP_HIC_TO_ASSEMBLY {
       -o ${meta.id}.sorted.bam ${meta.id}.unsorted.bam
     rm -f ${meta.id}.unsorted.bam
 
-    samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
-
-    # CSI index works on unsorted BAMs
-    # samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
+    # samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
+    samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
 
     # -------------------------------------------------------------------------
     # 2) Mapping QC
@@ -88,7 +87,8 @@ process MAP_HIC_TO_ASSEMBLY {
     stub:
     """
     touch ${meta.id}.sorted.bam
-    touch ${meta.id}.sorted.bam.bai
+    #touch ${meta.id}.sorted.bam.bai
+    touch ${meta.id}.sorted.bam.csi
     touch ${meta.id}_mapping_stats.txt
     touch versions.tsv
     """

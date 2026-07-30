@@ -21,7 +21,11 @@ process FILTER_HIC_BAM {
     tuple val(meta), val(stage), path(bam), path(bai), path(assembly_fasta)
 
     output:
-    tuple val(meta), val(stage), path("${meta.id}.filtered.sorted.bam"), path("${meta.id}.filtered.sorted.bam.bai"), emit: bam
+    tuple val(meta), val(stage), 
+          path("${meta.id}.filtered.sorted.bam"), 
+          //path("${meta.id}.filtered.sorted.bam.bai"), 
+          path("${meta.id}.filtered.sorted.bam.csi"), 
+          emit: bam
     tuple val(meta), val(stage), path("${meta.id}_filtering_stats.txt"), emit: stats
     tuple val(meta), val(stage), path("${meta.id}.pairs.gz"), emit: pairs
     tuple val(meta), val(stage), path("${meta.id}_parse_stats.txt"), emit: parse_stats
@@ -93,7 +97,8 @@ process FILTER_HIC_BAM {
     | samtools view -@ \${T_IO} -b - \\
     | samtools sort -@ \${T_SORT} -T "\$PWD/${meta.id}.sort" -o ${meta.id}.filtered.sorted.bam -
 
-    samtools index -@ \${CPUS} ${meta.id}.filtered.sorted.bam
+    # samtools index -@ \${CPUS} ${meta.id}.filtered.sorted.bam
+    samtools index -@ \${CPUS} -c ${meta.id}.filtered.sorted.bam
 
     # -------------------------------------------------------------------------
     # 4) Optional pair-level stats (pairtools stats) if available
@@ -182,7 +187,8 @@ process FILTER_HIC_BAM {
     stub:
     """
     touch ${meta.id}.filtered.sorted.bam
-    touch ${meta.id}.filtered.sorted.bam.bai
+    #touch ${meta.id}.filtered.sorted.bam.bai
+    touch ${meta.id}.filtered.sorted.bam.csi
     touch ${meta.id}_filtering_stats.txt
     touch ${meta.id}.pairs.gz
     touch ${meta.id}_parse_stats.txt
