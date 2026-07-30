@@ -73,7 +73,7 @@ process MAP_HIC_TO_ASSEMBLY {
     samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
 
     # CSI index works on unsorted BAMs
-    samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
+    # samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
 
     # -------------------------------------------------------------------------
     # 2) Mapping QC
@@ -82,7 +82,11 @@ process MAP_HIC_TO_ASSEMBLY {
       ${meta.id}.sorted.bam \\
       > ${meta.id}_mapping_stats.txt
 
-    bwa-mem2 version 2>&1 | head -n1 > versions.tsv
+    # bwa-mem2's launcher prints a multi-line banner before the version; a bare `... | head`
+    # closes the pipe after line 1 and SIGPIPEs bwa-mem2 -> exit 141 under pipefail. Wrapping in
+    # $() contains the SIGPIPE (as the other version captures do); the regex grabs the real
+    # version token, not the banner (and skips the "512" in avx512bw by requiring a dot).
+    printf 'bwa-mem2\t%s\n' "\$(bwa-mem2 version 2>&1 | grep -m1 -oE '[0-9]+[.][0-9][0-9.]*' || echo unknown)" > versions.tsv
     """
 
     stub:
