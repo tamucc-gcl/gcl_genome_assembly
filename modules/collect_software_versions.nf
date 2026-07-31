@@ -12,6 +12,6 @@ process COLLECT_SOFTWARE_VERSIONS {
     script:
     """
     printf 'tool\tversion\n' > software_versions.tsv
-    cat ${versions_raw} 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u >> software_versions.tsv
+    cat ${versions_raw} 2>/dev/null | sed '/^[[:space:]]*\$/d' | sort -u >> software_versions.tsv
     """
 }
