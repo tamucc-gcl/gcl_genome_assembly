@@ -32,6 +32,7 @@
 
 include { HIFIASM } from '../modules/hifiasm.nf'
 include { SPADES }  from '../modules/spades.nf'
+include { SUBSAMPLE_SHORTREAD } from '../modules/subsample_shortread.nf'
 
 workflow CONTIG_ASSEMBLY {
 
@@ -59,9 +60,14 @@ workflow CONTIG_ASSEMBLY {
     )
 
     // --- spades branch: PE short reads. ---
-    SPADES(
-        ch_by_assembler.spades.map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta, sr1, sr2) }
-    )
+    // --- spades branch: depth-normalize, then assemble ---
+    ch_sr = ch_by_assembler.spades
+        .map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta.sample, meta, sr1, sr2) }
+        .join( ch_gsize )                                         // tuple(sample, gsize)
+        .map { sample, meta, sr1, sr2, gsize -> tuple(meta, sr1, sr2, gsize) }
+
+    SUBSAMPLE_SHORTREAD( ch_sr )
+    SPADES( SUBSAMPLE_SHORTREAD.out.reads )
 
     // Re-converge on the shape the downstream fork consumes: tuple(meta, fastas).
     // (Each sample took exactly one branch, so no sample is duplicated by the mix.)

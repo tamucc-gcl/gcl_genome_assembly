@@ -25,7 +25,7 @@ process ESTIMATE_GENOME_SIZE {
     tag "${meta.sample}"
     label 'genomescope'
 
-    publishDir "${params.outdir}/qc/genome_size", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/est_genome_size", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(reads), val(ploidy)

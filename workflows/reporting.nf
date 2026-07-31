@@ -247,7 +247,9 @@ workflow REPORTING {
         .of(wf_lines)
         .collectFile(name: 'workflow_info.tsv', newLine: true)
 
-    COLLECT_SOFTWARE_VERSIONS(ch_versions.collect())
+    COLLECT_SOFTWARE_VERSIONS(
+        ch_versions.collectFile(name: 'software_versions_raw.tsv')
+    )
 
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
