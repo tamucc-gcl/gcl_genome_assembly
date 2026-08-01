@@ -74,7 +74,7 @@ workflow QC_PHASE {
             scaffold_round2:    it[1] == 'scaffold_round2'
             gap_filled:         it[1] == 'gap_filled'
             teloclip:           it[1] == 'teloclip'
-            final:              it[1] == 'final'
+            finalstage:         it[1] == 'final'
         }
         .set { st }
 
@@ -116,7 +116,7 @@ workflow QC_PHASE {
     ASSEMBLY_QC_TELOCLIP(          st.teloclip.map           { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'teloclip_extended')
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
 
-    ASSEMBLY_QC_FINAL(             st.final.map              { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'final')
+    ASSEMBLY_QC_FINAL(             st.finalstage.map         { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'final')
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
 
     ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
