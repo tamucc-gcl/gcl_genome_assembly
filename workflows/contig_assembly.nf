@@ -33,6 +33,7 @@
 include { HIFIASM } from '../modules/hifiasm.nf'
 include { SPADES }  from '../modules/spades.nf'
 include { SUBSAMPLE_SHORTREAD } from '../modules/subsample_shortread.nf'
+include { COUNT_SHORTREAD } from '../modules/count_shortread.nf'
 
 workflow CONTIG_ASSEMBLY {
 
@@ -60,20 +61,39 @@ workflow CONTIG_ASSEMBLY {
     )
 
     // --- spades branch: PE short reads. ---
-    // --- spades branch: depth-normalize, then assemble ---
-    ch_sr = ch_by_assembler.spades
-        .map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta.sample, meta, sr1, sr2) }
-        .join( ch_gsize )                                         // tuple(sample, gsize)
-        .map { sample, meta, sr1, sr2, gsize -> tuple(meta, sr1, sr2, gsize) }
+    // genome size into meta (fallback/floor); gs file still handed to SUBSAMPLE
+    ch_spades_reads = ch_by_assembler.spades
+        .map { meta, hifi, h1, h2, sr1, sr2 -> tuple(meta.sample, meta, sr1, sr2) }
+        .join( ch_gsize )                                      // (sample, gs_file)
+        .map { s, meta, sr1, sr2, gs ->
+            def g = (gs.text.trim() ==~ /\d+/) ? (gs.text.trim() as long) : 0L
+            tuple(meta + [genome_size: g], sr1, sr2, gs)
+        }
 
-    SUBSAMPLE_SHORTREAD( ch_sr )
-    SPADES( SUBSAMPLE_SHORTREAD.out.reads )
+    SUBSAMPLE_SHORTREAD( ch_spades_reads )                     // .out.reads: (meta, r1, r2)
+    COUNT_SHORTREAD( SUBSAMPLE_SHORTREAD.out.reads )           // .out.counted: (meta, r1, r2, bases.txt)
+
+    // add measured bases; meta now carries both sizing fields for the directive
+    ch_spades_in = COUNT_SHORTREAD.out.counted
+        .map { meta, r1, r2, bfile ->
+            tuple(meta + [sr_bases: (bfile.text.trim() as long)], r1, r2)
+        }
+
+    SPADES( ch_spades_in )
+
+    // strip transient sizing fields -> downstream meta is pristine (no cascade)
+    ch_primary = SPADES.out.contigs.map { meta, fa ->
+        tuple(meta.subMap(meta.keySet() - ['genome_size', 'sr_bases']), fa)
+    }
 
     // Re-converge on the shape the downstream fork consumes: tuple(meta, fastas).
     // (Each sample took exactly one branch, so no sample is duplicated by the mix.)
-    ch_assemblies = HIFIASM.out.assemblies.mix( SPADES.out.contigs )
+    ch_assemblies = HIFIASM.out.assemblies.mix( ch_primary )
 
     emit:
     assemblies = ch_assemblies
-    versions   = HIFIASM.out.versions.mix(SPADES.out.versions)
+    versions   = HIFIASM.out.versions
+        .mix(SPADES.out.versions)
+        .mix(SUBSAMPLE_SHORTREAD.out.versions)
+        .mix(COUNT_SHORTREAD.out.versions)
 }
