@@ -105,19 +105,7 @@ include { SHORTREAD_QC as SHORTREAD_QC_RAW }     from './workflows/shortread_qc.
 include { SHORTREAD_QC as SHORTREAD_QC_TRIMMED } from './workflows/shortread_qc.nf'
 
 // Assembly QC
-include { ASSEMBLY_QC as ASSEMBLY_QC_INITIAL } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_ORGANELLE_FILTERED } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_PURGED } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_REDUNDANS } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_CORRECTED } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_CONTIG_DECONTAM } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_CORRECTED } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_ROUND2 } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_GAP_FILLED } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_TELOCLIP } from './workflows/assembly_qc.nf'
-include { ASSEMBLY_QC as ASSEMBLY_QC_FINAL } from './workflows/assembly_qc.nf'
+include { QC_PHASE } from './workflows/qc_phase.nf'
 
 // HI-C MODULAR WORKFLOWS
 include { HIC_QC_FROM_BAM as HIC_QC_FROM_BAM_RAW } from './workflows/hic_qc_from_bam.nf'
@@ -170,12 +158,10 @@ include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PA
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hic_mapping_metrics.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from './modules/hic_mapping_metrics.nf'
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLDSCAF } from './modules/hic_mapping_metrics.nf'
-include { COMPILE_FINAL_QC } from './modules/compile_final_qc.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 //include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
-include { ASSEMBLY_REPORT } from './modules/assemblyReport.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 
@@ -1077,165 +1063,34 @@ workflow {
     // QC stage selector: 'all_stages' (default) runs QC at every checkpoint;
     // 'final_only' runs QC on the final assembly only.
     def run_all_qc = ( (params.qc_mode ?: 'all_stages') != 'final_only' )
-    // Assembly-QC summary accumulator — appended inside each stage's guard below,
-    // consumed by COMPILE_FINAL_QC (replaces the old centralized collection block).
-    ch_all_assembly_summaries = Channel.empty()
+    // Stage every checkpoint's per-hap assembly into one labeled channel for QC_PHASE.
+    // Guards below decide which stages are QC'd (lifted from the old per-call ifs); 'final' is unconditional.
+    ch_staged_assemblies = Channel.empty()
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ch_contigs.map { m, f -> tuple(m, 'initial', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ch_organelle_filtered.map { m, f -> tuple(m, 'organelle_filtered', f) } )
+    if (run_all_qc && params.run_purge_dups) ch_staged_assemblies = ch_staged_assemblies.mix( ch_hifiasm_output.map { m, f -> tuple(m, 'purged', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ch_shortread_conditioned.map { m, f -> tuple(m, 'redundans', f) } )
+    if (run_all_qc && params.run_inspector_contigs) ch_staged_assemblies = ch_staged_assemblies.mix( CORRECT_MISASSEMBLIES_CONTIG.out.corrected.map { m, f -> tuple(m, 'contig_corrected', f) } )
+    if (run_all_qc && params.run_decon_contigs) ch_staged_assemblies = ch_staged_assemblies.mix( DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated.map { m, f -> tuple(m, 'contig_decontam', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( SCAFFOLD_HIC_ROUND1.out.scaffolds.map { m, f -> tuple(m, 'scaffold', f) } )
+    if (run_all_qc && params.run_inspector_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected.map { m, f -> tuple(m, 'scaffold_corrected', f) } )
+    if (run_all_qc && params.run_decon_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated.map { m, f -> tuple(m, 'scaffold_decontam', f) } )
+    if (run_all_qc && params.run_scaffold_round2) ch_staged_assemblies = ch_staged_assemblies.mix( ch_final_scaffolds_round2.map { m, f -> tuple(m, 'scaffold_round2', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( GAP_FILLING.out.filled_assembly.map { m, f -> tuple(m, 'gap_filled', f) } )
+    if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( TELOCLIP_EXTEND.out.extended_assembly.map { m, f -> tuple(m, 'teloclip', f) } )
+    ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
 
-     // QC raw hifiasm contigs (per-hap fork — was HIFIASM.out.assemblies triple)
-    if (run_all_qc) {
-        ASSEMBLY_QC_INITIAL(
-            ch_contigs,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'contig'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
-    }
-
-    // QC organelle-filtered contigs (HiFi + short-read)
-    if (run_all_qc) {
-        ASSEMBLY_QC_ORGANELLE_FILTERED(
-            ch_organelle_filtered,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'contig_organelle_filtered'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_ORGANELLE_FILTERED.out.assembly_summary)
-    }
-
-    // QC purged contigs
-    if (run_all_qc && params.run_purge_dups) {
-        ASSEMBLY_QC_PURGED(
-            ch_hifiasm_output,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'contig_purged'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
-    }
-
-    // QC redundans-reduced short-read contigs — short-read analogue of purge_dups, reported
-    // at the same 'contig_purged' (ctg.purged) stage. No-op when there are no short-read samples.
-    if (run_all_qc) {
-        ASSEMBLY_QC_REDUNDANS(
-            ch_shortread_conditioned, ch_qc_reads, BUILD_MERYL_DB.out.meryl_db, ch_busco_db,
-            'contig_purged'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
-    }
-
-    // QC Inspector-corrected contigs
-    if (run_all_qc && params.run_inspector_contigs) {
-        ASSEMBLY_QC_CONTIG_CORRECTED(
-            CORRECT_MISASSEMBLIES_CONTIG.out.corrected,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'contig_corrected'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
-    }
-
-    // QC decontaminated contigs
-    if (run_all_qc && params.run_decon_contigs) {
-        ASSEMBLY_QC_CONTIG_DECONTAM(
-            DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'contig_decontam'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
-    }
-
-    // QC round-1 scaffolds
-    if (run_all_qc) {
-        ASSEMBLY_QC_SCAFFOLD(
-            SCAFFOLD_HIC_ROUND1.out.scaffolds,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'scaffold'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
-    }
-
-    // QC Inspector-corrected scaffolds
-    if (run_all_qc && params.run_inspector_scaffolds) {
-        ASSEMBLY_QC_SCAFFOLD_CORRECTED(
-            CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'scaffold_corrected'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
-    }
-
-    // QC decontaminated scaffolds
-    if (run_all_qc && params.run_decon_scaffolds) {
-        ASSEMBLY_QC_SCAFFOLD_DECONTAM(
-            DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'scaffold_decontam'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
-    }
-
-    // QC round-2 scaffolds
-    if (run_all_qc && params.run_scaffold_round2) {
-        ASSEMBLY_QC_SCAFFOLD_ROUND2(
-            ch_final_scaffolds_round2,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'scaffold_round2'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
-    }
-
-    // QC gap-filled genomes — intermediate HiFi-path stage (short-read has no gap-fill).
-    if (run_all_qc) {
-        ASSEMBLY_QC_GAP_FILLED(
-            GAP_FILLING.out.filled_assembly,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'gap_filled'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
-    }
-
-    // QC teloclip-extended assembly (pre-FINALIZE) — kept independent of the final QC so the
-    // effect of FINALIZE (scaffold renaming, future small-contig trimming, etc.) stays
-    // visible. HiFi-path only, when teloclip is enabled.
-    if (run_all_qc && params.run_teloclip_extend) {
-        ASSEMBLY_QC_TELOCLIP(
-            TELOCLIP_EXTEND.out.extended_assembly,
-            ch_qc_reads,
-            BUILD_MERYL_DB.out.meryl_db,
-            ch_busco_db,
-            'teloclip_extended'
-        )
-        ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
-    }
-
-    // Final QC — ALWAYS runs on the finalized assembly (post-FINALIZE), independent of
-    // teloclip and of qc_mode (final_only needs it too). The 'final' stage for EVERY sample.
-    ASSEMBLY_QC_FINAL(
-        ch_finalized_assembly,
+    QC_PHASE(
+        ch_staged_assemblies,
         ch_qc_reads,
         BUILD_MERYL_DB.out.meryl_db,
         ch_busco_db,
-        'final'
+        ch_all_bam_metrics,
+        ch_all_pairs_metrics,
+        ch_compile_qc_script,
+        ch_assembly_report_script
     )
-    ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
-    ch_versions = ch_versions.mix(ASSEMBLY_QC_FINAL.out.versions)
+    ch_versions = ch_versions.mix(QC_PHASE.out.versions)
 
     /*
     ========================================================================================
@@ -1274,27 +1129,7 @@ workflow {
         }
     }
 
-    /*
-    ========================================================================================
-        FINAL QC COMPILATION
-        Collects all assembly QC summaries and Hi-C metrics into a single report
-    ========================================================================================
-    */
-    
-    ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
-
-    
-    // Compile final QC report
-    // Extract just the TSV files from tuples and collect
-    COMPILE_FINAL_QC(
-        ch_all_assembly_summaries.map { sample_id, qc_label, tsv -> tsv }.collect().ifEmpty([]),
-        ch_all_bam_metrics.map { meta, checkpoint, tsv -> tsv }.collect().ifEmpty([]),
-        ch_all_pairs_metrics.map { meta, checkpoint, tsv -> tsv }.collect().ifEmpty([]),
-        ch_compile_qc_script
-    )
-
-    // Make interactive HTML assembly viewer
-    ASSEMBLY_REPORT(COMPILE_FINAL_QC.out.metrics, ch_assembly_report_script)
+    ch_final_busco = QC_PHASE.out.final_busco
 
     /*
     ========================================================================================
@@ -1341,9 +1176,9 @@ workflow {
         FINAL_VIZ.out.dotplot,
         FINAL_VIZ.out.riparian,
         FINAL_VIZ.out.tidk_plot,
-        COMPILE_FINAL_QC.out.metrics,
-        COMPILE_FINAL_QC.out.plots,
-        ASSEMBLY_REPORT.out.report_html,
+        QC_PHASE.out.metrics,
+        QC_PHASE.out.plots,
+        QC_PHASE.out.report_html,
         ORGANELLE.out.annotation,
         ORGANELLE.out.stats,
         ORGANELLE.out.circular_map,
