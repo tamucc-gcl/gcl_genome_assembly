@@ -120,6 +120,7 @@ workflow QC_PHASE {
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
 
     ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results
+    ch_final_busco_table = ASSEMBLY_QC_FINAL.out.busco_full_table
 
     // Compile cross-stage report: summaries built here + Hi-C metrics from the scaffolding phase.
     COMPILE_FINAL_QC(
@@ -137,5 +138,6 @@ workflow QC_PHASE {
     plots       = COMPILE_FINAL_QC.out.plots         // *.png
     report_html = ASSEMBLY_REPORT.out.report_html    // assembly_qc_report.html
     final_busco = ch_final_busco                     // per-haplotype (meta, results) — for SNAIL
+    final_busco_table = ch_final_busco_table    // per-haplotype (meta, full_table.tsv) — for SNAIL
     versions    = ASSEMBLY_QC_FINAL.out.versions
 }

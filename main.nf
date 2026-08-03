@@ -1138,7 +1138,7 @@ workflow {
     */
     // Join gap-filled assemblies with their BUSCO results
     // BUSCO output from ASSEMBLY_QC_TELOCLIP is per-haplotype
-    ch_final_busco_table = ASSEMBLY_QC_FINAL.out.busco_full_table
+    ch_final_busco_table = QC_PHASE.out.final_busco_table
 
     ch_finalized_assembly
         .join(ch_final_busco_table)
