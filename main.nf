@@ -1138,10 +1138,12 @@ workflow {
     */
     // Join gap-filled assemblies with their BUSCO results
     // BUSCO output from ASSEMBLY_QC_TELOCLIP is per-haplotype
+    ch_final_busco_table = ASSEMBLY_QC_FINAL.out.busco_full_table
+
     ch_finalized_assembly
-        .join(ch_final_busco)
-        .map { meta, assembly, busco_dir ->
-            tuple(meta.id, assembly, busco_dir, "final")
+        .join(ch_final_busco_table)
+        .map { meta, assembly, full_table ->
+            tuple(meta.id, assembly, full_table, "final")
         }
         .set { ch_snail_plot_final_input }
 
