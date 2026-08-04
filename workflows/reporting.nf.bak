@@ -21,43 +21,6 @@
 include { COLLECT_SOFTWARE_VERSIONS } from '../modules/collect_software_versions.nf'
 include { SUMMARY_REPORT           } from '../modules/summary_report'
 
-// ---------------------------------------------------------------------------
-// Parse heterozygosity (%) and repeat content (%) from a GenomeScope2
-// summary.txt. GenomeScope prints heterozygosity as a min-max range and does
-// NOT print a repeat percentage, so repeat content is derived as
-//     Genome Repeat Length / Genome Haploid Length * 100
-// Both take the MAX column, matching ESTIMATE_GENOME_SIZE's genome-size parse
-// (awk '{print $(NF-1)}'). Returns [het, rep] as ready-to-print % strings, or
-// 'NA' when a field is absent (higher-ploidy models, stub runs, failed fits).
-// File scope (not the workflow body) so it does not grow the workflow's
-// compiled source-String toward Groovy's 65,535-char limit.
-// ---------------------------------------------------------------------------
-def parseGenomescopeSummary(gs_dir) {
-    def out = [het: 'NA', rep: 'NA']
-    def summary = file("${gs_dir}/summary.txt")
-    if (!summary.exists()) return out
-
-    Long hapLen = null
-    Long repLen = null
-    try {
-        summary.readLines().each { String line ->
-            def mh = (line =~ /Heterozygous \(ab\)\s+[0-9.]+%\s+([0-9.]+)%/)
-            if (mh.find()) out.het = String.format(Locale.US, '%.2f%%', (mh.group(1) as double))
-
-            def mg = (line =~ /Genome Haploid Length\s+[0-9,]+\s*bp\s+([0-9,]+)\s*bp/)
-            if (mg.find()) hapLen = (mg.group(1).replaceAll(',', '') as Long)
-
-            def mr = (line =~ /Genome Repeat Length\s+[0-9,]+\s*bp\s+([0-9,]+)\s*bp/)
-            if (mr.find()) repLen = (mr.group(1).replaceAll(',', '') as Long)
-        }
-    } catch (Exception e) {
-        return out
-    }
-    if (repLen != null && hapLen != null && hapLen > 0L)
-        out.rep = String.format(Locale.US, '%.1f%%', (repLen / (double) hapLen) * 100.0d)
-    return out
-}
-
 workflow REPORTING {
 
     take:
@@ -247,20 +210,6 @@ workflow REPORTING {
                      newLine: true)
         .ifEmpty(file('NO_GENOME_SIZE'))
 
-    // ---- Per-sample GenomeScope heterozygosity + repeat content ----
-    // Parsed straight from each sample's genomescope summary.txt (already flowing
-    // as ch_genomescope_results) via parseGenomescopeSummary() defined above, so
-    // nothing changes in ESTIMATE_GENOME_SIZE or main.nf. Mirrors genome_sizes.tsv.
-    ch_genomescope_metrics_tsv = ch_genomescope_results
-        .map { meta, gs_dir ->
-            def gm = parseGenomescopeSummary(gs_dir)
-            "${meta.sample}\t${gm.het}\t${gm.rep}"
-        }
-        .collectFile(name: 'genomescope_metrics.tsv',
-                     seed: 'sample\theterozygosity_pct\trepeat_pct',
-                     newLine: true)
-        .ifEmpty(file('NO_GENOMESCOPE_METRICS'))
-
 
     // ---- Per-sample run info (evidence + strategy) for the report header ----
     ch_run_info_tsv = ch_input
@@ -312,7 +261,6 @@ workflow REPORTING {
         ch_teloclip_stats_for_report,
         ch_sample_taxonomy_tsv,
         ch_genome_size_tsv,
-        ch_genomescope_metrics_tsv,
         ch_workflow_info,
         ch_run_info_tsv,
         COLLECT_SOFTWARE_VERSIONS.out.versions,

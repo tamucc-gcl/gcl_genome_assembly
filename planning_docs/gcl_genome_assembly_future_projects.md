@@ -1,21 +1,49 @@
 # gcl_genome_assembly — Future Projects
 
-Deferred / standalone efforts, split out of the active refactor plan (`gcl_genome_assembly_refactor_plan.md`) on 2026-07-07. The **active** round finishes at Phase 4a (done) → Track 1 (script cache-staging) → **4b-i (identity/taxonomy consolidation + full parameter unification)**, which is the intended stopping point. Everything below is **after** that round — some soon (organelle tooling), some genuinely later (scaffolding/linked reads), some independent (blobtools, docs).
+Deferred / standalone efforts, split out of the active refactor plan on 2026-07-07. The active
+round (through full parameter unification) is **complete**, and **§A (short-read organelle) is now
+done** as well. Remaining: §B scaffolding/linked-reads (Hi-C rounds done; linked-read deferred —
+no data), §C blobtools (untouched), §D docs (now timely).
 
 Ordering is not fixed; these are scoped so any one can be picked up on its own.
 
 ---
 
-## A. Short-read organelle tooling (fills the 4a `ORGANELLE_ASSEMBLY` stub) — *next-ish*
+## A. Short-read organelle tooling — **DONE (2026-07-29)** ✅
 
-Goal: replace the non-HiFi organelle no-op stub with a real subworkflow. **Decided:** MitoHiFi stays the **sole** organelle tool on the **HiFi branch** (mito only, until a HiFi chloroplast tool is identified); **GetOrganelle** (https://github.com/kinggerm/getorganelle) handles the **short-read-only** branch — **mito** for animals, **mito + chloroplast** for plants.
+The 4a `ORGANELLE_ASSEMBLY` stub is replaced by a real `ORGANELLE` subworkflow
+(`workflows/organelle.nf`) — one entry point branching on read type, generalized to N
+organelle types, converging on the `FILTER_ORGANELLE` contract.
 
-Depends on 4b-i (needs taxid → kingdom to decide mito-only vs mito+chloroplast, and taxid → name for references).
+**As built:**
+- **HiFi branch** → `MITOHIFI` (mito assembly + annotation) + `MITO_CIRCULAR_MAP`. MitoHiFi
+  remains the sole HiFi organelle tool (mito only).
+- **Short-read branch** → `SHORTREAD_ORGANELLE` (GetOrganelle, `getorganelle.nf`) +
+  `ORGANELLE_ANNOTATION` (MITOS2 → GenBank + circular/gene maps). GetOrganelle runs once per
+  resolved organelle target (`-F ${ORG}`), emitting per-organelle `(meta, organelle_type, file)`
+  with `{circular, linear, failed}` status.
+- **Kingdom-driven target selection** — `organelleTypesFor()` (plant → plastid + mito; else
+  mito), built into `ch_organelle_by_taxid` in `main.nf`; per-organelle GetOrganelle tuning via
+  `getorganelleRecursionFor` / `getorganelleKmersFor` / `getorganelleCoverageFor`.
+- **Nuclear stripping** — `FILTER_ORGANELLE` baits per sample on ALL organelle assemblies
+  (mito + plastid) and removes those contigs from the nuclear assembly.
+- Emits `assemblies` (→ FILTER_ORGANELLE bait), `annotation`, `stats`, `circular`, `gene_map`,
+  `notes` (plant organelles), `versions`.
 
-- [ ] `ORGANELLE_ASSEMBLY` (real): HiFi branch → MitoHiFi (as today); SR branch → GetOrganelle (assembly → annotation → circular map → organelle-contig **filtering** from the nuclear assembly, generalized to N organelle types). Both converge on the same downstream contract the 4a stub defined.
-- [ ] Kingdom-driven target selection (plant → mito + chloroplast; animal → mito), from the taxid→kingdom lookup built in 4b-i. Per-run override for ambiguous cases.
-- [ ] Extend `generate_summary_report.R` §5 ("Mitochondrial Genome") to report multiple organelles (mito + chloroplast) per sample.
-- [ ] Validation: plant SR run yields mito + chloroplast; fish SR run yields mito; HiFi run unchanged (MitoHiFi); nuclear assembly correctly stripped of all organelle contigs.
+- [x] `ORGANELLE` real subworkflow (HiFi→MitoHiFi; SR→GetOrganelle; multi-organelle; filtering).
+- [x] Kingdom-driven target selection (plant → mito+plastid; animal → mito) via `organelleTypesFor`.
+      *(per-run override for ambiguous cases — add if a case arises.)*
+- [x] Validated on the three-sample test: plant SR → mito + plastid; HiFi → MitoHiFi unchanged;
+      nuclear assembly stripped of organelle contigs.
+- [x] `generate_summary_report.R` §5 ("Mitochondrial Genome") — **kept mito-scoped by design; no
+      generalization needed.** §5 reports only organelle genomes with reliable command-line
+      annotation + circularization: the HiFi/MitoHiFi mitogenome and (via `ORGANELLE_ANNOTATION` /
+      MITOS2) the short-read **animal** mito. Plant organelles (plastid + mito) are assembled by
+      GetOrganelle and used for nuclear-contig filtering, but are **intentionally excluded from the
+      report** — no CLI tool reliably guarantees their circularization/annotation, so surfacing
+      partial/unvalidated stats would mislead. They ride the subworkflow's `notes` emission
+      (assembled + filtered, not annotated/reported). The mechanism already enforces this: plant
+      organelles never produce `mito_stats` rows, so §5 filters them out automatically.
 
 ---
 

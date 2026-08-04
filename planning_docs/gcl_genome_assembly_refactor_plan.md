@@ -870,4 +870,6 @@ So the three-tier split collapsed: **WS-A was not cache-safe**, and `-resume` af
 - **Collapsed-primary assembly quality** — for `n_hap=1` samples, enable `purge_dups` (or revisit the `--hg-size` value) so the primary lands near haploid size; this is the real fix for the Hi-C-mapping resource blowup on collapsed samples. QUAST the primary to quantify the bloat.
 - **FCS-adaptor** — not currently wired to run; when enabled, add its `versions.tsv` line (container `git:` tag, like FCS-GX).
 - **Dead-code removal** — orphaned `decontamination.nf` / `DECONTAM_FCS_AUTO`; stale `meta.ploidy`/`haploid_genome_size` doc comments in `spades.nf` / `estimate_genome_size.nf`.
-- **Future projects** (`gcl_genome_assembly_future_projects.md`): §A GetOrganelle short-read organelle, §B linked-read scaffolding, §C blobtools resurrection (+ diamond/minimap2 `task.cpus`), §D docs/README.
+- **Future projects** (`gcl_genome_assembly_future_projects.md`): §A GetOrganelle organelle **DONE**;
+  §B linked-read scaffolding (Hi-C N-round + ARCS/LINKS — linked-read deferred, no data);
+  §C blobtools resurrection (+ diamond/minimap2 `task.cpus`); §D docs/README.
