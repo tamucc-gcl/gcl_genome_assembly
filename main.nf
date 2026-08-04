@@ -309,6 +309,7 @@ workflow {
         .combine( DOWNLOAD_BUSCO_DB.out.db.map { db -> tuple(db.name, db) }, by: 0 )
         .map { lineage, taxid, db -> [ (taxid): lineage ] }
         .reduce([:]) { acc, m -> acc + m }
+        .map { m -> m.sort { a, b -> a.key <=> b.key } }        // deterministic key order -> stable cache hash
 
     /*
     ========================================================================================
