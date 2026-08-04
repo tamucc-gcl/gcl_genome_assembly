@@ -237,7 +237,7 @@ workflow REPORTING {
             "${sample}\t${tax.taxid}\t${tax.name}\t${tax.kingdom}\t${tax.busco_lineage}\t${tax.genetic_code}\t${tax.telomere_motif}" }
         .collectFile(name: 'sample_taxonomy.tsv', newLine: true,
                      seed: 'sample\ttaxid\tspecies\tkingdom\tbusco_lineage\tgenetic_code\ttelomere_motif',
-                     sort: false)
+                     sort: true)
         .ifEmpty(file('NO_TAXONOMY'))
 
     ch_genome_size_tsv = ch_genome_size_est
