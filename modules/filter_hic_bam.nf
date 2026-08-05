@@ -21,11 +21,16 @@ process FILTER_HIC_BAM {
     tuple val(meta), val(stage), path(bam), path(bai), path(assembly_fasta)
 
     output:
-    tuple val(meta), val(stage), path("${meta.id}.filtered.sorted.bam"), path("${meta.id}.filtered.sorted.bam.bai"), emit: bam
+    tuple val(meta), val(stage), 
+          path("${meta.id}.filtered.sorted.bam"), 
+          //path("${meta.id}.filtered.sorted.bam.bai"), 
+          path("${meta.id}.filtered.sorted.bam.csi"), 
+          emit: bam
     tuple val(meta), val(stage), path("${meta.id}_filtering_stats.txt"), emit: stats
     tuple val(meta), val(stage), path("${meta.id}.pairs.gz"), emit: pairs
     tuple val(meta), val(stage), path("${meta.id}_parse_stats.txt"), emit: parse_stats
     tuple val(meta), val(stage), path("${meta.id}_dedup_stats.txt"), emit: dedup_stats
+    path "versions.tsv", emit: versions
 
     script:
     """
@@ -92,7 +97,8 @@ process FILTER_HIC_BAM {
     | samtools view -@ \${T_IO} -b - \\
     | samtools sort -@ \${T_SORT} -T "\$PWD/${meta.id}.sort" -o ${meta.id}.filtered.sorted.bam -
 
-    samtools index -@ \${CPUS} ${meta.id}.filtered.sorted.bam
+    # samtools index -@ \${CPUS} ${meta.id}.filtered.sorted.bam
+    samtools index -@ \${CPUS} -c ${meta.id}.filtered.sorted.bam
 
     # -------------------------------------------------------------------------
     # 4) Optional pair-level stats (pairtools stats) if available
@@ -173,15 +179,20 @@ process FILTER_HIC_BAM {
     rm -f ${meta.id}.pairsam.gz
     rm -f ${meta.id}.dups.pairs.gz
     rm -f chrom.sizes
+
+    printf 'pairtools\t%s\n' "\$(pairtools --version 2>&1 | sed 's/pairtools, version //')" > versions.tsv
+    printf 'samtools\t%s\n'  "\$(samtools --version 2>&1 | head -n1 | sed 's/samtools //')" >> versions.tsv
     """
 
     stub:
     """
     touch ${meta.id}.filtered.sorted.bam
-    touch ${meta.id}.filtered.sorted.bam.bai
+    #touch ${meta.id}.filtered.sorted.bam.bai
+    touch ${meta.id}.filtered.sorted.bam.csi
     touch ${meta.id}_filtering_stats.txt
     touch ${meta.id}.pairs.gz
     touch ${meta.id}_parse_stats.txt
     touch ${meta.id}_dedup_stats.txt
+    touch versions.tsv
     """
 }

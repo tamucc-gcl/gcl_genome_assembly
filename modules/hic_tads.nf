@@ -33,7 +33,7 @@ process HIC_TADS {
   script:
     def out_prefix = "${meta.id}_${stage}.tads_${resolution}bp_w${window_bp}"
     def assembly_label = "${meta.id} (${stage})"
-    def balance_flag = params.hic_balance ? "--balance" : ""
+    def balance_flag = params.run_hic_balance ? "--balance" : ""
 
   """
   set -euo pipefail

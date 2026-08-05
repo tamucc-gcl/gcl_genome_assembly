@@ -62,7 +62,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .set { ch_reads }
     
     ch_combined
-        .map { sample_id, haplotype_id, clean_fasta, hifi_fastq -> params.evidence.map_preset ?: 'map-hifi' }
+        .map { sample_id, haplotype_id, clean_fasta, hifi_fastq -> params.evidence_map_preset ?: 'map-hifi' }
         .set { ch_preset }
     
     MAP_READS_MINIMAP2(ch_assembly, ch_reads, ch_preset)
@@ -92,11 +92,11 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .set { ch_diamond_db }
     
     ch_diamond_combined
-        .map { haplotype_id, clean_fasta, dmnd -> params.evidence.diamond_max_target_seqs ?: 1 }
+        .map { haplotype_id, clean_fasta, dmnd -> params.evidence_diamond_max_target_seqs ?: 1 }
         .set { ch_diamond_max_seqs }
     
     ch_diamond_combined
-        .map { haplotype_id, clean_fasta, dmnd -> params.evidence.diamond_evalue ?: 1e-25 }
+        .map { haplotype_id, clean_fasta, dmnd -> params.evidence_diamond_evalue ?: 1e-25 }
         .set { ch_diamond_evalue }
     
     DIAMOND_BLASTX(ch_diamond_assembly, ch_diamond_db, ch_diamond_max_seqs, ch_diamond_evalue)
@@ -136,7 +136,7 @@ workflow GENERATE_DECONTAM_EVIDENCE {
         .set { ch_blob_taxdump }
     
     ch_blob_combined
-        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> params.evidence.blob_min_contig_len ?: 1000 }
+        .map { haplotype_id, clean_fasta, hits, bam, taxdump -> params.evidence_blob_min_contig_bp ?: 1000 }
         .set { ch_blob_min_len }
     
     BLOBTOOLS_CREATE(ch_blob_assembly, ch_blob_hits, ch_blob_bam, ch_blob_taxdump, ch_blob_min_len)

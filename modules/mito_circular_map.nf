@@ -19,7 +19,7 @@ process MITO_CIRCULAR_MAP {
     tag "${meta.sample}"
     label 'mito_circular_map'
 
-    publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode
 
     input:
     tuple val(meta), path(genbank)

@@ -129,12 +129,12 @@ all_assembly_stages <- unique(assembly_qc$qc_label)
 last_assembly_stage <- 'final'
 message(sprintf("  Final assembly stage: %s", last_assembly_stage))
 
-stage_levels <- c('contig', 'contig_mito_filtered', 'contig_purged',
+stage_levels <- c('contig', 'contig_organelle_filtered', 'contig_purged',
                   'contig_corrected', 'contig_decontam',
                   'scaffold', 'scaffold_corrected', 'scaffold_round2',
                   'gap_filled', 'teloclip_extended', 'final')
 
-stage_labels <- c('ctg.base', 'ctg.mito', 'ctg.purged', 'ctg.cor', 'ctg.deco',
+stage_labels <- c('ctg.base', 'ctg.org', 'ctg.purged', 'ctg.cor', 'ctg.deco',
                   'scaf.base', 'scaf.cor', 'scaf2',
                   'gap_fill', 'teloclip', 'final')
 

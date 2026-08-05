@@ -32,9 +32,9 @@ workflow SETUP_DECONTAM_DBS {
     ================================================================================
     SETUP_DECONTAM_DBS DEBUG
     ================================================================================
-    params.decon.make_blobtools_evidence: ${params.decon?.make_blobtools_evidence}
-    Check result: ${params.decon?.make_blobtools_evidence ?: false}
-    params.diamond.dmnd: ${params.diamond?.dmnd}
+    params.run_blobtools_evidence: ${params.run_blobtools_evidence}
+    Check result: ${params.run_blobtools_evidence ?: false}
+    params.diamond_dmnd: ${params.diamond_dmnd}
     ================================================================================
     """
     */
@@ -44,14 +44,14 @@ workflow SETUP_DECONTAM_DBS {
         FCS-GX Database Setup
     ========================================================================================
     */
-    def gxdb_profile  = params.gxdb?.profile  ?: 'all'
-    def gxdb_manifest = params.gxdb?.manifest ?: (
+    def gxdb_profile  = params.gxdb_profile  ?: 'all'
+    def gxdb_manifest = params.gxdb_manifest ?: (
         gxdb_profile == 'test-only'
             ? 'https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/test-only/test-only.manifest'
             : 'https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/latest/all.manifest'
     )
-    def gxdb_dir_path = file(params.gxdb?.dir ?: "${params.db_base}/fcs-gx")
-    def gxdb_force = (params.gxdb?.force ?: false) as boolean
+    def gxdb_dir_path = file(params.gxdb_dir ?: "${params.db_base}/fcs-gx")
+    def gxdb_force = (params.gxdb_force ?: false) as boolean
 
     // Create channels for the inputs
     ch_gxdb_manifest = Channel.value(gxdb_manifest)
@@ -70,10 +70,10 @@ workflow SETUP_DECONTAM_DBS {
         Optional: Evidence Databases (DIAMOND + Taxonomy)
     ========================================================================================
     */
-    if (params.decon?.make_blobtools_evidence ?: false) {
+    if (params.run_blobtools_evidence ?: false) {
         
         // Check if user provided pre-built DIAMOND database
-        def prebuilt_dmnd = params.diamond?.dmnd ? file(params.diamond.dmnd) : null
+        def prebuilt_dmnd = params.diamond_dmnd ? file(params.diamond_dmnd) : null
         
         if (prebuilt_dmnd && prebuilt_dmnd.exists()) {
             // Use pre-built database - no download/build needed
@@ -81,11 +81,11 @@ workflow SETUP_DECONTAM_DBS {
             
         } else {
             // Need to build DIAMOND database
-            def diamond_dir = file(params.diamond?.dir ?: './db/diamond')
-            def diamond_name = params.diamond?.name ?: 'proteins'
-            def fasta_url = params.diamond?.fasta_url
-            def taxonmap_url = params.diamond?.taxonmap_url
-            def diamond_force = (params.diamond?.force ?: false) as boolean
+            def diamond_dir = file(params.diamond_dir ?: './db/diamond')
+            def diamond_name = params.diamond_name ?: 'proteins'
+            def fasta_url = params.diamond_fasta_url
+            def taxonmap_url = params.diamond_taxonmap_url
+            def diamond_force = (params.diamond_force ?: false) as boolean
             
             // Validate that URLs are provided
             if (!fasta_url || !taxonmap_url) {

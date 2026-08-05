@@ -25,40 +25,27 @@ process SNAIL_PLOT {
     publishDir "${params.outdir}/snail_plots", mode: params.publish_dir_mode
     
     input:
-    tuple val(haplotype_id), path(assembly_fasta), path(busco_dir), val(qc_label)
-    
+    tuple val(haplotype_id), path(assembly_fasta), path(busco_full_table), val(qc_label)
+
     output:
-    //tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}.fasta"), emit: assembly
-    //tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_busco"), emit: busco
     tuple val(haplotype_id), val(qc_label), path("${haplotype_id}_${qc_label}_snail.svg"), emit: snail
-    
+
     script:
-    def busco_lineage = params.busco_lineage ?: 'actinopterygii_odb10'
     """
-    # Copy assembly with standardized name
-    #cp ${assembly_fasta} ${haplotype_id}_${qc_label}.fasta
-    
-    # Copy BUSCO directory with standardized name
-    #cp -r ${busco_dir} ${haplotype_id}_${qc_label}_busco
-    
-    #echo "[SNAIL_PLOT] Staged files for ${haplotype_id} (${qc_label})"
-    #echo "[SNAIL_PLOT] Assembly: ${haplotype_id}_${qc_label}.fasta"
-    #echo "[SNAIL_PLOT] BUSCO dir: ${haplotype_id}_${qc_label}_busco"
+    set -euo pipefail
 
-    # Create the initial dataset from your FASTA
-    blobtools create \
-        --fasta ${assembly_fasta} \
+    blobtools create \\
+        --fasta ${assembly_fasta} \\
         ${haplotype_id}_${qc_label}
 
-    blobtools add \
-        --busco ${busco_dir}/run_${busco_lineage}/full_table.tsv \
+    blobtools add \\
+        --busco ${busco_full_table} \\
         ${haplotype_id}_${qc_label}
 
-    blobtk plot \
-        --blobdir ${haplotype_id}_${qc_label} \
-        --view snail \
+    blobtk plot \\
+        --blobdir ${haplotype_id}_${qc_label} \\
+        --view snail \\
         --output ${haplotype_id}_${qc_label}_snail.svg
-
     """
     
     stub:

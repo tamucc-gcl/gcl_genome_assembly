@@ -22,7 +22,7 @@ process FIND_MITO_REFERENCE {
     tag "${species_name}"
     label 'mitohifi'
 
-    publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode, saveAs: { filename ->
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode, saveAs: { filename ->
         filename == 'mito_reference_info.tsv' ? "${taxid}_mito_reference_info.tsv" : null
     }
 
@@ -35,7 +35,7 @@ process FIND_MITO_REFERENCE {
     tuple val(taxid), path("mito_reference_info.tsv"), emit: ref_info
 
     script:
-    def min_length = params.mitohifi_ref_min_length ?: 14000
+    def min_length = params.mitohifi_ref_min_bp ?: 14000
     """
     set -euo pipefail
 

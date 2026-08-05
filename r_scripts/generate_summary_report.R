@@ -36,6 +36,7 @@ parser$add_argument("--mito_stats",       required = TRUE, help = "Mitogenome st
 parser$add_argument("--teloclip_stats",   required = TRUE, help = "Teloclip extension stats TSV (or NO_TELOCLIP)")
 parser$add_argument("--sample_taxonomy", default = "NO_TAXONOMY",    help = "Per-sample taxonomy TSV (sample/taxid/species/kingdom/busco_lineage) or NO_TAXONOMY")
 parser$add_argument("--genome_size",     default = "NO_GENOME_SIZE", help = "Per-sample genome-size estimate TSV (sample/est_genome_size_bp) or NO_GENOME_SIZE")
+parser$add_argument("--genomescope_metrics", default = "NO_GENOMESCOPE_METRICS", help = "Per-sample GenomeScope het/repeat TSV (sample/heterozygosity_pct/repeat_pct) or NO_GENOMESCOPE_METRICS")
 parser$add_argument("--workflow_info", default = "NO_WORKFLOW_INFO", help = "Workflow provenance TSV (key/value) or NO_WORKFLOW_INFO")
 parser$add_argument("--run_info",      default = "NO_RUN_INFO",      help = "Per-sample run-info TSV (sample/evidence/strategy) or NO_RUN_INFO")
 parser$add_argument("--flag_busco", default = 90, type = "double", help = "Status flag: warn if BUSCO complete percent below this")
@@ -254,11 +255,13 @@ read_side_tsv <- function(path, sentinel) {
 
 tax_tbl  <- read_side_tsv(args$sample_taxonomy, "NO_TAXONOMY")
 size_tbl <- read_side_tsv(args$genome_size,     "NO_GENOME_SIZE")
+gs_tbl   <- read_side_tsv(args$genomescope_metrics, "NO_GENOMESCOPE_METRICS")
 
-if (!is.null(tax_tbl) || !is.null(size_tbl)) {
+if (!is.null(tax_tbl) || !is.null(size_tbl) || !is.null(gs_tbl)) {
   info <- tibble(sample = all_sample_ids)
   if (!is.null(tax_tbl))  info <- left_join(info, tax_tbl,  by = "sample")
   if (!is.null(size_tbl)) info <- left_join(info, size_tbl, by = "sample")
+  if (!is.null(gs_tbl))   info <- left_join(info, gs_tbl,   by = "sample")
 
   if ("est_genome_size_bp" %in% names(info)) {
     info <- info %>%
@@ -271,7 +274,8 @@ if (!is.null(tax_tbl) || !is.null(size_tbl)) {
 
   col_map <- c(sample = "Sample", species = "Species", taxid = "Taxid",
                kingdom = "Kingdom", busco_lineage = "BUSCO Lineage",
-               est_genome_size = "Est. Genome Size")
+               est_genome_size = "Est. Genome Size",
+               heterozygosity_pct = "Heterozygosity", repeat_pct = "Repeat Content")
   present <- intersect(names(col_map), names(info))
   info_disp <- info %>%
     select(all_of(present)) %>%
@@ -279,9 +283,10 @@ if (!is.null(tax_tbl) || !is.null(size_tbl)) {
   names(info_disp) <- col_map[present]
 
   md <- c(md,
-          "### Sample Taxonomy & Genome-Size Estimate", "",
-          "Per-sample organism identity (resolved from the NCBI taxid) and the k-mer-based",
-          "haploid genome-size estimate from [GenomeScope2](https://github.com/tbenavi1/genomescope2.0).", "",
+          "### Sample Taxonomy & Genome Profile", "",
+          "Per-sample organism identity (resolved from the NCBI taxid) and k-mer-based",
+          "estimates from [GenomeScope2](https://github.com/tbenavi1/genomescope2.0): haploid",
+          "genome size, heterozygosity, and repeat content.", "",
           make_markdown_table(info_disp), "")
 }
 

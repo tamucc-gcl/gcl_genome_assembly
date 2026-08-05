@@ -32,6 +32,7 @@ process CORRECT_MISASSEMBLIES {
     tuple val(meta), path("${meta.id}_small_scale_error.bed"), emit: small_scale_errors
     tuple val(meta), path("${meta.id}_summary_statistics.txt"), emit: stats
     tuple val(meta), path("${meta.id}_inspector_report.txt"), emit: inspector_report
+    path "versions.tsv", emit: versions
     //tuple val(meta), path("${meta.id}_inspector"), emit: inspector_dir
 
     script:
@@ -203,6 +204,8 @@ fi)
 ================================================================================
 EOF
 
+
+    printf 'Inspector\t%s\n' "\$(inspector.py --version 2>&1 | sed 's/Inspector_v//' | head -n1)" > versions.tsv
     """
 
     stub:
@@ -214,5 +217,6 @@ EOF
     touch ${meta.id}_small_scale_error.bed
     touch ${meta.id}_summary_statistics.txt
     touch ${meta.id}_inspector_report.txt
+    touch versions.tsv
     """
 }

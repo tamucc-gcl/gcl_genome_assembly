@@ -39,10 +39,10 @@ workflow DECONTAMINATE_ASSEMBLY {
         STEP 1: Optional Adapter/Vector Screening
     ========================================================================================
     */
-    if (params.decon?.run_fcs_adaptor ?: false) {
+    if (params.run_fcs_adaptor ?: false) {
         assemblies
             .map { meta, assembly_fasta ->
-                tuple(meta, assembly_fasta, params.decon?.fcsadaptor_mode ?: 'euk', params.decon?.container_engine ?: 'singularity', stage)
+                tuple(meta, assembly_fasta, params.decon_fcsadaptor_mode ?: 'euk', params.decon_container_engine ?: 'singularity', stage)
             }
             .set { ch_adaptor_input }
 
@@ -64,12 +64,12 @@ workflow DECONTAMINATE_ASSEMBLY {
     ========================================================================================
     */
     // Per-sample source taxid: meta.taxid (sheet `taxid` column or params.taxid), falling
-    // back to the global params.decon_source_taxid (nested: params.decon.source_taxid).
+    // back to the global params.decon_source_taxid (nested: params.decon_source_taxid).
     ch_cleaned_input
         .map { meta, assembly_fasta ->
-            def tax = meta.taxid ?: params.decon?.source_taxid
+            def tax = meta.taxid ?: params.taxid
             if (tax == null)
-                throw new IllegalArgumentException("Sample '${meta.id}': decontamination requires a taxid — set a per-row 'taxid' in the sample sheet, or --taxid / --decon_source_taxid.")
+                throw new IllegalArgumentException("Sample '${meta.id}': decontamination requires a taxid — set a per-row 'taxid' in the sample sheet, or --taxid.")
             tuple(meta, assembly_fasta, tax)
         }
         .combine(gxdb_dir)
@@ -98,4 +98,5 @@ workflow DECONTAMINATE_ASSEMBLY {
     contaminants = FCS_CLEAN_GENOME.out.contaminants_fasta      // tuple(meta, fasta)
     action_report = FCS_GX_SCREEN.out.action_report             // tuple(meta, report)
     taxonomy_report = FCS_GX_SCREEN.out.taxonomy_report         // tuple(meta, report)
+    versions = FCS_GX_SCREEN.out.versions
 }

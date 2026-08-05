@@ -42,11 +42,11 @@ process DIAMOND_DB_GET {
   if [ "${profile}" = "uniprot_ref_proteomes" ]; then
     # NOTE: UniProt reference proteome packaging can change by release.
     # For fully reproducible builds, set fasta_url and taxonmap_url explicitly in config.
-    : "${fasta_url:?Set params.diamond.fasta_url for uniprot_ref_proteomes (release-specific URL)}"
-    : "${taxonmap_url:?Set params.diamond.taxonmap_url for uniprot_ref_proteomes (mapping file URL)}"
+    : "${fasta_url:?Set params.diamond_fasta_url for uniprot_ref_proteomes (release-specific URL)}"
+    : "${taxonmap_url:?Set params.diamond_taxonmap_url for uniprot_ref_proteomes (mapping file URL)}"
   else
-    : "${fasta_url:?Set params.diamond.fasta_url for profile=custom}"
-    : "${taxonmap_url:?Set params.diamond.taxonmap_url for profile=custom}"
+    : "${fasta_url:?Set params.diamond_fasta_url for profile=custom}"
+    : "${taxonmap_url:?Set params.diamond_taxonmap_url for profile=custom}"
   fi
 
   # --- build db if missing ---

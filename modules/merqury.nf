@@ -19,6 +19,7 @@ process MERQURY {
 
     output:
     tuple val(sample_id), path("${sample_id}_merqury"), emit: results
+    path "versions.tsv", emit: versions
 
     script:
     // Assemblies are staged in the task dir; merqury runs from a subdir, so prefix with ../
@@ -32,6 +33,8 @@ process MERQURY {
         ../${meryl_db} \\
         ${asm_args} \\
         ${sample_id}
+    
+    printf 'meryl\t%s\n' "\$(meryl --version 2>&1 | sed 's/meryl //')" > ../versions.tsv
     """
 
     stub:
@@ -39,5 +42,6 @@ process MERQURY {
     mkdir -p ${sample_id}_merqury
     touch ${sample_id}_merqury/${sample_id}.qv
     touch ${sample_id}_merqury/${sample_id}.completeness.stats
+    touch versions.tsv
     """
 }

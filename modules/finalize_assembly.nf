@@ -30,8 +30,8 @@ process FINALIZE_ASSEMBLY {
     script:
     // Sequences >= this size are treated as chromosomal scaffolds.
     // Anything smaller is classified as an unplaced contig.
-    // Default 1 Mb; override with params.finalize_min_scaffold_size
-    def min_scaffold = params.finalize_min_scaffold_size ?: 1000000
+    // Default 1 Mb; override with params.finalize_min_scaffold_bp
+    def min_scaffold = params.finalize_min_scaffold_bp ?: 1000000
     """
     set -euo pipefail
 
@@ -47,43 +47,18 @@ process FINALIZE_ASSEMBLY {
     #
     #    Output columns: old_name  new_name  length  class
     # ------------------------------------------------------------------
-    awk -v min_scaf=${min_scaffold} '
-    BEGIN { OFS = "\\t" }
-    {
-        name = \$1; len = \$2
-        if (len >= min_scaf) {
-            scaff[++ns] = name
-            scaff_len[ns] = len
-        } else {
-            ctg[++nc] = name
-            ctg_len[nc] = len
-        }
-    }
-    END {
-        # Sort scaffolds by descending length (simple insertion sort — fine for <100 seqs)
-        for (i = 2; i <= ns; i++) {
-            j = i
-            while (j > 1 && scaff_len[j] > scaff_len[j-1]) {
-                t = scaff[j];     scaff[j] = scaff[j-1];     scaff[j-1] = t
-                t = scaff_len[j]; scaff_len[j] = scaff_len[j-1]; scaff_len[j-1] = t
-                j--
-            }
-        }
-        # Sort contigs by descending length
-        for (i = 2; i <= nc; i++) {
-            j = i
-            while (j > 1 && ctg_len[j] > ctg_len[j-1]) {
-                t = ctg[j];     ctg[j] = ctg[j-1];     ctg[j-1] = t
-                t = ctg_len[j]; ctg_len[j] = ctg_len[j-1]; ctg_len[j-1] = t
-                j--
-            }
-        }
-        # Emit scaffolds then contigs
-        for (i = 1; i <= ns; i++)
-            print scaff[i], "scaffold_" i, scaff_len[i], "scaffold"
-        for (i = 1; i <= nc; i++)
-            print ctg[i], "contig_" i, ctg_len[i], "unplaced"
-    }' "\${INPUT_FA}.fai" > name_map_full.tsv
+    # Classify (scaffold >= min_scaf, else unplaced), sort by descending length within
+    # class (scaffolds first), assign sequential names. coreutils sort is O(n log n) --
+    # the previous in-awk insertion sort was O(n^2) and unusable at short-read contig counts.
+    awk -v min_scaf=${min_scaffold} 'BEGIN { OFS = "\\t" }
+        { cls = (\$2 >= min_scaf ? "0scaffold" : "1unplaced"); print cls, \$2, \$1 }' "\${INPUT_FA}.fai" \\
+      | sort -k1,1 -k2,2nr \\
+      | awk 'BEGIN { OFS = "\\t" }
+        {
+            if (\$1 == "0scaffold") { new = "scaffold_" ++ns; lab = "scaffold" }
+            else                    { new = "contig_"   ++nc; lab = "unplaced" }
+            print \$3, new, \$2, lab
+        }' > name_map_full.tsv
 
     # ------------------------------------------------------------------
     # 3. Create the name mapping output (old_name → new_name)
@@ -101,7 +76,7 @@ process FINALIZE_ASSEMBLY {
     cut -f1 name_map_full.tsv > extract_order.txt
 
     # Rename headers using awk exact-match lookup (no regex escaping needed)
-    samtools faidx "\${INPUT_FA}" \$(cat extract_order.txt | tr '\\n' ' ') \\
+    samtools faidx -r extract_order.txt "\${INPUT_FA}" \\
         | awk '
             BEGIN { while ((getline < "name_map_full.tsv") > 0) map[\$1] = \$2 }
             /^>/ {

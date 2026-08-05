@@ -18,6 +18,7 @@ process MULTIQC_HIC {
     output:
     path("multiqc_report.html"), emit: report
     path("multiqc_report_data"),        emit: data
+    path "versions.tsv", emit: versions
     
     script:
     def title = qc_label == "raw" ? "Hi-C Raw Reads QC" : "Hi-C Trimmed Reads QC"
@@ -31,6 +32,8 @@ process MULTIQC_HIC {
         --title "${title}" \\
         --comment "${comment}" \\
         .
+
+    printf 'FastQC\t%s\n' "\$(fastqc --version 2>&1 | sed 's/FastQC //')" > versions.tsv
     """
     
     stub:
@@ -38,5 +41,6 @@ process MULTIQC_HIC {
     mkdir -p multiqc_report_data
     touch multiqc_report.html
     touch multiqc_report_data/multiqc_data.json
+    touch versions.tsv
     """
 }

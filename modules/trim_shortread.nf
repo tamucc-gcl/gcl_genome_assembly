@@ -30,6 +30,7 @@ process TRIM_SHORTREAD {
     tuple val(meta), path("${meta.sample}_R1.trim.fastq.gz"), path("${meta.sample}_R2.trim.fastq.gz"), emit: trimmed_reads
     tuple val(meta), path("${meta.sample}_fastp.html"), emit: html
     tuple val(meta), path("${meta.sample}_fastp.json"), emit: json
+    path "versions.tsv", emit: versions
 
     script:
     def qual   = params.shortread_fastp_cut_tail_quality ?: 20
@@ -49,6 +50,8 @@ process TRIM_SHORTREAD {
         --thread ${task.cpus} \\
         --html ${meta.sample}_fastp.html \\
         --json ${meta.sample}_fastp.json ${extra}
+    
+    printf 'fastp\t%s\n' "\$(fastp --version 2>&1)" > versions.tsv
     """
 
     stub:
@@ -57,5 +60,6 @@ process TRIM_SHORTREAD {
     touch ${meta.sample}_R2.trim.fastq.gz
     touch ${meta.sample}_fastp.html
     touch ${meta.sample}_fastp.json
+    touch versions.tsv
     """
 }

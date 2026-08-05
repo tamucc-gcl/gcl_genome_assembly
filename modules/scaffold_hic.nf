@@ -27,11 +27,12 @@ process SCAFFOLD_HIC {
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.agp"), emit: agp
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.bin"), emit: bin
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}.yahs.log"), emit: log
+    path "versions.tsv", emit: versions
 
     script:
     // Extract parameters from round_params map
     def min_contig_len    = round_params.min_contig_length ?: 10000
-    def min_mapq          = round_params.min_mapq ?: 1
+    def min_mapq          = round_params.coverage_min_mapq ?: 1
     def resolutions       = round_params.resolutions ?: '10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000'
     def rounds_per_res    = round_params.rounds_per_resolution ?: null
     def enzyme            = round_params.enzyme ?: null
@@ -115,6 +116,8 @@ process SCAFFOLD_HIC {
     cp -f "\${bin_candidate}" "${meta.id}${round_suffix}_scaffolds_final.bin"
 
     echo "[YAHS ${round ?: 'round1'}] Scaffolding complete for ${meta.id}"
+    
+    printf 'YaHS\t%s\n' "\$(yahs --version 2>&1 | head -n1)" > versions.tsv
     """
 
     stub:
@@ -124,5 +127,6 @@ process SCAFFOLD_HIC {
     touch ${meta.id}${round_suffix}_scaffolds_final.agp
     touch ${meta.id}${round_suffix}_scaffolds_final.bin
     touch ${meta.id}${round_suffix}.yahs.log
+    touch versions.tsv
     """
 }

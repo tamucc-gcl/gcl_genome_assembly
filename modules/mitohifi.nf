@@ -27,10 +27,10 @@ process MITOHIFI {
     tag "${meta.sample}"
     label 'mitohifi'
 
-    publishDir "${params.outdir}/mitogenome", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(hifi_fastq), path(ref_fasta), path(ref_gb)
+    tuple val(meta), path(hifi_fastq), path(ref_fasta), path(ref_gb), val(genetic_code)
 
     output:
     tuple val(meta), path("${meta.sample}_mitogenome.fasta"),           emit: mitogenome
@@ -39,9 +39,9 @@ process MITOHIFI {
     tuple val(meta), path("${meta.sample}_mito_contigs.fasta"),         emit: contigs_fasta
     //tuple val(meta), path("mitohifi_output"),                          emit: output_dir
     tuple val(meta), path("${meta.sample}_final_mitogenome*.png"),      emit: gene_map, optional: true
+    path "versions.tsv", emit: versions
 
     script:
-    def genetic_code = params.mitohifi_genetic_code ?: 2
     def perc_id      = params.mitohifi_perc_identity ?: 50
     def cov_cutoff   = params.mitohifi_cov_cutoff ?: 'auto'
     def bloom_filter = params.mitohifi_bloom_filter ? '--bloom-filter' : ''
@@ -156,6 +156,8 @@ EOF
     done
 
     echo "[MITOHIFI] Complete: \$(date)"
+
+    printf 'MitoHiFi\t%s\n' "\$(mitohifi.py -v 2>&1 | sed 's/^MitoHiFi //' | head -n1)" > versions.tsv
     """
 
     stub:
@@ -167,5 +169,6 @@ EOF
     touch ${meta.sample}_mito_stats.tsv
     cp ${meta.sample}_mitogenome.fasta ${meta.sample}_mito_contigs.fasta
     touch ${meta.sample}_final_mitogenome.annotation.png
+    touch versions.tsv
     """
 }

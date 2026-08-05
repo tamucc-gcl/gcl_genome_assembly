@@ -21,16 +21,17 @@ process TELOCLIP_EXTEND {
     publishDir "${params.outdir}/assembly/scaffold/teloclip", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(scaffold_fasta), path(hifi_fastq)
+    tuple val(meta), path(scaffold_fasta), path(hifi_fastq), val(telomere_motif)
 
     output:
     tuple val(meta), path("${meta.id}.teloclip_extended.fasta"), emit: extended_assembly
     tuple val(meta), path("${meta.id}.teloclip_stats.tsv"),      emit: stats
     tuple val(meta), path("${meta.id}.teloclip_overhangs.bam"),  emit: overhangs_bam
     tuple val(meta), path("${meta.id}.teloclip_overhangs.bam.bai"), emit: overhangs_bai
+    path "versions.tsv", emit: versions
 
     script:
-    def motif       = params.telomere_motif ?: 'TTAGGG'
+    def motif = telomere_motif
     def min_clip    = params.teloclip_min_clip ?: 1
     def max_break   = params.teloclip_max_break ?: 50
     def min_anchor  = params.teloclip_min_anchor ?: 100
@@ -158,6 +159,8 @@ PYEOF
     fi
 
     echo "[TELOCLIP] Done: ${meta.id}"
+
+    printf 'teloclip\t%s\n' "\$(teloclip --version 2>&1 | sed 's/^teloclip, version //')" > versions.tsv
     """
 
     stub:
@@ -166,6 +169,7 @@ PYEOF
     printf "contig\\tcontig_length\\tend\\textension_length\\toverhang_count\\tmotif_counts\\n" > ${meta.id}.teloclip_stats.tsv
     touch ${meta.id}.teloclip_overhangs.bam
     touch ${meta.id}.teloclip_overhangs.bam.bai
+    touch versions.tsv
     """
 }
 

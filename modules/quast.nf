@@ -20,6 +20,7 @@ process QUAST {
 
     output:
     tuple val(sample_id), path("${sample_id}_quast"), emit: results
+    path "versions.tsv", emit: versions
 
     script:
     def labels_str = (labels instanceof List ? labels : [labels]).join(',')
@@ -30,6 +31,8 @@ process QUAST {
         --labels ${labels_str} \\
         --output-dir ${sample_id}_quast \\
         --contig-thresholds 10000,50000,100000,500000,1000000,5000000,10000000
+
+    printf 'QUAST\t%s\n' "\$(quast.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
     """
 
     stub:
@@ -37,6 +40,7 @@ process QUAST {
     mkdir -p ${sample_id}_quast
     touch ${sample_id}_quast/report.txt
     touch ${sample_id}_quast/report.html
+    touch versions.tsv
     """
 }
 
@@ -64,6 +68,7 @@ process QUAST_FINAL {
     path("quast_final"), emit: results
     path("quast_final/report.tsv"), emit: report_tsv
     path("quast_final/report.html"), emit: report_html
+    path "versions.tsv", emit: versions
 
     script:
     def labels_str = labels.join(',')
@@ -74,6 +79,8 @@ process QUAST_FINAL {
         --labels ${labels_str} \\
         --output-dir quast_final \\
         --contig-thresholds 10000,50000,100000,500000,1000000,5000000,10000000
+
+    printf 'QUAST\t%s\n' "\$(quast.py --version 2>&1 | sed 's/.* v//')" > versions.tsv
     """
 
     stub:
@@ -82,5 +89,6 @@ process QUAST_FINAL {
     touch quast_final/report.txt
     touch quast_final/report.tsv
     touch quast_final/report.html
+    touch versions.tsv
     """
 }

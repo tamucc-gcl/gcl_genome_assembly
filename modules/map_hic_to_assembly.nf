@@ -24,15 +24,23 @@ process MAP_HIC_TO_ASSEMBLY {
     output:
     tuple val(meta), val(stage),
           path("${meta.id}.sorted.bam"),
-          path("${meta.id}.sorted.bam.bai"),
+          //path("${meta.id}.sorted.bam.bai"),
+          path("${meta.id}.sorted.bam.csi"),
           emit: bam
 
     tuple val(meta), val(stage),
           path("${meta.id}_mapping_stats.txt"),
           emit: stats
 
+    path "versions.tsv", emit: versions
+
     script:
     def extra_args = (params.bwa_mem2_hic_args ?: "").toString()
+    // samtools sort memory, scaled to the SLURM allocation:
+    // ~1/4 of task.memory for sort buffers — bwa-mem2 (index + mapping, running concurrently
+    // in the same pipe) gets the bulk — split across a capped sort-thread count.
+    def sort_threads = Math.min(task.cpus as int, 16)
+    def sort_mem_mb  = Math.max(768L, (task.memory.toMega() / 4 / sort_threads) as long)
     """
     set -euo pipefail
     export LC_ALL=C
@@ -54,12 +62,16 @@ process MAP_HIC_TO_ASSEMBLY {
     # 1) Map Hi-C reads + collate by queryname
     #    samtools collate keeps mates together for pairtools
     # -------------------------------------------------------------------------
+    # Map to an unsorted BAM first, then sort as a separate step.
+    # (A fused bwa|view|sort pipe keeps sort running under bwa's backpressure for the
+    #  whole mapping run; on large Hi-C sets that long-lived pipe dies mid-merge -> SIGPIPE/141.)
     bwa-mem2 mem -t ${task.cpus} -5SP ${extra_args} ${assembly_fasta} ${hic_r1} ${hic_r2} \
-    | samtools view -@ ${task.cpus} -b - \
-    | samtools sort -@ ${task.cpus} -o ${meta.id}.sorted.bam -
-    samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
+      | samtools view -@ ${task.cpus} -b -o ${meta.id}.unsorted.bam -
+    samtools sort -@ ${sort_threads} -m ${sort_mem_mb}M -T "\$PWD/${meta.id}.sorttmp" \
+      -o ${meta.id}.sorted.bam ${meta.id}.unsorted.bam
+    rm -f ${meta.id}.unsorted.bam
 
-    # CSI index works on unsorted BAMs
+    # samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
     samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
 
     # -------------------------------------------------------------------------
@@ -68,12 +80,16 @@ process MAP_HIC_TO_ASSEMBLY {
     samtools flagstat -@ ${task.cpus} \\
       ${meta.id}.sorted.bam \\
       > ${meta.id}_mapping_stats.txt
+
+    printf 'bwa-mem2\t%s\n' "\$(bwa-mem2 version 2>&1 | grep -m1 -oE '[0-9]+[.][0-9][0-9.]*' || echo unknown)" > versions.tsv
     """
 
     stub:
     """
     touch ${meta.id}.sorted.bam
-    touch ${meta.id}.sorted.bam.bai
+    #touch ${meta.id}.sorted.bam.bai
+    touch ${meta.id}.sorted.bam.csi
     touch ${meta.id}_mapping_stats.txt
+    touch versions.tsv
     """
 }

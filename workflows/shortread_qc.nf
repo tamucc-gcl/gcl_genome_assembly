@@ -36,4 +36,5 @@ workflow SHORTREAD_QC {
     fastqc_zip     = FASTQC_SHORTREAD.out.fastqc_zip
     multiqc_report = MULTIQC_SHORTREAD.out.report
     multiqc_data   = MULTIQC_SHORTREAD.out.data
+    versions       = FASTQC_SHORTREAD.out.versions.mix(MULTIQC_SHORTREAD.out.versions)
 }

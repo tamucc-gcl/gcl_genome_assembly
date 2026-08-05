@@ -25,9 +25,10 @@ process BUILD_MERYL_DB {
 
     output:
     tuple val(meta), path("${meta.id}.meryl"), emit: meryl_db
+    path "versions.tsv", emit: versions
 
     script:
-    def k = params.merqury_k ?: 21
+    def k = params.kmer_size ?: 21
     """
     # Build k-mer database from the sample's QC reads (1 HiFi FASTQ, or R1+R2 for PE).
     meryl count \\
@@ -36,11 +37,13 @@ process BUILD_MERYL_DB {
         memory=${task.memory.toGiga()} \\
         ${reads} \\
         output ${meta.id}.meryl
+    printf 'meryl\t%s\n' "\$(meryl --version 2>&1 | sed 's/meryl //')" > versions.tsv
     """
 
     stub:
     """
     mkdir -p ${meta.id}.meryl
     touch ${meta.id}.meryl/merylIndex
+    touch versions.tsv
     """
 }

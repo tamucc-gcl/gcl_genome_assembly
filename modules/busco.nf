@@ -22,6 +22,8 @@ process BUSCO {
 
     output:
     tuple val(meta), path("${meta.id}_busco"), emit: results
+    tuple val(meta), path("${meta.id}_busco/run_*/full_table.tsv"), emit: full_table
+    path "versions.tsv", emit: versions
 
     script:
     // Per-sample lineage, keyed by meta.taxid. Falls back to params.busco_lineage only if a
@@ -36,11 +38,15 @@ process BUSCO {
         --cpu ${task.cpus} \\
         --offline \\
         --download_path ${params.busco_downloads ?: '/path/to/busco_downloads'}
+
+    printf 'BUSCO\t%s\n' "\$(busco --version 2>&1 | sed 's/BUSCO //')" > versions.tsv
     """
 
     stub:
     """
-    mkdir -p ${meta.id}_busco
+    mkdir -p ${meta.id}_busco/run_stub
+    touch ${meta.id}_busco/run_stub/full_table.tsv
     touch ${meta.id}_busco/short_summary.txt
+    touch versions.tsv
     """
 }
