@@ -164,6 +164,7 @@ include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
+include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
 ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
@@ -174,6 +175,7 @@ ch_assembly_report_script = file("${projectDir}/py_scripts/generate_assembly_rep
 ch_coverage_book_script   = file("${projectDir}/py_scripts/bigwig_genome_book.py",               checkIfExists: true)
 ch_tad_book_script        = file("${projectDir}/py_scripts/make_tad_book.py",                    checkIfExists: true)
 ch_compartments_script    = file("${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py", checkIfExists: true)
+ch_harmonize_script       = file("${projectDir}/py_scripts/harmonize_names.py",                     checkIfExists: true)
 /*
 ========================================================================================
     MAIN WORKFLOW
@@ -944,7 +946,12 @@ workflow {
     // =========================================================================
     ch_final_assembly = ch_final_assembly.mix(ch_shortread_finished)
 
-    FINALIZE_ASSEMBLY(ch_final_assembly)
+    // Harmonize scaffold names across same-species long-read assemblies (>= 2) before
+    // finalizing, so homologous chromosomes share names and FINAL_VIZ inherits them.
+    HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script)
+    ch_versions = ch_versions.mix(HARMONIZE_SCAFFOLDS.out.versions)
+
+    FINALIZE_ASSEMBLY(HARMONIZE_SCAFFOLDS.out.assemblies)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
     /*
