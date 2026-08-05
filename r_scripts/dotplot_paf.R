@@ -38,6 +38,7 @@ parser$add_argument("--width", type = "double", default = 10, help = "Plot width
 parser$add_argument("--height", type = "double", default = 10, help = "Plot height in inches")
 parser$add_argument("--dpi", type = "integer", default = 300, help = "Resolution for PNG output")
 parser$add_argument("--min_align", type = "integer", default = 0, help = "Minimum alignment length to plot")
+parser$add_argument("--min_seq", type = "integer", default = 1000000, help = "Minimum sequence length to include on an axis (bp); declutters and makes scaffold numbering meaningful")
 
 args <- parser$parse_args()
 
@@ -121,8 +122,28 @@ if (nrow(paf_data) == 0) {
 
 message("Generating dotplot with ", nrow(paf_data), " alignments")
 
+# Order both axes by harmonized chromosome number (chr1, chr2, ... then unplaced/other
+# by descending length) instead of pafr's default order_by = "size". The two assemblies
+# can differ slightly in relative chromosome size (e.g. two haplotypes of one individual),
+# so size-ordering ranks homologous chromosomes differently on the two axes and breaks the
+# diagonal into offset blocks. Chromosome-ordering lines them up. Non-harmonized names
+# (scaffold_N/contig_N) have no chr prefix and fall back to descending length.
+ordered_names <- function(nm, ln) {
+  d <- data.frame(id = nm, len = ln, stringsAsFactors = FALSE)
+  d <- d[!duplicated(d$id), ]
+  r <- suppressWarnings(as.integer(sub("^chr([0-9]+).*$", "\\1", d$id)))
+  r[!grepl("^chr[0-9]+", d$id)] <- NA
+  r[is.na(r)] <- 1000000000L                 # non-chromosome sequences sort last
+  d$id[order(r, -d$len)]
+}
+q_ord <- ordered_names(paf_data$qname, paf_data$qlen)
+t_ord <- ordered_names(paf_data$tname, paf_data$tlen)
+
+
 # Generate dotplot
 pair_plot <- dotplot(paf_data,
+                     order_by = "provided",
+                     ordering = list(q_ord, t_ord),
                      label_seqs = FALSE,
                      dashes = FALSE,
                      xlab = args$query,
