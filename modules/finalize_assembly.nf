@@ -15,7 +15,8 @@
         scaffolds flagged 'rev' are reverse-complemented; composites are left native.
 
     Input : tuple(meta, assembly_fasta, name_map)
-    Output: assembly / name_map / fai   (+ harmonized_name_map when harmonized)
+    Output: assembly / name_map / fai   (the full harmonized map is published by
+    HARMONIZE_SPECIES; FINALIZE emits the 4-column old->new name_map)
 ========================================================================================
 */
 
@@ -32,7 +33,6 @@ process FINALIZE_ASSEMBLY {
     tuple val(meta), path("${meta.id}.fasta"),          emit: assembly
     tuple val(meta), path("${meta.id}.name_map.tsv"),   emit: name_map
     tuple val(meta), path("${meta.id}.fasta.fai"),      emit: fai
-    tuple val(meta), path("${meta.id}.harmonized_name_map.tsv"), emit: harmonized_map, optional: true
 
     script:
     // Sequences >= this size are treated as chromosomal scaffolds in the size-rank
@@ -119,9 +119,6 @@ process FINALIZE_ASSEMBLY {
         tail -n +2 "\${MAP}" \\
           | awk 'BEGIN{FS=OFS="\\t"} { c=(\$6=="unplaced"?"unplaced":"scaffold"); print \$1,\$2,\$5,c }' \\
           >> ${meta.id}.name_map.tsv
-
-        # keep the full harmonized map alongside for provenance
-        cp "\${MAP}" ${meta.id}.harmonized_name_map.tsv
 
         N_CHR=\$(tail -n +2 "\${MAP}"  | awk -F'\\t' '\$6=="chromosome"' | wc -l)
         N_COMP=\$(tail -n +2 "\${MAP}" | awk -F'\\t' '\$6=="composite"'  | wc -l)
