@@ -212,21 +212,24 @@ def apply_containment(place, contained_frac, demote):
     for nm, info in place.items():
         if info["class"] == "chromosome":
             by_chr[info["primary"]].append(nm)
+    demote_to, flag_to = {}, {}                # nm -> chr  (decisions, applied after the scan)
     for k, names in by_chr.items():
         names.sort(key=lambda nm: -place[nm]["length"])     # largest keeper first
+        ivals = {nm: (place[nm]["tstart"][k], place[nm]["tend"][k]) for nm in names}
         for i, nm in enumerate(names):
-            info = place[nm]
-            b0, b1 = info["tstart"][k], info["tend"][k]
+            b0, b1 = ivals[nm]
             span = b1 - b0
             if span <= 0:
                 continue
-            larger = [(place[o]["tstart"][k], place[o]["tend"][k]) for o in names[:i]]
+            larger = [ivals[o] for o in names[:i]]           # every larger piece on this chr
             if interval_coverage(b0, b1, larger) / span >= contained_frac:
-                if demote:
-                    place[nm] = {"class": "unplaced", "length": info["length"],
-                                 "aligned_frac": 0.0, "contained_in": k}
-                else:
-                    info.setdefault("extra_flags", []).append(f"contained(chr{k})")
+                (demote_to if demote else flag_to)[nm] = k
+    # mutate only after all decisions are made (reading a demoted dict mid-scan would KeyError)
+    for nm, k in demote_to.items():
+        place[nm] = {"class": "unplaced", "length": place[nm]["length"],
+                     "aligned_frac": 0.0, "contained_in": k}
+    for nm, k in flag_to.items():
+        place[nm].setdefault("extra_flags", []).append(f"contained(chr{k})")
 
 
 def main():
