@@ -100,7 +100,12 @@ def parse_paf(path, chrom_of):
 
 
 def classify(chr_ev, scaf_len, min_frac, sec_frac):
-    """Decide placement of one query scaffold from its per-chromosome evidence."""
+    """Decide placement of one query scaffold from its per-chromosome evidence.
+
+    Only called for scaffolds that passed the per-query chromosome-scale eligibility set
+    (select_chromosome_set applied to the query's own lengths); placement here is purely
+    alignment-decided.
+    """
     total_bp = sum(e["bp"] for e in chr_ev.values())
     if scaf_len == 0 or total_bp == 0 or (total_bp / scaf_len) < min_frac:
         return {"class": "unplaced",
@@ -177,6 +182,53 @@ def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropo
     return cs, meta
 
 
+def interval_coverage(b0, b1, ivals):
+    """Length of [b0, b1) covered by the union of ivals (each clipped to [b0, b1))."""
+    clipped = sorted((max(s, b0), min(e, b1)) for s, e in ivals if min(e, b1) > max(s, b0))
+    if not clipped:
+        return 0
+    cov, cs, ce = 0, clipped[0][0], clipped[0][1]
+    for s, e in clipped[1:]:
+        if s > ce:
+            cov += ce - cs
+            cs, ce = s, e
+        else:
+            ce = max(ce, e)
+    return cov + (ce - cs)
+
+
+def apply_containment(place, contained_frac, demote):
+    """Within one assembly, find chromosome-class pieces whose reference territory on their
+    chromosome is >= contained_frac covered by LARGER pieces on the same chromosome -- i.e.
+    redundant haplotigs sitting inside a bigger scaffold. This is the size-independent analog
+    of the reference chromosome-set cut, applied per query: it catches a large haplotig that a
+    size floor cannot (a haplotig is the same size as a real fragment) while keeping genuine
+    splits (whose pieces cover disjoint reference territory and so are not contained).
+
+    demote=True  -> reclassify contained pieces as unplaced (they lose the chromosome name).
+    demote=False -> keep them as chromosomes but tag 'contained(chrK)'.
+    """
+    by_chr = defaultdict(list)
+    for nm, info in place.items():
+        if info["class"] == "chromosome":
+            by_chr[info["primary"]].append(nm)
+    for k, names in by_chr.items():
+        names.sort(key=lambda nm: -place[nm]["length"])     # largest keeper first
+        for i, nm in enumerate(names):
+            info = place[nm]
+            b0, b1 = info["tstart"][k], info["tend"][k]
+            span = b1 - b0
+            if span <= 0:
+                continue
+            larger = [(place[o]["tstart"][k], place[o]["tend"][k]) for o in names[:i]]
+            if interval_coverage(b0, b1, larger) / span >= contained_frac:
+                if demote:
+                    place[nm] = {"class": "unplaced", "length": info["length"],
+                                 "aligned_frac": 0.0, "contained_in": k}
+                else:
+                    info.setdefault("extra_flags", []).append(f"contained(chr{k})")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -197,6 +249,14 @@ def main():
                          "allowed (guards against cutting after a dominant chromosome)")
     ap.add_argument("--min-aligned-frac", type=float, default=0.5,
                     help="min (aligned-to-chromosomes bp / scaffold length) to place")
+    ap.add_argument("--contained-frac", type=float, default=0.9,
+                    help="a chromosome piece whose reference territory is >= this fraction "
+                         "covered by larger pieces on the same chromosome is treated as a "
+                         "contained (redundant) haplotig")
+    ap.add_argument("--demote-contained", dest="demote_contained", action="store_true",
+                    default=True, help="move contained pieces to unplaced (default)")
+    ap.add_argument("--no-demote-contained", dest="demote_contained", action="store_false",
+                    help="keep contained pieces as chromosomes but tag 'contained(chrK)'")
     ap.add_argument("--secondary-frac", type=float, default=0.2,
                     help="a 2nd chromosome contributing >= this share -> composite")
     ap.add_argument("--overlap-tol", type=int, default=0,
@@ -242,11 +302,22 @@ def main():
                     p[n] = {"class": "unplaced", "length": L, "aligned_frac": 0.0}
         else:
             ev = parse_paf(row["paf"], chrom_of)
+            # per-query chromosome-scale eligibility, same drop-off logic as the reference:
+            # only scaffolds in the query's own chromosome-scale set may claim a chromosome.
+            qset, _ = select_chromosome_set(
+                fai, a.min_scaffold_bp, a.chromosome_set_method,
+                a.dropoff_ratio, a.dropoff_min_frac)
+            eligible = {nm for nm, _ in qset}
             p = {}
             for n, L in fai:
-                info = classify(ev.get(n, {}), L, a.min_aligned_frac, a.secondary_frac)
+                if n in eligible:
+                    info = classify(ev.get(n, {}), L, a.min_aligned_frac, a.secondary_frac)
+                else:
+                    info = {"class": "unplaced", "aligned_frac": 0.0}
                 info["length"] = L
                 p[n] = info
+            # demote/flag redundant haplotigs contained within a larger piece
+            apply_containment(p, a.contained_frac, a.demote_contained)
         place[rid] = p
         pres, fused = set(), set()
         for info in p.values():
@@ -301,6 +372,7 @@ def main():
                 key = (0, k, part[n][k])
                 if k in overlap[n]:
                     flags.append("overlap")
+                flags += info.get("extra_flags", [])
             elif info["class"] == "composite":
                 toks = [f"chr{k}_{part[n][k]}" for k in info["members"]]
                 new = "+".join(toks)
@@ -321,7 +393,9 @@ def main():
                 new = f"unplaced_{u}"
                 orient, span = "fwd", "-"
                 key = (1, u, 0)
-                if info.get("aligned_frac", 0) > 0:
+                if info.get("contained_in") is not None:
+                    flags.append(f"contained(chr{info['contained_in']})")
+                elif info.get("aligned_frac", 0) > 0:
                     flags.append(f"low_cov({info['aligned_frac']:.2f})")
             out.append({"old": n, "new": new, "orient": orient, "length": info["length"],
                         "class": info["class"], "span": span,
@@ -352,6 +426,7 @@ def main():
         fh.write(f"# chromosome_set_flags\t{';'.join(chrom_meta['flags']) if chrom_meta['flags'] else '-'}\n")
         fh.write(f"# params\tmin_scaffold_bp={a.min_scaffold_bp}\t"
                  f"dropoff_ratio={a.dropoff_ratio}\tdropoff_min_frac={a.dropoff_min_frac}\t"
+                 f"contained_frac={a.contained_frac}\tdemote_contained={a.demote_contained}\t"
                  f"min_aligned_frac={a.min_aligned_frac}\t"
                  f"secondary_frac={a.secondary_frac}\n")
         fh.write("assembly\told_name\tnew_name\tclass\tlength\torient\tref_span\tflags\n")

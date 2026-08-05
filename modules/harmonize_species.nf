@@ -45,6 +45,8 @@ process HARMONIZE_SPECIES {
     def drop_ratio   = params.harmonize_dropoff_ratio ?: 2.0
     def drop_minfrac = params.harmonize_dropoff_min_frac ?: 0.5
     def min_frac     = params.harmonize_min_aligned_frac ?: 0.5
+    def contained_frac = params.harmonize_contained_frac ?: 0.9
+    def demote       = (params.harmonize_demote_contained == false) ? '--no-demote-contained' : '--demote-contained'
     def sec_frac     = params.harmonize_secondary_frac ?: 0.2
     def ref_pref     = params.harmonize_reference_ids ?: ''
     """
@@ -147,6 +149,7 @@ process HARMONIZE_SPECIES {
         --dropoff-ratio ${drop_ratio} \\
         --dropoff-min-frac ${drop_minfrac} \\
         --min-aligned-frac ${min_frac} \\
+        --contained-frac ${contained_frac} ${demote} \\
         --secondary-frac ${sec_frac} \\
         --outdir .
 
