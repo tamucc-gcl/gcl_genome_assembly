@@ -24,19 +24,31 @@ process CACTUS_PANGENOME {
     tag "taxid_${taxid}"
     label 'cactus_pangenome'
 
-    publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
+    // publish flat: cactus nests everything under out/; strip that prefix at publish time
+    // (leaves the workdir untouched, so the graph itself is never moved/rewritten).
+    publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode,
+        saveAs: { fn -> fn.startsWith('out/') ? fn.substring(4) : fn }
 
     input:
     tuple val(taxid), val(ref_name), val(names), path(fastas)
 
     output:
-    tuple val(taxid), path("out/*.gbz"),    emit: gbz
-    tuple val(taxid), path("out/*.og"),     emit: og,   optional: true
-    tuple val(taxid), path("out/*.gfa.gz"), emit: gfa,  optional: true
-    tuple val(taxid), path("out/*.vcf.gz"), emit: vcf,  optional: true
-    tuple val(taxid), path("seqfile.txt"),  emit: seqfile
-    path("out/**"),                         emit: all
-    path("versions.tsv"),                   emit: versions
+    // primary clip-graph handles (exact names -> single files, never the .full.* variants)
+    tuple val(taxid), path("out/${taxid}.gbz"),        emit: gbz
+    tuple val(taxid), path("out/${taxid}.og"),         emit: og
+    tuple val(taxid), path("out/${taxid}.hapl"),       emit: hapl
+    tuple val(taxid), path("out/${taxid}.snarls"),     emit: snarls
+    tuple val(taxid), path("out/${taxid}.gfa.gz"),     emit: gfa
+    tuple val(taxid), path("out/${taxid}.vcf.gz"),     emit: vcf
+    tuple val(taxid), path("out/${taxid}.vcf.gz.tbi"), emit: vcf_tbi
+    tuple val(taxid), path("out/${taxid}.chroms/*"),   emit: chrom_og
+    tuple val(taxid), path("out/${taxid}.viz/*"),      emit: viz
+    // catch-all: keeps + publishes everything cactus produced EXCEPT the construction scratch
+    // removed in-script (full graphs, HAL, GAF/PAF, SV graph, raw VCF, stats bundle, ...).
+    // '**' so future cactus outputs are retained automatically (general-purpose).
+    tuple val(taxid), path("out/**"),                  emit: all
+    tuple val(taxid), path("seqfile.txt"),             emit: seqfile
+    path("versions.tsv"),                              emit: versions
 
     script:
     def extra = params.pangenome_cactus_extra ?: ''
@@ -98,14 +110,22 @@ process CACTUS_PANGENOME {
         ${gpu} \\
         ${extra}
 
+    # ---- cull construction scratch (pre-join per-chromosome intermediates, superseded by
+    # the joined graph; the bulk of the file count) and the duplicate seqfile. Everything
+    # else cactus produced is kept and published (flattened) via the output block above.
+    rm -rf out/chrom-subproblems out/chrom-alignments
+    rm -f  out/seqfile.txt
+
     CV=\$(cactus --version 2>&1 | awk 'NR==1{print}')
     printf 'process\\ttool\\tversion\\n%s\\tcactus\\t%s\\n' "${task.process}" "\${CV}" > versions.tsv
     """
 
     stub:
     """
-    mkdir -p out
-    : > out/${taxid}.gbz
+    mkdir -p out out/${taxid}.chroms out/${taxid}.viz
+    for x in gbz og hapl snarls gfa.gz vcf.gz vcf.gz.tbi; do : > "out/${taxid}.\$x"; done
+    : > out/${taxid}.chroms/chr1_1.og
+    : > out/${taxid}.viz/chr1_1.viz.png
     : > seqfile.txt
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
