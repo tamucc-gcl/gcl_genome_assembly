@@ -73,9 +73,15 @@ workflow PANGENOME {
                 if( kept.size() < min_hap ) return []
                 def sampleOf = { String id -> id.replaceFirst(/_hap[0-9]+$/, '').replaceAll(/\./, '_') }
                 def hapOf    = { String id -> def m = (id =~ /_hap([0-9]+)$/); m ? m[0][1] : '0' }
+                def flat     = { String id -> id.replaceAll(/\./, '_') }   // full id, dots -> _
+                // cactus forbids a sample name from sharing a prefix with the reference, so
+                // the reference cannot be grouped with its own sibling haplotype. Assemblies
+                // from the reference's individual therefore get distinct FLAT names (full id);
+                // every other individual's haplotypes group as <individual>.<hap> (PanSN).
+                def refInd = sampleOf(ref_id)
                 def named = kept.collect { mm ->
-                    def id = mm.meta.id
-                    def nm = (id == ref_id) ? sampleOf(id) : "${sampleOf(id)}.${hapOf(id)}"
+                    def id  = mm.meta.id
+                    def nm  = (sampleOf(id) == refInd) ? flat(id) : "${sampleOf(id)}.${hapOf(id)}"
                     [name: nm, fa: mm.fa]
                 }
                 // key used for publishDir / --outName: sanitized species name from
@@ -84,7 +90,7 @@ workflow PANGENOME {
                 def label = (sp?.toString()?.trim())
                     ? sp.toString().trim().replaceAll(/[^A-Za-z0-9._-]+/, '_').replaceAll(/^_+|_+$/, '')
                     : taxid
-                return [ tuple(label, sampleOf(ref_id), named*.name, named*.fa) ]
+                return [ tuple(label, flat(ref_id), named*.name, named*.fa) ]
             }
 
         CACTUS_PANGENOME( ch_cactus_in )
