@@ -122,6 +122,9 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 include { FINAL_VIZ } from './workflows/final_viz.nf'
 include { FINAL_HIC_MAPS } from './workflows/final_hic_maps.nf'
 
+// Pangenome
+include { PANGENOME } from './workflows/pangenome.nf'
+
 /*
 ========================================================================================
     IMPORT MODULES

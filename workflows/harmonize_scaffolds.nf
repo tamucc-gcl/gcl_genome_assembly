@@ -38,6 +38,7 @@ workflow HARMONIZE_SCAFFOLDS {
         // pass-through: every assembly gets the sentinel, no barrier
         ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
         ch_report = Channel.empty()
+        ch_ref_id = Channel.empty()
     }
     else {
         // long-read candidates vs short-read (short-read never harmonized)
@@ -78,10 +79,13 @@ workflow HARMONIZE_SCAFFOLDS {
         ch_sr_out = ch_split.sr.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
 
         ch_out = ch_lr_out.mix( ch_sr_out )
+
+        ch_ref_id = HARMONIZE_SPECIES.out.reference_id.map { taxid, f -> tuple(taxid, f.text.trim()) }
     }
 
     emit:
     assemblies = ch_out      // tuple(meta, fasta, name_map|NO_HARMONIZE)
+    reference_id = ch_ref_id
     report     = ch_report
     versions   = ch_versions
 }

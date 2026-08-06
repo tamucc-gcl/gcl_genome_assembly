@@ -33,6 +33,7 @@ process HARMONIZE_SPECIES {
 
     output:
     tuple val(taxid), path("*.harmonized_name_map.tsv"), emit: name_maps
+    tuple val(taxid), path("${taxid}.reference_id.txt"), emit: reference_id
     path("*.harmonization_report.tsv"),                  emit: report
     path("*.reference_selection.tsv"),                   emit: reference_selection
     path("versions.tsv"),                                emit: versions
@@ -122,6 +123,7 @@ process HARMONIZE_SPECIES {
     if [ "\${AMB}" = "1" ]; then
         echo "[HARMONIZE taxid ${taxid}] WARNING: no clear chromosome-count consensus (even split at the median); reference chosen by N50 tie-break and may sit on a fused or fragmented frame. Inspect ${taxid}.reference_selection.tsv or pin a reference via harmonize_reference_ids." >&2
     fi
+    printf '%s\\n' "\${REF}" > ${taxid}.reference_id.txt
 
     # ------------------------------------------------------------------
     # align each non-reference assembly to the reference (query = 2nd arg,
