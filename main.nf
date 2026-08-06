@@ -963,9 +963,14 @@ workflow {
 
     // Pangenome graph (minigraph-cactus) per species, from the gated finalized assemblies.
     ch_finalized_with_fai = FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.fai)
+    // resolved organism name per taxid (RESOLVE_TAXONOMY -> ch_taxonomy; tax.name is the
+    // taxid-derived species, e.g. 373251 -> "Spratelloides delicatulus")
+    ch_species_by_taxid = ch_taxonomy.map { taxid, tax -> tuple(taxid.toString(), tax.name) }
+
     PANGENOME(
         ch_finalized_with_fai,
-        HARMONIZE_SCAFFOLDS.out.reference_id
+        HARMONIZE_SCAFFOLDS.out.reference_id,
+        ch_species_by_taxid
     )
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 

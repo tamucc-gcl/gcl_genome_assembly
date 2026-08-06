@@ -37,6 +37,7 @@ workflow PANGENOME {
     take:
     ch_finalized       // tuple(meta, fasta, fai)
     ch_reference_ids   // tuple(taxid, ref_id)
+    ch_species         // tuple(taxid, species_name)  resolved from the taxid (RESOLVE_TAXONOMY)
 
     main:
     ch_versions = Channel.empty()
@@ -62,10 +63,11 @@ workflow PANGENOME {
             }
             .groupTuple()
             .join(ch_reference_ids)
+            .join(ch_species)
 
         // gate + PanSN naming per species (flatMap: return [] to drop a species)
         ch_cactus_in = ch_metrics
-            .flatMap { taxid, members, ref_id ->
+            .flatMap { taxid, members, ref_id, species ->
                 def refm = members.find { it.meta.id == ref_id }
                 if( refm == null ) return []
                 def ref_chrom = (refm.cn ?: 1) as int
@@ -84,9 +86,9 @@ workflow PANGENOME {
                     def nm  = (sampleOf(id) == refInd) ? flat(id) : "${sampleOf(id)}.${hapOf(id)}"
                     [name: nm, fa: mm.fa]
                 }
-                // key used for publishDir / --outName: sanitized species name from
-                // meta.species, falling back to the taxid when species is unset
-                def sp    = refm.meta.species ?: members[0].meta.species
+                // key for publishDir / --outName: prefer the taxid-resolved species name
+                // (RESOLVE_TAXONOMY), then a sample-sheet meta.species, then the taxid
+                def sp    = species ?: refm.meta.species ?: members[0].meta.species
                 def label = (sp?.toString()?.trim())
                     ? sp.toString().trim().replaceAll(/[^A-Za-z0-9._-]+/, '_').replaceAll(/^_+|_+$/, '')
                     : taxid
