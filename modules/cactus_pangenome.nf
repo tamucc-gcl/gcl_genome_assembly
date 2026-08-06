@@ -41,6 +41,7 @@ process CACTUS_PANGENOME {
     tuple val(taxid), path("out/${taxid}.gfa.gz"),     emit: gfa
     tuple val(taxid), path("out/${taxid}.vcf.gz"),     emit: vcf
     tuple val(taxid), path("out/${taxid}.vcf.gz.tbi"), emit: vcf_tbi
+    tuple val(taxid), path("out/${taxid}.raw.vcf.gz"), emit: raw_vcf
     tuple val(taxid), path("out/${taxid}.chroms/*"),   emit: chrom_og
     tuple val(taxid), path("out/${taxid}.viz/*"),      emit: viz
     // catch-all: keeps + publishes everything cactus produced EXCEPT the construction scratch

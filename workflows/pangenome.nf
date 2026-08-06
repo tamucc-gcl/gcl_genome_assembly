@@ -30,7 +30,10 @@
 */
 
 include { CACTUS_PANGENOME } from '../modules/cactus_pangenome.nf'
-include { PANGENOME_STATS  } from '../modules/pangenome_stats.nf'
+include { PANGENOME_STATS     } from '../modules/pangenome_stats.nf'
+include { PANGENOME_REF_FASTA } from '../modules/pangenome_ref_fasta.nf'
+include { PANGENOME_VARIANTS  } from '../modules/pangenome_variants.nf'
+include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 
 workflow PANGENOME {
 
@@ -40,14 +43,22 @@ workflow PANGENOME {
     ch_species         // tuple(taxid, species_name)  resolved from the taxid (RESOLVE_TAXONOMY)
 
     main:
-    ch_versions = Channel.empty()
+    ch_versions  = Channel.empty()
+    ch_gbz       = Channel.empty()
+    ch_gfa       = Channel.empty()
+    ch_og        = Channel.empty()
+    ch_snarls    = Channel.empty()
+    ch_hapl      = Channel.empty()
+    ch_vcf       = Channel.empty()
+    ch_chrom_og  = Channel.empty()
+    ch_viz       = Channel.empty()
+    ch_ref_fasta = Channel.empty()
+    ch_variants  = Channel.empty()
+    ch_sv_sizes  = Channel.empty()
+    ch_manifest  = Channel.empty()
+    ch_stats     = Channel.empty()
 
-    if( !params.run_pangenome ) {
-        ch_gbz   = Channel.empty()
-        ch_vcf   = Channel.empty()
-        ch_stats = Channel.empty()
-    }
-    else {
+    if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
         def mult     = (params.pangenome_max_chrom_scaffold_mult ?: 3)
         def min_hap  = (params.pangenome_min_haplotypes ?: 2)
@@ -98,16 +109,58 @@ workflow PANGENOME {
         CACTUS_PANGENOME( ch_cactus_in )
         ch_versions = ch_versions.mix( CACTUS_PANGENOME.out.versions )
 
+        // graph statistics (clip graph)
         PANGENOME_STATS( CACTUS_PANGENOME.out.gbz.join( CACTUS_PANGENOME.out.og ) )
 
-        ch_gbz   = CACTUS_PANGENOME.out.gbz
-        ch_vcf   = CACTUS_PANGENOME.out.vcf
-        ch_stats = PANGENOME_STATS.out.vg_stats
+        // reference-path FASTA (needs the PanSN reference name from the cactus input)
+        ch_ref_name = ch_cactus_in.map { taxid, ref_name, names, fastas -> tuple(taxid, ref_name) }
+        PANGENOME_REF_FASTA( ch_ref_name.join( CACTUS_PANGENOME.out.gbz ) )
+
+        // variant catalog (SNP / indel / SV counts + SV size spectrum) from the raw VCF
+        PANGENOME_VARIANTS( CACTUS_PANGENOME.out.raw_vcf )
+        ch_versions = ch_versions.mix( PANGENOME_VARIANTS.out.versions )
+
+        // downstream manifest (role -> file) over the graph products
+        PANGENOME_MANIFEST(
+            CACTUS_PANGENOME.out.gbz
+                .join( CACTUS_PANGENOME.out.gfa )
+                .join( CACTUS_PANGENOME.out.og )
+                .join( CACTUS_PANGENOME.out.snarls )
+                .join( CACTUS_PANGENOME.out.hapl )
+                .join( PANGENOME_VARIANTS.out.vcf )
+                .join( PANGENOME_VARIANTS.out.tbi )
+                .join( PANGENOME_REF_FASTA.out.ref_fasta )
+                .join( PANGENOME_REF_FASTA.out.ref_fai )
+        )
+
+        ch_gbz       = CACTUS_PANGENOME.out.gbz
+        ch_gfa       = CACTUS_PANGENOME.out.gfa
+        ch_og        = CACTUS_PANGENOME.out.og
+        ch_snarls    = CACTUS_PANGENOME.out.snarls
+        ch_hapl      = CACTUS_PANGENOME.out.hapl
+        ch_vcf       = CACTUS_PANGENOME.out.vcf
+        ch_chrom_og  = CACTUS_PANGENOME.out.chrom_og
+        ch_viz       = CACTUS_PANGENOME.out.viz
+        ch_ref_fasta = PANGENOME_REF_FASTA.out.ref_fasta
+        ch_variants  = PANGENOME_VARIANTS.out.summary
+        ch_sv_sizes  = PANGENOME_VARIANTS.out.sv_sizes
+        ch_manifest  = PANGENOME_MANIFEST.out.manifest
+        ch_stats     = PANGENOME_STATS.out.vg_stats
     }
 
     emit:
-    gbz      = ch_gbz
-    vcf      = ch_vcf
-    stats    = ch_stats
-    versions = ch_versions
+    gbz       = ch_gbz          // graph + haplotype index (downstream mapping)
+    gfa       = ch_gfa          // interchange (panacus / Bandage / odgi)
+    og        = ch_og           // odgi graph (stats / report)
+    snarls    = ch_snarls       // bubbles (downstream vg call)
+    hapl      = ch_hapl         // haplotype-sampling index (downstream giraffe)
+    vcf       = ch_vcf          // decomposed variants vs reference
+    chrom_og  = ch_chrom_og     // per-chromosome odgi graphs (report)
+    viz       = ch_viz          // 1D odgi viz PNGs (report)
+    ref_fasta = ch_ref_fasta    // reference-path FASTA (downstream surjection)
+    variants  = ch_variants     // variant summary table (report)
+    sv_sizes  = ch_sv_sizes     // SV size spectrum (report)
+    manifest  = ch_manifest     // role -> file downstream manifest
+    stats     = ch_stats        // vg/odgi stats (report)
+    versions  = ch_versions
 }
