@@ -40,6 +40,9 @@ process CACTUS_PANGENOME {
 
     script:
     def extra = params.pangenome_cactus_extra ?: ''
+    // -gpu image runs KegAlign automatically; --gpu 1 pins it to the single requested GPU
+    // and --lastzMemory is the recommended cluster safeguard for the alignment jobs.
+    def gpu   = params.pangenome_use_gpu ? '--gpu 1 --lastzMemory 100G' : ''
     """
     set -euo pipefail
 
@@ -85,6 +88,7 @@ process CACTUS_PANGENOME {
         --odgi full clip \\
         --chrom-og full clip \\
         --maxCores ${task.cpus} \\
+        ${gpu} \\
         ${extra}
 
     CV=\$(cactus --version 2>&1 | awk 'NR==1{print}')

@@ -15,7 +15,7 @@
 
 process PANGENOME_STATS {
     tag "taxid_${taxid}"
-    label 'cactus_pangenome'
+    label 'cactus_tools'
 
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
