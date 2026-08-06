@@ -78,7 +78,13 @@ workflow PANGENOME {
                     def nm = (id == ref_id) ? sampleOf(id) : "${sampleOf(id)}.${hapOf(id)}"
                     [name: nm, fa: mm.fa]
                 }
-                return [ tuple(taxid, sampleOf(ref_id), named*.name, named*.fa) ]
+                // key used for publishDir / --outName: sanitized species name from
+                // meta.species, falling back to the taxid when species is unset
+                def sp    = refm.meta.species ?: members[0].meta.species
+                def label = (sp?.toString()?.trim())
+                    ? sp.toString().trim().replaceAll(/[^A-Za-z0-9._-]+/, '_').replaceAll(/^_+|_+$/, '')
+                    : taxid
+                return [ tuple(label, sampleOf(ref_id), named*.name, named*.fa) ]
             }
 
         CACTUS_PANGENOME( ch_cactus_in )

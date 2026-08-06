@@ -46,6 +46,13 @@ process CACTUS_PANGENOME {
     """
     set -euo pipefail
 
+    # cactus/Toil write config under ~/.toil and heavy scratch under TMPDIR. The container's
+    # inherited HOME (/home/<user>) and /tmp are not writable/roomy on the compute node, so
+    # point both at the Nextflow task dir (on /scratch): writable, discarded after the task.
+    export HOME="\$PWD"
+    export TMPDIR="\$PWD/tmp"
+    mkdir -p "\$TMPDIR"
+
     ids=(${names.join(' ')})
     fastas=(${fastas})
 
