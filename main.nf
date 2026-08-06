@@ -957,6 +957,18 @@ workflow {
     FINALIZE_ASSEMBLY(HARMONIZE_SCAFFOLDS.out.assemblies)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
+    // =========================================================================
+    //  PanGenome Assembly - combine all same species chromosome level assemblies into a pangenome
+    // =========================================================================
+
+    // Pangenome graph (minigraph-cactus) per species, from the gated finalized assemblies.
+    ch_finalized_with_fai = FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.fai)
+    PANGENOME(
+        ch_finalized_with_fai,
+        HARMONIZE_SCAFFOLDS.out.reference_id
+    )
+    ch_versions = ch_versions.mix(PANGENOME.out.versions)
+
     /*
     ========================================================================================
         STEP 14: Finalization

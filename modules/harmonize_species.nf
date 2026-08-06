@@ -179,6 +179,7 @@ process HARMONIZE_SPECIES {
     printf 'assembly\\told_name\\tnew_name\\tclass\\tlength\\torient\\tref_span\\tflags\\n' \\
         > "${taxid}.harmonization_report.tsv"
     printf 'id\\tn_chrom_scaffolds\\tscaffold_n50\\n' > "${taxid}.reference_selection.tsv"
+    printf 'id\\tn_chrom_scaffolds\\tscaffold_n50\\n' > "${taxid}.reference_selection.tsv"
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }
