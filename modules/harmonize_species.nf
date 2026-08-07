@@ -50,6 +50,8 @@ process HARMONIZE_SPECIES {
     def demote       = (params.harmonize_demote_contained == false) ? '--no-demote-contained' : '--demote-contained'
     def sec_frac     = params.harmonize_secondary_frac ?: 0.2
     def ref_pref     = params.harmonize_reference_ids ?: ''
+    def min_chrom_frac  = params.harmonize_min_chrom_frac ?: 0.1
+    def batch_consensus = (params.harmonize_batch_consensus == false) ? '--no-batch-consensus' : '--batch-consensus'
     """
     set -euo pipefail
 
@@ -153,6 +155,8 @@ process HARMONIZE_SPECIES {
         --min-aligned-frac ${min_frac} \\
         --contained-frac ${contained_frac} ${demote} \\
         --secondary-frac ${sec_frac} \\
+        --min-chrom-frac ${min_chrom_frac} \\
+        ${batch_consensus} \\
         --outdir .
 
     # ------------------------------------------------------------------

@@ -37,6 +37,7 @@ import argparse
 import csv
 import gzip
 import os
+import statistics
 import sys
 from collections import defaultdict
 from itertools import combinations
@@ -127,7 +128,8 @@ def classify(chr_ev, scaf_len, min_frac, sec_frac):
     }
 
 
-def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropoff_min_frac):
+def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropoff_min_frac,
+                          min_chrom_frac=0.0):
     """Pick the reference chromosome set (descending by length).
 
     method='threshold' -> every reference scaffold >= min_scaffold_bp.
@@ -137,6 +139,13 @@ def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropo
                           don't cut after a single dominant chromosome). The floor also
                           excludes deep-tail cuts. If no boundary reaches dropoff_ratio,
                           fall back to the plain threshold and flag it.
+
+    min_chrom_frac     -> relative-size guardrail: after the cut, drop any member shorter
+                          than this fraction of the median selected-chromosome length
+                          (0 disables). Chromosomes in a karyotype are within an order of
+                          magnitude of each other, so a member far below its peers is a
+                          fragment/haplotig pulled in when two adjacent size cliffs are
+                          near-equal, not a real chromosome.
 
     Returns (chrom_list, meta) where meta records method / n / cut ratio / genome fraction
     / flags so the choice is auditable in the report.
@@ -174,6 +183,18 @@ def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropo
             meta.update(method="threshold_fallback",
                         cut_ratio=(best_ratio if best_k is not None else None))
             meta["flags"].append("no_sharp_dropoff")
+
+    # relative-size guardrail: cs is sorted descending, so any member below the floor is a
+    # trailing tail -> trim it (it falls through to unplaced). Guards the near-equal-cliff
+    # case where a mid-sized scaffold gets pulled in as a spurious extra chromosome.
+    if min_chrom_frac and min_chrom_frac > 0 and len(cs) > 1:
+        med = statistics.median([L for _, L in cs])
+        floor = min_chrom_frac * med
+        kept = [(nm, L) for nm, L in cs if L >= floor]
+        n_trim = len(cs) - len(kept)
+        if n_trim > 0:
+            meta["flags"].append(f"size_floor_trimmed={n_trim}")
+            cs = kept
 
     meta["n_chrom"] = len(cs)
     meta["genome_fraction"] = sum(L for _, L in cs) / total
@@ -250,6 +271,17 @@ def main():
     ap.add_argument("--dropoff-min-frac", type=float, default=0.5,
                     help="cumulative genome fraction reached before a drop-off cut is "
                          "allowed (guards against cutting after a dominant chromosome)")
+    ap.add_argument("--min-chrom-frac", type=float, default=0.1,
+                    help="relative-size guardrail: drop a chromosome-set member shorter "
+                         "than this fraction of the median chromosome length (0 disables). "
+                         "Lower it for genomes with genuine small microchromosomes.")
+    ap.add_argument("--batch-consensus", dest="batch_consensus", action="store_true",
+                    help="when >=3 assemblies are present and a strict majority agree on a "
+                         "chromosome count below the reference's, demote the reference's "
+                         "smallest extra chromosomes to unplaced so refContigs match the "
+                         "batch (default on)")
+    ap.add_argument("--no-batch-consensus", dest="batch_consensus", action="store_false")
+    ap.set_defaults(batch_consensus=True)
     ap.add_argument("--min-aligned-frac", type=float, default=0.5,
                     help="min (aligned-to-chromosomes bp / scaffold length) to place")
     ap.add_argument("--contained-frac", type=float, default=0.9,
@@ -277,7 +309,28 @@ def main():
     ref_fai = read_fai(by_id[a.reference_id]["fai"])
     chrom, chrom_meta = select_chromosome_set(
         ref_fai, a.min_scaffold_bp, a.chromosome_set_method,
-        a.dropoff_ratio, a.dropoff_min_frac)
+        a.dropoff_ratio, a.dropoff_min_frac, a.min_chrom_frac)
+
+    # ---- per-query chromosome-scale sets (computed once; reused for eligibility below
+    # and for the batch-consensus check) ----
+    qset_by_id = {}
+    for rid, row in by_id.items():
+        if rid == a.reference_id:
+            continue
+        qfai = read_fai(row["fai"])
+        qcs, _ = select_chromosome_set(
+            qfai, a.min_scaffold_bp, a.chromosome_set_method,
+            a.dropoff_ratio, a.dropoff_min_frac, a.min_chrom_frac)
+        qset_by_id[rid] = {nm for nm, _ in qcs}
+
+    # per-assembly chromosome-scale scaffold counts (post size-floor) -> report audit.
+    # NB these are scaffold counts, so a chromosome split across two scaffolds counts twice;
+    # they are recorded for provenance, not used to decide the chromosome number (see below).
+    assembly_chrom_counts = {a.reference_id: len(chrom)}
+    for rid in by_id:
+        if rid != a.reference_id:
+            assembly_chrom_counts[rid] = len(qset_by_id[rid])
+
     chrom_of = {n: i for i, (n, _) in enumerate(chrom, start=1)}  # ref scaffold -> chr num
     n_chrom = len(chrom)
     if n_chrom == 0:
@@ -286,51 +339,81 @@ def main():
             f"chromosome-scale scaffolds; nothing will be placed. Lower --min-scaffold-bp "
             f"or use a chromosome-scale reference.\n")
 
-    # ---- resolve every assembly into placements ----
-    place = {}          # id -> {scaffold -> info}
-    present_chr = {}    # id -> set(chr nums present as a single primary)
-    fused_pairs = {}    # id -> set(frozenset({a,b}))
+    # ---- resolve every assembly into placements (reusable so we can re-place if the
+    # batch-consensus check trims a reference chromosome) ----
+    def place_all(chrom_of):
+        place, present_chr, fused_pairs = {}, {}, {}
+        for rid, row in by_id.items():
+            fai = read_fai(row["fai"])
+            if rid == a.reference_id:
+                p = {}
+                for n, L in fai:
+                    if n in chrom_of:
+                        k = chrom_of[n]
+                        p[n] = {"class": "chromosome", "primary": k, "members": [k],
+                                "tstart": {k: 0}, "tend": {k: L}, "orient": {k: "+"},
+                                "aligned_frac": 1.0, "length": L}
+                    else:
+                        p[n] = {"class": "unplaced", "length": L, "aligned_frac": 0.0}
+            else:
+                ev = parse_paf(row["paf"], chrom_of)
+                # per-query chromosome-scale eligibility: only scaffolds in the query's own
+                # chromosome-scale set may claim a chromosome.
+                eligible = qset_by_id[rid]
+                p = {}
+                for n, L in fai:
+                    if n in eligible:
+                        info = classify(ev.get(n, {}), L, a.min_aligned_frac, a.secondary_frac)
+                    else:
+                        info = {"class": "unplaced", "aligned_frac": 0.0}
+                    info["length"] = L
+                    p[n] = info
+                # demote/flag redundant haplotigs contained within a larger piece
+                apply_containment(p, a.contained_frac, a.demote_contained)
+            place[rid] = p
+            pres, fused = set(), set()
+            for info in p.values():
+                if info["class"] == "chromosome":
+                    pres.add(info["primary"])
+                elif info["class"] == "composite":
+                    for x, y in combinations(info["members"], 2):
+                        fused.add(frozenset((x, y)))
+            present_chr[rid] = pres
+            fused_pairs[rid] = fused
+        return place, present_chr, fused_pairs
 
-    for rid, row in by_id.items():
-        fai = read_fai(row["fai"])
-        if rid == a.reference_id:
-            p = {}
-            for n, L in fai:
-                if n in chrom_of:
-                    k = chrom_of[n]
-                    p[n] = {"class": "chromosome", "primary": k, "members": [k],
-                            "tstart": {k: 0}, "tend": {k: L}, "orient": {k: "+"},
-                            "aligned_frac": 1.0, "length": L}
-                else:
-                    p[n] = {"class": "unplaced", "length": L, "aligned_frac": 0.0}
-        else:
-            ev = parse_paf(row["paf"], chrom_of)
-            # per-query chromosome-scale eligibility, same drop-off logic as the reference:
-            # only scaffolds in the query's own chromosome-scale set may claim a chromosome.
-            qset, _ = select_chromosome_set(
-                fai, a.min_scaffold_bp, a.chromosome_set_method,
-                a.dropoff_ratio, a.dropoff_min_frac)
-            eligible = {nm for nm, _ in qset}
-            p = {}
-            for n, L in fai:
-                if n in eligible:
-                    info = classify(ev.get(n, {}), L, a.min_aligned_frac, a.secondary_frac)
-                else:
-                    info = {"class": "unplaced", "aligned_frac": 0.0}
-                info["length"] = L
-                p[n] = info
-            # demote/flag redundant haplotigs contained within a larger piece
-            apply_containment(p, a.contained_frac, a.demote_contained)
-        place[rid] = p
-        pres, fused = set(), set()
-        for info in p.values():
-            if info["class"] == "chromosome":
-                pres.add(info["primary"])
-            elif info["class"] == "composite":
-                for x, y in combinations(info["members"], 2):
-                    fused.add(frozenset((x, y)))
-        present_chr[rid] = pres
-        fused_pairs[rid] = fused
+    place, present_chr, fused_pairs = place_all(chrom_of)
+
+    # ---- batch consensus (>=3 assemblies): a real chromosome is corroborated by the batch
+    # -- some other assembly independently places a chromosome-scale scaffold on it. A
+    # reference chromosome with zero such support is reference-specific (a fragment/haplotig
+    # unique to the reference, e.g. one pulled in by a near-equal size cliff that the size
+    # floor didn't catch), so demote it to unplaced and re-place on the trimmed set. Demotes,
+    # never deletes; the sequence is retained as unplaced_N.
+    if a.batch_consensus and len(by_id) >= 3 and n_chrom > 0:
+        support = {k: 0 for k in chrom_of.values()}
+        for rid in by_id:
+            if rid == a.reference_id:
+                continue
+            for k in present_chr[rid]:
+                if k in support:
+                    support[k] += 1
+        unsupported = sorted(k for k, s in support.items() if s == 0)
+        if unsupported:
+            num_to_ref = {i: n for n, i in chrom_of.items()}
+            drop = {num_to_ref[k] for k in unsupported}
+            chrom = [(n, L) for (n, L) in chrom if n not in drop]
+            chrom_meta["flags"].append(
+                f"batch_consensus_demoted={len(unsupported)}"
+                f"(no_support_from_{len(by_id) - 1}_others)")
+            sys.stderr.write(
+                f"[harmonize {a.species}] batch-consensus: reference chromosome(s) "
+                f"{','.join('chr%d' % k for k in unsupported)} have no chromosome-scale "
+                f"support from any of the other {len(by_id) - 1} assemblies; demoting to "
+                f"unplaced.\n")
+            chrom_of = {n: i for i, (n, _) in enumerate(chrom, start=1)}
+            n_chrom = len(chrom)
+            place, present_chr, fused_pairs = place_all(chrom_of)
 
     def concordance(x, y):
         pair = frozenset((x, y))
@@ -429,9 +512,12 @@ def main():
         fh.write(f"# chromosome_set_flags\t{';'.join(chrom_meta['flags']) if chrom_meta['flags'] else '-'}\n")
         fh.write(f"# params\tmin_scaffold_bp={a.min_scaffold_bp}\t"
                  f"dropoff_ratio={a.dropoff_ratio}\tdropoff_min_frac={a.dropoff_min_frac}\t"
+                 f"min_chrom_frac={a.min_chrom_frac}\tbatch_consensus={a.batch_consensus}\t"
                  f"contained_frac={a.contained_frac}\tdemote_contained={a.demote_contained}\t"
                  f"min_aligned_frac={a.min_aligned_frac}\t"
                  f"secondary_frac={a.secondary_frac}\n")
+        fh.write("# assembly_chromosome_counts\t"
+                 + ";".join(f"{k}={v}" for k, v in assembly_chrom_counts.items()) + "\n")
         fh.write("assembly\told_name\tnew_name\tclass\tlength\torient\tref_span\tflags\n")
         for rid, out in results.items():
             for d in out:
