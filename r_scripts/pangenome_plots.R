@@ -46,6 +46,7 @@ read_int_keyed <- function(path) {
 # 1. coverage histogram -> growth/core curves + Heaps fit + CI band
 # ======================================================================================
 h_mat <- read_int_keyed(hist_f)
+if (!is.null(h_mat)) h_mat <- h_mat[h_mat[, 1] >= 1, , drop = FALSE]   # panacus emits a coverage-0 row; drop it (R is 1-indexed)
 growth_fit <- data.frame()
 
 if (!is.null(h_mat) && nrow(h_mat) >= 1) {
