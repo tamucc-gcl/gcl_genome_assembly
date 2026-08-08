@@ -34,6 +34,9 @@ include { PANGENOME_STATS     } from '../modules/pangenome_stats.nf'
 include { PANGENOME_REF_FASTA } from '../modules/pangenome_ref_fasta.nf'
 include { PANGENOME_VARIANTS  } from '../modules/pangenome_variants.nf'
 include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
+include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
+include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
+include { PANGENOME_2D_VIZ    } from '../modules/pangenome_2d_viz.nf'
 
 workflow PANGENOME {
 
@@ -57,6 +60,12 @@ workflow PANGENOME {
     ch_sv_sizes  = Channel.empty()
     ch_manifest  = Channel.empty()
     ch_stats     = Channel.empty()
+    ch_growth    = Channel.empty()
+    ch_growth_hist = Channel.empty()
+    ch_core_acc    = Channel.empty()
+    ch_figures     = Channel.empty()
+    ch_growth_fit  = Channel.empty()
+    ch_viz2d       = Channel.empty()
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
@@ -120,6 +129,34 @@ workflow PANGENOME {
         PANGENOME_VARIANTS( CACTUS_PANGENOME.out.raw_vcf )
         ch_versions = ch_versions.mix( PANGENOME_VARIANTS.out.versions )
 
+        // openness / growth (panacus on the finished clip GFA; workstream E)
+        if( params.pangenome_growth != false ) {
+            PANGENOME_GROWTH( CACTUS_PANGENOME.out.gfa )
+            ch_versions    = ch_versions.mix( PANGENOME_GROWTH.out.versions )
+            ch_growth      = PANGENOME_GROWTH.out.histgrowth
+            ch_growth_hist = PANGENOME_GROWTH.out.hist
+            ch_core_acc    = PANGENOME_GROWTH.out.core_accessory
+
+            // report figures: growth/core + Heaps + band (from the coverage histogram),
+            // SV size spectrum + variant-class bar (from the catalog) — workstream D
+            def plots_script = file("${projectDir}/r_scripts/pangenome_plots.R", checkIfExists: true)
+            PANGENOME_PLOTS(
+                PANGENOME_GROWTH.out.hist
+                    .join( PANGENOME_VARIANTS.out.sv_sizes )
+                    .join( PANGENOME_VARIANTS.out.summary ),
+                plots_script
+            )
+            ch_figures    = PANGENOME_PLOTS.out.figures
+            ch_growth_fit = PANGENOME_PLOTS.out.growth_fit
+        }
+
+        // 2D per-chromosome layout (odgi layout + draw; workstream D) — independent, gated
+        if( params.pangenome_2d_viz != false ) {
+            PANGENOME_2D_VIZ( CACTUS_PANGENOME.out.chrom_og )
+            ch_versions = ch_versions.mix( PANGENOME_2D_VIZ.out.versions )
+            ch_viz2d    = PANGENOME_2D_VIZ.out.png
+        }
+
         // downstream manifest (role -> file) over the graph products
         PANGENOME_MANIFEST(
             CACTUS_PANGENOME.out.gbz
@@ -162,5 +199,11 @@ workflow PANGENOME {
     sv_sizes  = ch_sv_sizes     // SV size spectrum (report)
     manifest  = ch_manifest     // role -> file downstream manifest
     stats     = ch_stats        // vg/odgi stats (report)
+    growth       = ch_growth        // panacus growth/core curves (report)
+    growth_hist  = ch_growth_hist   // panacus coverage histogram (report)
+    core_accessory = ch_core_acc    // core/accessory/private partition (report)
+    figures      = ch_figures       // rendered report PDFs (growth/SV/coverage/variants)
+    growth_fit   = ch_growth_fit    // machine-readable Heaps gamma / open-closed / sizes
+    viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     versions  = ch_versions
 }

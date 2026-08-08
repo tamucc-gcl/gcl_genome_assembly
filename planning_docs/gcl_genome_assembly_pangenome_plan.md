@@ -24,11 +24,11 @@ downstream index/file requirements). Report §7 maps each item to that report's 
 
 | Field | Value |
 |---|---|
-| Current phase | **Basic build working (2026-08-06).** `PANGENOME` subworkflow builds a Minigraph-Cactus graph end-to-end (validated: taxid 373251, 2 haplotypes, minigraph 271,543 events / 55 inversions, `vg`/`odgi` stats produced, outputs curated + flattened). Finalization workstreams A–G not started. |
-| Built so far | `PANGENOME` subworkflow (gate + PanSN + species label); `CACTUS_PANGENOME` (build + curate + flatten publish + GPU toggle); `PANGENOME_STATS` (vg/odgi stats, CPU); config params + singularity block + `cactus_pangenome`/`cactus_tools` labels; main.nf wiring; harmonization `reference_id` emit. |
-| Roadmap ahead | Workstreams A→G (see §5). Build order §8. Progressive rebuild is LAST and opt-in. |
-| Test data | **10 genomes** of *Spratelloides delicatulus* (clupeid fish, ~1 Gb, 15 chromosomes). At n=10 the growth/core/Heaps analysis becomes meaningful. |
-| Last updated | 2026-08-06 |
+| Current phase | **Workstreams A + B complete & validated (2026-08-08).** Full `PANGENOME` run finished end-to-end on the 4-assembly test (2 individuals: CMat_203 + CBau_104, both haplotypes) and produced the complete category-1/2/4 output set: curated+flattened graph bundle, reference FASTA, variant catalog, and downstream manifest. Built on the corrected **15-chromosome** reference (`chr1_1…chr15_1`, no spurious chr16). Workstreams C–H not started. |
+| Built so far | `PANGENOME` (gate + PanSN + species label, emits all 4 output categories); `CACTUS_PANGENOME` (build + curate + flatten + GPU toggle + `raw_vcf` handle); `PANGENOME_STATS` (vg/odgi, clip); **`PANGENOME_REF_FASTA`** (vg paths -F -S → reference.fa+.fai); **`PANGENOME_VARIANTS`** (vcfbub → SNP/indel/SV catalog + SV size spectrum); **`PANGENOME_MANIFEST`** (role→file TSV); config params + `pangenome_variants` label; main.nf wiring. Upstream: harmonization relative-size guardrail + batch-consensus check (produces the clean 15-chrom reference). |
+| Roadmap ahead | Workstreams E → C+D → F → H (see §5, build order §8). Progressive rebuild (H) is LAST and opt-in. |
+| Test data | **10 genomes** of *Spratelloides delicatulus* (clupeid fish, ~1 Gb, 15 chromosomes). Current validation used a 4-haplotype subset; the growth/core/Heaps analysis (E) becomes meaningful at the full n=10. |
+| Last updated | 2026-08-08 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
 
 ---
@@ -114,22 +114,26 @@ Four clean output categories (this *is* the generalization work — freeze this 
 
 ## 5. Workstreams
 
-### A. Downstream-ready outputs & manifest — `[TODO]` *(the reuse seam)*
-- [ ] Surface named handles through `PANGENOME` `emit:` (`gbz`, `hapl`, `snarls`, `gfa`, `og`,
-      `vcf`, `chrom_og`, `viz`) — already emitted by `CACTUS_PANGENOME`; add to the subworkflow emit block.
-- [ ] **Reference-path FASTA** — new step: `vg paths -x graph.gbz -F` (reference sample paths) →
-      `samtools faidx`. Needed downstream for surject-to-BAM and reference-based callers. Graph product.
-- [ ] **`pangenome_manifest.tsv`** — path · role · label for every downstream-relevant file.
-- [ ] Decision-6 confirmed: do NOT build `.dist`/`.min` here.
+### A. Downstream-ready outputs & manifest — `[DONE]` *(the reuse seam)* — validated 2026-08-08
+- [x] Surface named handles through `PANGENOME` `emit:` (`gbz`, `gfa`, `og`, `snarls`, `hapl`,
+      `vcf`, `chrom_og`, `viz`, `ref_fasta`, `variants`, `sv_sizes`, `manifest`, `stats`).
+- [x] **Reference-path FASTA** — `PANGENOME_REF_FASTA`: `vg paths -x gbz -F -S <ref>` → faidx →
+      `Spratelloides_delicatulus.reference.fa`(+.fai). Produced on the run. Downstream surjection seam.
+- [x] **`pangenome_manifest.tsv`** — `PANGENOME_MANIFEST`: role · file · label over gbz/gfa/og/
+      snarls/hapl/variants-vcf(+tbi)/reference-fa(+fai). Produced on the run.
+- [x] Decision-6 confirmed: `.dist`/`.min` NOT built here (left to the downstream mapping pipeline).
 
-### B. Descriptive statistics — Report Tier 1 — `[TODO]`
-- [ ] Parse `vg stats` / `odgi stats` (have) into the stats table (whole-genome + per chrom-og).
-- [ ] **Graph-size-vs-genome sanity** — compare graph bp to genome size (`ESTIMATE_GENOME_SIZE` /
-      assembly total); flag over-collapse / over-inflation.
-- [ ] **Variant catalog** — new process: `vcfbub` filter the decomposed VCF → classify SNP / indel
-      (<50 bp) / SV (≥50 bp) relative to the reference path → counts, **SV size spectra**, **SV type
-      breakdown** (ins/del/inv/dup). Env: `bcftools` + `vcflib`/`vcfbub`.
-- [ ] Non-reference/novel sequence + core/accessory partitioning — computed once in E (panacus).
+### B. Descriptive statistics — Report Tier 1 — `[WIP]` *(variant catalog done 2026-08-08)*
+- [x] **Variant catalog** — `PANGENOME_VARIANTS`: `vcfbub --max-level 0 --max-ref-length` from the
+      raw VCF → `bcftools norm -m -any` → length-classify SNP / indel (<`pangenome_sv_min_bp`) /
+      SV → `variant_summary.tsv` (counts), `sv_sizes.tsv` (SV size spectrum + INS/DEL/COMPLEX),
+      `variants.vcf.gz`(+tbi, the filtered catalog the manifest advertises). Produced on the run.
+      *(INV/DUP not separately typed — deferred realignment refinement.)*
+- [ ] Parse `vg stats` / `odgi stats` (produced: `vg_stats.txt`, `odgi_stats.txt`) into the report
+      stats table. **→ handled in the report step (F).**
+- [ ] **Graph-size-vs-genome sanity** — graph bp vs `ESTIMATE_GENOME_SIZE` / assembly total.
+      **→ handled in the report step (F).**
+- [ ] Non-reference/novel sequence + core/accessory partitioning — **computed in E (panacus).**
 
 ### C. Quality diagnostics — Report Tier 2 (**all default on**) — `[TODO]`
 - [ ] **Acyclicity** — `vg stats -A` (reference path acyclic/unclipped).
@@ -142,19 +146,31 @@ Four clean output categories (this *is* the generalization work — freeze this 
 - [ ] **Spurious-inversion cross-check** — cross-reference graph inversions (55 seen at n=2) against
       scaffold boundaries + harmonization composite/overlap flags; surface as a **flag table** (not auto-fix).
 
-### D. Visualizations — `[TODO]`
+### D. Visualizations — `[WIP]` *(2D layout + R figures built 2026-08-08)*
 - [x] 1D `odgi viz` (produced by cactus — have).
-- [ ] **2D layout** — `odgi layout` + `odgi draw` (whole-genome and/or per-chr).
-- [ ] Plot scripts (R, `r_scripts/` staged-script convention): **SV size histograms**,
-      **core/accessory U-curve**, **growth / Heaps curves**.
-- [ ] **Graph-derived PCA + NJ tree** from the decomposed VCF (bubble presence/absence). Default-on,
-      tolerant of small n (meaningful at n=10).
+- [x] **2D layout** — `PANGENOME_2D_VIZ`: per-chromosome `odgi layout` + `odgi draw` on the clip
+      per-chr graphs (best-effort; gated by `pangenome_2d_viz`, default on). Label `cactus_tools`.
+- [x] **R report figures** — `r_scripts/pangenome_plots.R` + `PANGENOME_PLOTS` (label
+      `pairwise_alignment`, ggplot2): growth/core curves with Heaps'-law fit **γ** and a
+      rarefaction (Coleman) confidence band + machine-readable `growth_fit.tsv`; coverage-histogram
+      core/accessory/private U-curve; **SV size histogram**; variant-class bar. All derived from the
+      coverage histogram + variant catalog (no fragile histgrowth parse). Verified rarefaction math
+      offline (core(N)=h(N); band ≈ hairline at bp scale, as expected).
+- [ ] **Graph-derived PCA + NJ tree** from the decomposed VCF — `[DEFERRED]`: degenerate at the
+      current n (2 samples / 4 haplotypes), needs a plink/ape env, and is arguably downstream-popgen
+      territory. Build at the full n=10, or hand to the mapping pipeline.
 
-### E. Openness / growth — Report Tier 3 (default via panacus) — `[TODO]`
-- [ ] **`PANGENOME_GROWTH`** — `panacus histgrowth` / `growth` on the final GFA → growth curve,
-      core curve, coverage histogram (core/accessory/private), **Heaps'-law exponent + permutation
-      band**, non-reference-sequence-by-haplotype-count. One cheap process; the headline n=10 result.
-      Env: `panacus`.
+### E. Openness / growth — Report Tier 3 (default via panacus) — `[WIP]` *(process built 2026-08-08)*
+- [x] **`PANGENOME_GROWTH`** — panacus on the finished clip GFA, `--groupby-haplotype`:
+      `histgrowth` (pangenome + core + soft-core curves, **exact expected = permutation-averaged**)
+      and `hist` (coverage histogram → core/accessory/private partition). Data only. Env: `panacus`
+      label (`bioconda::panacus`, no plotting deps). Awaiting run.
+- [ ] Confirm the panacus CLI flags on the installed version (`--groupby-haplotype`, `-c/-l/-q/-t`)
+      and the hist TSV column layout for `core_accessory.tsv`.
+- [ ] **Plotting + Heaps fit → workstream D (R):** styled growth/core plot with a thin rarefaction
+      band, coverage-histogram core/accessory bar, and the machine-readable γ + open/closed call,
+      all from the histgrowth TSV. (`panacus-visualize` is deprecated/removed-soon, so not used;
+      panacus `report` HTML is an optional standalone extra if wanted later.)
 
 ### F. Report fragment + main-report integration — `[TODO]`
 - [ ] **`PANGENOME_REPORT`** — R/RMarkdown render (reuse R report stack) taking the stats tables +
@@ -243,6 +259,29 @@ users can disable):**
 
 ## 10. Change Log
 
+- **2026-08-08** — **Workstream D built** (visualization). `PANGENOME_2D_VIZ` (per-chromosome
+  `odgi layout`+`draw`, best-effort, gated by `pangenome_2d_viz`). `r_scripts/pangenome_plots.R` +
+  `PANGENOME_PLOTS` (reuses `pairwise_alignment` R/ggplot2 env): growth/core curves + Heaps γ +
+  rarefaction confidence band + `growth_fit.tsv`, coverage-histogram U-curve, SV size histogram,
+  variant-class bar — all from the coverage histogram + variant catalog. Rarefaction math verified
+  offline. PCA/NJ tree deferred (degenerate at current n; downstream-flavored). Awaiting rerun. panacus `histgrowth` +
+  `hist` on the finished clip GFA, grouped by haplotype (PanSN). Emits growth/core curves,
+  coverage histogram, and the core/accessory/private partition (data only; plotting + Heaps fit
+  deferred to the R step in D — `panacus-visualize` is deprecated so unused). Wired into
+  `PANGENOME` (gated by `pangenome_growth`, default on). New `panacus` label (`bioconda::panacus`)
+  + `pangenome_growth_{count,coverage,quorum}` params. Awaiting run. (CMat_203 +
+  CBau_104, both haplotypes). Confirmed: output flattening (`saveAs` strips `out/`) and scratch
+  curation (chrom-subproblems / chrom-alignments removed); `PANGENOME_REF_FASTA`, `PANGENOME_VARIANTS`,
+  `PANGENOME_MANIFEST` all produced their outputs; clip-only `PANGENOME_STATS`; full graph bundle
+  retained (`.hal`/`.gaf`/`.paf`/`.sv.gfa`/`.raw.vcf`/`.stats.tgz`) per the general-purpose decision.
+  Graph built on the corrected **15-chromosome** reference. Marked A `[DONE]`, B variant-catalog done.
+- **2026-08-08** — Upstream fix that unblocked the clean reference: added a **relative-size guardrail**
+  (`--min-chrom-frac`, drop chromosome-set members below a fraction of the median chromosome length)
+  and a **batch-consensus check** (demote a reference chromosome with no chromosome-scale support from
+  any other assembly) to `harmonize_names.py`. Removed the spurious 3.75 Mb "chr16" from the reference
+  (a near-equal-size-cliff artifact); all four assemblies now resolve to 15 chromosomes.
+  *(Also diagnosed CBau chr4/chr7 as genuine fragmentation at collapsed repeats — not a reference
+  duplication and not a harmonizer bug; no action needed for the graph.)*
 - **2026-08-06** — Plan created. Basic build validated (taxid 373251, n=2). Decisions §3 locked:
   panacus-not-rebuild for curves; progressive opt-in + last; report in subworkflow, Markdown, reuse
   R stack, always-on; indexing deferred downstream; all QC default-on; short reads out of scope.
