@@ -101,18 +101,23 @@ workflow PANGENOME {
                 // from the reference's individual therefore get distinct FLAT names (full id);
                 // every other individual's haplotypes group as <individual>.<hap> (PanSN).
                 def refInd = sampleOf(ref_id)
+                def refName = flat(ref_id)
                 def named = kept.collect { mm ->
                     def id  = mm.meta.id
                     def nm  = (sampleOf(id) == refInd) ? flat(id) : "${sampleOf(id)}.${hapOf(id)}"
                     [name: nm, fa: mm.fa]
-                }
+                }.sort { a, b ->                          // deterministic order: reference first,
+                    def ra = (a.name == refName) ? 0 : 1  // then by name. groupTuple() emits members
+                    def rb = (b.name == refName) ? 0 : 1  // in task-completion order, so without this
+                    ra != rb ? ra <=> rb : a.name <=> b.name  // the val names/fastas hash unstably ->
+                }                                         // CACTUS_PANGENOME cache-misses every run.
                 // key for publishDir / --outName: prefer the taxid-resolved species name
                 // (RESOLVE_TAXONOMY), then a sample-sheet meta.species, then the taxid
                 def sp    = species ?: refm.meta.species ?: members[0].meta.species
                 def label = (sp?.toString()?.trim())
                     ? sp.toString().trim().replaceAll(/[^A-Za-z0-9._-]+/, '_').replaceAll(/^_+|_+$/, '')
                     : taxid
-                return [ tuple(label, flat(ref_id), named*.name, named*.fa) ]
+                return [ tuple(label, refName, named*.name, named*.fa) ]
             }
 
         CACTUS_PANGENOME( ch_cactus_in )
@@ -202,7 +207,7 @@ workflow PANGENOME {
     growth       = ch_growth        // panacus growth/core curves (report)
     growth_hist  = ch_growth_hist   // panacus coverage histogram (report)
     core_accessory = ch_core_acc    // core/accessory/private partition (report)
-    figures      = ch_figures       // rendered report PDFs (growth/SV/coverage/variants)
+    figures      = ch_figures       // rendered report PNGs (growth/SV/coverage/variants)
     growth_fit   = ch_growth_fit    // machine-readable Heaps gamma / open-closed / sizes
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     versions  = ch_versions

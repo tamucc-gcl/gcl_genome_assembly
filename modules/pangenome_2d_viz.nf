@@ -4,10 +4,12 @@
 ========================================================================================
     Repo location: modules/pangenome_2d_viz.nf
 
-    Per-chromosome 2D graph layout (odgi layout -> odgi draw) as a complement to the 1D
-    odgi viz that cactus already produces. Operates on the clip per-chromosome .og graphs.
-    Best-effort: any per-chromosome failure is skipped so it never breaks the pipeline
-    (odgi is in the cactus image; the 'png' output is optional).
+    Per-chromosome 2D graph layout (odgi sort -> odgi layout -> odgi draw) as a complement
+    to the 1D odgi viz that cactus already produces. Operates on the clip per-chromosome .og
+    graphs. odgi layout/draw need a sorted graph, so each chromosome is sorted on a throwaway
+    copy first (the sort is a viz concern, kept out of the build step). Best-effort: any
+    per-chromosome failure is skipped so it never breaks the pipeline (odgi is in the cactus
+    image; the 'png' output is optional).
 
     Gated by params.pangenome_2d_viz (default on). Layout is iterative (path-guided SGD),
     so cost grows with graph size — disable for very large runs if it dominates runtime.
@@ -38,9 +40,12 @@ process PANGENOME_2D_VIZ {
     for og in ${chrom_ogs}; do
         case "\$og" in *.full.og) continue;; esac        # clip per-chr graphs only
         base=\$(basename "\$og" .og)
-        odgi layout -i "\$og" -o "\$base.lay" -t ${task.cpus} -P || { echo "layout failed: \$base" >&2; continue; }
-        odgi draw   -i "\$og" -c "\$base.lay" -p "\$base.2D.png" -H 1500 || echo "draw failed: \$base" >&2
-        rm -f "\$base.lay"
+        # odgi layout/draw need a sorted (optimized) graph; cactus's .og is not sorted for
+        # 2D layout, so sort a throwaway copy first (path-guided SGD + groom + topological).
+        odgi sort   -i "\$og" -o "\$base.sorted.og" -p Ygs -t ${task.cpus} -P || { echo "sort failed: \$base"   >&2; continue; }
+        odgi layout -i "\$base.sorted.og" -o "\$base.lay" -t ${task.cpus} -P  || { echo "layout failed: \$base" >&2; rm -f "\$base.sorted.og"; continue; }
+        odgi draw   -i "\$base.sorted.og" -c "\$base.lay" -p "\$base.2D.png" -H 1500 || echo "draw failed: \$base" >&2
+        rm -f "\$base.sorted.og" "\$base.lay"
     done
 
     {
