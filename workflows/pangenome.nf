@@ -155,11 +155,16 @@ workflow PANGENOME {
             ch_growth_fit = PANGENOME_PLOTS.out.growth_fit
         }
 
-        // 2D per-chromosome layout (odgi layout + draw; workstream D) — independent, gated
+        // 2D per-chromosome layout (odgi; workstream D) — scatter so the ~25-min-per-chrom
+        // path-guided SGD layouts run in parallel rather than one long serial task
         if( params.pangenome_2d_viz != false ) {
-            PANGENOME_2D_VIZ( CACTUS_PANGENOME.out.chrom_og )
+            ch_chrom_scatter = CACTUS_PANGENOME.out.chrom_og
+                .flatMap { taxid, ogs ->
+                    ogs.findAll { !it.name.endsWith('.full.og') }.collect { og -> tuple(taxid, og) }
+                }
+            PANGENOME_2D_VIZ( ch_chrom_scatter )
             ch_versions = ch_versions.mix( PANGENOME_2D_VIZ.out.versions )
-            ch_viz2d    = PANGENOME_2D_VIZ.out.png
+            ch_viz2d    = PANGENOME_2D_VIZ.out.png.groupTuple()
         }
 
         // downstream manifest (role -> file) over the graph products
