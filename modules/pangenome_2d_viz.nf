@@ -46,9 +46,10 @@ process PANGENOME_2D_VIZ {
     set -euo pipefail
     export HOME="\$PWD"
 
-    # optimize node IDs (required by layout/draw index), then 2D layout + render
+    # optimize node IDs (required by layout/draw index), then 2D layout + render.
+    # -P prints layout progress (verbose in .command.err, but lets you monitor the ~25-min SGD)
     odgi sort   -i ${og} -o ${base}.sorted.og -O
-    odgi layout -i ${base}.sorted.og -o ${base}.lay -t ${task.cpus}
+    odgi layout -i ${base}.sorted.og -o ${base}.lay -t ${task.cpus} -P
     odgi draw   -i ${base}.sorted.og -c ${base}.lay -p ${base}.2D.png -H 1500
 
     rm -f ${base}.sorted.og ${base}.lay
