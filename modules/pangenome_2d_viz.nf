@@ -40,9 +40,10 @@ process PANGENOME_2D_VIZ {
     for og in ${chrom_ogs}; do
         case "\$og" in *.full.og) continue;; esac        # clip per-chr graphs only
         base=\$(basename "\$og" .og)
-        # odgi layout/draw need a sorted (optimized) graph; cactus's .og is not sorted for
-        # 2D layout, so sort a throwaway copy first (path-guided SGD + groom + topological).
-        odgi sort   -i "\$og" -o "\$base.sorted.og" -p Ygs -t ${task.cpus} -P || { echo "sort failed: \$base"   >&2; continue; }
+        # odgi layout/draw build an index that requires OPTIMIZED (contiguous) node IDs;
+        # cactus's .og is not, so optimize a throwaway copy first (odgi sort -O). layout
+        # then does its own 2D SGD from the optimized graph.
+        odgi sort   -i "\$og" -o "\$base.sorted.og" -O || { echo "sort failed: \$base"   >&2; continue; }
         odgi layout -i "\$base.sorted.og" -o "\$base.lay" -t ${task.cpus} -P  || { echo "layout failed: \$base" >&2; rm -f "\$base.sorted.og"; continue; }
         odgi draw   -i "\$base.sorted.og" -c "\$base.lay" -p "\$base.2D.png" -H 1500 || echo "draw failed: \$base" >&2
         rm -f "\$base.sorted.og" "\$base.lay"
