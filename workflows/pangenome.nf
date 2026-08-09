@@ -37,6 +37,7 @@ include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
 include { PANGENOME_2D_VIZ    } from '../modules/pangenome_2d_viz.nf'
+include { PANGENOME_QC        } from '../modules/pangenome_qc.nf'
 
 workflow PANGENOME {
 
@@ -66,6 +67,7 @@ workflow PANGENOME {
     ch_figures     = Channel.empty()
     ch_growth_fit  = Channel.empty()
     ch_viz2d       = Channel.empty()
+    ch_qc          = Channel.empty()
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
@@ -167,6 +169,17 @@ workflow PANGENOME {
             ch_viz2d    = PANGENOME_2D_VIZ.out.png.groupTuple()
         }
 
+        // graph-intrinsic quality diagnostics (workstream C, Tier 1) — all default on
+        if( params.pangenome_qc != false ) {
+            PANGENOME_QC(
+                CACTUS_PANGENOME.out.gbz
+                    .join( CACTUS_PANGENOME.out.og )
+                    .join( CACTUS_PANGENOME.out.gaf )
+            )
+            ch_versions = ch_versions.mix( PANGENOME_QC.out.versions )
+            ch_qc       = PANGENOME_QC.out.metrics
+        }
+
         // downstream manifest (role -> file) over the graph products
         PANGENOME_MANIFEST(
             CACTUS_PANGENOME.out.gbz
@@ -215,5 +228,6 @@ workflow PANGENOME {
     figures      = ch_figures       // rendered report PNGs (growth/SV/coverage/variants)
     growth_fit   = ch_growth_fit    // machine-readable Heaps gamma / open-closed / sizes
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
+    qc           = ch_qc            // graph-intrinsic QC metrics (report)
     versions  = ch_versions
 }

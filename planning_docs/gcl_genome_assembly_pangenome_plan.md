@@ -135,16 +135,29 @@ Four clean output categories (this *is* the generalization work — freeze this 
       **→ handled in the report step (F).**
 - [ ] Non-reference/novel sequence + core/accessory partitioning — **computed in E (panacus).**
 
-### C. Quality diagnostics — Report Tier 2 (**all default on**) — `[TODO]`
-- [ ] **Acyclicity** — `vg stats -A` (reference path acyclic/unclipped).
-- [ ] **Node-degree & node-depth** distributions — `odgi degree` / `odgi depth` (collapsed-repeat / tangle detection).
-- [ ] **Tangling / linearity** — `odgi stats` (mean links length, sum-of-path-node-distances) after sort/layout.
-- [ ] **Re-alignment edit rate** — parse from cactus logs / `.gaf` (graph faithfully represents inputs).
-- [ ] **BUSCO on the flattened graph FASTA** — completeness / duplication. Reuse the pipeline's BUSCO env.
-- [ ] **SV fidelity vs. orthogonal callers** — run SVIM-asm / SyRI on the all-vs-all minimap2
-      alignments already produced in `FINAL_VIZ`; intersect with graph SVs (concordance table).
-- [ ] **Spurious-inversion cross-check** — cross-reference graph inversions (55 seen at n=2) against
-      scaffold boundaries + harmonization composite/overlap flags; surface as a **flag table** (not auto-fix).
+### C. Quality diagnostics — Report Tier 2 (**all default on**) — `[WIP]` *(Tier 1 built 2026-08-08)*
+
+**Tier 1 — graph-intrinsic** (`PANGENOME_QC`, `cactus_tools`, gated `pangenome_qc`) — built, awaiting run:
+- [x] **Acyclicity** — `vg stats -A` on the `.gbz`. *(A pangenome with inversions is normally NOT
+      acyclic — informational.)*
+- [x] **Node degree / depth** — `odgi degree -S` / `odgi depth` summaries.
+- [x] **Tangling / linearity** — `odgi stats -l -s` after `odgi sort -O` (mean links length, sum of
+      path-node distances).
+- [x] **Re-alignment edit rate** — parsed from the cactus `.gaf` (identity = Σmatches/Σaln-length).
+      Highest-value fidelity metric. *(New `gaf` emit added to `CACTUS_PANGENOME`.)*
+- [ ] Verify vg/odgi flags against the installed versions (`vg stats -A`, `odgi degree -S`,
+      `odgi depth`, `odgi stats -l -s`) and finalize parsing of the linearity/degree/depth numbers
+      from `qc_raw.txt` into `qc_metrics.tsv` (metrics are best-effort with NA fallbacks + raw dump).
+
+**Tier 2 — extrinsic** (need inputs from other subworkflows + new tool envs) — `[TODO]`:
+- [ ] **BUSCO on the flattened graph** — `odgi flatten` → BUSCO (completeness / duplication).
+      Needs the BUSCO **lineage DB** wired into the pangenome subworkflow + the `busco` env.
+- [ ] **SV fidelity vs. orthogonal callers** — SVIM-asm / SyRI on the all-vs-all minimap2 from
+      `FINAL_VIZ`; intersect with graph SVs (concordance table). Needs the **all-vs-all PAFs** wired
+      in + a caller env. Most complex.
+- [ ] **Spurious-inversion cross-check** — graph inversions × scaffold boundaries × harmonization
+      composite/overlap flags → a **flag table** (not auto-fix). Needs the **harmonization name-map
+      flags** wired in.
 
 ### D. Visualizations — `[WIP]` *(2D layout + R figures built 2026-08-08)*
 - [x] 1D `odgi viz` (produced by cactus — have).
@@ -259,7 +272,35 @@ users can disable):**
 
 ## 10. Change Log
 
-- **2026-08-08** — **Workstream D built** (visualization). `PANGENOME_2D_VIZ` (per-chromosome
+- **2026-08-08** — **Workstream C Tier 1 built** (`PANGENOME_QC`, graph-intrinsic, gated
+  `pangenome_qc`, `cactus_tools`): acyclicity (`vg stats`), node degree/depth (`odgi`), linearity
+  (`odgi stats -l -s` after `odgi sort -O`), and **re-alignment edit rate** from the cactus `.gaf`
+  (the headline fidelity metric). Metrics are best-effort with NA fallbacks + a `qc_raw.txt` dump so
+  the process never fails on one uncertain flag; flags/parsing to be finalized against the first run.
+  Added a `gaf` emit to `CACTUS_PANGENOME` (output-only change — does not bust the cactus cache).
+  Tier 2 (BUSCO-on-graph, orthogonal SV validation, inversion cross-check) needs cross-subworkflow
+  wiring + new envs — outlined as the next sub-increment.
+  `odgi sort -O` (optimize node IDs) resolved the "graph not optimized" index error and layout
+  now runs. But the single task looped all 15 chromosomes serially (~25 min/chrom → ~6 h) and hit
+  the 4 h SLURM limit (exit 140). Refactored `PANGENOME_2D_VIZ` to take ONE chromosome; the
+  subworkflow scatters over the clip per-chrom `.og`s so the layouts run in parallel (~25 min each),
+  with `errorStrategy 'ignore'` + a 4 h per-task limit so a slow/oversized chromosome can't kill the
+  run. PNGs collected via `groupTuple`. (2D layout stays a viz-step concern; disable for very large
+  production runs if it dominates runtime.) `groupTuple()` emitted assemblies
+  in task-completion order, so the `val names` / `path fastas` inputs hashed unstably. The flatMap now
+  sorts them deterministically (reference first, then by name) — restores caching and makes the graph
+  build reproducible. NB this changes the input order once, so cactus rebuilds a single time on the next
+  run, then `-resume` skips it. Also added `odgi sort -O` (optimize node IDs — required by
+  `odgi layout`/`draw`'s index) before layout in `PANGENOME_2D_VIZ` (a viz-step concern, not in the
+  build). *(First tried `-p Ygs`; odgi requires the graph to be optimized before that pipeline's
+  index can build, so `-O` is the correct pre-step.)* panacus `histgrowth`/`hist` ran
+  (`--groupby-haplotype` → N=4), variant catalog + R figures produced. Coverage histogram: private
+  474.8 / accessory 224.7 / core 736.4 Mb (= 1.436 Gb graph); pangenome grows 999→1436 Mb; Heaps
+  γ≈0.26. Fixed one R bug: panacus emits a **coverage-0 row** which broke R's 1-indexed histogram
+  vector (shifted core/private) — `pangenome_plots.R` now drops coverage 0; awk `core_accessory.tsv`
+  was already correct. **Pending:** `PANGENOME_2D_VIZ` produced no PNGs (odgi layout/draw failed under
+  the best-effort guard — flag check needed); `panacus hist` format noted (coverage 0..N, col1=cov,
+  col2=bp, with a non-`#` `panacus hist` line + `count\tbp` header). `PANGENOME_2D_VIZ` (per-chromosome
   `odgi layout`+`draw`, best-effort, gated by `pangenome_2d_viz`). `r_scripts/pangenome_plots.R` +
   `PANGENOME_PLOTS` (reuses `pairwise_alignment` R/ggplot2 env): growth/core curves + Heaps γ +
   rarefaction confidence band + `growth_fit.tsv`, coverage-histogram U-curve, SV size histogram,
