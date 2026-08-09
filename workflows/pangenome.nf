@@ -38,6 +38,8 @@ include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
 include { PANGENOME_2D_VIZ    } from '../modules/pangenome_2d_viz.nf'
 include { PANGENOME_QC        } from '../modules/pangenome_qc.nf'
+include { PANGENOME_ODGI_STATS_MQC } from '../modules/pangenome_odgi_stats_mqc.nf'
+include { MULTIQC_PANGENOME   } from '../modules/multiqc_pangenome.nf'
 
 workflow PANGENOME {
 
@@ -68,6 +70,7 @@ workflow PANGENOME {
     ch_growth_fit  = Channel.empty()
     ch_viz2d       = Channel.empty()
     ch_qc          = Channel.empty()
+    ch_mqc         = Channel.empty()
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
@@ -180,6 +183,21 @@ workflow PANGENOME {
             ch_qc       = PANGENOME_QC.out.metrics
         }
 
+        // MultiQC report: odgi graph stats (whole + per-chrom) + bcftools variant stats
+        if( params.pangenome_multiqc != false ) {
+            PANGENOME_ODGI_STATS_MQC(
+                CACTUS_PANGENOME.out.og.join( CACTUS_PANGENOME.out.chrom_og )
+            )
+            ch_versions = ch_versions.mix( PANGENOME_ODGI_STATS_MQC.out.versions )
+
+            ch_mqc_in = PANGENOME_ODGI_STATS_MQC.out.yaml
+                .join( PANGENOME_VARIANTS.out.bcftools_stats )
+                .map { taxid, yamls, bcf -> tuple(taxid, [yamls, bcf].flatten()) }
+            MULTIQC_PANGENOME( ch_mqc_in )
+            ch_versions = ch_versions.mix( MULTIQC_PANGENOME.out.versions )
+            ch_mqc      = MULTIQC_PANGENOME.out.report
+        }
+
         // downstream manifest (role -> file) over the graph products
         PANGENOME_MANIFEST(
             CACTUS_PANGENOME.out.gbz
@@ -229,5 +247,6 @@ workflow PANGENOME {
     growth_fit   = ch_growth_fit    // machine-readable Heaps gamma / open-closed / sizes
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
+    multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)
     versions  = ch_versions
 }

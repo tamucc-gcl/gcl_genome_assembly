@@ -272,7 +272,16 @@ users can disable):**
 
 ## 10. Change Log
 
-- **2026-08-08** — **Workstream C Tier 1 built** (`PANGENOME_QC`, graph-intrinsic, gated
+- **2026-08-08** — **Pangenome MultiQC report added** (gated `pangenome_multiqc`, default on).
+  `PANGENOME_ODGI_STATS_MQC` (`cactus_tools`) emits `odgi stats -m -sgdl` YAMLs in the exact format
+  MultiQC's odgi module ingests — one whole-genome + one per chromosome (`*.og.stats.yaml`) → a
+  per-chromosome comparison of nodes/edges/paths/acyclicity/self-loops/composition/linearity.
+  `bcftools stats` on the filtered catalog added to `PANGENOME_VARIANTS` (MultiQC bcftools module).
+  `MULTIQC_PANGENOME` (`multiqc` label) aggregates both into `<taxid>_pangenome_multiqc.html`.
+  Reuses existing envs (multiqc/cactus_tools/pangenome_variants) — no new labels. Images (1D viz /
+  2D draw) can be folded in later via MultiQC custom-content; BUSCO-on-graph will slot in once wired.
+  *(Also: the `gaf` emit on `CACTUS_PANGENOME` was added last turn but not presented — that was the
+  `No such property: gaf` compile error; the corrected module is now provided.)*
   `pangenome_qc`, `cactus_tools`): acyclicity (`vg stats`), node degree/depth (`odgi`), linearity
   (`odgi stats -l -s` after `odgi sort -O`), and **re-alignment edit rate** from the cactus `.gaf`
   (the headline fidelity metric). Metrics are best-effort with NA fallbacks + a `qc_raw.txt` dump so

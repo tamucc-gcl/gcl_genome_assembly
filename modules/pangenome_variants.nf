@@ -33,6 +33,7 @@ process PANGENOME_VARIANTS {
     tuple val(taxid), path("${taxid}.variants.vcf.gz.tbi"), emit: tbi
     tuple val(taxid), path("${taxid}.variant_summary.tsv"), emit: summary
     tuple val(taxid), path("${taxid}.sv_sizes.tsv"),        emit: sv_sizes
+    tuple val(taxid), path("${taxid}.variants.bcftools_stats.txt"), emit: bcftools_stats
     path("versions.tsv"),                                   emit: versions
 
     script:
@@ -66,6 +67,9 @@ process PANGENOME_VARIANTS {
           if(!(rl==1 && al==1) && d>=minsv){ t=(al>rl?"INS":(rl>al?"DEL":"COMPLEX")); print d,t } }' \\
         refalt.tsv > ${taxid}.sv_sizes.tsv
 
+    # bcftools stats on the filtered catalog -> MultiQC bcftools module
+    bcftools stats ${taxid}.variants.vcf.gz > ${taxid}.variants.bcftools_stats.txt
+
     {
       printf 'process\\ttool\\tversion\\n'
       printf '%s\\tbcftools\\t%s\\n' "${task.process}" "\$(bcftools --version 2>&1 | awk 'NR==1{print \$2}')"
@@ -79,6 +83,7 @@ process PANGENOME_VARIANTS {
     : > ${taxid}.variants.vcf.gz.tbi
     printf 'class\\tcount\\n' > ${taxid}.variant_summary.tsv
     printf 'sv_size_bp\\tsv_type\\n' > ${taxid}.sv_sizes.tsv
+    : > ${taxid}.variants.bcftools_stats.txt
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }
