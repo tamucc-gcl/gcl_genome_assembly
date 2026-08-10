@@ -168,6 +168,7 @@ include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
+include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
 ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
@@ -954,6 +955,13 @@ workflow {
     HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script)
     ch_versions = ch_versions.mix(HARMONIZE_SCAFFOLDS.out.versions)
 
+    ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies
+        .map { meta, fa, nm -> nm }
+        .filter { nm -> !nm.name.startsWith('NO_') }
+        .collect()
+    COLLECT_NAME_MAPS( ch_name_map_files )
+    ch_name_map_for_report = COLLECT_NAME_MAPS.out.map.ifEmpty( file('NO_NAMEMAP') )
+
     FINALIZE_ASSEMBLY(HARMONIZE_SCAFFOLDS.out.assemblies)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
@@ -1225,6 +1233,7 @@ workflow {
         ch_pairwise_summary,
         ch_teloclip_stats_for_report,
         ch_pangenome_report_for_report,
+        ch_name_map_for_report,
         ch_versions,
         ch_summary_report_script
     )

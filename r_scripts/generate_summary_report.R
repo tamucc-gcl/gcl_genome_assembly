@@ -47,6 +47,7 @@ parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Con
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
 parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pangenome report fragment markdown (or NO_PANGENOME)")
+parser$add_argument("--name_map", default = "NO_NAMEMAP", help = "Harmonization name-map TSV (assembly/old_name/new_name) or NO_NAMEMAP")
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
@@ -1003,10 +1004,28 @@ if (has_teloclip) {
         )
       md <- c(md, make_markdown_table(tc_table), "")
 
+      # remap pre-harmonization scaffold_N -> final harmonized names (chrN_1 / unplaced_N)
+      nm_path <- args$name_map
+      have_nm <- !str_detect(basename(nm_path), "NO_NAMEMAP") &&
+                 file.exists(nm_path) && file.size(nm_path) > 0
+      nm <- if (have_nm) tryCatch(read_tsv(nm_path, show_col_types = FALSE),
+                                  error = function(e) NULL) else NULL
+
       tc_detail <- tc %>%
+        mutate(bare = str_remove(contig, paste0("^", haplotype_id, "_")))
+      if (!is.null(nm) && all(c("assembly", "old_name", "new_name") %in% names(nm))) {
+        tc_detail <- tc_detail %>%
+          left_join(nm %>% transmute(assembly, old_name, .full = new_name),
+                    by = c("haplotype_id" = "assembly", "contig" = "old_name")) %>%
+          left_join(nm %>% transmute(assembly, old_name, .barehit = new_name),
+                    by = c("haplotype_id" = "assembly", "bare" = "old_name")) %>%
+          mutate(bare = coalesce(.full, .barehit, bare)) %>%
+          select(-.full, -.barehit)
+      }
+      tc_detail <- tc_detail %>%
         transmute(
           Haplotype = haplotype_id,
-          Contig    = str_remove(contig, paste0("^", haplotype_id, "_")),
+          Contig    = bare,
           End       = end,
           `Extension (bp)` = comma(extension_length)
         ) %>%
