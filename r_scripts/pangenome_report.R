@@ -24,6 +24,7 @@ p$add_argument("--qc_metrics",      default = "NO_QC")
 p$add_argument("--growth_fit",      default = "NO_GROWTH")
 p$add_argument("--variant_summary", default = "NO_VARIANTS")
 p$add_argument("--graph_stats",     default = "NO_GRAPH")   # odgi stats -S text (length/nodes/edges/paths/steps)
+p$add_argument("--popstruct",       default = "NO_POPSTRUCT") # sentinel/indicator; PCA+NJ PNGs sit next to the other figures
 p$add_argument("--species",         default = "pangenome")
 p$add_argument("--output",          default = "pangenome_report.md")
 p$add_argument("--json",            default = "pangenome_stats.json")
@@ -108,6 +109,17 @@ if (length(gr) > 0) {
 # ---- structural variants figure -------------------------------------------------------
 add("### Structural variants", "",
     sprintf("![SV size spectrum](%s)", fig("sv_size_histogram.png")), "")
+
+# ---- population structure (PCA + NJ tree) ---------------------------------------------
+if (!is_missing(args$popstruct)) {
+  add("### Population structure", "",
+      sprintf(paste("Graph-derived PCA and neighbour-joining tree over the %s haplotypes,",
+                    "from the variant catalog. Degenerate at small n; interpretable at cohort scale."),
+              g(gr, "n_haplotypes", "sampled")),
+      "",
+      sprintf("![PCA](%s)", fig("pca.png")), "",
+      sprintf("![NJ tree](%s)", fig("njtree.png")), "")
+}
 
 # ---- graph quality --------------------------------------------------------------------
 if (length(qc) > 0) {

@@ -24,10 +24,10 @@ downstream index/file requirements). Report §7 maps each item to that report's 
 
 | Field | Value |
 |---|---|
-| Current phase | **Workstreams A + B complete & validated (2026-08-08).** Full `PANGENOME` run finished end-to-end on the 4-assembly test (2 individuals: CMat_203 + CBau_104, both haplotypes) and produced the complete category-1/2/4 output set: curated+flattened graph bundle, reference FASTA, variant catalog, and downstream manifest. Built on the corrected **15-chromosome** reference (`chr1_1…chr15_1`, no spurious chr16). Workstreams C–H not started. |
-| Built so far | `PANGENOME` (gate + PanSN + species label, emits all 4 output categories); `CACTUS_PANGENOME` (build + curate + flatten + GPU toggle + `raw_vcf` handle); `PANGENOME_STATS` (vg/odgi, clip); **`PANGENOME_REF_FASTA`** (vg paths -F -S → reference.fa+.fai); **`PANGENOME_VARIANTS`** (vcfbub → SNP/indel/SV catalog + SV size spectrum); **`PANGENOME_MANIFEST`** (role→file TSV); config params + `pangenome_variants` label; main.nf wiring. Upstream: harmonization relative-size guardrail + batch-consensus check (produces the clean 15-chrom reference). |
-| Roadmap ahead | Workstreams E → C+D → F → H (see §5, build order §8). Progressive rebuild (H) is LAST and opt-in. |
-| Test data | **10 genomes** of *Spratelloides delicatulus* (clupeid fish, ~1 Gb, 15 chromosomes). Current validation used a 4-haplotype subset; the growth/core/Heaps analysis (E) becomes meaningful at the full n=10. |
+| Current phase | **Core pangenome integration complete & validated (2026-08-08).** A (outputs/manifest), B (variant catalog), E (openness/growth), D (2D viz + R figures), C Tier 1 (graph-intrinsic QC), MultiQC (odgi + bcftools), and F (report fragment + §8 in the main report) all built and validated on the 4-assembly test. **Remaining:** C Tier 2 (inversion cross-check + orthogonal SV validation — deferred coupled unit), G (freeze/document params), H (progressive rebuild, opt-in, last). Deferred sub-items: BUSCO-on-graph, D's PCA/NJ tree. |
+| Built so far | `PANGENOME` subworkflow: `CACTUS_PANGENOME` (+gaf emit), `PANGENOME_STATS`, `PANGENOME_REF_FASTA`, `PANGENOME_VARIANTS` (+bcftools stats), `PANGENOME_MANIFEST`, `PANGENOME_GROWTH`, `PANGENOME_PLOTS` (+R), `PANGENOME_2D_VIZ` (scattered), `PANGENOME_QC`, `PANGENOME_ODGI_STATS_MQC`, `MULTIQC_PANGENOME`, `PANGENOME_REPORT` (+R, +main-report §8). Plus `COLLECT_NAME_MAPS` (teloclip remap). Caching fixed (deterministic cactus input order). |
+| Roadmap ahead | C Tier 2 (inversion + SV validation, coupled) → G (interface freeze + param docs) → H (progressive, opt-in). |
+| Test data | **10 genomes** of *Spratelloides delicatulus*. All modules validated at n=4 haplotypes; the full n=10 gives the real growth/openness numbers. |
 | Last updated | 2026-08-08 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
 
@@ -178,9 +178,14 @@ alignments and both need cross-subworkflow wiring (or duplicated alignment). Bes
       core/accessory/private U-curve; **SV size histogram**; variant-class bar. All derived from the
       coverage histogram + variant catalog (no fragile histgrowth parse). Verified rarefaction math
       offline (core(N)=h(N); band ≈ hairline at bp scale, as expected).
-- [ ] **Graph-derived PCA + NJ tree** from the decomposed VCF — `[DEFERRED]`: degenerate at the
-      current n (2 samples / 4 haplotypes), needs a plink/ape env, and is arguably downstream-popgen
-      territory. Build at the full n=10, or hand to the mapping pipeline.
+- [x] **Graph-derived per-haplotype ordination + NJ tree** — built 2026-08-08. `PANGENOME_PCA_NJ`
+      (`odgi similarity -D '#' -p 2 -d` → per-**haplotype** distance matrix, grouping the contig-paths
+      by PanSN haplotype so each haploid genome incl. the reference is one unit) → `PANGENOME_POPSTRUCT`
+      (`pangenome_popstruct.R`, base-R `cmdscale` PCoA + `ape::nj`) → PCoA scatter + NJ tree PNGs,
+      embedded in report §8 "Population structure". **Non-degenerate at the n=4 test** (4 haplotype
+      units), real figures. Gated `pangenome_popstruct`. Uses odgi (`cactus_tools`) + `r-ape` on
+      `pairwise_alignment` — no plink. *(NB the earlier plink-on-VCF design was wrong: the deconstruct
+      VCF has only 2 diploid samples and omits the reference → 2 points, not 4.)*
 
 ### E. Openness / growth — Report Tier 3 (default via panacus) — `[WIP]` *(process built 2026-08-08)*
 - [x] **`PANGENOME_GROWTH`** — panacus on the finished clip GFA, `--groupby-haplotype`:
@@ -201,10 +206,10 @@ alignments and both need cross-subworkflow wiring (or duplicated alignment). Bes
       (`pangenome_stats.json`). Gated `pangenome_report` (default on); robust to disabled sub-analyses
       via `NO_*` sentinels. Image paths written relative to outdir root so they resolve in the main report.
 - [x] **Standalone emit** — the fragment + JSON publish to `pangenome/<taxid>/`.
-- [ ] **Main report inclusion** — 4 edits to apply (delicate/large files): `generate_summary_report.R`
-      (`--pangenome_report` arg + `readLines` append before final write), `SUMMARY_REPORT` (input +
-      arg), `REPORTING` (take + pass-through), `main.nf` (`PANGENOME.out.report` → single path /
-      `NO_PANGENOME` sentinel → `REPORTING`). Pipelines without a pangenome are unaffected.
+- [x] **Main report inclusion** — validated 2026-08-08. `generate_summary_report.R` appends the
+      fragment (sentinel-guarded `readLines`), numbered **§8 Pangenome** with Methods → §9, TOC entry
+      added, all conditional on `has_pangenome` so non-pangenome runs render unchanged. Rendered
+      correctly in `assembly_report.md` (graph/variants/openness/QC tables + figures resolving).
 
 ### G. Packaging for reuse — `[TODO]`
 - [ ] Freeze the `PANGENOME` interface (take: finalized+fai, reference_id, species; emit: the four categories).
@@ -285,7 +290,20 @@ users can disable):**
 
 ## 10. Change Log
 
-- **2026-08-08** — **Workstream F fragment built** (`PANGENOME_REPORT` + `pangenome_report.R`, label
+- **2026-08-08** — **Per-haplotype ordination + NJ tree built** (workstream D). Initially designed on
+  plink-over-the-VCF, then corrected: the deconstruct VCF has only **2 diploid samples** (CBau's two
+  haplotypes collapsed to one; reference omitted) → would plot 2 points, not the 4 haplotypes wanted.
+  Rebuilt graph-native: `PANGENOME_PCA_NJ` (`cactus_tools`: `odgi similarity -D '#' -p 2 -d`, grouped
+  by PanSN haplotype → 4 units incl. reference) → `PANGENOME_POPSTRUCT` (`pairwise_alignment` + `r-ape`:
+  `pangenome_popstruct.R`, `cmdscale` PCoA + `ape::nj`) → PCoA scatter + NJ tree, report §8. Non-degenerate
+  at n=4. Gated `pangenome_popstruct` (default on). No plink env. (§8 Pangenome, Methods→§9, TOC
+  entry, figures resolving). Adjacent report fix surfaced by the test: the teloclip §6 table showed
+  pre-harmonization `scaffold_N` names (teloclip runs before `HARMONIZE_SCAFFOLDS`). Fixed via a new
+  `COLLECT_NAME_MAPS` module (merges the per-assembly `*.harmonized_name_map.tsv` already carried in
+  `HARMONIZE_SCAFFOLDS.out.assemblies`) routed through `REPORTING`→`SUMMARY_REPORT`→
+  `generate_summary_report.R`, which now left-joins the teloclip contig to the map (`{hap}_scaffold_N`
+  → `chrN_1`/`unplaced_N`), sentinel-guarded so non-harmonized runs are unchanged. Separately logged
+  teloclip over-aggressiveness (126 extensions vs 22 tidk telomeres) as future-projects §E — its own fix.
   `summarize_assembly`, gated `pangenome_report`). Reads qc_metrics + growth_fit + variant_summary +
   odgi graph stats → self-contained markdown section (`pangenome_report.md`) + stats JSON
   (`pangenome_stats.json`), robust to disabled sub-analyses via `NO_*` sentinels; image paths

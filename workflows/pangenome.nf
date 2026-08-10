@@ -41,6 +41,8 @@ include { PANGENOME_QC        } from '../modules/pangenome_qc.nf'
 include { PANGENOME_ODGI_STATS_MQC } from '../modules/pangenome_odgi_stats_mqc.nf'
 include { MULTIQC_PANGENOME   } from '../modules/multiqc_pangenome.nf'
 include { PANGENOME_REPORT    } from '../modules/pangenome_report.nf'
+include { PANGENOME_PCA_NJ    } from '../modules/pangenome_pca_nj.nf'
+include { PANGENOME_POPSTRUCT } from '../modules/pangenome_popstruct.nf'
 
 workflow PANGENOME {
 
@@ -73,6 +75,8 @@ workflow PANGENOME {
     ch_qc          = Channel.empty()
     ch_mqc         = Channel.empty()
     ch_report      = Channel.empty()
+    ch_pca_png     = Channel.empty()
+    ch_nj_png      = Channel.empty()
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
@@ -200,6 +204,19 @@ workflow PANGENOME {
             ch_mqc      = MULTIQC_PANGENOME.out.report
         }
 
+        // graph-derived population structure: per-haplotype PCoA + NJ tree from odgi
+        // similarity (grouped by PanSN haplotype -> 4 units incl. reference at the n=4 test,
+        // so it plots for real). Workstream D.
+        if( params.pangenome_popstruct != false ) {
+            PANGENOME_PCA_NJ( CACTUS_PANGENOME.out.og )
+            ch_versions = ch_versions.mix( PANGENOME_PCA_NJ.out.versions )
+
+            def popstruct_script = file("${projectDir}/r_scripts/pangenome_popstruct.R", checkIfExists: true)
+            PANGENOME_POPSTRUCT( PANGENOME_PCA_NJ.out.similarity, popstruct_script )
+            ch_pca_png = PANGENOME_POPSTRUCT.out.pca_png
+            ch_nj_png  = PANGENOME_POPSTRUCT.out.nj_png
+        }
+
         // pangenome report fragment + stats JSON (workstream F) — always on when built.
         // Base on the always-present variant summary; feed NO_* sentinels for any sub-analysis
         // that was disabled (the R script skips sentinels).
@@ -209,12 +226,14 @@ workflow PANGENOME {
                 .join( ch_qc,                          remainder: true )
                 .join( ch_growth_fit,                  remainder: true )
                 .join( PANGENOME_STATS.out.odgi_stats, remainder: true )
-                .map { taxid, vs, qc, gf, gs ->
+                .join( ch_pca_png,                     remainder: true )
+                .map { taxid, vs, qc, gf, gs, pca ->
                     tuple(taxid,
                           qc ?: file('NO_QC'),
                           gf ?: file('NO_GROWTH'),
                           vs ?: file('NO_VARIANTS'),
-                          gs ?: file('NO_GRAPH')) }
+                          gs ?: file('NO_GRAPH'),
+                          pca ?: file('NO_POPSTRUCT')) }
             PANGENOME_REPORT( ch_report_in, report_script )
             ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
             ch_report   = PANGENOME_REPORT.out.report
@@ -271,5 +290,7 @@ workflow PANGENOME {
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
     multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)
     report       = ch_report        // pangenome report fragment (markdown) for the main report
+    pca_png      = ch_pca_png        // graph-derived PCA scatter
+    nj_png       = ch_nj_png         // graph-derived NJ tree
     versions  = ch_versions
 }
