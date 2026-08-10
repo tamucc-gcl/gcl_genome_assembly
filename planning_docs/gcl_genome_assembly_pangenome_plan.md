@@ -137,27 +137,36 @@ Four clean output categories (this *is* the generalization work — freeze this 
 
 ### C. Quality diagnostics — Report Tier 2 (**all default on**) — `[WIP]` *(Tier 1 built 2026-08-08)*
 
-**Tier 1 — graph-intrinsic** (`PANGENOME_QC`, `cactus_tools`, gated `pangenome_qc`) — built, awaiting run:
-- [x] **Acyclicity** — `vg stats -A` on the `.gbz`. *(A pangenome with inversions is normally NOT
-      acyclic — informational.)*
-- [x] **Node degree / depth** — `odgi degree -S` / `odgi depth` summaries.
-- [x] **Tangling / linearity** — `odgi stats -l -s` after `odgi sort -O` (mean links length, sum of
-      path-node distances).
-- [x] **Re-alignment edit rate** — parsed from the cactus `.gaf` (identity = Σmatches/Σaln-length).
-      Highest-value fidelity metric. *(New `gaf` emit added to `CACTUS_PANGENOME`.)*
-- [ ] Verify vg/odgi flags against the installed versions (`vg stats -A`, `odgi degree -S`,
-      `odgi depth`, `odgi stats -l -s`) and finalize parsing of the linearity/degree/depth numbers
-      from `qc_raw.txt` into `qc_metrics.tsv` (metrics are best-effort with NA fallbacks + raw dump).
+**Tier 1 — graph-intrinsic** (`PANGENOME_QC`, `cactus_tools`, gated `pangenome_qc`) — `[DONE]` validated 2026-08-08:
+- [x] **Acyclicity** — `vg stats -A` → cyclic (expected with inversions — informational).
+- [x] **Node degree / depth** — `odgi degree -S` (avg 2.73 / max 8) / `odgi depth`.
+- [x] **Tangling / linearity** — `odgi stats -l -s` after `odgi sort -O` (mean_links_length 81.46,
+      sum_path_node_dist 9.42).
+- [x] **Re-alignment edit rate** — cactus `.gaf`: edit_rate 0.051 / graph_identity 0.949 / realigned
+      4.27 Gb. *(Minigraph-GAF fidelity — coarse; a base-level metric would re-align to the GBZ.)*
+- [x] Flags/parsing finalized: `vg stats -A` OK; awk `%d`→`%.0f` (INT_MAX fix); `all_paths`-row parse
+      for linearity; odgi `-m` needs separate flags + `odgi sort -O` (compacted node IDs).
+
+**Pangenome MultiQC** (`PANGENOME_ODGI_STATS_MQC` + `MULTIQC_PANGENOME`, gated `pangenome_multiqc`)
+— `[DONE]` validated 2026-08-08: odgi module (whole + 15 per-chrom `*.og.stats.yaml`) + bcftools
+module (`bcftools stats` on the catalog) → `<taxid>_pangenome_multiqc.html`. Reuses existing envs.
 
 **Tier 2 — extrinsic** (need inputs from other subworkflows + new tool envs) — `[TODO]`:
-- [ ] **BUSCO on the flattened graph** — `odgi flatten` → BUSCO (completeness / duplication).
-      Needs the BUSCO **lineage DB** wired into the pangenome subworkflow + the `busco` env.
-- [ ] **SV fidelity vs. orthogonal callers** — SVIM-asm / SyRI on the all-vs-all minimap2 from
-      `FINAL_VIZ`; intersect with graph SVs (concordance table). Needs the **all-vs-all PAFs** wired
-      in + a caller env. Most complex.
+- [DEFERRED] **BUSCO on the flattened graph** — skipped for now (may revisit). Flattened graph inlines
+  alt alleles (corrupts gene models); reference-path BUSCO is identical to the reference assembly
+  BUSCO already computed → redundant. The per-haplotype assembly BUSCOs remain the authoritative
+  completeness figures. *(If revisited: `odgi flatten` → BUSCO as a caveated sanity-check; needs the
+  `ch_busco_db` lineage-map threaded into `PANGENOME` + `params.busco_downloads`.)*
 - [ ] **Spurious-inversion cross-check** — graph inversions × scaffold boundaries × harmonization
-      composite/overlap flags → a **flag table** (not auto-fix). Needs the **harmonization name-map
-      flags** wired in.
+      composite/overlap flags → a **flag table** (not auto-fix). Cleaner, non-redundant signal.
+      Inversion source = reverse-strand blocks in reference-vs-haplotype alignments (either wire the
+      `FINAL_VIZ` all-vs-all PAFs in, or recompute self-contained from `ch_finalized`).
+- [ ] **SV fidelity vs. orthogonal callers** — SVIM-asm / SyRI on the all-vs-all minimap2 from
+      `FINAL_VIZ`; intersect with graph SVs (concordance table). Needs the all-vs-all PAFs wired in +
+      a caller env. Most work. *(Overlaps the inversion check — both consume the pairwise alignments.)*
+
+**NB** both remaining Tier 2 items are a coupled unit: they share the reference-vs-haplotype pairwise
+alignments and both need cross-subworkflow wiring (or duplicated alignment). Best tackled together.
 
 ### D. Visualizations — `[WIP]` *(2D layout + R figures built 2026-08-08)*
 - [x] 1D `odgi viz` (produced by cactus — have).
@@ -185,13 +194,17 @@ Four clean output categories (this *is* the generalization work — freeze this 
       all from the histgrowth TSV. (`panacus-visualize` is deprecated/removed-soon, so not used;
       panacus `report` HTML is an optional standalone extra if wanted later.)
 
-### F. Report fragment + main-report integration — `[TODO]`
-- [ ] **`PANGENOME_REPORT`** — R/RMarkdown render (reuse R report stack) taking the stats tables +
-      all figures → **self-contained Markdown section** + **stats JSON**. Always on when a pangenome is built.
-- [ ] **Standalone emit** — the fragment renders/exports on its own (own `.md` / rendered doc).
-- [ ] **Main report inclusion** — `reporting.nf` / `generate_summary_report.R` detects the fragment
-      (sentinel like the `NO_TELOCLIP` pattern) and includes it (knitr child) if present; pipelines
-      without a pangenome are unaffected.
+### F. Report fragment + main-report integration — `[WIP]` *(fragment built 2026-08-08)*
+- [x] **`PANGENOME_REPORT`** — `r_scripts/pangenome_report.R` (label `summarize_assembly`): reads
+      qc_metrics + growth_fit + variant_summary + odgi graph stats → **self-contained markdown
+      section** (`pangenome_report.md`, same `c(md, ...)` style as the main report) + **stats JSON**
+      (`pangenome_stats.json`). Gated `pangenome_report` (default on); robust to disabled sub-analyses
+      via `NO_*` sentinels. Image paths written relative to outdir root so they resolve in the main report.
+- [x] **Standalone emit** — the fragment + JSON publish to `pangenome/<taxid>/`.
+- [ ] **Main report inclusion** — 4 edits to apply (delicate/large files): `generate_summary_report.R`
+      (`--pangenome_report` arg + `readLines` append before final write), `SUMMARY_REPORT` (input +
+      arg), `REPORTING` (take + pass-through), `main.nf` (`PANGENOME.out.report` → single path /
+      `NO_PANGENOME` sentinel → `REPORTING`). Pipelines without a pangenome are unaffected.
 
 ### G. Packaging for reuse — `[TODO]`
 - [ ] Freeze the `PANGENOME` interface (take: finalized+fai, reference_id, species; emit: the four categories).
@@ -272,7 +285,23 @@ users can disable):**
 
 ## 10. Change Log
 
-- **2026-08-08** — **Pangenome MultiQC report added** (gated `pangenome_multiqc`, default on).
+- **2026-08-08** — **Workstream F fragment built** (`PANGENOME_REPORT` + `pangenome_report.R`, label
+  `summarize_assembly`, gated `pangenome_report`). Reads qc_metrics + growth_fit + variant_summary +
+  odgi graph stats → self-contained markdown section (`pangenome_report.md`) + stats JSON
+  (`pangenome_stats.json`), robust to disabled sub-analyses via `NO_*` sentinels; image paths
+  relative to outdir root. Wired into `PANGENOME` (base on the always-present variant summary,
+  remainder-join the rest with sentinel fallback). Main-report inclusion is 4 documented edits to
+  `generate_summary_report.R` / `SUMMARY_REPORT` / `REPORTING` / `main.nf` (sentinel + `readLines`
+  append), left for the user to apply since those files are delicate/large. `PANGENOME_QC`
+  works: `vg stats -A` → cyclic (expected), edit_rate 0.051 / graph_identity 0.949, and the odgi
+  linearity/degree output is correct. Fixed: (1) `realigned_bp` hit INT_MAX — awk `printf %d` 32-bit
+  overflow → `%.0f`; (2) `mean_links_length`/`sum_path_node_dist` were NA — values sit on the
+  `all_paths` row, not the header → proper awk parse, and added `avg_node_degree` (2.73) /
+  `max_node_degree` (8). (3) The odgi `.og.stats.yaml` files were **empty** — this odgi build rejects
+  bundled short flags, so `odgi stats -m -sgdl` produced nothing; separated to `-m -s -g -d -l`.
+  NB the edit_rate/identity is the **minigraph-GAF** re-alignment (coarse fidelity ≈ base divergence
+  + small indels), not full base-level graph accuracy — 94.9% is reasonable for 2 divergent
+  individuals + fragmented assemblies; a stricter metric would re-align inputs to the full GBZ (heavier).
   `PANGENOME_ODGI_STATS_MQC` (`cactus_tools`) emits `odgi stats -m -sgdl` YAMLs in the exact format
   MultiQC's odgi module ingests — one whole-genome + one per chromosome (`*.og.stats.yaml`) → a
   per-chromosome comparison of nodes/edges/paths/acyclicity/self-loops/composition/linearity.

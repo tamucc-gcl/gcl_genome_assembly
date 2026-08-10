@@ -40,6 +40,7 @@ include { PANGENOME_2D_VIZ    } from '../modules/pangenome_2d_viz.nf'
 include { PANGENOME_QC        } from '../modules/pangenome_qc.nf'
 include { PANGENOME_ODGI_STATS_MQC } from '../modules/pangenome_odgi_stats_mqc.nf'
 include { MULTIQC_PANGENOME   } from '../modules/multiqc_pangenome.nf'
+include { PANGENOME_REPORT    } from '../modules/pangenome_report.nf'
 
 workflow PANGENOME {
 
@@ -71,6 +72,7 @@ workflow PANGENOME {
     ch_viz2d       = Channel.empty()
     ch_qc          = Channel.empty()
     ch_mqc         = Channel.empty()
+    ch_report      = Channel.empty()
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
@@ -198,6 +200,26 @@ workflow PANGENOME {
             ch_mqc      = MULTIQC_PANGENOME.out.report
         }
 
+        // pangenome report fragment + stats JSON (workstream F) — always on when built.
+        // Base on the always-present variant summary; feed NO_* sentinels for any sub-analysis
+        // that was disabled (the R script skips sentinels).
+        if( params.pangenome_report != false ) {
+            def report_script = file("${projectDir}/r_scripts/pangenome_report.R", checkIfExists: true)
+            ch_report_in = PANGENOME_VARIANTS.out.summary
+                .join( ch_qc,                          remainder: true )
+                .join( ch_growth_fit,                  remainder: true )
+                .join( PANGENOME_STATS.out.odgi_stats, remainder: true )
+                .map { taxid, vs, qc, gf, gs ->
+                    tuple(taxid,
+                          qc ?: file('NO_QC'),
+                          gf ?: file('NO_GROWTH'),
+                          vs ?: file('NO_VARIANTS'),
+                          gs ?: file('NO_GRAPH')) }
+            PANGENOME_REPORT( ch_report_in, report_script )
+            ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
+            ch_report   = PANGENOME_REPORT.out.report
+        }
+
         // downstream manifest (role -> file) over the graph products
         PANGENOME_MANIFEST(
             CACTUS_PANGENOME.out.gbz
@@ -248,5 +270,6 @@ workflow PANGENOME {
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
     multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)
+    report       = ch_report        // pangenome report fragment (markdown) for the main report
     versions  = ch_versions
 }

@@ -81,6 +81,7 @@ workflow REPORTING {
     ch_telomere_for_report         //  FINAL_VIZ.out.telomere_summary
     ch_pairwise_summary            //  FINAL_VIZ.out.pairwise_summary
     ch_teloclip_stats_for_report   //  COLLECT_TELOCLIP_STATS.out.stats | NO_TELOCLIP
+    ch_pangenome_report            //  PANGENOME.out.report | NO_PANGENOME
     ch_versions                    //  accumulated versions channel (already fully mixed in main)
     ch_summary_report_script       //  file: r_scripts/generate_summary_report.R
 

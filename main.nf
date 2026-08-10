@@ -974,6 +974,10 @@ workflow {
     )
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 
+    ch_pangenome_report_for_report = PANGENOME.out.report
+        .map { taxid, md -> md }
+        .ifEmpty( file('NO_PANGENOME') )
+
     /*
     ========================================================================================
         STEP 14: Finalization

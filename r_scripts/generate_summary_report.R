@@ -46,6 +46,7 @@ parser$add_argument("--flag_size_pct", default = 0, type = "double", help = "Sta
 parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Configured BUSCO fallback lineage (params.busco_lineage), for provenance flagging")
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
+parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pangenome report fragment markdown (or NO_PANGENOME)")
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
