@@ -8,8 +8,10 @@
     matrix, via r_scripts/pangenome_popstruct.R. One point / one leaf per haplotype (incl.
     the reference). Always emits both PNGs (a labelled placeholder only if < 3 haplotypes).
 
-    Dedicated 'pangenome_popstruct' env (r-base + r-ggplot2 + r-ape; cmdscale is base R) so
-    adding ape does not bust the shared 'pairwise_alignment' cache (riparian/dotplot/plots).
+    Dedicated 'pangenome_popstruct' env (r-base + r-ggplot2 + r-ape + r-ggrepel; cmdscale is
+    base R) so adding these does not bust the shared 'pairwise_alignment' cache. Labels are
+    shortened (drop 'Sde-' prefix, collapse '_dip_hapN#0' to '#N') and repelled (ggrepel) so
+    they neither overlap nor run off the page.
 
     Input : tuple(taxid, similarity_tsv), popstruct_script
     Output: pca_png (PCoA) / nj_png
