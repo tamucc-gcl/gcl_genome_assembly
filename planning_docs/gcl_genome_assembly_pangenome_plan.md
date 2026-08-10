@@ -24,9 +24,9 @@ downstream index/file requirements). Report §7 maps each item to that report's 
 
 | Field | Value |
 |---|---|
-| Current phase | **Core pangenome integration complete & validated (2026-08-08).** A (outputs/manifest), B (variant catalog), E (openness/growth), D (2D viz + R figures), C Tier 1 (graph-intrinsic QC), MultiQC (odgi + bcftools), and F (report fragment + §8 in the main report) all built and validated on the 4-assembly test. **Remaining:** C Tier 2 (inversion cross-check + orthogonal SV validation — deferred coupled unit), G (freeze/document params), H (progressive rebuild, opt-in, last). Deferred sub-items: BUSCO-on-graph, D's PCA/NJ tree. |
-| Built so far | `PANGENOME` subworkflow: `CACTUS_PANGENOME` (+gaf emit), `PANGENOME_STATS`, `PANGENOME_REF_FASTA`, `PANGENOME_VARIANTS` (+bcftools stats), `PANGENOME_MANIFEST`, `PANGENOME_GROWTH`, `PANGENOME_PLOTS` (+R), `PANGENOME_2D_VIZ` (scattered), `PANGENOME_QC`, `PANGENOME_ODGI_STATS_MQC`, `MULTIQC_PANGENOME`, `PANGENOME_REPORT` (+R, +main-report §8). Plus `COLLECT_NAME_MAPS` (teloclip remap). Caching fixed (deterministic cactus input order). |
-| Roadmap ahead | C Tier 2 (inversion + SV validation, coupled) → G (interface freeze + param docs) → H (progressive, opt-in). |
+| Current phase | **Pangenome integration feature-complete (2026-08-08).** A, B, C Tier 1, D (incl. per-haplotype + per-individual PCoA/NJ), E, F, MultiQC, and H (progressive, opt-in) all built; the single-pangenome run produces the full report end-to-end, citations updated. **Remaining:** C Tier 2 (inversion cross-check + orthogonal SV validation — deferred coupled unit, to revisit), G (freeze/document `pangenome_*` params), and the actual **n=10 production run** (bump cactus memory). Deferred: BUSCO-on-graph. |
+| Built so far | `PANGENOME` subworkflow: `CACTUS_PANGENOME` (+gaf emit), `PANGENOME_STATS`, `PANGENOME_REF_FASTA`, `PANGENOME_VARIANTS` (+bcftools stats), `PANGENOME_MANIFEST`, `PANGENOME_GROWTH`, `PANGENOME_PLOTS` (+R), `PANGENOME_2D_VIZ` (scattered), `PANGENOME_QC`, `PANGENOME_ODGI_STATS_MQC`, `MULTIQC_PANGENOME`, `PANGENOME_PCA_NJ`+`PANGENOME_POPSTRUCT` (odgi-similarity PCoA/NJ, hap+individual), `PANGENOME_PROGRESSIVE`(+plot, opt-in), `PANGENOME_REPORT` (+R, +main-report §8). Plus `COLLECT_NAME_MAPS` (teloclip remap). Caching fixed (deterministic cactus input order). |
+| Roadmap ahead | G (interface freeze + param docs) → n=10 production run → C Tier 2 (inversion + SV validation, coupled) as capacity allows. |
 | Test data | **10 genomes** of *Spratelloides delicatulus*. All modules validated at n=4 haplotypes; the full n=10 gives the real growth/openness numbers. |
 | Last updated | 2026-08-08 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
@@ -178,14 +178,14 @@ alignments and both need cross-subworkflow wiring (or duplicated alignment). Bes
       core/accessory/private U-curve; **SV size histogram**; variant-class bar. All derived from the
       coverage histogram + variant catalog (no fragile histgrowth parse). Verified rarefaction math
       offline (core(N)=h(N); band ≈ hairline at bp scale, as expected).
-- [x] **Graph-derived per-haplotype ordination + NJ tree** — built 2026-08-08. `PANGENOME_PCA_NJ`
-      (`odgi similarity -D '#' -p 2 -d` → per-**haplotype** distance matrix, grouping the contig-paths
-      by PanSN haplotype so each haploid genome incl. the reference is one unit) → `PANGENOME_POPSTRUCT`
-      (`pangenome_popstruct.R`, base-R `cmdscale` PCoA + `ape::nj`) → PCoA scatter + NJ tree PNGs,
-      embedded in report §8 "Population structure". **Non-degenerate at the n=4 test** (4 haplotype
-      units), real figures. Gated `pangenome_popstruct`. Uses odgi (`cactus_tools`) + `r-ape` on
-      `pairwise_alignment` — no plink. *(NB the earlier plink-on-VCF design was wrong: the deconstruct
-      VCF has only 2 diploid samples and omits the reference → 2 points, not 4.)*
+- [x] **Graph-derived ordination + NJ trees, per haplotype AND per individual** — built 2026-08-08.
+      `PANGENOME_PCA_NJ` (`odgi similarity -D '#' -p 2 -d` → per-haplotype distances, PanSN grouping
+      **confirmed** on the real graph: 4 haplotype groups incl. reference) → `PANGENOME_POPSTRUCT`
+      (`pangenome_popstruct.R`: `cmdscale` PCoA + `ape::nj`) → **four** PNGs in report §8: haplotype
+      PCoA + NJ (4 units, real at n=4) and individual PCoA + NJ (haplotypes aggregated to diploid
+      individual by stripping PanSN hap markers; 2 units at n=4 → placeholder, real at n=10). Distance
+      = `jaccard.distance` column (odgi outputs `*.distance` columns, used directly). Gated
+      `pangenome_popstruct`. odgi (`cactus_tools`) + `r-ape` on `pairwise_alignment` — no plink.
 
 ### E. Openness / growth — Report Tier 3 (default via panacus) — `[WIP]` *(process built 2026-08-08)*
 - [x] **`PANGENOME_GROWTH`** — panacus on the finished clip GFA, `--groupby-haplotype`:
@@ -217,10 +217,15 @@ alignments and both need cross-subworkflow wiring (or duplicated alignment). Bes
 - [ ] Add new container labels (§6) alongside `cactus_pangenome` / `cactus_tools`.
 - [ ] Confirm default-on vs opt-in per analysis (§6 param defaults).
 
-### H. Progressive rebuild — **opt-in, LAST** — `[DEFERRED / TODO-last]`
-- [ ] **`PANGENOME_PROGRESSIVE`** (`pangenome_progressive = false`) — loop n=1..N over the first n
-      genomes, reusing `CACTUS_PANGENOME` + `PANGENOME_STATS`; plot per-step construction stats.
-      ~N× build cost; wants the H100 / 1.9 TB node. Only for the actual intermediate graphs.
+### H. Progressive (incremental-construction) growth — **opt-in** — `[DONE]` (built 2026-08-08)
+- [x] **`PANGENOME_PROGRESSIVE`** (`pangenome_progressive = false`, default off) — incremental
+      `minigraph -cxggs` over the reference-first assembly order, adding one at a time and recording
+      graph size (nodes/edges/bp) after each → empirical growth table + curve
+      (`PANGENOME_PROGRESSIVE_PLOT`), folded into report §8. Complements the analytic panacus growth (E).
+      **Built on minigraph, not a full cactus rebuild:** the SV-graph construction is the tractable
+      progressive backbone; a base-level cactus rebuild per step (~N× the full build, needs the big
+      node) remains the heavier alternative if the intermediate base-level graphs are ever needed.
+      Reuses `ch_cactus_in` + `cactus_tools`/`pairwise_alignment`; no new env.
 
 ---
 
@@ -290,7 +295,15 @@ users can disable):**
 
 ## 10. Change Log
 
-- **2026-08-08** — **Per-haplotype ordination + NJ tree built** (workstream D). Initially designed on
+- **2026-08-08** — **Workstream H (progressive growth) built, opt-in** + **citations updated**.
+  `PANGENOME_PROGRESSIVE` (`cactus_tools`: incremental `minigraph -cxggs`, reference-first, one
+  assembly added at a time) → empirical growth table (k, sample_added, nodes/edges/bp) →
+  `PANGENOME_PROGRESSIVE_PLOT` (`pairwise_alignment`/ggplot2) → curve, folded into report §8 as
+  "Progressive growth (empirical)" (complements the analytic panacus growth). Gated
+  `pangenome_progressive` (default **false**); minigraph-level (a full-cactus rebuild per step is
+  prohibitive). Reuses `ch_cactus_in`; no new env. Citations: added Minigraph-Cactus, minigraph, vg,
+  odgi, panacus, vcflib/vcfbub, BCFtools, MultiQC, ape to `generate_summary_report.R` (`refs` + `keys`,
+  pangenome tools gated on `has_pangenome`; MultiQC always-on). Initially designed on
   plink-over-the-VCF, then corrected: the deconstruct VCF has only **2 diploid samples** (CBau's two
   haplotypes collapsed to one; reference omitted) → would plot 2 points, not the 4 haplotypes wanted.
   Rebuilt graph-native: `PANGENOME_PCA_NJ` (`cactus_tools`: `odgi similarity -D '#' -p 2 -d`, grouped

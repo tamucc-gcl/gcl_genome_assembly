@@ -1226,7 +1226,16 @@ refs <- c(
   samtools    = "**SAMtools** — Danecek et al. (2021) *GigaScience* 10:giab008.",
   tidk        = "**tidk** — Brown et al. (2021) *Bioinformatics* 41:btaf049.",
   teloclip    = "**teloclip** — Taranto. https://github.com/Adamtaranto/teloclip",
-  gggenomes   = "**gggenomes** — Hackl et al. (2024) *arXiv* arXiv:2411.13556"
+  gggenomes   = "**gggenomes** — Hackl et al. (2024) *arXiv* arXiv:2411.13556",
+  cactus      = "**Minigraph-Cactus** — Hickey et al. (2024) *Nat. Biotechnol.* 42:663-673.",
+  minigraph   = "**minigraph** — Li et al. (2020) *Genome Biol.* 21:265.",
+  vg          = "**vg** (variation-graph toolkit) — Garrison et al. (2018) *Nat. Biotechnol.* 36:875-879.",
+  odgi        = "**odgi** — Guarracino et al. (2022) *Bioinformatics* 38:3319-3326.",
+  panacus     = "**Panacus** — Parmigiani et al. (2024) *Bioinformatics* 40:btae720.",
+  vcflib      = "**vcflib/vcfbub** — Garrison et al. (2022) *PLoS Comput. Biol.* 18:e1009123.",
+  bcftools    = "**BCFtools** — Danecek et al. (2021) *GigaScience* 10:giab008.",
+  multiqc     = "**MultiQC** — Ewels et al. (2016) *Bioinformatics* 32:3047-3048.",
+  ape         = "**ape** (neighbour-joining) — Paradis & Schliep (2019) *Bioinformatics* 35:526-528."
 )
 
 # --- Select citations matching this run ---
@@ -1238,9 +1247,10 @@ if (ran_purge)                          keys <- c(keys, "purge")
 if (ran_decon)                          keys <- c(keys, "fcs")
 if (sig_hic)                            keys <- c(keys, "yahs")
 if (sig_mito)                           keys <- c(keys, "mitohifi")
-keys <- c(keys, "jellyfish", "genomescope", "busco", "merqury", "quast", "minimap2", "samtools", "tidk")
+keys <- c(keys, "jellyfish", "genomescope", "busco", "merqury", "quast", "minimap2", "samtools", "tidk", "multiqc")
 if (has_teloclip)                       keys <- c(keys, "teloclip")
 if (sig_syn)                            keys <- c(keys, "gggenomes")
+if (has_pangenome) keys <- c(keys, "cactus", "minigraph", "vg", "odgi", "panacus", "vcflib", "bcftools", "ape")
 keys <- unique(keys)
 
 # --- Pangenome section (workstream F fragment), numbered as section 8 ---

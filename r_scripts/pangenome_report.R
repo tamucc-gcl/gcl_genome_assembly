@@ -25,6 +25,7 @@ p$add_argument("--growth_fit",      default = "NO_GROWTH")
 p$add_argument("--variant_summary", default = "NO_VARIANTS")
 p$add_argument("--graph_stats",     default = "NO_GRAPH")   # odgi stats -S text (length/nodes/edges/paths/steps)
 p$add_argument("--popstruct",       default = "NO_POPSTRUCT") # sentinel/indicator; PCA+NJ PNGs sit next to the other figures
+p$add_argument("--progressive",     default = "NO_PROGRESSIVE") # sentinel/indicator; progressive growth PNG (opt-in)
 p$add_argument("--species",         default = "pangenome")
 p$add_argument("--output",          default = "pangenome_report.md")
 p$add_argument("--json",            default = "pangenome_stats.json")
@@ -104,6 +105,15 @@ if (length(gr) > 0) {
       "",
       sprintf("![Growth and core curves](%s)", fig("growth_curves.png")), "",
       sprintf("![Coverage histogram](%s)", fig("coverage_histogram.png")), "")
+}
+
+# ---- progressive (incremental-construction) growth, if run (opt-in) --------------------
+if (!is_missing(args$progressive)) {
+  add("### Progressive growth (empirical)", "",
+      paste("Graph size as each assembly is added (minigraph, reference-first) \u2014 the",
+            "empirical counterpart to the analytic growth above."),
+      "",
+      sprintf("![Progressive growth](%s)", fig("progressive_growth.png")), "")
 }
 
 # ---- structural variants figure -------------------------------------------------------

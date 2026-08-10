@@ -43,6 +43,8 @@ include { MULTIQC_PANGENOME   } from '../modules/multiqc_pangenome.nf'
 include { PANGENOME_REPORT    } from '../modules/pangenome_report.nf'
 include { PANGENOME_PCA_NJ    } from '../modules/pangenome_pca_nj.nf'
 include { PANGENOME_POPSTRUCT } from '../modules/pangenome_popstruct.nf'
+include { PANGENOME_PROGRESSIVE      } from '../modules/pangenome_progressive.nf'
+include { PANGENOME_PROGRESSIVE_PLOT } from '../modules/pangenome_progressive_plot.nf'
 
 workflow PANGENOME {
 
@@ -77,6 +79,8 @@ workflow PANGENOME {
     ch_report      = Channel.empty()
     ch_pca_png     = Channel.empty()
     ch_nj_png      = Channel.empty()
+    ch_progressive = Channel.empty()
+    ch_prog_png    = Channel.empty()
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
@@ -217,6 +221,18 @@ workflow PANGENOME {
             ch_nj_png  = PANGENOME_POPSTRUCT.out.figures
         }
 
+        // progressive (incremental-construction) growth via minigraph — opt-in (workstream H)
+        if( params.pangenome_progressive ) {
+            ch_prog_in = ch_cactus_in.map { taxid, ref, names, fastas -> tuple(taxid, names.join(' '), fastas) }
+            PANGENOME_PROGRESSIVE( ch_prog_in )
+            ch_versions = ch_versions.mix( PANGENOME_PROGRESSIVE.out.versions )
+
+            def prog_script = file("${projectDir}/r_scripts/pangenome_progressive.R", checkIfExists: true)
+            PANGENOME_PROGRESSIVE_PLOT( PANGENOME_PROGRESSIVE.out.growth, prog_script )
+            ch_progressive = PANGENOME_PROGRESSIVE.out.growth
+            ch_prog_png    = PANGENOME_PROGRESSIVE_PLOT.out.png
+        }
+
         // pangenome report fragment + stats JSON (workstream F) — always on when built.
         // Base on the always-present variant summary; feed NO_* sentinels for any sub-analysis
         // that was disabled (the R script skips sentinels).
@@ -227,13 +243,15 @@ workflow PANGENOME {
                 .join( ch_growth_fit,                  remainder: true )
                 .join( PANGENOME_STATS.out.odgi_stats, remainder: true )
                 .join( ch_pca_png,                     remainder: true )
-                .map { taxid, vs, qc, gf, gs, pca ->
+                .join( ch_prog_png,                    remainder: true )
+                .map { taxid, vs, qc, gf, gs, pca, prog ->
                     tuple(taxid,
                           qc ?: file('NO_QC'),
                           gf ?: file('NO_GROWTH'),
                           vs ?: file('NO_VARIANTS'),
                           gs ?: file('NO_GRAPH'),
-                          pca ?: file('NO_POPSTRUCT')) }
+                          pca ?: file('NO_POPSTRUCT'),
+                          prog ?: file('NO_PROGRESSIVE')) }
             PANGENOME_REPORT( ch_report_in, report_script )
             ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
             ch_report   = PANGENOME_REPORT.out.report
@@ -292,5 +310,7 @@ workflow PANGENOME {
     report       = ch_report        // pangenome report fragment (markdown) for the main report
     pca_png      = ch_pca_png        // haplotype PCoA (report indicator)
     nj_png       = ch_nj_png         // all popstruct figures (hap + individual PCoA/NJ)
+    progressive  = ch_progressive    // progressive growth table (opt-in)
+    progressive_png = ch_prog_png    // progressive growth curve (opt-in)
     versions  = ch_versions
 }
