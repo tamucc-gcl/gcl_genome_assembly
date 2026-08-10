@@ -11,9 +11,9 @@
     edges, paths, per-component acyclicity, self-loops, nucleotide composition, mean links
     length, sum of path-node distances).
 
-    NB the MultiQC odgi module requires EXACTLY the `-m -sgdl` output; other flag
-    combinations break it. Stats run on the graph as stored (no sort) -- topology metrics
-    are order-independent and the linearity metrics reflect the graph's own node order.
+    NB the MultiQC odgi module requires EXACTLY the `-m -s -g -d -l` output (flags separate --
+    this build rejects bundled short flags), and `odgi stats -m` requires OPTIMIZED node IDs, so
+    each graph is `odgi sort -O`'d on a throwaway copy first.
 
     Input : tuple(taxid, og, [chrom_ogs])   (clip whole .og + per-chrom clip/full .og list)
     Output: yaml (whole + per-chrom *.og.stats.yaml) / versions
@@ -38,14 +38,26 @@ process PANGENOME_ODGI_STATS_MQC {
     set -euo pipefail
     export HOME="\$PWD"
 
-    # whole-genome graph (sample name = species/taxid)
-    odgi stats -i ${og} -m -sgdl > ${taxid}.og.stats.yaml || echo "whole-genome odgi stats failed" >&2
+    # odgi stats -m requires OPTIMIZED (compacted) node IDs; cactus's .og is not, so sort -O
+    # a throwaway copy of each graph first (the flags must also be separate -- this build
+    # rejects bundled short flags like -sgdl).
+    if odgi sort -i ${og} -o whole.sorted.og -O 2>/dev/null; then
+        odgi stats -i whole.sorted.og -m -s -g -d -l > ${taxid}.og.stats.yaml || echo "whole-genome odgi stats failed" >&2
+        rm -f whole.sorted.og
+    else
+        echo "whole-genome odgi sort failed" >&2
+    fi
 
     # per-chromosome clip graphs -> one YAML each (sample name = chrN_1)
     for o in ${chrom_ogs}; do
         case "\$o" in *.full.og) continue;; esac
         base=\$(basename "\$o" .og)
-        odgi stats -i "\$o" -m -sgdl > "\${base}.og.stats.yaml" || echo "odgi stats failed: \$base" >&2
+        if odgi sort -i "\$o" -o "\${base}.sorted.og" -O 2>/dev/null; then
+            odgi stats -i "\${base}.sorted.og" -m -s -g -d -l > "\${base}.og.stats.yaml" || echo "odgi stats failed: \$base" >&2
+            rm -f "\${base}.sorted.og"
+        else
+            echo "odgi sort failed: \$base" >&2
+        fi
     done
 
     {
