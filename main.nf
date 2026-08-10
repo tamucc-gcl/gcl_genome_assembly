@@ -1224,6 +1224,7 @@ workflow {
         ch_telomere_for_report,
         ch_pairwise_summary,
         ch_teloclip_stats_for_report,
+        ch_pangenome_report_for_report,
         ch_versions,
         ch_summary_report_script
     )

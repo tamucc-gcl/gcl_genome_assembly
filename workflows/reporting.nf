@@ -316,6 +316,7 @@ workflow REPORTING {
         ch_genomescope_metrics_tsv,
         ch_workflow_info,
         ch_run_info_tsv,
+        ch_pangenome_report,
         COLLECT_SOFTWARE_VERSIONS.out.versions,
         ch_summary_report_script
     )

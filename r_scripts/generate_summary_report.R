@@ -50,6 +50,8 @@ parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pang
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
+has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
+                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
 # =============================================================================
 # Helpers
@@ -191,7 +193,9 @@ md <- c(md,
         "5. [Mitochondrial Genome](#5-mitochondrial-genome)",
         "6. [Telomere Detection](#6-telomere-detection)",
         "7. [Pairwise Alignment Summary](#7-pairwise-alignment-summary)",
-        "8. [Methods and Citations](#8-methods-and-citations)",
+        if (has_pangenome) "8. [Pangenome](#8-pangenome)" else NULL,
+        if (has_pangenome) "9. [Methods and Citations](#9-methods-and-citations)"
+                      else "8. [Methods and Citations](#8-methods-and-citations)",
         "",
         "---",
         ""
@@ -1220,8 +1224,18 @@ if (has_teloclip)                       keys <- c(keys, "teloclip")
 if (sig_syn)                            keys <- c(keys, "gggenomes")
 keys <- unique(keys)
 
+# --- Pangenome section (workstream F fragment), numbered as section 8 ---
+if (has_pangenome) {
+  frag <- readLines(args$pangenome_report, warn = FALSE)
+  hi <- grep("^## Pangenome", frag)[1]
+  if (!is.na(hi)) frag[hi] <- "## 8. Pangenome"
+  md <- c(md, "", frag)
+}
+
+
+# --- Methods and citations section ---
 md <- c(md,
-        "## 8. Methods and Citations", "",
+        sprintf("## %s. Methods and Citations", if (has_pangenome) "9" else "8"), "",
         narr, "",
         "### Tool References", "",
         "Primary references for the tools used in this run. Exact versions are recorded in the pipeline's Nextflow execution reports (not reproduced here).", "",

@@ -67,9 +67,10 @@ md <- character(0)
 add <- function(...) md <<- c(md, ...)
 
 nhap <- g(gr, "n_haplotypes", g(qc, "n_alignments", NA))
-add(sprintf("## Pangenome — %s", gsub("_", " ", species)), "")
-add(sprintf("Minigraph-Cactus pangenome graph%s.",
-            if (!is.na(g(gr, "n_haplotypes"))) sprintf(" over %s haplotypes", g(gr, "n_haplotypes")) else ""), "")
+add("## Pangenome", "")
+add(sprintf("Minigraph-Cactus pangenome graph for *%s*%s.",
+            gsub("_", " ", species),
+            if (!is.na(g(gr, "n_haplotypes"))) sprintf(", over %s haplotypes", g(gr, "n_haplotypes")) else ""), "")
 
 # ---- graph ----------------------------------------------------------------------------
 add("### Graph", "",
