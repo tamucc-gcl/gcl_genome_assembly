@@ -27,8 +27,8 @@ process PANGENOME_POPSTRUCT {
     path(popstruct_script)
 
     output:
-    tuple val(taxid), path("${taxid}.pca.png"),    emit: pca_png
-    tuple val(taxid), path("${taxid}.njtree.png"), emit: nj_png
+    tuple val(taxid), path("${taxid}.pca_haplotype.png"), emit: pca_png    // report indicator
+    tuple val(taxid), path("${taxid}.*.png"),             emit: figures    // all four (hap + individual)
 
     script:
     """
@@ -37,7 +37,9 @@ process PANGENOME_POPSTRUCT {
 
     stub:
     """
-    : > ${taxid}.pca.png
-    : > ${taxid}.njtree.png
+    : > ${taxid}.pca_haplotype.png
+    : > ${taxid}.njtree_haplotype.png
+    : > ${taxid}.pca_individual.png
+    : > ${taxid}.njtree_individual.png
     """
 }

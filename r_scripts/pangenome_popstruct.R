@@ -3,15 +3,16 @@
 # pangenome_popstruct.R  (workstream D)
 # Repo location: r_scripts/pangenome_popstruct.R
 #
-# Renders per-haplotype population-structure figures from an `odgi similarity` long-format
-# pairwise table (grouped by PanSN haplotype):
-#   - PCoA scatter (classical MDS of the distance matrix; the PCA analogue for distances)
-#   - neighbour-joining tree (ape::nj)
-# Each haplotype (incl. the reference) is one point / one leaf. Small-n tolerant: with < 3
-# groups a labelled placeholder is written instead of failing. Always writes both PNGs.
+# From an `odgi similarity -D '#' -p 2 -d` long-format table (grouped by PanSN haplotype),
+# renders per-HAPLOTYPE and per-INDIVIDUAL ordination (PCoA) + neighbour-joining trees.
+#   - Haplotype level: each haploid assembly is one unit (incl. the reference).
+#   - Individual level: haplotypes aggregated to their diploid individual (mean between-
+#     individual pairwise distance). The individual is derived from the haplotype name by
+#     stripping the PanSN hap markers (`#N`, and a reference-style `_dip_hapN` / `_hapN`).
+# Distances come from shared graph content (SNPs + indels + SVs). Small-n tolerant: a level
+# with < 3 units gets a labelled placeholder. Always writes all four PNGs.
 #
-# Usage:
-#   Rscript pangenome_popstruct.R <similarity.tsv> <label> <outdir>
+# Usage: Rscript pangenome_popstruct.R <similarity.tsv> <label> <outdir>
 # ======================================================================================
 
 suppressPackageStartupMessages({ library(ggplot2); library(ape) })
@@ -29,61 +30,71 @@ placeholder <- function(path, msg) {
   ggsave(path, p, width = 7, height = 5, dpi = 150)
 }
 
-# ---- build the haplotype x haplotype distance matrix from the odgi similarity table ----
+# ---- build the haplotype x haplotype distance matrix -----------------------------------
 D <- NULL; groups <- character(0)
 if (file.exists(sim_f) && file.size(sim_f) > 0) {
   s <- tryCatch(read.delim(sim_f, header = TRUE, check.names = FALSE, stringsAsFactors = FALSE),
                 error = function(e) NULL)
   if (!is.null(s) && nrow(s) > 0 && ncol(s) >= 3) {
     nm <- names(s)
-    # group-name columns: prefer group.a/group.b, else the first two columns
     ga_c <- if ("group.a" %in% nm) "group.a" else nm[1]
     gb_c <- if ("group.b" %in% nm) "group.b" else nm[2]
-    # distance column: euclidean (from -d) preferred; else derive from a jaccard similarity
-    if ("euclidean" %in% nm) {
-      s$.d <- suppressWarnings(as.numeric(s[[ "euclidean" ]]))
-    } else if (any(grepl("jaccard", nm, ignore.case = TRUE))) {
-      jc <- nm[grepl("jaccard", nm, ignore.case = TRUE)][1]
-      s$.d <- 1 - suppressWarnings(as.numeric(s[[jc]]))
-    } else {
-      # last resort: last numeric column, treated as a distance
-      numc <- nm[vapply(s, is.numeric, logical(1))]
-      s$.d <- if (length(numc)) suppressWarnings(as.numeric(s[[tail(numc, 1)]])) else NA_real_
-    }
-    groups <- sort(unique(c(as.character(s[[ga_c]]), as.character(s[[gb_c]]))))
-    D <- matrix(0, length(groups), length(groups), dimnames = list(groups, groups))
-    for (i in seq_len(nrow(s))) {
-      a <- as.character(s[[ga_c]][i]); b <- as.character(s[[gb_c]][i]); d <- s$.d[i]
-      if (!is.na(a) && !is.na(b) && !is.na(d)) { D[a, b] <- d; D[b, a] <- d }
+    # distance column: prefer jaccard.distance (bounded 0-1), then euclidean.distance, then
+    # any *.distance column. These are already DISTANCES (0 = identical), so use as-is.
+    dcands <- nm[grepl("distance$", nm, ignore.case = TRUE) & !grepl("^group", nm, ignore.case = TRUE)]
+    dcol <- if ("jaccard.distance" %in% nm) "jaccard.distance"
+            else if ("euclidean.distance" %in% nm) "euclidean.distance"
+            else if (length(dcands)) dcands[1] else NA
+    if (!is.na(dcol)) {
+      s$.d <- suppressWarnings(as.numeric(s[[dcol]]))
+      groups <- sort(unique(c(as.character(s[[ga_c]]), as.character(s[[gb_c]]))))
+      D <- matrix(0, length(groups), length(groups), dimnames = list(groups, groups))
+      for (i in seq_len(nrow(s))) {
+        a <- as.character(s[[ga_c]][i]); b <- as.character(s[[gb_c]][i]); d <- s$.d[i]
+        if (!is.na(a) && !is.na(b) && !is.na(d)) { D[a, b] <- d; D[b, a] <- d }
+      }
     }
   }
 }
-# short leaf labels: drop a trailing PanSN hap suffix like '#0' only when it is uninformative
-short <- function(x) x
 
-# ---- PCoA scatter ----------------------------------------------------------------------
-if (!is.null(D) && length(groups) >= 3) {
-  co <- tryCatch(cmdscale(as.dist(D), k = 2, eig = TRUE), error = function(e) NULL)
-  if (!is.null(co)) {
-    pts <- as.data.frame(co$points); names(pts) <- c("Dim1", "Dim2")
-    pts$hap <- short(rownames(pts))
-    ev <- co$eig; ev[ev < 0] <- 0
-    lab <- function(k) if (sum(ev) > 0) sprintf("PCoA %d (%.1f%%)", k, 100 * ev[k] / sum(ev)) else sprintf("PCoA %d", k)
-    p <- ggplot(pts, aes(Dim1, Dim2, label = hap)) +
-      geom_point(size = 3, colour = "#2c7fb8") + geom_text(vjust = -0.8, size = 3) +
-      labs(title = paste0(label, " \u2014 haplotype ordination (PCoA)"), x = lab(1), y = lab(2))
-    ggsave(op(".pca.png"), p, width = 7, height = 5, dpi = 150)
-  } else placeholder(op(".pca.png"), "PCoA failed")
-} else placeholder(op(".pca.png"), sprintf("ordination needs \u22653 haplotypes\n(have %d)", length(groups)))
+# ---- plot one level (PCoA scatter + NJ tree) from a distance matrix --------------------
+plot_level <- function(M, lvl, pca_path, nj_path) {
+  n <- if (is.null(M)) 0 else nrow(M)
+  if (n >= 3) {
+    co <- tryCatch(cmdscale(as.dist(M), k = 2, eig = TRUE), error = function(e) NULL)
+    if (!is.null(co)) {
+      pts <- as.data.frame(co$points); names(pts) <- c("Dim1", "Dim2"); pts$u <- rownames(pts)
+      ev <- co$eig; ev[ev < 0] <- 0
+      lab <- function(k) if (sum(ev) > 0) sprintf("PCoA %d (%.1f%%)", k, 100 * ev[k]/sum(ev)) else sprintf("PCoA %d", k)
+      p <- ggplot(pts, aes(Dim1, Dim2, label = u)) +
+        geom_point(size = 3, colour = "#2c7fb8") + geom_text(vjust = -0.8, size = 3) +
+        labs(title = sprintf("%s \u2014 %s ordination (PCoA)", label, lvl), x = lab(1), y = lab(2))
+      ggsave(pca_path, p, width = 7, height = 5, dpi = 150)
+    } else placeholder(pca_path, "PCoA failed")
+    tr <- tryCatch(nj(as.dist(M)), error = function(e) NULL)
+    if (!is.null(tr)) {
+      png(nj_path, width = 7 * 150, height = 5 * 150, res = 150)
+      plot(tr, type = "unrooted", lab4ut = "axial", main = sprintf("%s \u2014 %s NJ tree (graph similarity)", label, lvl))
+      dev.off()
+    } else placeholder(nj_path, "NJ tree failed")
+  } else {
+    placeholder(pca_path, sprintf("%s ordination needs \u22653 units\n(have %d)", lvl, n))
+    placeholder(nj_path,  sprintf("%s NJ tree needs \u22653 units\n(have %d)", lvl, n))
+  }
+}
 
-# ---- NJ tree ---------------------------------------------------------------------------
-if (!is.null(D) && length(groups) >= 3) {
-  tr <- tryCatch(nj(as.dist(D)), error = function(e) NULL)
-  if (!is.null(tr)) {
-    tr$tip.label <- short(tr$tip.label)
-    png(op(".njtree.png"), width = 7 * 150, height = 5 * 150, res = 150)
-    plot(tr, type = "unrooted", lab4ut = "axial",
-         main = paste0(label, " \u2014 haplotype NJ tree (graph similarity)"))
-    dev.off()
-  } else placeholder(op(".njtree.png"), "NJ tree failed")
-} else placeholder(op(".njtree.png"), sprintf("NJ tree needs \u22653 haplotypes\n(have %d)", length(groups)))
+# ---- haplotype level -------------------------------------------------------------------
+plot_level(D, "haplotype", op(".pca_haplotype.png"), op(".njtree_haplotype.png"))
+
+# ---- individual level (aggregate haplotypes -> diploid individual) ---------------------
+Di <- NULL
+if (!is.null(D) && length(groups) >= 1) {
+  individual_of <- function(h) sub("_(dip_)?hap[0-9]+$", "", sub("#.*$", "", h))
+  inds <- individual_of(groups); uind <- sort(unique(inds))
+  Di <- matrix(0, length(uind), length(uind), dimnames = list(uind, uind))
+  for (i in seq_along(uind)) for (j in seq_along(uind)) if (i != j) {
+    hi <- which(inds == uind[i]); hj <- which(inds == uind[j])
+    Di[i, j] <- mean(D[hi, hj, drop = FALSE])
+  }
+}
+plot_level(Di, "individual", op(".pca_individual.png"), op(".njtree_individual.png"))

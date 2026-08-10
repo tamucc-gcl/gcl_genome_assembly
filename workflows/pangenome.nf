@@ -214,7 +214,7 @@ workflow PANGENOME {
             def popstruct_script = file("${projectDir}/r_scripts/pangenome_popstruct.R", checkIfExists: true)
             PANGENOME_POPSTRUCT( PANGENOME_PCA_NJ.out.similarity, popstruct_script )
             ch_pca_png = PANGENOME_POPSTRUCT.out.pca_png
-            ch_nj_png  = PANGENOME_POPSTRUCT.out.nj_png
+            ch_nj_png  = PANGENOME_POPSTRUCT.out.figures
         }
 
         // pangenome report fragment + stats JSON (workstream F) — always on when built.
@@ -290,7 +290,7 @@ workflow PANGENOME {
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
     multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)
     report       = ch_report        // pangenome report fragment (markdown) for the main report
-    pca_png      = ch_pca_png        // graph-derived PCA scatter
-    nj_png       = ch_nj_png         // graph-derived NJ tree
+    pca_png      = ch_pca_png        // haplotype PCoA (report indicator)
+    nj_png       = ch_nj_png         // all popstruct figures (hap + individual PCoA/NJ)
     versions  = ch_versions
 }

@@ -110,15 +110,21 @@ if (length(gr) > 0) {
 add("### Structural variants", "",
     sprintf("![SV size spectrum](%s)", fig("sv_size_histogram.png")), "")
 
-# ---- population structure (PCA + NJ tree) ---------------------------------------------
+# ---- population structure (PCoA + NJ tree, per haplotype and per individual) ----------
 if (!is_missing(args$popstruct)) {
   add("### Population structure", "",
-      sprintf(paste("Graph-derived PCA and neighbour-joining tree over the %s haplotypes,",
-                    "from the variant catalog. Degenerate at small n; interpretable at cohort scale."),
+      sprintf(paste("Ordination (PCoA) and neighbour-joining trees from graph-similarity",
+                    "distances (shared node content \u2014 SNPs, indels and SVs), at two levels:",
+                    "per haploid assembly (%s haplotypes, incl. the reference) and per diploid",
+                    "individual (haplotypes aggregated)."),
               g(gr, "n_haplotypes", "sampled")),
       "",
-      sprintf("![PCA](%s)", fig("pca.png")), "",
-      sprintf("![NJ tree](%s)", fig("njtree.png")), "")
+      "**Per haplotype**", "",
+      sprintf("![Haplotype PCoA](%s)", fig("pca_haplotype.png")), "",
+      sprintf("![Haplotype NJ tree](%s)", fig("njtree_haplotype.png")), "",
+      "**Per individual**", "",
+      sprintf("![Individual PCoA](%s)", fig("pca_individual.png")), "",
+      sprintf("![Individual NJ tree](%s)", fig("njtree_individual.png")), "")
 }
 
 # ---- graph quality --------------------------------------------------------------------
