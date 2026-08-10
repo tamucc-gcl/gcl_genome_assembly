@@ -32,7 +32,7 @@ process PANGENOME_REPORT {
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), path(qc_metrics), path(growth_fit), path(variant_summary), path(graph_stats)
+    tuple val(taxid), path(qc_metrics), path(growth_fit), path(variant_summary), path(graph_stats), path(popstruct)
     path(report_script)
 
     output:
@@ -47,6 +47,7 @@ process PANGENOME_REPORT {
         --growth_fit ${growth_fit} \\
         --variant_summary ${variant_summary} \\
         --graph_stats ${graph_stats} \\
+        --popstruct ${popstruct} \\
         --species ${taxid} \\
         --output pangenome_report.md \\
         --json pangenome_stats.json

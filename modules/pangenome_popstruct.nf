@@ -8,8 +8,8 @@
     matrix, via r_scripts/pangenome_popstruct.R. One point / one leaf per haplotype (incl.
     the reference). Always emits both PNGs (a labelled placeholder only if < 3 haplotypes).
 
-    Reuses the pipeline R stack via 'pairwise_alignment' -- that env needs `ape` added
-    (conda-forge::r-ape) alongside its existing ggplot2. cmdscale is base R.
+    Dedicated 'pangenome_popstruct' env (r-base + r-ggplot2 + r-ape; cmdscale is base R) so
+    adding ape does not bust the shared 'pairwise_alignment' cache (riparian/dotplot/plots).
 
     Input : tuple(taxid, similarity_tsv), popstruct_script
     Output: pca_png (PCoA) / nj_png
@@ -18,7 +18,7 @@
 
 process PANGENOME_POPSTRUCT {
     tag "taxid_${taxid}"
-    label 'pairwise_alignment'
+    label 'pangenome_popstruct'
 
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
