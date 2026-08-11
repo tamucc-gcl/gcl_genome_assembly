@@ -81,6 +81,8 @@ workflow REPORTING {
     ch_telomere_for_report         //  FINAL_VIZ.out.telomere_summary
     ch_pairwise_summary            //  FINAL_VIZ.out.pairwise_summary
     ch_teloclip_stats_for_report   //  COLLECT_TELOCLIP_STATS.out.stats | NO_TELOCLIP
+    ch_pangenome_report            //  PANGENOME.out.report | NO_PANGENOME
+    ch_name_map                    //  COLLECT_NAME_MAPS.out.map | NO_NAMEMAP
     ch_versions                    //  accumulated versions channel (already fully mixed in main)
     ch_summary_report_script       //  file: r_scripts/generate_summary_report.R
 
@@ -315,6 +317,8 @@ workflow REPORTING {
         ch_genomescope_metrics_tsv,
         ch_workflow_info,
         ch_run_info_tsv,
+        ch_pangenome_report,
+        ch_name_map,
         COLLECT_SOFTWARE_VERSIONS.out.versions,
         ch_summary_report_script
     )

@@ -122,6 +122,9 @@ include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evide
 include { FINAL_VIZ } from './workflows/final_viz.nf'
 include { FINAL_HIC_MAPS } from './workflows/final_hic_maps.nf'
 
+// Pangenome
+include { PANGENOME } from './workflows/pangenome.nf'
+
 /*
 ========================================================================================
     IMPORT MODULES
@@ -164,6 +167,8 @@ include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
+include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
+include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
 ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
@@ -174,6 +179,7 @@ ch_assembly_report_script = file("${projectDir}/py_scripts/generate_assembly_rep
 ch_coverage_book_script   = file("${projectDir}/py_scripts/bigwig_genome_book.py",               checkIfExists: true)
 ch_tad_book_script        = file("${projectDir}/py_scripts/make_tad_book.py",                    checkIfExists: true)
 ch_compartments_script    = file("${projectDir}/py_scripts/plot_compartments_pc1_genomewide.py", checkIfExists: true)
+ch_harmonize_script       = file("${projectDir}/py_scripts/harmonize_names.py",                     checkIfExists: true)
 /*
 ========================================================================================
     MAIN WORKFLOW
@@ -944,8 +950,41 @@ workflow {
     // =========================================================================
     ch_final_assembly = ch_final_assembly.mix(ch_shortread_finished)
 
-    FINALIZE_ASSEMBLY(ch_final_assembly)
+    // Harmonize scaffold names across same-species long-read assemblies (>= 2) before
+    // finalizing, so homologous chromosomes share names and FINAL_VIZ inherits them.
+    HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script)
+    ch_versions = ch_versions.mix(HARMONIZE_SCAFFOLDS.out.versions)
+
+    ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies
+        .map { meta, fa, nm -> nm }
+        .filter { nm -> !nm.name.startsWith('NO_') }
+        .collect()
+    COLLECT_NAME_MAPS( ch_name_map_files )
+    ch_name_map_for_report = COLLECT_NAME_MAPS.out.map.ifEmpty( file('NO_NAMEMAP') )
+
+    FINALIZE_ASSEMBLY(HARMONIZE_SCAFFOLDS.out.assemblies)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
+
+    // =========================================================================
+    //  PanGenome Assembly - combine all same species chromosome level assemblies into a pangenome
+    // =========================================================================
+
+    // Pangenome graph (minigraph-cactus) per species, from the gated finalized assemblies.
+    ch_finalized_with_fai = FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.fai)
+    // resolved organism name per taxid (RESOLVE_TAXONOMY -> ch_taxonomy; tax.name is the
+    // taxid-derived species, e.g. 373251 -> "Spratelloides delicatulus")
+    ch_species_by_taxid = ch_taxonomy.map { taxid, tax -> tuple(taxid.toString(), tax.name) }
+
+    PANGENOME(
+        ch_finalized_with_fai,
+        HARMONIZE_SCAFFOLDS.out.reference_id,
+        ch_species_by_taxid
+    )
+    ch_versions = ch_versions.mix(PANGENOME.out.versions)
+
+    ch_pangenome_report_for_report = PANGENOME.out.report
+        .map { taxid, md -> md }
+        .ifEmpty( file('NO_PANGENOME') )
 
     /*
     ========================================================================================
@@ -1193,6 +1232,8 @@ workflow {
         ch_telomere_for_report,
         ch_pairwise_summary,
         ch_teloclip_stats_for_report,
+        ch_pangenome_report_for_report,
+        ch_name_map_for_report,
         ch_versions,
         ch_summary_report_script
     )

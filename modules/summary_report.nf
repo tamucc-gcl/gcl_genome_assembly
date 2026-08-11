@@ -36,6 +36,8 @@ process SUMMARY_REPORT {
     path(genomescope_metrics)   // GenomeScope het + repeat content, or NO_GENOMESCOPE_METRICS
     path(workflow_info)         // NEW: workflow_info.tsv (key/value)
     path(run_info)              // NEW: run_info.tsv (per-sample) or NO_RUN_INFO
+    path(pangenome_report)      // pangenome_report.md or NO_PANGENOME
+    path(name_map)              // all_name_maps.tsv or NO_NAMEMAP  
     path(software_versions)
     path(summary_report_script) // R script to generate the summary report
 
@@ -63,6 +65,8 @@ process SUMMARY_REPORT {
         --busco_fallback ${params.busco_lineage} \\
         --ran_purge_dups ${params.run_purge_dups} \\
         --ran_decontam ${params.run_decon_contigs ?: false} \\
+        --pangenome_report ${pangenome_report} \\
+        --name_map ${name_map} \\
         --versions ${software_versions} \\
         --output assembly_report.md
     """

@@ -1,3 +1,0 @@
-sample,taxid,reads_1,reads_2
-FLAT2_D4_MD1_8-10,999999,/work/birdlab/GCL/prj_blum-samericanus-ddrad/genome_assembly/fastq/shortread/trimmed/FLAT2_D4_MD1_8-10_R1.trim.fastq.gz,/work/birdlab/GCL/prj_blum-samericanus-ddrad/genome_assembly/fastq/shortread/trimmed/FLAT2_D4_MD1_8-10_R2.trim.fastq.gz
-ANIMAL_SAMPLE,7460,/path/to/animal_R1.fastq.gz,/path/to/animal_R2.fastq.gz

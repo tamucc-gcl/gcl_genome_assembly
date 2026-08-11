@@ -46,9 +46,13 @@ parser$add_argument("--flag_size_pct", default = 0, type = "double", help = "Sta
 parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Configured BUSCO fallback lineage (params.busco_lineage), for provenance flagging")
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
+parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pangenome report fragment markdown (or NO_PANGENOME)")
+parser$add_argument("--name_map", default = "NO_NAMEMAP", help = "Harmonization name-map TSV (assembly/old_name/new_name) or NO_NAMEMAP")
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
+has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
+                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
 # =============================================================================
 # Helpers
@@ -190,7 +194,9 @@ md <- c(md,
         "5. [Mitochondrial Genome](#5-mitochondrial-genome)",
         "6. [Telomere Detection](#6-telomere-detection)",
         "7. [Pairwise Alignment Summary](#7-pairwise-alignment-summary)",
-        "8. [Methods and Citations](#8-methods-and-citations)",
+        if (has_pangenome) "8. [Pangenome](#8-pangenome)" else NULL,
+        if (has_pangenome) "9. [Methods and Citations](#9-methods-and-citations)"
+                      else "8. [Methods and Citations](#8-methods-and-citations)",
         "",
         "---",
         ""
@@ -998,10 +1004,28 @@ if (has_teloclip) {
         )
       md <- c(md, make_markdown_table(tc_table), "")
 
+      # remap pre-harmonization scaffold_N -> final harmonized names (chrN_1 / unplaced_N)
+      nm_path <- args$name_map
+      have_nm <- !str_detect(basename(nm_path), "NO_NAMEMAP") &&
+                 file.exists(nm_path) && file.size(nm_path) > 0
+      nm <- if (have_nm) tryCatch(read_tsv(nm_path, show_col_types = FALSE),
+                                  error = function(e) NULL) else NULL
+
       tc_detail <- tc %>%
+        mutate(bare = str_remove(contig, paste0("^", haplotype_id, "_")))
+      if (!is.null(nm) && all(c("assembly", "old_name", "new_name") %in% names(nm))) {
+        tc_detail <- tc_detail %>%
+          left_join(nm %>% transmute(assembly, old_name, .full = new_name),
+                    by = c("haplotype_id" = "assembly", "contig" = "old_name")) %>%
+          left_join(nm %>% transmute(assembly, old_name, .barehit = new_name),
+                    by = c("haplotype_id" = "assembly", "bare" = "old_name")) %>%
+          mutate(bare = coalesce(.full, .barehit, bare)) %>%
+          select(-.full, -.barehit)
+      }
+      tc_detail <- tc_detail %>%
         transmute(
           Haplotype = haplotype_id,
-          Contig    = str_remove(contig, paste0("^", haplotype_id, "_")),
+          Contig    = bare,
           End       = end,
           `Extension (bp)` = comma(extension_length)
         ) %>%
@@ -1202,7 +1226,16 @@ refs <- c(
   samtools    = "**SAMtools** — Danecek et al. (2021) *GigaScience* 10:giab008.",
   tidk        = "**tidk** — Brown et al. (2021) *Bioinformatics* 41:btaf049.",
   teloclip    = "**teloclip** — Taranto. https://github.com/Adamtaranto/teloclip",
-  gggenomes   = "**gggenomes** — Hackl et al. (2024) *arXiv* arXiv:2411.13556"
+  gggenomes   = "**gggenomes** — Hackl et al. (2024) *arXiv* arXiv:2411.13556",
+  cactus      = "**Minigraph-Cactus** — Hickey et al. (2024) *Nat. Biotechnol.* 42:663-673.",
+  minigraph   = "**minigraph** — Li et al. (2020) *Genome Biol.* 21:265.",
+  vg          = "**vg** (variation-graph toolkit) — Garrison et al. (2018) *Nat. Biotechnol.* 36:875-879.",
+  odgi        = "**odgi** — Guarracino et al. (2022) *Bioinformatics* 38:3319-3326.",
+  panacus     = "**Panacus** — Parmigiani et al. (2024) *Bioinformatics* 40:btae720.",
+  vcflib      = "**vcflib/vcfbub** — Garrison et al. (2022) *PLoS Comput. Biol.* 18:e1009123.",
+  bcftools    = "**BCFtools** — Danecek et al. (2021) *GigaScience* 10:giab008.",
+  multiqc     = "**MultiQC** — Ewels et al. (2016) *Bioinformatics* 32:3047-3048.",
+  ape         = "**ape** (neighbour-joining) — Paradis & Schliep (2019) *Bioinformatics* 35:526-528."
 )
 
 # --- Select citations matching this run ---
@@ -1214,13 +1247,24 @@ if (ran_purge)                          keys <- c(keys, "purge")
 if (ran_decon)                          keys <- c(keys, "fcs")
 if (sig_hic)                            keys <- c(keys, "yahs")
 if (sig_mito)                           keys <- c(keys, "mitohifi")
-keys <- c(keys, "jellyfish", "genomescope", "busco", "merqury", "quast", "minimap2", "samtools", "tidk")
+keys <- c(keys, "jellyfish", "genomescope", "busco", "merqury", "quast", "minimap2", "samtools", "tidk", "multiqc")
 if (has_teloclip)                       keys <- c(keys, "teloclip")
 if (sig_syn)                            keys <- c(keys, "gggenomes")
+if (has_pangenome) keys <- c(keys, "cactus", "minigraph", "vg", "odgi", "panacus", "vcflib", "bcftools", "ape")
 keys <- unique(keys)
 
+# --- Pangenome section (workstream F fragment), numbered as section 8 ---
+if (has_pangenome) {
+  frag <- readLines(args$pangenome_report, warn = FALSE)
+  hi <- grep("^## Pangenome", frag)[1]
+  if (!is.na(hi)) frag[hi] <- "## 8. Pangenome"
+  md <- c(md, "", frag)
+}
+
+
+# --- Methods and citations section ---
 md <- c(md,
-        "## 8. Methods and Citations", "",
+        sprintf("## %s. Methods and Citations", if (has_pangenome) "9" else "8"), "",
         narr, "",
         "### Tool References", "",
         "Primary references for the tools used in this run. Exact versions are recorded in the pipeline's Nextflow execution reports (not reproduced here).", "",

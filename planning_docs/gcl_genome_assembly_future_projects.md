@@ -87,6 +87,36 @@ A dedicated effort to fully revamp the README and write end-user + developer doc
 - [ ] Architecture / developer docs: the meta-map model, subworkflow map, how to add an assembler/scaffolder/organelle tool, **caching rules (what re-hashes and why — incl. the script-staging pattern from Track 1)**.
 - [ ] Per-tool notes + citations.
 
+## E. teloclip over-aggressive extension — *independent, small*
+
+*Noted 2026-08-08 from the S. delicatulus pangenome-integration test report. Separate from the
+teloclip **naming** issue (scaffold_N vs harmonized chrN_1), which is fixed via the harmonization
+name-map remap in `generate_summary_report.R`.*
+
+teloclip extends a scaffold end on **any** soft-clip containing a telomeric motif, so it fires on
+small repeat-rich unplaced scaffolds that are not real telomeres. On the test (Sde-CBau_104 hap1):
+
+- teloclip: **126 contigs extended / 172 extensions / 1.71 Mb added** (mean 9.9 kb, max 28.1 kb).
+- tidk on the final assembly: only **22 scaffolds with a detectable telomere array** (12.79%).
+
+So ~100 ends were extended on weak/spurious signal, adding ~1.7 Mb of read overhang, much of it
+non-telomeric. §6 of the report therefore reads as contradictory: the teloclip subsection ("126
+extended") vs the tidk subsection ("22 with telomeres"). This is teloclip's default permissiveness,
+**not** a harmonization or pipeline bug.
+
+### Options to scope (pick per appetite)
+- [ ] **Report framing (cheapest — do regardless):** relabel §6 so "extension attempts" (teloclip)
+      and "confirmed telomere arrays" (tidk) are clearly distinct metrics, not read as one number.
+- [ ] **Tighten teloclip:** require a minimum telomeric-repeat run length / motif count in the
+      soft-clip before extending, and/or restrict extension to chromosome-scale scaffolds (length
+      filter) rather than all unplaced fragments.
+- [ ] **Cross-gate with tidk:** accept a teloclip extension only if tidk confirms a telomere array
+      at that end after extension — turns teloclip into propose-then-validate.
+- [ ] **Retention decision:** decide whether the ~1.7 Mb of unconfirmed extension sequence should be
+      trimmed (affects final length ~0.15%) or kept.
+
+Scoped small; independent of the pangenome work and of the naming fix.
+
 ### Running notes to fold into the docs (from the refactor plan)
 - **Parameter scheme + column↔param duality**: the unified grouped params (from 4b-i), and that optional strategy columns (`ploidy`, `n_hap`, `assembler`, `dedup`, `mito_tool`, organism identity) can be set globally as params or per-row, per-row winning.
 - **`ploidy` (organism) vs `n_hap` (output haplotype count)**: distinct; the `n_hap` override; e.g. collapsed diploid = `ploidy=2` + `n_hap=1` (hifiasm `--primary`), NOT a false haploid.

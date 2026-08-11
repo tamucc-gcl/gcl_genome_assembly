@@ -80,9 +80,25 @@ if (nrow(ref_seqs) == 0 || nrow(query_seqs) == 0) {
   quit(save = "no", status = 0)
 }
 
-# Sort sequences by length descending for a cleaner layout
-ref_seqs   <- ref_seqs   %>% arrange(desc(length))
-query_seqs <- query_seqs %>% arrange(desc(length))
+# Order sequences by harmonized chromosome number (chr1, chr2, ... then composites,
+# then unplaced/other), falling back to length so non-harmonized assemblies (scaffold_N/
+# contig_N, named by descending size) keep their existing order. Ordering by chromosome
+# rather than length makes homologous chromosomes line up vertically between the two
+# tracks; ordering by length crosses them whenever two assemblies differ in relative
+# chromosome size (e.g. two haplotypes of one individual).
+chr_rank <- function(id) {
+  ifelse(grepl("^chr[0-9]+", id),
+         suppressWarnings(as.integer(sub("^chr([0-9]+).*$", "\\1", id))),
+         NA_integer_)
+}
+order_seqs <- function(df) {
+  df %>%
+    mutate(.chr = chr_rank(seq_id)) %>%
+    arrange(is.na(.chr), .chr, desc(length)) %>%
+    select(-.chr)
+}
+ref_seqs   <- order_seqs(ref_seqs)
+query_seqs <- order_seqs(query_seqs)
 
 seqs <- bind_rows(ref_seqs, query_seqs)
 
