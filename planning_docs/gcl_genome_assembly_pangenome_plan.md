@@ -24,9 +24,9 @@ downstream index/file requirements). Report §7 maps each item to that report's 
 
 | Field | Value |
 |---|---|
-| Current phase | **Pangenome integration feature-complete (2026-08-08).** A, B, C Tier 1, D (incl. per-haplotype + per-individual PCoA/NJ), E, F, MultiQC, and H (progressive, opt-in) all built; the single-pangenome run produces the full report end-to-end, citations updated. **Remaining:** C Tier 2 (inversion cross-check + orthogonal SV validation — deferred coupled unit, to revisit), G (freeze/document `pangenome_*` params), and the actual **n=10 production run** (bump cactus memory). Deferred: BUSCO-on-graph. |
+| Current phase | **Pangenome build-out complete (2026-08-08).** A, B, C Tier 1, D (per-haplotype + per-individual PCoA/NJ), E, F, G (frozen interface + docs), MultiQC, and H (progressive, opt-in) all built and validated end-to-end on the 4-assembly test; citations complete. **Remaining (not build-out):** the deferred C Tier 2 pair (inversion cross-check + orthogonal SV validation) and the actual **n=10 production run** (bump cactus memory). Deferred: BUSCO-on-graph. |
 | Built so far | `PANGENOME` subworkflow: `CACTUS_PANGENOME` (+gaf emit), `PANGENOME_STATS`, `PANGENOME_REF_FASTA`, `PANGENOME_VARIANTS` (+bcftools stats), `PANGENOME_MANIFEST`, `PANGENOME_GROWTH`, `PANGENOME_PLOTS` (+R), `PANGENOME_2D_VIZ` (scattered), `PANGENOME_QC`, `PANGENOME_ODGI_STATS_MQC`, `MULTIQC_PANGENOME`, `PANGENOME_PCA_NJ`+`PANGENOME_POPSTRUCT` (odgi-similarity PCoA/NJ, hap+individual), `PANGENOME_PROGRESSIVE`(+plot, opt-in), `PANGENOME_REPORT` (+R, +main-report §8). Plus `COLLECT_NAME_MAPS` (teloclip remap). Caching fixed (deterministic cactus input order). |
-| Roadmap ahead | G (interface freeze + param docs) → n=10 production run → C Tier 2 (inversion + SV validation, coupled) as capacity allows. |
+| Roadmap ahead | n=10 production run (bump cactus memory) → C Tier 2 (inversion + SV validation, coupled) as capacity allows. |
 | Test data | **10 genomes** of *Spratelloides delicatulus*. All modules validated at n=4 haplotypes; the full n=10 gives the real growth/openness numbers. |
 | Last updated | 2026-08-08 |
 | Production branch | `main` (S. delicatulus runs — DO NOT break) |
@@ -211,11 +211,16 @@ alignments and both need cross-subworkflow wiring (or duplicated alignment). Bes
       added, all conditional on `has_pangenome` so non-pangenome runs render unchanged. Rendered
       correctly in `assembly_report.md` (graph/variants/openness/QC tables + figures resolving).
 
-### G. Packaging for reuse — `[TODO]`
-- [ ] Freeze the `PANGENOME` interface (take: finalized+fai, reference_id, species; emit: the four categories).
-- [ ] Document every `pangenome_*` param (§6).
-- [ ] Add new container labels (§6) alongside `cactus_pangenome` / `cactus_tools`.
-- [ ] Confirm default-on vs opt-in per analysis (§6 param defaults).
+### G. Packaging for reuse — `[DONE]` (2026-08-08)
+- [x] Froze the `PANGENOME` interface — full reference in `pangenome_interface.md` (params, gating,
+      envs, outputs, ops notes).
+- [x] Documented every `pangenome_*` param; consolidated params block in `pangenome_params_block.groovy`
+      with the two previously-implicit params (`pangenome_popstruct`, `pangenome_progressive`) now
+      **declared explicitly** — no more reliance on Nextflow `null` defaulting.
+- [x] All container labels catalogued (`cactus_pangenome`, `cactus_tools`, `pangenome_variants`,
+      `panacus`, `pangenome_popstruct`, + reused `multiqc`/`pairwise_alignment`/`summarize_assembly`).
+- [x] Default-on vs opt-in confirmed: all analyses default on except `pangenome_progressive` (opt-in);
+      whole module gated by `run_pangenome` (opt-in). Report degrades gracefully via `NO_*` sentinels.
 
 ### H. Progressive (incremental-construction) growth — **opt-in** — `[DONE]` (built 2026-08-08)
 - [x] **`PANGENOME_PROGRESSIVE`** (`pangenome_progressive = false`, default off) — incremental
@@ -294,6 +299,12 @@ users can disable):**
 ---
 
 ## 10. Change Log
+
+- **2026-08-08** — **Workstream G done (interface frozen + documented).** `pangenome_interface.md`
+  (params table, gating logic, compute-env/label table, output tree, ops notes) + a consolidated
+  `pangenome_params_block.groovy`. The two params the code used only via Nextflow's null defaulting
+  (`pangenome_popstruct` on, `pangenome_progressive` off) are now declared explicitly. This closes the
+  pangenome build-out — remaining items are the deferred C Tier 2 pair and the n=10 production run.
 
 - **2026-08-08** — **Workstream H (progressive growth) built, opt-in** + **citations updated**.
   `PANGENOME_PROGRESSIVE` (`cactus_tools`: incremental `minigraph -cxggs`, reference-first, one
