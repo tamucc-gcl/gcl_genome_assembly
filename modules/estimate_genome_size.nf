@@ -23,7 +23,8 @@
       - FLAT: every final output lands directly in est_genome_size/, prefixed with the
         sample ID — <sample>.summary.txt, <sample>.model.txt, and the four
         <sample>.{,transformed_}{linear,log}_plot.png profiles. No per-sample subdir.
-      - Per-round fit artifacts (round*/) and the verbose fit log (progress.txt) are dropped.
+      - Per-round fit artifacts (the round* subdirs) and the verbose fit log (progress.txt)
+        are dropped.
       - <sample>.genome_size.txt is emitted on `size` (feeds assembly + report) but is
         NOT published; the user-facing size lives in <sample>.summary.txt.
       - `results` carries <sample>.summary.txt (parsed downstream for het/repeat).
