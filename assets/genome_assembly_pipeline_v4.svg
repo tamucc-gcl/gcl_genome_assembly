@@ -1,0 +1,2203 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="3120"
+   height="744"
+   viewBox="0 0 3120 744"
+   style="background:#ffffff; font-family: Arial, Helvetica, sans-serif;"
+   version="1.1"
+   id="svg516"
+   sodipodi:docname="genome_assembly_pipeline_v4.svg"
+   inkscape:version="1.1.1 (3bf5ae0d25, 2021-09-20)"
+   inkscape:export-filename="C:\Users\jdsel\Documents\Google Drive\TAMUCC-CORE\Bioinformatics\gcl_genome_assembly\assets\genome_assembly_pipeline_v4.png"
+   inkscape:export-xdpi="300"
+   inkscape:export-ydpi="300"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview518"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     showgrid="false"
+     inkscape:zoom="0.6998544"
+     inkscape:cx="1297.4127"
+     inkscape:cy="303.63458"
+     inkscape:window-width="1920"
+     inkscape:window-height="1129"
+     inkscape:window-x="1912"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg516" />
+  <title
+     id="title2">Genome Assembly Pipeline</title>
+  <desc
+     id="desc4">gcl_genome_assembly (Nextflow DSL2): organelle assembly (HiFi + short-read
+  variants) on top, HiFi+Hi-C and Illumina short-read nuclear inputs, per-sample
+  assembly spine with iterative optional Hi-C scaffolding, QC fan funnelling to a
+  terminal summary report, and a cross-sample Minigraph-Cactus pangenome stage.</desc>
+  <defs
+     id="defs24">
+    <marker
+       id="arr"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#555"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path6" />
+    </marker>
+    <marker
+       id="arr-teal"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#0F6E56"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path9" />
+    </marker>
+    <marker
+       id="arr-dash"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#999"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path12" />
+    </marker>
+    <marker
+       id="arr-cyan"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#0E6E8C"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path15" />
+    </marker>
+    <marker
+       id="arr-blue"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#185FA5"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path18" />
+    </marker>
+    <marker
+       id="arr-purple"
+       viewBox="0 0 10 10"
+       refX="8"
+       refY="5"
+       markerWidth="6"
+       markerHeight="6"
+       orient="auto-start-reverse">
+      <path
+         d="M2 1L8 5L2 9"
+         fill="none"
+         stroke="#534AB7"
+         stroke-width="1.5"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="path21" />
+    </marker>
+  </defs>
+  <rect
+     style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:1.3368;stroke-miterlimit:4;stroke-dasharray:0, 14.7048;stroke-dashoffset:0"
+     id="rect28334"
+     width="3127.4631"
+     height="752.68335"
+     x="-1.2636497"
+     y="-1.2636497" />
+  <text
+     x="1560.0"
+     y="22"
+     text-anchor="middle"
+     font-size="18"
+     font-weight="700"
+     fill="#1a1a1a"
+     id="text26">Genome Assembly Pipeline</text>
+  <text
+     x="1560.0"
+     y="38"
+     text-anchor="middle"
+     font-size="11"
+     fill="#999"
+     id="text28">PacBio HiFi + Hi-C (primary) · Illumina short-read (alternate) · haplotype-resolved, chromosome-scale · multi-sample pangenome · gcl_genome_assembly · Nextflow DSL2</text>
+  <rect
+     x="29.871262"
+     y="48"
+     width="128.25748"
+     height="14"
+     rx="1.4574714"
+     fill="#f1efe8"
+     id="rect30"
+     style="stroke-width:0.697011" />
+  <text
+     x="93.912109"
+     y="58"
+     text-anchor="middle"
+     font-size="9px"
+     font-weight="700"
+     fill="#5f5e5a"
+     letter-spacing="1"
+     id="text32">INPUTS</text>
+  <rect
+     x="166.12874"
+     y="48"
+     width="128.25748"
+     height="14"
+     rx="1.4574714"
+     fill="#f1efe8"
+     id="rect30-3"
+     style="font-family:Arial, Helvetica, sans-serif;stroke-width:0.697011;fill:#e6f1fb;fill-opacity:1" />
+  <text
+     x="230.16959"
+     y="58"
+     text-anchor="middle"
+     font-size="9px"
+     font-weight="700"
+     fill="#5f5e5a"
+     letter-spacing="1"
+     id="text32-1"
+     style="font-family:Arial, Helvetica, sans-serif"><tspan
+       style="fill:#0c447c;fill-opacity:1"
+       id="tspan26904">READ PREP</tspan></text>
+  <rect
+     x="306"
+     y="48"
+     width="216"
+     height="14"
+     rx="3"
+     fill="#D3F0E4"
+     id="rect34" />
+  <text
+     x="414"
+     y="58"
+     text-anchor="middle"
+     font-size="9px"
+     font-weight="700"
+     fill="#085041"
+     letter-spacing="1"
+     id="text36">Organelle Assembly</text>
+  <rect
+     x="536"
+     y="48"
+     width="140"
+     height="14"
+     rx="3"
+     fill="#EEEDFE"
+     id="rect38" />
+  <text
+     x="606.0"
+     y="58"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#534AB7"
+     letter-spacing="1"
+     id="text40">ASSEMBLY</text>
+  <rect
+     x="688"
+     y="48"
+     width="560"
+     height="14"
+     rx="3"
+     fill="#FAECE7"
+     id="rect42" />
+  <text
+     x="968.0"
+     y="58"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#993C1D"
+     letter-spacing="1"
+     id="text44">CORRECTION + DECON</text>
+  <rect
+     x="1248"
+     y="48"
+     width="798"
+     height="14"
+     rx="3"
+     fill="#EEEDFE"
+     id="rect46" />
+  <text
+     x="1647.0"
+     y="58"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#534AB7"
+     letter-spacing="1"
+     id="text48">HI-C SCAFFOLDING · iterative · optional</text>
+  <rect
+     x="2088"
+     y="48"
+     width="582"
+     height="14"
+     rx="3"
+     fill="#D3F0E4"
+     id="rect50" />
+  <text
+     x="2379.0"
+     y="58"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#085041"
+     letter-spacing="1"
+     id="text52">FINALIZATION</text>
+  <rect
+     x="2706"
+     y="48"
+     width="384"
+     height="14"
+     rx="3"
+     fill="#DDF0F5"
+     id="rect54" />
+  <text
+     x="2898.0"
+     y="58"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#0E6E8C"
+     letter-spacing="1"
+     id="text56">PANGENOME · ALL SAMPLES</text>
+  <text
+     x="300"
+     y="100"
+     text-anchor="end"
+     font-size="9"
+     font-weight="700"
+     fill="#5F5E5A"
+     id="text60">HiFi</text>
+  <text
+     x="300"
+     y="152"
+     text-anchor="end"
+     font-size="9"
+     font-weight="700"
+     fill="#5F5E5A"
+     id="text62">short-read</text>
+  <rect
+     x="306"
+     y="78"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect64" />
+  <text
+     x="370.0"
+     y="96"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text66">Find mito ref</text>
+  <text
+     x="370.0"
+     y="111"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text68">NCBI closest genome</text>
+  <line
+     x1="434"
+     y1="100"
+     x2="452"
+     y2="100"
+     stroke="#0F6E56"
+     stroke-width="1.2"
+     marker-end="url(#arr-teal)"
+     id="line70" />
+  <rect
+     x="452"
+     y="78"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect72" />
+  <text
+     x="516.0"
+     y="96"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text74">MitoHiFi</text>
+  <text
+     x="516.0"
+     y="111"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text76">assemble + annotate</text>
+  <line
+     x1="580"
+     y1="100"
+     x2="598"
+     y2="100"
+     stroke="#0F6E56"
+     stroke-width="1.2"
+     marker-end="url(#arr-teal)"
+     id="line78" />
+  <rect
+     x="598"
+     y="78"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect80" />
+  <text
+     x="662.0"
+     y="96"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text82">Circular map</text>
+  <text
+     x="662.0"
+     y="111"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text84">pyCirclize</text>
+  <rect
+     x="380"
+     y="130"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect86" />
+  <text
+     x="444.0"
+     y="148"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text88">GetOrganelle</text>
+  <text
+     x="444.0"
+     y="163"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text90">mito (+plastid)</text>
+  <line
+     x1="508"
+     y1="152"
+     x2="534"
+     y2="152"
+     stroke="#0F6E56"
+     stroke-width="1.2"
+     marker-end="url(#arr-teal)"
+     id="line92" />
+  <rect
+     x="534"
+     y="130"
+     width="140"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect94" />
+  <text
+     x="604.0"
+     y="148"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text96">Annotate</text>
+  <text
+     x="604.0"
+     y="163"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text98">MITOS2 → GenBank + map</text>
+  <path
+     d="M516 122 L516 185"
+     fill="none"
+     stroke="#999"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="path100" />
+  <path
+     d="M444 174 L444 185"
+     fill="none"
+     stroke="#999"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="path102" />
+  <path
+     d="M444 185 L764 185 L764 258"
+     fill="none"
+     stroke="#999"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-dash)"
+     id="path104" />
+  <rect
+     x="30"
+     y="196"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect106" />
+  <text
+     x="94.0"
+     y="214"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text108">HiFi BAM</text>
+  <text
+     x="94.0"
+     y="229"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text110">PacBio reads</text>
+  <line
+     x1="158"
+     y1="218"
+     x2="174"
+     y2="218"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line112" />
+  <rect
+     x="176"
+     y="196"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect114" />
+  <text
+     x="240.0"
+     y="214"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text116">BAM → FASTQ</text>
+  <text
+     x="240.0"
+     y="229"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text118">samtools fastq</text>
+  <rect
+     x="30"
+     y="316"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect120" />
+  <text
+     x="94.0"
+     y="334"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text122">Hi-C reads</text>
+  <text
+     x="94.0"
+     y="349"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text124">Illumina pairs</text>
+  <line
+     x1="158"
+     y1="338"
+     x2="174"
+     y2="338"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line126" />
+  <rect
+     x="176"
+     y="316"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect128" />
+  <text
+     x="240.0"
+     y="334"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text130">Trim Hi-C</text>
+  <text
+     x="240.0"
+     y="349"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text132">fastp</text>
+  <rect
+     x="30"
+     y="384"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect134" />
+  <text
+     x="94.0"
+     y="402"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text136">Illumina reads</text>
+  <text
+     x="94.0"
+     y="417"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text138">short-read pairs</text>
+  <line
+     x1="158"
+     y1="406"
+     x2="174"
+     y2="406"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line140" />
+  <rect
+     x="176"
+     y="384"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect142" />
+  <text
+     x="240.0"
+     y="402"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text144">Trim short-read</text>
+  <text
+     x="240.0"
+     y="417"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text146">fastp</text>
+  <rect
+     x="322"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect148" />
+  <text
+     x="386.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text150">Est. genome size</text>
+  <text
+     x="386.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text152">k-mer → GenomeScope2</text>
+  <path
+     d="M304 218 L313 218 L313 282 L322 282"
+     fill="none"
+     stroke="#185FA5"
+     stroke-width="1"
+     marker-end="url(#arr-blue)"
+     id="path154" />
+  <path
+     d="M304 406 L313 406 L313 282 L322 282"
+     fill="none"
+     stroke="#185FA5"
+     stroke-width="1"
+     marker-end="url(#arr-blue)"
+     id="path156" />
+  <rect
+     x="540"
+     y="196"
+     width="128"
+     height="164"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1"
+     id="rect158" />
+  <text
+     x="604.0"
+     y="214"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#26215C"
+     id="text160">hifiasm</text>
+  <text
+     x="604.0"
+     y="229"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text162">HiFi (+ Hi-C phasing)</text>
+  <line
+     x1="304"
+     y1="218"
+     x2="538"
+     y2="218"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line164" />
+  <line
+     x1="304"
+     y1="338"
+     x2="538"
+     y2="338"
+     stroke="#185FA5"
+     stroke-width="1.2"
+     marker-end="url(#arr-blue)"
+     id="line166" />
+  <path
+     d="M450 282 L490 282 L490 266 L538 266"
+     fill="none"
+     stroke="#999"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-dash)"
+     id="path168" />
+  <rect
+     x="540"
+     y="384"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1"
+     id="rect170" />
+  <text
+     x="604.0"
+     y="402"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#26215C"
+     id="text172">SPAdes</text>
+  <text
+     x="604.0"
+     y="417"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text174">short-read de novo</text>
+  <line
+     x1="304"
+     y1="406"
+     x2="538"
+     y2="406"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line176" />
+  <line
+     x1="668"
+     y1="266"
+     x2="700"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line178" />
+  <rect
+     x="700"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect180" />
+  <text
+     x="764.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text182">Filter organelle</text>
+  <text
+     x="764.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text184">remove organellar seqs</text>
+  <rect
+     x="840"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect186"
+     style="stroke-width:1;stroke-miterlimit:4;stroke-dasharray:0,1,2,3,4,5,6,7,8,9,10,11,12,13,14;stroke-dashoffset:0" />
+  <text
+     x="904.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text188">Purge dups</text>
+  <text
+     x="904.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text190">collapse haplotigs</text>
+  <line
+     x1="828"
+     y1="282"
+     x2="840"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line192" />
+  <rect
+     x="980"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect194" />
+  <text
+     x="1044.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text196">Inspector</text>
+  <text
+     x="1044.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text198">correct misassemblies</text>
+  <line
+     x1="968"
+     y1="282"
+     x2="980"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line200" />
+  <rect
+     x="1120"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect202" />
+  <text
+     x="1184.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text204">Decontaminate</text>
+  <text
+     x="1184.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text206">FCS-GX screen + clean</text>
+  <line
+     x1="1108"
+     y1="282"
+     x2="1120"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line208" />
+  <rect
+     x="1252"
+     y="164"
+     width="716"
+     height="250"
+     rx="12"
+     fill="none"
+     stroke="#534AB7"
+     stroke-width="1"
+     stroke-dasharray="6 4"
+     opacity="0.5"
+     id="rect210" />
+  <line
+     x1="1248"
+     y1="282"
+     x2="1260"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line212" />
+  <rect
+     x="1260"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect214" />
+  <text
+     x="1324.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0C447C"
+     id="text216">Map + filter Hi-C</text>
+  <text
+     x="1324.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text218">bwa-mem2 → pairs</text>
+  <rect
+     x="1446"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1"
+     id="rect220" />
+  <text
+     x="1510.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#26215C"
+     id="text222">YaHS</text>
+  <text
+     x="1510.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text224">Hi-C scaffolding</text>
+  <rect
+     x="1634"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect226" />
+  <text
+     x="1698.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text228">Inspector</text>
+  <text
+     x="1698.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text230">correct misassemblies</text>
+  <rect
+     x="1820"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect232" />
+  <text
+     x="1884.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text234">Decontaminate</text>
+  <text
+     x="1884.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text236">FCS-GX screen + clean</text>
+  <line
+     x1="1388"
+     y1="282"
+     x2="1446"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line238" />
+  <line
+     x1="1574"
+     y1="282"
+     x2="1634"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line240" />
+  <line
+     x1="1762"
+     y1="282"
+     x2="1820"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line242" />
+  <path
+     d="M1884 258 C 1884 180, 1324 180, 1324 258"
+     fill="none"
+     stroke="#534AB7"
+     stroke-width="1.4"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-purple)"
+     id="path244" />
+  <text
+     x="1604"
+     y="175"
+     text-anchor="middle"
+     font-size="9"
+     font-weight="700"
+     fill="#534AB7"
+     id="text246">round 2 · conditional (re-map Hi-C + re-run YaHS)</text>
+  <rect
+     x="1264"
+     y="360"
+     width="120"
+     height="40"
+     rx="8"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect248" />
+  <text
+     x="1324.0"
+     y="378"
+     text-anchor="middle"
+     font-size="11"
+     font-weight="700"
+     fill="#0C447C"
+     id="text250">Hi-C reads</text>
+  <text
+     x="1324.0"
+     y="393"
+     text-anchor="middle"
+     font-size="10"
+     fill="#185FA5"
+     id="text252">from Trim Hi-C</text>
+  <line
+     x1="1324"
+     y1="358"
+     x2="1324"
+     y2="306"
+     stroke="#185FA5"
+     stroke-width="1.2"
+     marker-end="url(#arr-blue)"
+     id="line254" />
+  <path
+     d="M1256 304 L1256 424 L2304 424 L2304 304"
+     fill="none"
+     stroke="#999"
+     stroke-width="1.2"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-dash)"
+     id="path256" />
+  <text
+     x="1600"
+     y="440"
+     text-anchor="middle"
+     font-size="9"
+     fill="#888"
+     id="text258">no Hi-C: skip scaffolding (HiFi-only → teloclip; short-read → finalize)</text>
+  <line
+     x1="1948"
+     y1="282"
+     x2="2100"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line260" />
+  <rect
+     x="2100"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect262" />
+  <text
+     x="2164.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text264">Gap fill</text>
+  <text
+     x="2164.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text266">TGSGapCloser</text>
+  <rect
+     x="2240"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect268" />
+  <text
+     x="2304.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text270">Teloclip</text>
+  <text
+     x="2304.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text272">telomere extension</text>
+  <line
+     x1="2228"
+     y1="282"
+     x2="2240"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line274" />
+  <rect
+     x="2380"
+     y="260"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect276" />
+  <text
+     x="2444.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#085041"
+     id="text278">Harmonize names</text>
+  <text
+     x="2444.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0F6E56"
+     id="text280">scaffold_N → chrN</text>
+  <line
+     x1="2368"
+     y1="282"
+     x2="2380"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line282" />
+  <rect
+     x="2520"
+     y="260"
+     width="150"
+     height="44"
+     rx="8"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="2"
+     id="rect284" />
+  <text
+     x="2595.0"
+     y="278"
+     text-anchor="middle"
+     font-size="13"
+     font-weight="700"
+     fill="#26215C"
+     id="text286">Finalize assembly</text>
+  <text
+     x="2595.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#534AB7"
+     id="text288">rename + sort + index</text>
+  <line
+     x1="2508"
+     y1="282"
+     x2="2520"
+     y2="282"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line290" />
+  <rect
+     x="700"
+     y="384"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect292"
+     style="stroke-width:1;stroke-miterlimit:4;stroke-dasharray:0,1,2,3,4,5,6,7,8,9,10,11,12,13,14;stroke-dashoffset:0" />
+  <text
+     x="764.0"
+     y="402"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text294">Redundans</text>
+  <text
+     x="764.0"
+     y="417"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text296">collapse redundancy</text>
+  <rect
+     x="840"
+     y="384"
+     width="128"
+     height="44"
+     rx="8"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect298"
+     style="stroke-width:1;stroke-miterlimit:4;stroke-dasharray:0,1,2,3,4,5,6,7,8,9,10,11,12,13,14;stroke-dashoffset:0" />
+  <text
+     x="904.0"
+     y="402"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#4A1B0C"
+     id="text300">Pilon</text>
+  <text
+     x="904.0"
+     y="417"
+     text-anchor="middle"
+     font-size="10"
+     fill="#993C1D"
+     id="text302">short-read polish</text>
+  <line
+     x1="668"
+     y1="406"
+     x2="700"
+     y2="406"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line304" />
+  <line
+     x1="828"
+     y1="406"
+     x2="840"
+     y2="406"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line306" />
+  <path
+     d="M904 384 L904 340 L1044 340 L1044 304"
+     fill="none"
+     stroke="#993C1D"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path308" />
+  <rect
+     x="18"
+     y="370"
+     width="954"
+     height="72"
+     rx="10"
+     fill="none"
+     stroke="#888780"
+     stroke-width="1"
+     stroke-dasharray="6 4"
+     id="rect310" />
+  <text
+     x="28"
+     y="381"
+     font-size="9"
+     font-weight="700"
+     fill="#888780"
+     id="text312">SHORT-READ (ILLUMINA) — alternate assembler for samples without HiFi/Hi-C; contigs join the shared correction → scaffolding → finalization path</text>
+  <path
+     d="M2595 304 L2595 476"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     id="path314" />
+  <path
+     d="M2595 476 L750 476"
+     fill="none"
+     stroke="#555"
+     stroke-width="1.2"
+     id="path316" />
+  <line
+     x1="750"
+     y1="476"
+     x2="750"
+     y2="504"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line318" />
+  <rect
+     x="670"
+     y="506"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect320" />
+  <text
+     x="750.0"
+     y="524"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text322">QUAST + BUSCO</text>
+  <text
+     x="750.0"
+     y="539"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text324">contiguity + completeness</text>
+  <line
+     x1="1032"
+     y1="476"
+     x2="1032"
+     y2="504"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line326" />
+  <rect
+     x="952"
+     y="506"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect328" />
+  <text
+     x="1032.0"
+     y="524"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text330">Merqury</text>
+  <text
+     x="1032.0"
+     y="539"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text332">QV + k-mer completeness</text>
+  <line
+     x1="1314"
+     y1="476"
+     x2="1314"
+     y2="504"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line334" />
+  <rect
+     x="1234"
+     y="506"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect336" />
+  <text
+     x="1314.0"
+     y="524"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text338">Snail + TIDK</text>
+  <text
+     x="1314.0"
+     y="539"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text340">assembly stats + telomeres</text>
+  <line
+     x1="1596"
+     y1="476"
+     x2="1596"
+     y2="504"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line342" />
+  <rect
+     x="1516"
+     y="506"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect344" />
+  <text
+     x="1596.0"
+     y="524"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text346">Hi-C contact map</text>
+  <text
+     x="1596.0"
+     y="539"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text348">chromosome interactions</text>
+  <line
+     x1="1878"
+     y1="476"
+     x2="1878"
+     y2="504"
+     stroke="#555"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="line350" />
+  <rect
+     x="1798"
+     y="506"
+     width="160"
+     height="44"
+     rx="8"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect352" />
+  <text
+     x="1878.0"
+     y="524"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#173404"
+     id="text354">Dotplot + riparian</text>
+  <text
+     x="1878.0"
+     y="539"
+     text-anchor="middle"
+     font-size="10"
+     fill="#3B6D11"
+     id="text356">hap1 ↔ hap2 synteny</text>
+  <rect
+     x="1204"
+     y="630"
+     width="220"
+     height="44"
+     rx="8"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1.5"
+     id="rect358" />
+  <text
+     x="1314.0"
+     y="648"
+     text-anchor="middle"
+     font-size="13"
+     font-weight="700"
+     fill="#2C2C2A"
+     id="text360">Summary report</text>
+  <text
+     x="1314.0"
+     y="663"
+     text-anchor="middle"
+     font-size="10"
+     fill="#5F5E5A"
+     id="text362">interactive HTML · all metrics</text>
+  <path
+     d="M750 550 L750 596"
+     fill="none"
+     stroke="#999"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path364" />
+  <path
+     d="M1032 550 L1032 596"
+     fill="none"
+     stroke="#999"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path366" />
+  <path
+     d="M1314 550 L1314 596"
+     fill="none"
+     stroke="#999"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path368" />
+  <path
+     d="M1596 550 L1596 596"
+     fill="none"
+     stroke="#999"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path370" />
+  <path
+     d="M1878 550 L1878 596"
+     fill="none"
+     stroke="#999"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path372" />
+  <path
+     d="M750 596 L1878 596"
+     fill="none"
+     stroke="#999"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path374" />
+  <path
+     d="M1314 596 L1314 630"
+     fill="none"
+     stroke="#999"
+     stroke-width="1.0"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-dash)"
+     id="path376" />
+  <line
+     x1="2670"
+     y1="282"
+     x2="2716"
+     y2="282"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line378" />
+  <rect
+     x="2724"
+     y="254"
+     width="150"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect380" />
+  <rect
+     x="2720"
+     y="258"
+     width="150"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect382" />
+  <rect
+     x="2716"
+     y="260"
+     width="150"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect384" />
+  <text
+     x="2791.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text386">Finalized assemblies</text>
+  <text
+     x="2791.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text388">all samples · all haps</text>
+  <line
+     x1="2866"
+     y1="282"
+     x2="2896"
+     y2="282"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line390" />
+  <rect
+     x="2898"
+     y="260"
+     width="172"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="2"
+     id="rect392" />
+  <text
+     x="2984.0"
+     y="278"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text394">Minigraph-Cactus</text>
+  <text
+     x="2984.0"
+     y="293"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text396">build graph: GFA/GBZ/OG/VCF</text>
+  <path
+     d="M2984 304 L2984 326 L2812 326 L2812 598"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     id="path398" />
+  <line
+     x1="2812"
+     y1="374"
+     x2="2900"
+     y2="374"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line400" />
+  <rect
+     x="2900"
+     y="352"
+     width="172"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect402" />
+  <text
+     x="2986.0"
+     y="370"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text404">Graph QC + odgi stats</text>
+  <text
+     x="2986.0"
+     y="385"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text406">1D/2D metrics → MultiQC</text>
+  <line
+     x1="2812"
+     y1="430"
+     x2="2900"
+     y2="430"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line408" />
+  <rect
+     x="2900"
+     y="408"
+     width="172"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect410" />
+  <text
+     x="2986.0"
+     y="426"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text412">2D layout viz</text>
+  <text
+     x="2986.0"
+     y="441"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text414">odgi layout / draw</text>
+  <line
+     x1="2812"
+     y1="486"
+     x2="2900"
+     y2="486"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line416" />
+  <rect
+     x="2900"
+     y="464"
+     width="172"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect418" />
+  <text
+     x="2986.0"
+     y="482"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text420">PCoA + NJ tree</text>
+  <text
+     x="2986.0"
+     y="497"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text422">odgi similarity</text>
+  <line
+     x1="2812"
+     y1="542"
+     x2="2900"
+     y2="542"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line424" />
+  <rect
+     x="2900"
+     y="520"
+     width="172"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect426" />
+  <text
+     x="2986.0"
+     y="538"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text428">Panacus growth</text>
+  <text
+     x="2986.0"
+     y="553"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text430">core / pan openness</text>
+  <line
+     x1="2812"
+     y1="598"
+     x2="2900"
+     y2="598"
+     stroke="#0E6E8C"
+     stroke-width="1.2"
+     marker-end="url(#arr-cyan)"
+     id="line432" />
+  <rect
+     x="2900"
+     y="576"
+     width="172"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect434" />
+  <text
+     x="2986.0"
+     y="594"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text436">Variants (VCF)</text>
+  <text
+     x="2986.0"
+     y="609"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text438">deconstruct + normalize</text>
+  <rect
+     x="2890"
+     y="648"
+     width="192"
+     height="44"
+     rx="8"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1.5"
+     id="rect440" />
+  <text
+     x="2986.0"
+     y="666"
+     text-anchor="middle"
+     font-size="12"
+     font-weight="700"
+     fill="#0A3D4E"
+     id="text442">Pangenome report</text>
+  <text
+     x="2986.0"
+     y="681"
+     text-anchor="middle"
+     font-size="10"
+     fill="#0E6E8C"
+     id="text444">HTML · MultiQC · manifest</text>
+  <path
+     d="M3072 374 L3082 374"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path446" />
+  <path
+     d="M3072 430 L3082 430"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path448" />
+  <path
+     d="M3072 486 L3082 486"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path450" />
+  <path
+     d="M3072 542 L3082 542"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path452" />
+  <path
+     d="M3072 598 L3082 598"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     id="path454" />
+  <path
+     d="M3082 374 L3082 636 L2986 636 L2986 648"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="0.8"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-cyan)"
+     id="path456" />
+  <rect
+     x="2706"
+     y="242"
+     width="392"
+     height="458"
+     rx="12"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     stroke-dasharray="6 4"
+     opacity="0.7"
+     id="rect458" />
+  <path
+     d="M2890 665 L1426 665"
+     fill="none"
+     stroke="#0E6E8C"
+     stroke-width="1.0"
+     stroke-dasharray="5 3"
+     marker-end="url(#arr-cyan)"
+     id="path460" />
+  <text
+     x="2150"
+     y="659"
+     text-anchor="middle"
+     font-size="9"
+     fill="#0E6E8C"
+     id="text462">links to summary report</text>
+  <rect
+     x="30"
+     y="550"
+     width="600"
+     height="176"
+     rx="8"
+     fill="#f9f9f9"
+     stroke="#e0e0e0"
+     stroke-width="1"
+     id="rect464" />
+  <text
+     x="330"
+     y="569"
+     text-anchor="middle"
+     font-size="11"
+     font-weight="700"
+     fill="#1a1a1a"
+     id="text466">Legend</text>
+  <rect
+     x="46"
+     y="580"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#E6F1FB"
+     stroke="#185FA5"
+     stroke-width="1"
+     id="rect468" />
+  <text
+     x="63"
+     y="589"
+     font-size="10"
+     fill="#333"
+     id="text470">Hi-C / read processing</text>
+  <rect
+     x="216"
+     y="580"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#EEEDFE"
+     stroke="#534AB7"
+     stroke-width="1.5"
+     id="rect472" />
+  <text
+     x="233"
+     y="589"
+     font-size="10"
+     fill="#333"
+     id="text474">Assembly / scaffolding</text>
+  <rect
+     x="396"
+     y="580"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#FAECE7"
+     stroke="#993C1D"
+     stroke-width="1"
+     id="rect476" />
+  <text
+     x="413"
+     y="589"
+     font-size="10"
+     fill="#333"
+     id="text478">Correction / decontamination</text>
+  <rect
+     x="46"
+     y="600"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#E1F5EE"
+     stroke="#0F6E56"
+     stroke-width="1"
+     id="rect480" />
+  <text
+     x="63"
+     y="609"
+     font-size="10"
+     fill="#333"
+     id="text482">Organelle assembly</text>
+  <rect
+     x="216"
+     y="600"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#EAF3DE"
+     stroke="#3B6D11"
+     stroke-width="1"
+     id="rect484" />
+  <text
+     x="233"
+     y="609"
+     font-size="10"
+     fill="#333"
+     id="text486">QC / visualization</text>
+  <rect
+     x="396"
+     y="600"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#DDF0F5"
+     stroke="#0E6E8C"
+     stroke-width="1"
+     id="rect488" />
+  <text
+     x="413"
+     y="609"
+     font-size="10"
+     fill="#333"
+     id="text490">Pangenome (all samples)</text>
+  <rect
+     x="46"
+     y="620"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#F1EFE8"
+     stroke="#888780"
+     stroke-width="1"
+     id="rect492" />
+  <text
+     x="63"
+     y="629"
+     font-size="10"
+     fill="#333"
+     id="text494">Input / output</text>
+  <rect
+     x="216"
+     y="620"
+     width="11"
+     height="11"
+     rx="2"
+     fill="#FAEEDA"
+     stroke="#BA7517"
+     stroke-width="1"
+     stroke-dasharray="5 3"
+     id="rect496" />
+  <text
+     x="233"
+     y="629"
+     font-size="10"
+     fill="#333"
+     id="text498">Optional step (dashed border)</text>
+  <line
+     x1="396"
+     y1="625"
+     x2="407"
+     y2="625"
+     stroke="#999"
+     stroke-width="1.2"
+     stroke-dasharray="5 3"
+     id="line500" />
+  <text
+     x="413"
+     y="629"
+     font-size="10"
+     fill="#333"
+     id="text502">Auxiliary / conditional flow</text>
+  <text
+     x="46"
+     y="646"
+     font-size="10"
+     fill="#888"
+     id="text504">Two input modalities: HiFi+Hi-C drive hifiasm; Illumina short-read drives SPAdes (alternate lane).</text>
+  <text
+     x="46"
+     y="660"
+     font-size="10"
+     fill="#888"
+     id="text506">Organelle assembly, per modality: HiFi → MitoHiFi; short-read → GetOrganelle + MITOS2 → baits Filter organelle.</text>
+  <text
+     x="46"
+     y="674"
+     font-size="10"
+     fill="#888"
+     id="text508">Dashed borders = conditional steps (find-ref, purging, correction, decontamination, teloclip).</text>
+  <text
+     x="46"
+     y="688"
+     font-size="10"
+     fill="#888"
+     id="text510">Hi-C scaffolding (YaHS): up to 2 rounds; round 2 only if scaffold correction/decontam ran (else 1).</text>
+  <text
+     x="46"
+     y="702"
+     font-size="10"
+     fill="#888"
+     id="text512">No Hi-C → scaffolding skipped (HiFi-only → teloclip; short-read → finalize).</text>
+  <text
+     x="46"
+     y="716"
+     font-size="10"
+     fill="#888"
+     id="text514">All assemblies fan into one Minigraph-Cactus pangenome; Pangenome report links to the Summary report.</text>
+</svg>

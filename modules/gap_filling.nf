@@ -57,7 +57,7 @@ process GAP_FILLING {
     fi
 
     # Generate comprehensive report
-    cat > ${meta.id}_gap_filling_report.txt <<'EOF'
+    cat > ${meta.id}_gap_filling_report.txt <<EOF
 ================================================================================
 Gap Filling Report
 ================================================================================

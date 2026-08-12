@@ -32,9 +32,9 @@ include { SUMMARY_REPORT           } from '../modules/summary_report'
 // File scope (not the workflow body) so it does not grow the workflow's
 // compiled source-String toward Groovy's 65,535-char limit.
 // ---------------------------------------------------------------------------
-def parseGenomescopeSummary(gs_dir) {
+def parseGenomescopeSummary(gs_summary) {
     def out = [het: 'NA', rep: 'NA']
-    def summary = file("${gs_dir}/summary.txt")
+    def summary = file("${gs_summary}")
     if (!summary.exists()) return out
 
     Long hapLen = null
@@ -73,7 +73,7 @@ workflow REPORTING {
     ch_organelle_annotation        //  ORGANELLE.out.annotation            tuple(meta, gb)
     ch_organelle_stats             //  ORGANELLE.out.stats                 tuple(meta, tsv) (used twice)
     ch_organelle_circular          //  ORGANELLE.out.circular_map          tuple(meta, png)
-    ch_genomescope_results         //  ESTIMATE_GENOME_SIZE.out.results    tuple(meta, dir)
+    ch_genomescope_results         //  ESTIMATE_GENOME_SIZE.out.results    tuple(meta, summary_txt)
     ch_genome_size_est             //  ESTIMATE_GENOME_SIZE.out.size       tuple(meta, size_file)
     ch_sample_identity             //  per-sample taxonomy side-channel    tuple(sample, tax)
     ch_input                       //  parsed sample sheet                 tuple(meta, reads)
@@ -195,11 +195,11 @@ workflow REPORTING {
         .map { meta, png -> "mito_gene_map\t${meta.sample}\t.\t${png.name}\torganelle" }
 
     // ---- GenomeScope profiles (linear_plot.png per sample) ----
-    // ESTIMATE_GENOME_SIZE.out.results: tuple(meta, <sample>_genomescope dir)
-    // publishDir: ${params.outdir}/qc/genome_size → qc/genome_size/<sample>_genomescope/linear_plot.png
+    // ESTIMATE_GENOME_SIZE.out.results: tuple(meta, <sample>.summary.txt)
+    // publishDir: ${params.outdir}/est_genome_size (flat, ID-prefixed) → est_genome_size/<sample>.linear_plot.png
     ch_manifest_genomescope = ch_genomescope_results
-        .map { meta, gs_dir ->
-            "genomescope_plot\t${meta.sample}\t.\tlinear_plot.png\tqc/genome_size/${gs_dir.name}"
+        .map { meta, gs_summary ->
+            "genomescope_plot\t${meta.sample}\t.\t${meta.sample}.linear_plot.png\test_genome_size"
         }
 
     // ---- Combine all manifest entries into a single TSV ----
@@ -254,8 +254,8 @@ workflow REPORTING {
     // as ch_genomescope_results) via parseGenomescopeSummary() defined above, so
     // nothing changes in ESTIMATE_GENOME_SIZE or main.nf. Mirrors genome_sizes.tsv.
     ch_genomescope_metrics_tsv = ch_genomescope_results
-        .map { meta, gs_dir ->
-            def gm = parseGenomescopeSummary(gs_dir)
+        .map { meta, gs_summary ->
+            def gm = parseGenomescopeSummary(gs_summary)
             "${meta.sample}\t${gm.het}\t${gm.rep}"
         }
         .collectFile(name: 'genomescope_metrics.tsv',

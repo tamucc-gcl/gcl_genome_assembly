@@ -8,7 +8,7 @@ A comprehensive, modular Nextflow pipeline for diploid genome assembly and scaff
 
 ---
 
-![](assets/genome_assembly_pipeline.png)
+![](assets/genome_assembly_pipeline_v4.png)
 
 ## Table of Contents
 
