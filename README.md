@@ -565,7 +565,6 @@ Assembly: `--hifiasm_cleaning_rounds` `4`, `--hifiasm_contig_bubble_bp` `1000000
 
 Purging: `--hifiasm_purge_level` `3`, `--hifiasm_purge_similarity` `0.55`,
 `--hifiasm_purge_min_overlap` `1`, `--hifiasm_purge_max_coverage` `auto`,
-`--hifiasm_nHaplotypes` `2` *(legacy; being folded into `ploidy`)*.
 
 Hi-C partition: `--hifiasm_use_hic` `true`, `--hifiasm_hic_base_similarity` `0.5`,
 `--hifiasm_hic_reweight_rounds` `3`, `--hifiasm_hic_perturb_rounds` `10000`,
@@ -1061,8 +1060,6 @@ into `head` bare, to avoid SIGPIPE.
   NCBI nr → UniProt Reference Proteomes; scatter-gather DIAMOND chunking; modernize the BlobDir
   workflow to `create`/`add` + `blobtk plot`; consider adopting the sanger-tol/blobtoolkit
   subworkflow if Singularity is viable; wire the evidence to an auditable filter action.
-- **`spades_mode = '--isolate'` is the current default and is inappropriate for eukaryotes** —
-  override it for eukaryotic short-read assemblies until the default changes.
 - **teloclip over-extends.** On the *S. delicatulus* test, 126 contigs / 172 extensions / 1.71 Mb
   added, while tidk confirmed telomere arrays on only 22 scaffolds. Options under consideration:
   require a minimum motif run length in the soft clip, restrict extension to chromosome-scale
@@ -1071,14 +1068,8 @@ into `head` bare, to avoid SIGPIPE.
   only), and both TADs and compartments are silently gated on `run_hic_balance`.
 - **Pangenome:** inversion cross-check + orthogonal SV validation, and BUSCO-on-graph, are not
   built.
-- **Short-read contiguity ceiling.** Without HiFi/ONT/Hi-C, Mb-scale contiguity is unreachable
-  regardless of assembler; for high-heterozygosity data (~1.7%) bubble fragmentation dominates and
-  Platanus-allee outperforms SPAdes. MEGAHIT is under consideration for short-read genomes >0.7 Gb.
 - **Pilon scatter-gather** is architecturally scoped but unimplemented; measure the QV delta before
   investing in the complexity.
-- **Parameter unification** is complete for naming, with two legacy items still in flight:
-  `hifiasm_nHaplotypes` (to be folded into `ploidy`) and the derived-vs-`auto` semantics of
-  `haploid_genome_size`.
 
 ---
 
