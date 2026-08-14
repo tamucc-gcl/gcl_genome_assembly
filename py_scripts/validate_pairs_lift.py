@@ -185,6 +185,25 @@ def main():
     print("TEST A -- ARITHMETIC (exact)")
     print("=" * 78)
 
+    # A0 -- pre-flight. Everything below assumes the two files describe the same assembly.
+    # When they do not, each later check fails in its own confusing way; this says so once.
+    # The usual cause is a stale intermediate: a lift REFUSED, the shell had no `set -e`,
+    # and a leftover file from an earlier command got compared instead.
+    expected = {new for _o, (new, _r, _L, _rk) in lift.items()}
+    observed = set(st1)
+    hit = len(expected & observed) / max(1, len(expected))
+    print(f"A0 same assembly         {len(expected & observed)}/{len(expected)} expected "
+          f"scaffolds present ({hit:.0%})  {'PASS' if hit >= 0.99 else 'FAIL'}")
+    if hit < 0.99:
+        miss = sorted(expected - observed)[:4]
+        extra = sorted(observed - expected)[:4]
+        print(f"     missing from lifted: {miss}")
+        print(f"     unexpected in lifted: {extra}")
+        print("     -> these files do not describe the same assembly. Check that no earlier")
+        print("        lift step REFUSED and left a stale intermediate behind; run the")
+        print("        recipe under `set -euo pipefail`.")
+        fails.append("A0 the two files describe different assemblies")
+
     ok = n0 == n1
     print(f"A1 pair count            orig={n0:,}  lifted={n1:,}  {'PASS' if ok else 'FAIL'}")
     if not ok:
@@ -215,6 +234,9 @@ def main():
         if not v0 or not v0["n"]:
             continue
         checked3 += 1
+        if v1 is None:
+            bad3.append((old, new, "rev" if rev else "fwd", "absent from the lifted file"))
+            continue
         n_e = v0["n"]
         if rev:
             K = L + 1
@@ -254,6 +276,9 @@ def main():
         if not v0 or not v0["n"]:
             continue
         checked4 += 1
+        if v1 is None:
+            bad4.append((old, new, "rev" if rev else "fwd", -1))
+            continue
         if all(v0["prof"].get(b, 0) == v1["prof"].get(b, 0)
                for b in set(v0["prof"]) | set(v1["prof"])):
             exact4 += 1
@@ -274,6 +299,9 @@ def main():
     for old, (new, rev, L, _o) in lift.items():
         v0, v1 = st0.get(old), st1.get(new)
         if not v0:
+            continue
+        if v1 is None:
+            bad5.append((old, new, "rev" if rev else "fwd", "absent", "-"))
             continue
         wp, wm = (v0["minus"], v0["plus"]) if rev else (v0["plus"], v0["minus"])
         if v1["plus"] != wp or v1["minus"] != wm:
