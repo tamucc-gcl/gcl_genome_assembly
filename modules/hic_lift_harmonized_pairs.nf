@@ -83,7 +83,7 @@ nextflow.enable.dsl = 2
 
 process HIC_LIFT_HARMONIZED_PAIRS {
     tag "${meta.id}_${stage}"
-    label 'hic_liftover_pairs'
+    label 'hic_lift_harmonized_pairs'
 
     publishDir "${params.outdir}/qc/hic_mapping/${stage}/harmonized_lift",
         mode: params.publish_dir_mode,
@@ -107,33 +107,33 @@ process HIC_LIFT_HARMONIZED_PAIRS {
     set -euo pipefail
     export LC_ALL=C
 
-    # pairtools sort reads TMPDIR; keep it in the task dir (already on /scratch)
-    TMPDIR="\${TMPDIR:-\$PWD}"
+    # no external sort, so no TMPDIR juggling needed
 
     # ------------------------------------------------------------------
-    # 1) translate coordinates (streaming; O(scaffolds) memory)
+    # 1) translate coordinates and compress in one stream
+    #
+    #    No re-sort. Renaming and flipping does destroy the input's sort order, but
+    #    neither consumer of these pairs needs it:
+    #      - HIC_PAIRS_METRICS is a `zcat | awk` cis/trans count, order-independent
+    #      - `cooler cload pairs` states "Pairs data need not be sorted" (index-free
+    #        loading since cooler 0.7.9). Only `cload pairix` / `cload tabix` require a
+    #        sorted, indexed contact list, and CONTACT_MAP uses `cload pairs`.
+    #    So sorting would cost a full second pass over ~10^8 pairs, plus a ~7 GB
+    #    uncompressed intermediate, to satisfy nobody. Streaming to bgzip needs neither.
+    #
+    #    The upper-triangular convention IS still restored, inside the lifter, because
+    #    that is per-record and free. Sortedness and triangularity are different things.
+    #    If some future consumer needs sorted+indexed pairs, `cooler csort` or
+    #    `pairtools sort` can be applied then rather than on every run now.
     # ------------------------------------------------------------------
     python3 ${lifter} \\
         --pairs ${pairs_gz} \\
         --name-map ${name_map} \\
-        --out lifted.unsorted.pairs \\
+        --out - \\
         --chrom-sizes ${meta.id}_${stage}.harmonized.chrom.sizes \\
         --stats ${meta.id}_${stage}.lift_stats.tsv \\
-        --sample-id ${meta.id}
-
-    # ------------------------------------------------------------------
-    # 2) re-sort in the new coordinate space
-    #    pairtools sort takes the chromosome order from the input pairs HEADER (it does
-    #    not accept --chroms-path). The lifter rewrote #chromsize: lines in finalized
-    #    order and dropped the stale @SQ samheader records, so the header the sorter
-    #    sees describes the body it is sorting. NB modules/hic_liftover_pairs.nf reuses
-    #    the ORIGINAL header after renaming chromosomes, which leaves it describing
-    #    sequences absent from the body -- worth revisiting there.
-    # ------------------------------------------------------------------
-    pairtools sort --nproc ${task.cpus} --tmpdir "\${TMPDIR}" lifted.unsorted.pairs \\
+        --sample-id ${meta.id} \\
       | bgzip -c > ${meta.id}_${stage}.harmonized.pairs.gz
-
-    rm -f lifted.unsorted.pairs
 
     # ------------------------------------------------------------------
     # 3) sanity gate: every chromosome in the sizes file must appear in the header
@@ -151,14 +151,13 @@ process HIC_LIFT_HARMONIZED_PAIRS {
     # ------------------------------------------------------------------
     # 4) versions (awk drains input -> no SIGPIPE under pipefail; no `head`)
     # ------------------------------------------------------------------
-    PT=\$(pairtools --version 2>&1 | awk 'NR==1{print \$NF}')
+    # no pairtools call remains -- only python and bgzip
     BG=\$(bgzip --version 2>&1 | awk 'NR==1{print \$NF}')
     PY=\$(python3 --version 2>&1 | awk '{print \$2}')
     {
         printf 'process\\ttool\\tversion\\n'
-        printf '%s\\tpairtools\\t%s\\n' "${task.process}" "\${PT}"
-        printf '%s\\tbgzip\\t%s\\n'     "${task.process}" "\${BG}"
-        printf '%s\\tpython\\t%s\\n'    "${task.process}" "\${PY}"
+        printf '%s\\tbgzip\\t%s\\n'  "${task.process}" "\${BG}"
+        printf '%s\\tpython\\t%s\\n' "${task.process}" "\${PY}"
     } > versions.tsv
     """
 

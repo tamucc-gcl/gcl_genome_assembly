@@ -41,7 +41,11 @@ Usage:
 """
 import argparse
 import gzip
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 
 
@@ -83,6 +87,49 @@ def identity_map(pairs_path):
                 if len(p) >= 2:
                     lift[p[0]] = (p[0], False, int(p[1]), len(lift) + 1)
     return lift
+
+
+def read_chromsizes(path):
+    """(name, length) pairs from a pairs file's #chromsize: header. Cheap -- header only."""
+    cs = {}
+    with openf(path) as fh:
+        for line in fh:
+            if not line.startswith("#"):
+                break
+            if line.lower().startswith("#chromsize:"):
+                p = line.split(":", 1)[1].split()
+                if len(p) >= 2:
+                    cs[p[0]] = int(p[1])
+    return cs
+
+
+def run_self_roundtrip(orig_pairs, name_map, workdir):
+    """Run invert-then-forward internally, into a private temp dir.
+
+    Exists because a paste-able command sequence without `set -e` leaves a stale
+    intermediate behind when a lift REFUSES, and the next command silently reads it. That
+    failure has happened twice and produced pages of misleading output both times. Running
+    both passes here makes it impossible: unique paths, and a refusal aborts.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    lifter = os.path.join(here, "lift_harmonized_pairs.py")
+    if not os.path.exists(lifter):
+        sys.exit(f"--self-roundtrip needs lift_harmonized_pairs.py beside this script "
+                 f"({lifter} not found)")
+    back = os.path.join(workdir, "back.pairs")
+    fwd = os.path.join(workdir, "roundtrip.pairs")
+    for label, args in (("invert", ["--pairs", orig_pairs, "--invert", "--out", back]),
+                        ("forward", ["--pairs", back, "--out", fwd])):
+        cmd = [sys.executable, lifter, "--name-map", name_map,
+               "--chrom-sizes", os.path.join(workdir, f"{label}.chrom.sizes"),
+               "--stats", os.path.join(workdir, f"{label}.stats.tsv")] + args
+        sys.stderr.write(f"[self-roundtrip] {label} pass\n")
+        r = subprocess.run(cmd)
+        if r.returncode != 0:
+            sys.exit(f"[self-roundtrip] the {label} pass refused (exit {r.returncode}). "
+                     f"Nothing was compared. The pairs and the map are from different "
+                     f"assemblies -- see the message above.")
+    return fwd
 
 
 def scan(path, binsize, order=None, rev_len=None):
@@ -144,10 +191,17 @@ def scan(path, binsize, order=None, rev_len=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--orig-pairs", required=True)
-    ap.add_argument("--lifted-pairs", required=True)
+    ap.add_argument("--lifted-pairs",
+                    required=not any(x == "--self-roundtrip" for x in sys.argv),
+                    help="not needed with --self-roundtrip, which produces it internally")
     ap.add_argument("--name-map",
                     help="applied_lift map relating orig -> lifted. Not needed with "
                          "--roundtrip, where the names are unchanged by construction")
+    ap.add_argument("--self-roundtrip", action="store_true", default=False,
+                    help="run the whole round trip internally: invert then forward into a "
+                         "private temp dir, then validate. Needs --orig-pairs and "
+                         "--name-map only. Preferred over --roundtrip, because there is no "
+                         "intermediate file that can go stale between commands.")
     ap.add_argument("--roundtrip", action="store_true", default=False,
                     help="orig and lifted are the two ends of an invert-then-forward round "
                          "trip, so the expected relation is the identity. Runs the same "
@@ -164,6 +218,13 @@ def main():
     a = ap.parse_args()
 
     fails, warns = [], []
+    tmpdir = None
+    if a.self_roundtrip:
+        if not a.name_map:
+            sys.exit("--self-roundtrip needs --name-map")
+        tmpdir = tempfile.mkdtemp(prefix="rtcheck.")
+        a.lifted_pairs = run_self_roundtrip(a.orig_pairs, a.name_map, tmpdir)
+        a.roundtrip = True
     if a.roundtrip:
         lift = identity_map(a.orig_pairs)
         if not lift:
@@ -173,6 +234,38 @@ def main():
         lift = read_name_map(a.name_map)
     else:
         sys.exit("give --name-map, or --roundtrip to compare an invert-then-forward pair")
+
+    # ---- A0: compare the two files' #chromsize headers BEFORE scanning. Names alone are a
+    # weak discriminator -- two assemblies of the same species share a naming scheme, so a
+    # stale file from a sibling assembly scored 97% on a name-only check. Lengths settle it,
+    # and reading headers costs milliseconds instead of scanning 180M lines to reach a
+    # conclusion that was available up front. Mismatched inputs are an INVALID TEST, not a
+    # failed lift, so this exits 2 and runs nothing else.
+    want_cs = {new: L for _o, (new, _r, L, _rk) in lift.items()}
+    got_cs = read_chromsizes(a.lifted_pairs)
+    if got_cs and want_cs != got_cs:
+        only_want = sorted(set(want_cs) - set(got_cs))
+        only_got = sorted(set(got_cs) - set(want_cs))
+        badlen = sorted(c for c in set(want_cs) & set(got_cs) if want_cs[c] != got_cs[c])
+        print("=" * 78)
+        print("MISMATCHED INPUTS -- nothing was compared")
+        print("=" * 78)
+        print(f"  expected {len(want_cs)} scaffolds, lifted file has {len(got_cs)}")
+        if only_want:
+            print(f"  absent from lifted   ({len(only_want)}): {only_want[:4]}")
+        if only_got:
+            print(f"  unexpected in lifted ({len(only_got)}): {only_got[:4]}")
+        if badlen:
+            print(f"  length disagreements ({len(badlen)}), e.g. "
+                  + "; ".join(f"{c} expected {want_cs[c]:,} got {got_cs[c]:,}"
+                              for c in badlen[:3]))
+        print()
+        print("  Same-species assemblies share a naming scheme, so matching NAMES prove")
+        print("  nothing -- the lengths are what settle it. Most likely an earlier lift")
+        print("  REFUSED and a leftover file from a previous command was read instead.")
+        print("  Use --self-roundtrip, which runs both passes into a private temp dir and")
+        print("  cannot pick up a stale intermediate.")
+        return 2
 
     order = {new: o for _old, (new, _r, _L, o) in lift.items()}
     sys.stderr.write("[validate] scanning original pairs...\n")
@@ -184,25 +277,6 @@ def main():
     print("=" * 78)
     print("TEST A -- ARITHMETIC (exact)")
     print("=" * 78)
-
-    # A0 -- pre-flight. Everything below assumes the two files describe the same assembly.
-    # When they do not, each later check fails in its own confusing way; this says so once.
-    # The usual cause is a stale intermediate: a lift REFUSED, the shell had no `set -e`,
-    # and a leftover file from an earlier command got compared instead.
-    expected = {new for _o, (new, _r, _L, _rk) in lift.items()}
-    observed = set(st1)
-    hit = len(expected & observed) / max(1, len(expected))
-    print(f"A0 same assembly         {len(expected & observed)}/{len(expected)} expected "
-          f"scaffolds present ({hit:.0%})  {'PASS' if hit >= 0.99 else 'FAIL'}")
-    if hit < 0.99:
-        miss = sorted(expected - observed)[:4]
-        extra = sorted(observed - expected)[:4]
-        print(f"     missing from lifted: {miss}")
-        print(f"     unexpected in lifted: {extra}")
-        print("     -> these files do not describe the same assembly. Check that no earlier")
-        print("        lift step REFUSED and left a stale intermediate behind; run the")
-        print("        recipe under `set -euo pipefail`.")
-        fails.append("A0 the two files describe different assemblies")
 
     ok = n0 == n1
     print(f"A1 pair count            orig={n0:,}  lifted={n1:,}  {'PASS' if ok else 'FAIL'}")
@@ -383,6 +457,8 @@ def main():
                 if n_over:
                     warns.append(f"B3 {n_over} blocks over tolerance")
 
+    if tmpdir:
+        shutil.rmtree(tmpdir, ignore_errors=True)
     print()
     print("=" * 78)
     if fails:
