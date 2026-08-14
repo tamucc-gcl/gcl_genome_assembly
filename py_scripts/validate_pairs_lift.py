@@ -85,8 +85,14 @@ def identity_map(pairs_path):
     return lift
 
 
-def scan(path, binsize, order=None):
+def scan(path, binsize, order=None, rev_len=None):
     """Single streaming pass. O(scaffolds) memory -- never stores per-pair data.
+
+    rev_len maps a reversed scaffold to its length; those scaffolds are binned from the FAR
+    END, ((L - p) // B), so the profile matches the original's ((p - 1) // B) exactly for
+    any length. Binning both from the start only lines up when the bin size divides the
+    length, which on real assemblies is never -- the check reported 0/0 and called it a
+    pass, which is worse than not running it.
 
     Per scaffold: end count, sum(pos), sum(pos^2), min, max, strand counts, binned profile.
     The moments are the load-bearing checks: they are exact at base resolution and O(1)
@@ -125,7 +131,8 @@ def scan(path, binsize, order=None):
                     v["plus"] += 1
                 elif sd == "-":
                     v["minus"] += 1
-                v["prof"][(p - 1) // binsize] += 1
+                Lr = rev_len.get(c) if rev_len else None
+                v["prof"][((Lr - p) if Lr is not None else (p - 1)) // binsize] += 1
             if order is not None:
                 i1 = order.get(c1, 0)
                 i2 = order.get(c2, 0)
@@ -171,7 +178,8 @@ def main():
     sys.stderr.write("[validate] scanning original pairs...\n")
     n0, st0, _ = scan(a.orig_pairs, a.bin)
     sys.stderr.write("[validate] scanning lifted pairs...\n")
-    n1, st1, tri_bad = scan(a.lifted_pairs, a.bin, order)
+    rev_len = {new: L for _o, (new, rv, L, _r) in lift.items() if rv}
+    n1, st1, tri_bad = scan(a.lifted_pairs, a.bin, order, rev_len)
 
     print("=" * 78)
     print("TEST A -- ARITHMETIC (exact)")
@@ -237,38 +245,30 @@ def main():
         fails.append(f"A3 {len(bad3)} scaffolds with wrong positions "
                      f"(a whole-bp shift means L - pos + 1 is wrong)")
 
-    # A4 -- binned profile shape. Secondary: catches local reordering that preserves the
-    # moments. Only bin-exact when the bin divides the length, so those are reported apart.
-    exact4, checked4, bad4, skip4 = 0, 0, [], 0
+    # A4 -- binned profile shape. Secondary to A3: catches local reordering that preserves
+    # the moments. Reversed scaffolds are binned from the far end in scan(), so the two
+    # profiles are directly comparable at any length.
+    exact4, checked4, bad4 = 0, 0, []
     for old, (new, rev, L, _o) in lift.items():
         v0, v1 = st0.get(old), st1.get(new)
         if not v0 or not v0["n"]:
             continue
-        if L % a.bin != 0:
-            skip4 += 1
-            continue
         checked4 += 1
-        nb = L // a.bin
-        if rev:
-            target = defaultdict(int)
-            for b, val in v0["prof"].items():
-                target[nb - 1 - b] += val
-        else:
-            target = v0["prof"]
-        if all(target.get(b, 0) == v1["prof"].get(b, 0)
-               for b in set(target) | set(v1["prof"])):
+        if all(v0["prof"].get(b, 0) == v1["prof"].get(b, 0)
+               for b in set(v0["prof"]) | set(v1["prof"])):
             exact4 += 1
         else:
             bad4.append((old, new, "rev" if rev else "fwd",
-                         sum(abs(target.get(b, 0) - v1["prof"].get(b, 0))
-                             for b in set(target) | set(v1["prof"]))))
-    print(f"A4 profile shape         {exact4}/{checked4} exact"
-          f"{f' ({skip4} skipped: bin does not divide length)' if skip4 else ''}  "
-          f"{'PASS' if not bad4 else 'FAIL'}")
+                         sum(abs(v0["prof"].get(b, 0) - v1["prof"].get(b, 0))
+                             for b in set(v0["prof"]) | set(v1["prof"]))))
+    verdict4 = "SKIP" if checked4 == 0 else ("PASS" if not bad4 else "FAIL")
+    print(f"A4 profile shape         {exact4}/{checked4} exact  {verdict4}")
     for b in bad4[:5]:
         print(f"     {b[0]} -> {b[1]} [{b[2]}]: total abs bin diff {b[3]:,}")
     if bad4:
         fails.append(f"A4 {len(bad4)} scaffolds with wrong profile shape")
+    if checked4 == 0:
+        warns.append("A4 checked nothing")
 
     bad5 = []
     for old, (new, rev, L, _o) in lift.items():

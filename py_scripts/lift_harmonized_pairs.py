@@ -49,6 +49,7 @@ Usage:
 """
 import argparse
 import gzip
+import re
 import sys
 
 
@@ -68,7 +69,11 @@ def read_name_map(path, invert=False):
     `order` is the actual output order of the finalized FASTA, dense 1..N.
 
     invert=True reads the map backwards: new -> old, same orient (reverse-complement is
-    its own inverse), order taken as file row order. Used only by the round-trip check.
+    its own inverse). The intermediate order is a NATURAL SORT of the destination names,
+    deliberately NOT the forward order -- if both passes targeted the same order the
+    upper-triangular restoration would be a no-op and the round-trip check would silently
+    fail to exercise it. Any order that differs works, because the forward pass restores
+    the forward order regardless.
 
     Returns (lift, ordered) with lift[src] = (dst, is_rev, length).
     """
@@ -95,6 +100,11 @@ def read_name_map(path, invert=False):
                 sys.exit(f"duplicate source name {src!r} in {path}")
             lift[src] = (dst, rev, length)
             rows.append((order, dst, length))
+    if invert:
+        def natkey(t):
+            return tuple(int(x) if x.isdigit() else x
+                         for x in re.findall(r"\d+|\D+", t[1]))
+        rows = [(i, n, L) for i, (_o, n, L) in enumerate(sorted(rows, key=natkey), start=1)]
     rows.sort()
     return lift, [(n, L) for _o, n, L in rows]
 
