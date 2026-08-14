@@ -15,8 +15,13 @@
         scaffolds flagged 'rev' are reverse-complemented; composites are left native.
 
     Input : tuple(meta, assembly_fasta, name_map)
-    Output: assembly / name_map / fai   (the full harmonized map is published by
-    HARMONIZE_SPECIES; FINALIZE emits the 4-column old->new name_map)
+    Output: assembly / name_map / fai / applied_lift
+      * name_map      4-column old->new compat map (no orient)
+      * applied_lift  old_name new_name orient order length -- what this task ACTUALLY did,
+                      written on BOTH naming paths, in dense output order matching the
+                      FASTA. Canonical input for modules/hic_lift_harmonized_pairs.nf,
+                      which needs orient to know which scaffolds were reverse-complemented.
+    (the full harmonized map is published by HARMONIZE_SPECIES)
 ========================================================================================
 */
 
@@ -33,6 +38,7 @@ process FINALIZE_ASSEMBLY {
     tuple val(meta), path("${meta.id}.fasta"),          emit: assembly
     tuple val(meta), path("${meta.id}.name_map.tsv"),   emit: name_map
     tuple val(meta), path("${meta.id}.fasta.fai"),      emit: fai
+    tuple val(meta), path("${meta.id}.applied_lift.tsv"), emit: applied_lift
 
     script:
     // Sequences >= this size are treated as chromosomal scaffolds in the size-rank
@@ -67,6 +73,14 @@ process FINALIZE_ASSEMBLY {
 
         echo -e "old_name\\tnew_name\\tlength\\tclass" > ${meta.id}.name_map.tsv
         cat name_map_full.tsv >> ${meta.id}.name_map.tsv
+
+        # applied-lift map. name_map_full.tsv is already in output order (extract_order.txt
+        # is its first column), so NR is the FASTA order. Nothing is reverse-complemented on
+        # this path, so orient is always fwd -- written explicitly so the lifter has exactly
+        # one schema and never has to assume.
+        echo -e "old_name\\tnew_name\\torient\\torder\\tlength" > ${meta.id}.applied_lift.tsv
+        awk 'BEGIN{FS=OFS="\\t"} {print \$1, \$2, "fwd", NR, \$3}' name_map_full.tsv \\
+          >> ${meta.id}.applied_lift.tsv
 
         cut -f1 name_map_full.tsv > extract_order.txt
 
@@ -120,6 +134,14 @@ process FINALIZE_ASSEMBLY {
           | awk 'BEGIN{FS=OFS="\\t"} { c=(\$6=="unplaced"?"unplaced":"scaffold"); print \$1,\$2,\$5,c }' \\
           >> ${meta.id}.name_map.tsv
 
+        # applied-lift map. rows.tsv was sorted into output order above, so NR gives a
+        # dense 1..N order matching the FASTA exactly. The source map's own order column may
+        # be sparse, and the lifter uses order for the upper-triangular convention, so it
+        # must agree with what was written, not with what was proposed.
+        echo -e "old_name\\tnew_name\\torient\\torder\\tlength" > ${meta.id}.applied_lift.tsv
+        awk 'BEGIN{FS=OFS="\\t"} {print \$1, \$2, \$3, NR, \$5}' rows.tsv \\
+          >> ${meta.id}.applied_lift.tsv
+
         N_CHR=\$(tail -n +2 "\${MAP}"  | awk -F'\\t' '\$6=="chromosome"' | wc -l)
         N_COMP=\$(tail -n +2 "\${MAP}" | awk -F'\\t' '\$6=="composite"'  | wc -l)
         N_UNPL=\$(tail -n +2 "\${MAP}" | awk -F'\\t' '\$6=="unplaced"'   | wc -l)
@@ -137,5 +159,6 @@ process FINALIZE_ASSEMBLY {
     touch ${meta.id}.fasta
     touch ${meta.id}.fasta.fai
     echo -e "old_name\\tnew_name\\tlength\\tclass" > ${meta.id}.name_map.tsv
+    echo -e "old_name\\tnew_name\\torient\\torder\\tlength" > ${meta.id}.applied_lift.tsv
     """
 }
