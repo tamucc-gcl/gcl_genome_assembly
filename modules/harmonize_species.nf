@@ -36,6 +36,11 @@ process HARMONIZE_SPECIES {
     tuple val(taxid), path("${taxid}.reference_id.txt"), emit: reference_id
     path("*.harmonization_report.tsv"),                  emit: report
     path("*.reference_selection.tsv"),                   emit: reference_selection
+    path("*.chromosome_sets.tsv"),                       emit: chromosome_sets
+    path("*.chromosome_graph.tsv"),                      emit: chromosome_graph
+    path("*.chromosome_components.tsv"),                 emit: chromosome_components
+    path("*.presence_matrix.tsv"),                       emit: presence_matrix
+    path("*.consensus_chromosome_map.provisional.tsv"),  emit: consensus_map_provisional
     path("versions.tsv"),                                emit: versions
     path("*.minimap2.log"),                              emit: logs, optional: true
 
@@ -52,6 +57,19 @@ process HARMONIZE_SPECIES {
     def ref_pref     = params.harmonize_reference_ids ?: ''
     def min_chrom_frac  = params.harmonize_min_chrom_frac ?: 0.1
     def batch_consensus = (params.harmonize_batch_consensus == false) ? '--no-batch-consensus' : '--batch-consensus'
+    def bc_action    = params.harmonize_batch_consensus_action ?: 'flag'
+    // NB explicit null checks, not `?:` -- 0 is falsy in Groovy, so `?:` would silently
+    // ignore an intentional 0 (the documented way to disable these thresholds).
+    def v_cut        = (params.harmonize_voter_min_cut_ratio   != null) ? params.harmonize_voter_min_cut_ratio   : 0.0
+    def v_gfrac      = (params.harmonize_voter_min_genome_frac != null) ? params.harmonize_voter_min_genome_frac : 0.8
+    def v_n50r       = (params.harmonize_voter_min_n50_ratio   != null) ? params.harmonize_voter_min_n50_ratio   : 0.2
+    def v_dropoff    = (params.harmonize_voter_require_dropoff == false) ? '--no-voter-require-dropoff' : '--voter-require-dropoff'
+    def min_voters   = (params.harmonize_min_voters != null) ? params.harmonize_min_voters : 3
+    def rp_min_ind   = (params.harmonize_restricted_presence_min_individuals != null) ? params.harmonize_restricted_presence_min_individuals : 2
+    def conc_excl_ref = (params.harmonize_concordance_exclude_reference == true) ? '--concordance-exclude-reference' : ''
+    def mem_cover    = (params.harmonize_member_cover_frac != null) ? params.harmonize_member_cover_frac : 0.5
+    def infl_tol     = (params.harmonize_inflated_aln_tol  != null) ? params.harmonize_inflated_aln_tol  : 1.05
+    def graph_rule   = params.harmonize_graph_rule ?: 'majority'
     """
     set -euo pipefail
 
@@ -157,6 +175,17 @@ process HARMONIZE_SPECIES {
         --secondary-frac ${sec_frac} \\
         --min-chrom-frac ${min_chrom_frac} \\
         ${batch_consensus} \\
+        --batch-consensus-action ${bc_action} \\
+        --voter-min-cut-ratio ${v_cut} \\
+        --voter-min-genome-frac ${v_gfrac} \\
+        --voter-min-n50-ratio ${v_n50r} \\
+        ${v_dropoff} \\
+        --min-voters ${min_voters} \\
+        --restricted-presence-min-individuals ${rp_min_ind} \\
+        ${conc_excl_ref} \\
+        --member-cover-frac ${mem_cover} \\
+        --inflated-aln-tol ${infl_tol} \\
+        --graph-rule ${graph_rule} \\
         --outdir .
 
     # ------------------------------------------------------------------
@@ -183,7 +212,16 @@ process HARMONIZE_SPECIES {
     printf 'assembly\\told_name\\tnew_name\\tclass\\tlength\\torient\\tref_span\\tflags\\n' \\
         > "${taxid}.harmonization_report.tsv"
     printf 'id\\tn_chrom_scaffolds\\tscaffold_n50\\n' > "${taxid}.reference_selection.tsv"
-    printf 'id\\tn_chrom_scaffolds\\tscaffold_n50\\n' > "${taxid}.reference_selection.tsv"
+    printf 'id\\trole\\tis_reference\\tn_chrom_set\\tchrom_set_method\\tcut_ratio\\tgenome_fraction\\tscaffold_n50\\tn_scaffolds\\tchrom_set_flags\\trole_reasons\\n' \\
+        > "${taxid}.chromosome_sets.tsv"
+    printf 'chr_a\\tchr_b\\tlen_a\\tlen_b\\tn_fused\\tn_split\\tn_voters\\tedge_permissive\\tedge_majority\\tedge_plurality\\n' \\
+        > "${taxid}.chromosome_graph.tsv"
+    printf 'rule\\tn_components\\tn_edges\\tcomponent_id\\tn_members\\tmembers\\ttotal_bp\\n' \\
+        > "${taxid}.chromosome_components.tsv"
+    printf 'chromosome\\tlength\\tn_chromosome\\tn_composite\\tn_absent\\tn_individuals_present\\tn_individuals\\n' \\
+        > "${taxid}.presence_matrix.tsv"
+    printf 'assembly\\trole\\told_name\\tcurrent_new_name\\tclass\\tlength\\torient\\tconsensus_chrom\\tconsensus_members\\tflags\\n' \\
+        > "${taxid}.consensus_chromosome_map.provisional.tsv"
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }
