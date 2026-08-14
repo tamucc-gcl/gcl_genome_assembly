@@ -98,6 +98,36 @@ def quantiles(vals, qs):
     return out
 
 
+def auc(pos_vals, neg_vals):
+    """P(control > null). Scale-free, cannot blow up, reported as a diagnostic only.
+
+    NOT used to set a threshold. Two reasons, both learned the hard way here:
+
+      * The null CONTAINS the junctions being searched for. Any threshold chosen to give
+        zero false positives therefore excludes the target by construction -- a Youden
+        threshold on this data sat above the planted junction in testing.
+      * An artificial mid-chromosome split is a STRONGER positive than a real missed
+        junction: the two halves of an intact chromosome are in maximal proximity, whereas
+        two scaffolds that failed to join may be separated by unassembled sequence or a
+        repeat that suppresses contact. So the controls bound what is achievable, they do
+        not estimate what a real junction scores.
+
+    Thresholds come from --min-z (a calibrated Poisson deviate, data-independent) and
+    --min-enrichment. The controls measure SENSITIVITY against those fixed thresholds; the
+    null shows what clears them. Nothing is tuned to the data.
+    """
+    if not pos_vals or not neg_vals:
+        return 0.0
+    wins = ties = 0
+    for p in pos_vals:
+        for n in neg_vals:
+            if p > n:
+                wins += 1
+            elif p == n:
+                ties += 1
+    return (wins + 0.5 * ties) / float(len(pos_vals) * len(neg_vals))
+
+
 def window_cov(covbins, lo, hi):
     """Coverage (contact ends) in [lo, hi) from COVBIN-sized marginal bins."""
     if hi <= lo:
@@ -153,7 +183,7 @@ def main():
     pos = defaultdict(list)
     ctrl_total = defaultdict(int)
     ctrl_pos = defaultdict(list)
-    keep = 12_000_000 if a.scan else a.window_inner + a.window_bp
+    keep = 3_000_000 if a.scan else a.window_inner + a.window_bp
     n_pairs = 0
 
     with openf(a.pairs) as fh:
@@ -245,33 +275,77 @@ def main():
                 "z": (obs - exp) / (exp ** 0.5), "tot": tot, "wcov": min(cA, cB)}
 
     if a.scan:
-        print("%-8s %-9s | %-26s | %-26s | verdict"
-              % ("inner", "width", "SPLITS (positive control)", "INTER-SCAFFOLD (null)"))
-        print("%-8s %-9s | %8s %8s %8s | %8s %8s %8s |"
-              % ("", "", "med", "p90", "max", "med", "p90", "max"))
-        for inner in (0, 100_000, 300_000, 500_000):
-            for width in (250_000, 500_000, 1_000_000, 2_000_000):
-                ps = []
-                for c in ctrl:
-                    r = score_control(c, inner, width)
-                    if r and r["wcov"] >= a.min_window_cov:
-                        ps.append(r["enr"])
-                ns = []
-                for i, ka in enumerate(cand):
-                    for kb in cand[i + 1:]:
-                        r = score_pair(ka, kb, inner, width)
-                        if (r and r["tot"] >= a.min_total_contacts
-                                and r["wcov"] >= a.min_window_cov):
-                            ns.append(r["enr"])
-                pm, p9, pmx = quantiles(ps, [0.5, 0.9, 1.0])
-                nm, n9, nmx = quantiles(ns, [0.5, 0.9, 1.0])
-                ok = "usable" if (ps and ns and pm > max(2.0, n9 * 2)) else "INSENSITIVE"
-                print("%-8d %-9d | %8.2f %8.2f %8.2f | %8.2f %8.2f %8.2f | %s (%d/%d)"
-                      % (inner, width, pm, p9, pmx, nm, n9, nmx, ok, len(ps), len(ns)))
-        print("\nThe SPLITS columns are artificial mid-chromosome splits -- what a TRUE")
-        print("junction looks like in this library. If their median is not clearly above")
-        print("the null p90, this test cannot resolve junctions at this depth, and the")
-        print("honest response is to report that, not to lower the thresholds.")
+        def collect(inner, width):
+            cs, ns = [], []
+            for c in ctrl:
+                r = score_control(c, inner, width)
+                if r and r["wcov"] >= a.min_window_cov:
+                    cs.append((r["enr"], r["z"], c))
+            for i, ka in enumerate(cand):
+                for kb in cand[i + 1:]:
+                    r = score_pair(ka, kb, inner, width)
+                    if (r and r["tot"] >= a.min_total_contacts
+                            and r["wcov"] >= a.min_window_cov):
+                        ns.append((r["enr"], r["z"], "%s+%s" % (ka, kb)))
+            return cs, ns
+
+        print("CONTROLS are artificial mid-chromosome splits -- KNOWN junctions in this")
+        print("library. 'thr' is the control p10, i.e. the threshold that keeps 90%% of")
+        print("them. n_hi counts inter-scaffold pairs reaching it; n_hiz adds z >= %.1f."
+              % a.min_z)
+        print("Those are CANDIDATES, not false positives -- named under the table.")
+        print("A small n_hiz with a high thr is what a usable setting looks like.\n")
+        hdr = ("%-7s %-8s | %7s %7s %7s | %7s %7s | %5s %8s %6s"
+               % ("inner", "width", "c_med", "c_medz", "sens", "n_med", "n_medz",
+                  "AUC", "n_pass", "n_ctrl"))
+        print(hdr)
+        print("-" * len(hdr))
+        best = None
+        for inner in (0, 100_000, 300_000):
+            for width in (50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000):
+                cs, ns = collect(inner, width)
+                if not cs or not ns:
+                    continue
+                def passes(e, z):
+                    return e >= a.min_enrichment and z >= a.min_z
+                c_med = quantiles([x[0] for x in cs], [0.5])[0]
+                c_medz = quantiles([x[1] for x in cs], [0.5])[0]
+                n_med = quantiles([x[0] for x in ns], [0.5])[0]
+                n_medz = quantiles([x[1] for x in ns], [0.5])[0]
+                sens = sum(1 for e, z, _n in cs if passes(e, z)) / float(len(cs))
+                hits = [x for x in ns if passes(x[0], x[1])]
+                A = auc([x[0] for x in cs], [x[0] for x in ns])
+                print("%-7d %-8d | %7.2f %7.2f %6.0f%% | %7.2f %7.2f | %5.3f %8d %6d"
+                      % (inner, width, c_med, c_medz, 100 * sens, n_med, n_medz,
+                         A, len(hits), len(cs)))
+                # rank by SENSITIVITY at the fixed thresholds, tie-broken by fewer null
+                # pairs clearing them. Never by a threshold fitted to the data.
+                key = (sens, -len(hits))
+                if best is None or key > best[0]:
+                    best = (key, inner, width, hits, sens, A)
+        if best is None:
+            print("\nNothing scoreable at any swept window.")
+            return
+        (bsens, _), bi, bw, bhits, sens, A = best
+        print("\nBest sensitivity: inner=%d width=%d -- %.0f%% of KNOWN junctions clear "
+              "enr>=%.1f and z>=%.1f (AUC %.3f)" % (bi, bw, 100 * bsens,
+                                                    a.min_enrichment, a.min_z, A))
+        if bsens < 0.5:
+            print("\nFewer than half the known junctions clear the thresholds at ANY window")
+            print("swept here, so this library cannot reliably resolve junctions. Report")
+            print("that. Do NOT lower --min-z or --min-enrichment until something passes:")
+            print("the controls are the calibration, and they say the test is blind.")
+            return
+        print("Inter-scaffold pairs clearing the same thresholds -- the CANDIDATES:")
+        print("  %-36s %9s %9s" % ("pair", "enrich", "z"))
+        for e, z, nm in sorted(bhits, key=lambda x: -x[1])[:20]:
+            print("  %-36s %9.2f %9.2f" % (nm, e, z))
+        if not bhits:
+            print("  (none -- with %.0f%% sensitivity demonstrated, that is a real negative:"
+                  % (100 * bsens))
+            print("   Hi-C does not support any of these joins)")
+        print("\nRe-run without --scan using --window-inner %d --window-bp %d to write "
+              "calls." % (bi, bw))
         return
 
     ctrl_rows = [(c, r) for c, r in
@@ -285,8 +359,16 @@ def main():
     null_enr = [r["enr"] for _a, _b, r in rows
                 if r["tot"] >= a.min_total_contacts and r["wcov"] >= a.min_window_cov]
     nmed, n90 = quantiles(null_enr, [0.5, 0.9])
-    call_floor = max(a.min_enrichment, n90 * 2)
-    sensitive = bool(ctrl_enr) and cmed > call_floor
+    # Thresholds are FIXED (--min-enrichment, --min-z). The controls do not set them --
+    # they measure whether known junctions clear them, i.e. sensitivity. Deriving a
+    # threshold from either distribution is unsound: the null contains the junctions being
+    # searched for, and the controls are a stronger positive than a real missed junction.
+    call_floor = a.min_enrichment
+    ctrl_pass = [1 for _c, r in ctrl_rows
+                 if r["wcov"] >= a.min_window_cov
+                 and r["enr"] >= a.min_enrichment and r["z"] >= a.min_z]
+    sensitivity = (len(ctrl_pass) / float(len(ctrl_enr))) if ctrl_enr else 0.0
+    sensitive = sensitivity >= 0.5
 
     n_join = n_low = 0
     with open(a.out, "w") as fh:
@@ -299,13 +381,16 @@ def main():
                  % (len(null_enr), nmed, n90))
         fh.write("# positive_control\tartificial_splits\t%d\tmedian\t%.3f\tp10\t%.3f\n"
                  % (len(ctrl_enr), cmed, c10))
-        fh.write("# sensitivity\t%s\tcall_floor\t%.3f\n"
-                 % ("SENSITIVE" if sensitive else "INSENSITIVE", call_floor))
+        fh.write("# sensitivity\t%s\t%.0f%%_of_known_junctions_clear_enr>=%.1f_and_z>=%.1f"
+                 "\tnull_median\t%.3f\n"
+                 % ("SENSITIVE" if sensitive else "INSENSITIVE", 100 * sensitivity,
+                    a.min_enrichment, a.min_z, nmed))
         if not sensitive:
-            fh.write("# WARNING\tartificial splits of KNOWN single chromosomes do not "
-                     "separate from the null, so this library cannot resolve junctions at "
-                     "these settings. All calls are suppressed to 'insensitive'. Do NOT "
-                     "lower thresholds to make calls appear.\n")
+            fh.write("# WARNING\tfewer than half of the artificial splits -- KNOWN single "
+                     "chromosomes -- clear these thresholds, so the test is blind at these "
+                     "settings. All calls are suppressed to 'insensitive'. Do NOT lower "
+                     "--min-z or --min-enrichment to make calls appear; the controls are "
+                     "the calibration and they say the test cannot see.\n")
         for c, r in sorted(ctrl_rows, key=lambda x: -x[1]["enr"]):
             fh.write("# control\t%s\tenrichment\t%.3f\tz\t%.2f\tobs\t%d\texp\t%.1f\n"
                      % (c, r["enr"], r["z"], r["obs"], r["exp"]))
@@ -331,9 +416,9 @@ def main():
                 "a_%s-b_%s" % c)) + "\n")
 
     sys.stderr.write(
-        "[hic-junction %s] %d candidates, %d controls; control median %.2f vs null p90 "
-        "%.2f -> %s; %d join, %d low_coverage\n"
-        % (a.assembly_id, len(cand), len(ctrl_enr), cmed, n90,
+        "[hic-junction %s] %d candidates, %d controls; sensitivity %.0f%% (control med "
+        "%.2f, null med %.2f) -> %s; %d join, %d low_coverage\n"
+        % (a.assembly_id, len(cand), len(ctrl_enr), 100 * sensitivity, cmed, nmed,
            "SENSITIVE" if sensitive else "INSENSITIVE", n_join, n_low))
 
 
