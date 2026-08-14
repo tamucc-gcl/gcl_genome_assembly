@@ -214,12 +214,24 @@ def edge_keep(rule, n_f, n_s, min_fused=2):
     raise ValueError("unknown graph rule %r" % rule)
 
 
-def components(nodes, edges):
-    """Union-find over chromosome numbers.
+def components(nodes, edges, node_len=None):
+    """Union-find over reference-frame piece numbers -> consensus chromosomes.
 
-    Returns (comp_of, comp_members) where component ids are 1..N ordered by their
-    smallest member -- and since chrN is a descending-size rank, that orders components
-    roughly by size and keeps ids stable across rules.
+    Consensus ids are 1..N ordered by DESCENDING component total length (ties broken by
+    smallest member), so chr1 is the largest chromosome -- the universal convention.
+
+    Ordering by smallest member instead, as this did originally, is wrong once any merge
+    happens: the id inherits the rank of the component's smallest member while the total
+    length comes from all of them, so a merged component lands in a low-numbered slot with
+    a large total while mid-rank singletons keep their original positions. On the Sde run
+    that put chr9 at 49.3 Mb between chr8 at 78.0 Mb and chr10 at 86.3 Mb, and left 13 of
+    15 ids out of size order. Indefensible in a published assembly.
+
+    node_len maps piece number -> length; omit it to fall back to smallest-member ordering.
+
+    NB consensus ids are not comparable across graph rules -- a different edge set gives a
+    different component count and different totals, so the numbering changes. The rule must
+    therefore be settled before any name derived from it ships.
     """
     parent = {n: n for n in nodes}
 
@@ -236,7 +248,11 @@ def components(nodes, edges):
     groups = defaultdict(list)
     for n in nodes:
         groups[find(n)].append(n)
-    ordered = sorted(groups.values(), key=lambda g: min(g))
+    if node_len:
+        ordered = sorted(groups.values(),
+                         key=lambda g: (-sum(node_len.get(n, 0) for n in g), min(g)))
+    else:
+        ordered = sorted(groups.values(), key=lambda g: min(g))
     comp_of, comp_members = {}, {}
     for cid, g in enumerate(ordered, start=1):
         comp_members[cid] = sorted(g)
@@ -885,17 +901,18 @@ def main():
         x, y = sorted(pr)
         pair_stats[(x, y)] = concordance(x, y)
 
-    graph = {}
-    for rule in GRAPH_RULES:
-        edges = [(x, y) for (x, y), (n_f, n_s) in pair_stats.items()
-                 if edge_keep(rule, n_f, n_s, a.graph_min_fused)]
-        comp_of, comp_members = components(chrom_nums, edges)
-        graph[rule] = {"edges": edges, "comp_of": comp_of, "comp_members": comp_members}
-
     # refN = reference-frame piece (size rank in the reference); chrN = consensus
     # chromosome. Two namespaces, never the same token for both.
     rs = {i: n for n, i in chrom_of.items()}
     rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
+
+    graph = {}
+    for rule in GRAPH_RULES:
+        edges = [(x, y) for (x, y), (n_f, n_s) in pair_stats.items()
+                 if edge_keep(rule, n_f, n_s, a.graph_min_fused)]
+        # rl orders consensus ids by descending total length -> chr1 is the largest
+        comp_of, comp_members = components(chrom_nums, edges, rl)
+        graph[rule] = {"edges": edges, "comp_of": comp_of, "comp_members": comp_members}
     gpath = os.path.join(a.outdir, f"{a.species}.chromosome_graph.tsv")
     with open(gpath, "w") as fh:
         fh.write("# refN = reference-frame piece (size rank in %s); chrN = consensus "
@@ -913,8 +930,9 @@ def main():
 
     cpath = os.path.join(a.outdir, f"{a.species}.chromosome_components.tsv")
     with open(cpath, "w") as fh:
-        fh.write("# chrN = consensus chromosome; members are reference-frame pieces "
-                 "(refN, size rank in %s)\n" % a.reference_id)
+        fh.write("# chrN = consensus chromosome, numbered by descending total length; "
+                 "ties by smallest member. members are reference-frame pieces (refN, size "
+                 "rank in %s). Ids are NOT comparable across rules.\n" % a.reference_id)
         fh.write("rule\tn_chromosomes\tn_edges\tchromosome\tn_members\t"
                  "members\tmember_scaffolds\ttotal_bp\n")
         for rule in GRAPH_RULES:

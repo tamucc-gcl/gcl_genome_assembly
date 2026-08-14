@@ -21,7 +21,8 @@ size-only behaviour rather than failing or silently changing its answer.
 |---|---|---|
 | 0a | Composite-aware batch consensus; voter/passenger roles; per-assembly chromosome-set metrics | **applied** (`patch_harmonize_consensus.py`) |
 | 0b | Size-invariant composite-member test; join graph / presence matrix / provisional consensus map (report-only) | **applied, validated** (`patch2_harmonize_graph.py`) |
-| 0c | Join-graph support floor; `refN` / `chrN` vocabulary split | **patch ready** (`patch3_graph_floor_vocab.py`) |
+| 0c | Join-graph support floor; `refN` / `chrN` vocabulary split | **applied, validated** (`patch3_graph_floor_vocab.py`) |
+| 0e | Consensus chromosome ids ordered by descending length | **patch ready** (`patch4_consensus_size_order.py`) |
 | 0d | Stable `groupTuple` ordering in `harmonize_scaffolds.nf` | **applied** |
 | 1 | Move Hi-C mapping to post-teloclip; rename/revcomp pairs lift | not started |
 | 2 | Hi-C junction evidence module | not started |
@@ -86,7 +87,68 @@ n_f = 1, which is why permissive gave the right answer here and plurality did no
 
 Fixed in 0c with `--graph-min-fused` (default 2), applied before every rule.
 
-### Watch item
+### Round 3 (patch 0c)
+
+Support floor worked: `ref2+ref20` at 1f/1s now fails every rule, `plurality` 14 → 15. Name
+maps byte-identical (zero `refN` in data rows), so only the report files changed.
+
+```
+rule         edges  consensus_chromosomes  merged
+permissive   5      15                     ref4+20, ref8+17, ref10+15, ref14+16, ref18+19
+majority     3      17                     ref4+20, ref8+17, ref18+19
+plurality    5      15                     same as permissive
+```
+
+Two things this exposed:
+
+**`permissive` collapses into the floor.** With `min_fused = 2`, `n_f > 1` is automatically
+true, so `permissive` reduces to "≥2 voters agree, however many disagree". It coincides with
+`plurality` here only because every n_f ≥ 2 pair also happens to satisfy n_f ≥ n_s. A 2f/10s
+junction would still separate them. Do not read the agreement as a general property; the
+informative contrast is `majority` vs `plurality`, i.e. the tie question.
+
+**Consensus ids were not in size order.** Ids came from the smallest member's reference rank,
+which is only correct when nothing merges. Once a component has several members the id
+inherits the smallest member's rank while the total comes from all of them:
+
+```
+chr8   ref8+ref17    78,019,979
+chr9   ref9          49,283,921
+chr10  ref10+ref15   86,285,929
+```
+
+13 of 15 ids out of descending-length order under `permissive`, 12 of 17 under `majority`.
+Fixed in 0e — descending total length, ties by smallest member. Replaying the observed edge
+sets through the fix:
+
+```
+permissive (15)                      majority (17)
+chr1  ref1          94,989,632       chr1  ref1          94,989,632
+chr2  ref4+ref20    93,285,116       chr2  ref4+ref20    93,285,116
+chr3  ref2          92,004,963       chr3  ref2          92,004,963
+chr4  ref10+ref15   86,285,929       chr4  ref3          85,027,058
+...                                  ...
+chr15 ref13         42,119,116       chr17 ref16         39,925,287
+```
+
+**Consequence for sequencing:** consensus ids are not comparable across rules — a different
+edge set changes both the count and the totals, so switching rules renumbers every
+chromosome. The rule must be settled before any name derived from it ships, which is the
+concrete cost of step 4 waiting on step 2.
+
+### Watch items
+
+**Reference selection tie-break should use cut ratio, not N50.** `chromosome_sets.tsv` shows
+the four 15-unit voters spread over cut ratios 10.7 / 11.4 / 27.6 / 115.1 — a 10× range in
+frame sharpness that N50 does not see. A mode-of-dropoff-counts selection would tie those
+four and break on N50 to CMat_203_hap1 (cut ratio 11.4, and carrying
+`size_floor_trimmed=1`), passing over CMat_203_hap2 (115.1, no trim). Cut ratio is a direct
+measure of how cleanly the chromosome set separates from the tail; fold it into the step 4
+selection rewrite as the primary tie-break with N50 secondary.
+
+Also from that table: `Sde-CBau_104_hap1` has a cut ratio of **102.6** at 17 units against
+the reference `hap2`'s **4.46** at 20 — same individual, 23× sharper frame in the other
+haplotype.
 
 `Sde-CMat_203_hap1` carries `size_floor_trimmed=1` — `min_chrom_frac = 0.1` removed one
 member from its chromosome set (median named length 77.1 Mb, so the floor was 7.71 Mb; its
@@ -530,6 +592,10 @@ where that gets looked at, without a nominated candidate.
   because its `n_f > 1` clause incidentally does a support floor's job. Reporting several
   rules is only useful if each one's failure mode is understood; a rule that looks like the
   loose end of a spectrum can be the one that gets it right.
+- **An id derived from a member is not an id for the group.** Numbering components by their
+  smallest member's rank silently breaks the moment anything merges, because the id and the
+  quantity it is supposed to order come from different places. Order by the property you
+  want ordered.
 - **Union-find has no notion of plausibility.** One accepted spurious edge chains whole
   components together. Every edge predicate needs a minimum-support floor, not just a
   comparison.
