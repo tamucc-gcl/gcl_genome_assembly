@@ -184,18 +184,26 @@ def parse_paf(path, chrom_of):
 GRAPH_RULES = ("permissive", "majority", "plurality")
 
 
-def edge_keep(rule, n_f, n_s):
+def edge_keep(rule, n_f, n_s, min_fused=2):
     """Should a fused pair become a join-graph edge under `rule`?
 
-    permissive -- the current in-flag concordance rule: >1 voter fused, or nobody split.
-                  Passes 2f/10s, so it over-joins.
-    majority   -- strictly more voters fused than split. Conservative; leaves ties open.
-    plurality  -- fused >= split. Treats a tie as a join.
+    min_fused is a hard floor applied BEFORE any rule: a junction seen fused in fewer than
+    this many voters is a single observation, not evidence. Without it, `plurality`
+    (n_f >= n_s) accepts a 1f/1s pair -- one assembly's mis-join against one assembly's
+    split -- and union-find then chains it into an unrelated component. On the Sde run that
+    turned chr2 + chr4 + chr20 into a single 185 Mb "chromosome", larger than the largest
+    real chromosome (95 Mb). `permissive`'s `n_s == 0` branch has the same hole: 1f/0s would
+    pass on one observation.
 
-    All three are reported so the tie cases are visible instead of silently resolved by
-    whichever rule happens to be wired into the naming path.
+    permissive -- >1 voter fused, or nobody splits it. Passes 2f/10s, so it over-joins.
+    majority   -- strictly more voters fused than split. Conservative; leaves ties open.
+    plurality  -- fused >= split. Treats a genuine tie as a join.
+
+    Note the rules are NOT nested: permissive's own `n_f > 1` clause makes it stricter than
+    plurality at n_f == 1. All three are reported so tie cases stay visible instead of being
+    silently resolved by whichever rule happens to be wired into naming.
     """
-    if n_f == 0:
+    if n_f < max(1, min_fused):
         return False
     if rule == "permissive":
         return n_f > 1 or n_s == 0
@@ -483,6 +491,11 @@ def main():
                     help="a 2nd chromosome contributing >= this share -> composite")
     ap.add_argument("--overlap-tol", type=int, default=0,
                     help="bp of reference overlap between two pieces before flagging")
+    ap.add_argument("--graph-min-fused", type=int, default=2,
+                    help="join-graph support floor: a junction must be seen fused in at "
+                         "least this many voters before any rule can keep it. Guards "
+                         "against a single assembly's mis-join chaining unrelated "
+                         "chromosomes together through union-find")
     ap.add_argument("--graph-rule", choices=GRAPH_RULES, default="majority",
                     help="which join-graph rule the PROVISIONAL consensus chromosome map "
                          "is written under. Reporting only in this version -- scaffold "
@@ -875,34 +888,43 @@ def main():
     graph = {}
     for rule in GRAPH_RULES:
         edges = [(x, y) for (x, y), (n_f, n_s) in pair_stats.items()
-                 if edge_keep(rule, n_f, n_s)]
+                 if edge_keep(rule, n_f, n_s, a.graph_min_fused)]
         comp_of, comp_members = components(chrom_nums, edges)
         graph[rule] = {"edges": edges, "comp_of": comp_of, "comp_members": comp_members}
 
+    # refN = reference-frame piece (size rank in the reference); chrN = consensus
+    # chromosome. Two namespaces, never the same token for both.
+    rs = {i: n for n, i in chrom_of.items()}
+    rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
     gpath = os.path.join(a.outdir, f"{a.species}.chromosome_graph.tsv")
     with open(gpath, "w") as fh:
-        fh.write("chr_a\tchr_b\tlen_a\tlen_b\tn_fused\tn_split\tn_voters\t"
+        fh.write("# refN = reference-frame piece (size rank in %s); chrN = consensus "
+                 "chromosome. min_fused=%d\n" % (a.reference_id, a.graph_min_fused))
+        fh.write("ref_a\tref_b\tref_scaffold_a\tref_scaffold_b\tlen_a\tlen_b\t"
+                 "n_fused\tn_split\tn_voters\t"
                  + "\t".join("edge_%s" % r for r in GRAPH_RULES) + "\n")
-        rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
         for (x, y) in sorted(pair_stats, key=lambda p: (-pair_stats[p][0], p)):
             n_f, n_s = pair_stats[(x, y)]
             fh.write("\t".join(str(v) for v in (
-                "chr%d" % x, "chr%d" % y, rl.get(x, 0), rl.get(y, 0),
-                n_f, n_s, len(conc_pool),
-                *(1 if edge_keep(r, n_f, n_s) else 0 for r in GRAPH_RULES))) + "\n")
+                "ref%d" % x, "ref%d" % y, rs.get(x, "?"), rs.get(y, "?"),
+                rl.get(x, 0), rl.get(y, 0), n_f, n_s, len(conc_pool),
+                *(1 if edge_keep(r, n_f, n_s, a.graph_min_fused) else 0
+                  for r in GRAPH_RULES))) + "\n")
 
     cpath = os.path.join(a.outdir, f"{a.species}.chromosome_components.tsv")
     with open(cpath, "w") as fh:
-        fh.write("rule\tn_components\tn_edges\tconsensus_id\tn_members\t"
-                 "members\ttotal_bp\n")
-        rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
+        fh.write("# chrN = consensus chromosome; members are reference-frame pieces "
+                 "(refN, size rank in %s)\n" % a.reference_id)
+        fh.write("rule\tn_chromosomes\tn_edges\tchromosome\tn_members\t"
+                 "members\tmember_scaffolds\ttotal_bp\n")
         for rule in GRAPH_RULES:
             g = graph[rule]
             for cid, mem in g["comp_members"].items():
                 fh.write("\t".join(str(v) for v in (
                     rule, len(g["comp_members"]), len(g["edges"]),
-                    "cons%d" % cid, len(mem),
-                    "+".join("chr%d" % m for m in mem),
+                    "chr%d" % cid, len(mem),
+                    "+".join("ref%d" % m for m in mem),
+                    "+".join(rs.get(m, "?") for m in mem),
                     sum(rl.get(m, 0) for m in mem))) + "\n")
 
     # presence matrix: how each assembly holds each reference chromosome. Makes genuine
@@ -910,10 +932,12 @@ def main():
     ppath = os.path.join(a.outdir, f"{a.species}.presence_matrix.tsv")
     ids_sorted = sorted(by_id)
     with open(ppath, "w") as fh:
-        fh.write("chromosome\tlength\tn_chromosome\tn_composite\tn_absent\t"
+        fh.write("# rows are reference-frame pieces (refN, size rank in %s), not consensus "
+                 "chromosomes -- see chromosome_components.tsv for the mapping\n"
+                 % a.reference_id)
+        fh.write("ref\tref_scaffold\tlength\tn_chromosome\tn_composite\tn_absent\t"
                  "n_individuals_present\tn_individuals\t"
                  + "\t".join(ids_sorted) + "\n")
-        rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
         n_ind_all = len({individual_of(r) for r in by_id})
         for k in chrom_nums:
             cells, nc, nx, na, inds = [], 0, 0, 0, set()
@@ -933,8 +957,8 @@ def main():
                     cells.append("absent")
                     na += 1
             fh.write("\t".join(str(v) for v in (
-                "chr%d" % k, rl.get(k, 0), nc, nx, na, len(inds), n_ind_all,
-                *cells)) + "\n")
+                "ref%d" % k, rs.get(k, "?"), rl.get(k, 0), nc, nx, na,
+                len(inds), n_ind_all, *cells)) + "\n")
 
     # provisional consensus chromosome map -- the schema a per-chromosome pangenome build
     # would consume. Written under --graph-rule and labelled provisional because names are
@@ -942,10 +966,12 @@ def main():
     gr = graph[a.graph_rule]
     mpath = os.path.join(a.outdir, f"{a.species}.consensus_chromosome_map.provisional.tsv")
     with open(mpath, "w") as fh:
-        fh.write("# PROVISIONAL -- consensus frame under graph rule '%s'. Scaffold names "
-                 "in the name maps are still reference-frame derived; this file exists to "
-                 "validate the schema and show what frame decoupling would produce.\n"
-                 % a.graph_rule)
+        fh.write("# PROVISIONAL -- consensus frame under graph rule '%s' "
+                 "(min_fused=%d). consensus_chrom is chrN in the CONSENSUS namespace; "
+                 "current_new_name is still chrN_p in the interim REFERENCE-FRAME "
+                 "namespace, so the same chrN token means different things in those two "
+                 "columns until step 4 retires reference-frame naming. consensus_members "
+                 "are refN pieces.\n" % (a.graph_rule, a.graph_min_fused))
         fh.write("assembly\trole\told_name\tcurrent_new_name\tclass\tlength\torient\t"
                  "consensus_chrom\tconsensus_members\tflags\n")
         for rid in ids_sorted:
@@ -957,13 +983,13 @@ def main():
                 # consensus ids are prefixed 'cons' so they can never be confused with
                 # reference chromosome numbers -- they are a different numbering system
                 if len(cids) == 1:
-                    cc = "cons%d" % cids[0]
-                    cm = "+".join("chr%d" % m
+                    cc = "chr%d" % cids[0]
+                    cm = "+".join("ref%d" % m
                                   for m in gr["comp_members"][cids[0]])
                 elif len(cids) > 1:
                     # spans >1 consensus chromosome: under this rule the scaffold reads as
                     # a chimera, i.e. the rule disagrees with this assembly's topology
-                    cc = "MULTI:" + "+".join("cons%d" % c for c in cids)
+                    cc = "MULTI:" + "+".join("chr%d" % c for c in cids)
                     cm = "-"
                 fh.write("\t".join(str(v) for v in (
                     rid, roles[rid], d["old"], d["new"], d["class"], d["length"],
@@ -972,9 +998,9 @@ def main():
     for rule in GRAPH_RULES:
         g = graph[rule]
         sys.stderr.write(
-            "[harmonize %s] join graph rule=%-10s edges=%2d components=%2d%s\n" % (
-                a.species, rule, len(g["edges"]), len(g["comp_members"]),
-                "   <- --graph-rule" if rule == a.graph_rule else ""))
+            "[harmonize %s] join graph rule=%-10s edges=%2d consensus_chromosomes=%2d%s\n"
+            % (a.species, rule, len(g["edges"]), len(g["comp_members"]),
+               "   <- --graph-rule" if rule == a.graph_rule else ""))
     multi = sorted(m for m in graph[a.graph_rule]["comp_members"].values() if len(m) > 1)
     if multi:
         sys.stderr.write(
@@ -983,7 +1009,7 @@ def main():
             "%s.consensus_chromosome_map.provisional.tsv for what a decoupled frame "
             "would produce.\n" % (
                 a.species, len(multi), a.graph_rule,
-                ", ".join("+".join("chr%d" % m for m in g) for g in multi), a.species))
+                ", ".join("+".join("ref%d" % m for m in g) for g in multi), a.species))
 
     rep = os.path.join(a.outdir, f"{a.species}.harmonization_report.tsv")
     with open(rep, "w") as fh:
@@ -1011,18 +1037,22 @@ def main():
                  f"concordance_exclude_reference={a.concordance_exclude_reference}\t"
                  f"member_cover_frac={a.member_cover_frac}\t"
                  f"inflated_aln_tol={a.inflated_aln_tol}\t"
-                 f"graph_rule={a.graph_rule}\n")
+                 f"graph_rule={a.graph_rule}\t"
+                 f"graph_min_fused={a.graph_min_fused}\n")
         fh.write("# assembly_chromosome_counts\t"
                  + ";".join(f"{k}={v}" for k, v in assembly_chrom_counts.items()) + "\n")
         fh.write(f"# voters\t{len(voters)}/{len(by_id)}\t"
                  + ";".join(f"{r}={roles[r]}" for r in sorted(by_id)) + "\n")
         for rule in GRAPH_RULES:
             g = graph[rule]
-            fh.write("# chromosome_graph\t%s\tedges=%d\tcomponents=%d\t%s\n" % (
-                rule, len(g["edges"]), len(g["comp_members"]),
-                ";".join("+".join("chr%d" % m for m in mem)
-                         for mem in g["comp_members"].values() if len(mem) > 1) or "-"))
+            fh.write("# chromosome_graph\t%s\tedges=%d\tconsensus_chromosomes=%d\t%s\n"
+                     % (rule, len(g["edges"]), len(g["comp_members"]),
+                        ";".join("+".join("ref%d" % m for m in mem)
+                                 for mem in g["comp_members"].values()
+                                 if len(mem) > 1) or "-"))
         fh.write("# chromosome_graph_rule_reported\t%s\n" % a.graph_rule)
+        fh.write("# frame_vocabulary\tnew_name/ref_span/flags=reference-frame chrN_p "
+                 "(interim)\tchromosome_graph+components=refN pieces -> chrN consensus\n")
         fh.write("# chromosome_consensus_notes\t"
                  + (";".join(consensus_notes[k] for k in sorted(consensus_notes))
                     if consensus_notes else "-") + "\n")

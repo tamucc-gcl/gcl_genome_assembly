@@ -20,7 +20,9 @@ size-only behaviour rather than failing or silently changing its answer.
 | # | Step | State |
 |---|---|---|
 | 0a | Composite-aware batch consensus; voter/passenger roles; per-assembly chromosome-set metrics | **applied** (`patch_harmonize_consensus.py`) |
-| 0b | Size-invariant composite-member test; join graph / presence matrix / provisional consensus map (report-only) | **patch ready** (`patch2_harmonize_graph.py`) |
+| 0b | Size-invariant composite-member test; join graph / presence matrix / provisional consensus map (report-only) | **applied, validated** (`patch2_harmonize_graph.py`) |
+| 0c | Join-graph support floor; `refN` / `chrN` vocabulary split | **patch ready** (`patch3_graph_floor_vocab.py`) |
+| 0d | Stable `groupTuple` ordering in `harmonize_scaffolds.nf` | **applied** |
 | 1 | Move Hi-C mapping to post-teloclip; rename/revcomp pairs lift | not started |
 | 2 | Hi-C junction evidence module | not started |
 | 3 | Telomere evidence module | not started |
@@ -29,6 +31,68 @@ size-only behaviour rather than failing or silently changing its answer.
 | 6 | Read-depth evidence | not started |
 | 7 | Merqury phase-switch evidence | not started |
 | 8 | Reporting: interval, not point estimate | blocked on 4 |
+
+---
+
+## Round 2 results (2026-08-14, patches 0a + 0b)
+
+Every prediction from 0b confirmed.
+
+**Size-asymmetry rescue fired on exactly the five assemblies the exclusive-footprint test
+called H1** (Bau_hap1, CMat h1/h2, CLim h1/h2):
+
+```
+Sde-CMat_203_hap2  scaffold_2  chr4_1+chr20_1  size_asymmetric(chr20:share=0.092,cover=0.87)
+Sde-CBau_104_hap1  scaffold_3  chr4_1+chr20_1  size_asymmetric(chr20:share=0.093,cover=0.89)
+Sde-CMat_203_hap1  scaffold_3  chr4_1+chr20_1  size_asymmetric(chr20:share=0.095,cover=0.87)
+Sde-CLim_110_hap1  scaffold_4  chr4_1+chr20_1  size_asymmetric(chr20:share=0.110,cover=0.89)
+Sde-CLim_110_hap2  scaffold_2  chr4_1+chr20_1  size_asymmetric(chr20:share=0.081,cover=0.69)
+```
+
+Shares 0.081–0.110, all under the 0.2 threshold that hid them; covers 0.69–0.89, all over
+the 0.5 floor that rescued them. Predicted share was 0.093.
+
+**chr20 presence went from 2/4 individuals to 5/5.** `chromosome_consensus_notes` is now
+`-` — the `restricted_presence` alarm that started the sex-chromosome detour is gone
+entirely, confirming it was a threshold artifact rather than biology. The single remaining
+absence is `Sde-CTlk_104_hap1`, which the earlier footprint test put at 0.41 exclusive —
+below `member_cover_frac = 0.5`, so a genuinely partial case declining promotion as designed.
+
+**Alignment inflation is real but modest.** `inflated_aln(bp=1.13,cov=1.00)` on all five:
+summed block length is 13% above scaffold length while merged coverage is exactly 1.00. So
+`--min-aligned-frac` evaluated on the inflatable value has ~13% of headroom eaten here. Not
+urgent; would matter more on repeat-dense assemblies.
+
+**`voter_min_cut_ratio = 0` was the right default.** CTlk_104_hap2 sits at 2.25 and
+CTlk_104_hap1 at 3.45. The 3.0 default originally sketched would have made CTlk_104_hap2 a
+passenger — wrongly, at 0.966 genome fraction. Also note the reference's own cut ratio is
+**4.46** against CMat_203_hap2's **115.11**: a 26× difference in frame sharpness, which is
+the quantitative statement of "the reference is the wrong frame."
+
+### Bug found: `plurality` chained unrelated chromosomes
+
+```
+plurality  14 chromosomes  cons2  3 members  chr2+chr4+chr20  185,290,079 bp
+```
+
+185 Mb against a largest real chromosome of 95 Mb. Cause: `chr2+chr20` at **1f/1s** —
+CTlk_104_hap2's `chr2_2+chr20_1` mis-join against one assembly's split — passed
+`n_f >= n_s`, and union-find then chained chr2 into the chr4+chr20 component. A 1f/1s pair
+is one observation, not a tie.
+
+`permissive`'s `n_s == 0` branch has the same hole (1f/0s would pass). And note the rules
+are **not nested**: permissive's `n_f > 1` clause makes it *stricter* than plurality at
+n_f = 1, which is why permissive gave the right answer here and plurality did not.
+
+Fixed in 0c with `--graph-min-fused` (default 2), applied before every rule.
+
+### Watch item
+
+`Sde-CMat_203_hap1` carries `size_floor_trimmed=1` — `min_chrom_frac = 0.1` removed one
+member from its chromosome set (median named length 77.1 Mb, so the floor was 7.71 Mb; its
+largest unplaced scaffold is 3.75 Mb). Given chr20 at 8.7 Mb turned out to be a real
+chromosome arm, a ~3.75 Mb piece could be one too. Same filter class, same concern — an
+argument for the plan's position that `min_chrom_frac` should nominate, not delete.
 
 ---
 
@@ -74,13 +138,25 @@ makes non-T2T assemblies, gene-poor chromosomes and low-coverage regions safe to
 
 ### Two numbering systems, never conflated
 
-- `chrN` — reference chromosome, descending-size rank within the chosen reference. What the
-  name maps use today.
-- `consN` — consensus chromosome, a connected component of the join graph, id ordered by
-  smallest member. What frame decoupling (step 4) will make the naming frame.
+| token | meaning | status |
+|---|---|---|
+| `refN` | reference-frame piece — descending-size rank within the naming reference. Interim machinery, **not** a chromosome claim. | consensus report files, from 0c |
+| `chrN` | consensus chromosome — a join-graph component. The biological claim. | consensus report files, from 0c; name maps from step 4 |
 
-The provisional map from step 0b already emits both side by side so the difference is
-auditable before anything is renamed.
+`refN` maps 1:1 by number onto the name maps' current `chrN_p` prefix, so `ref8 ↔ chr8_1`
+reads without a lookup. Adjacent `ref_scaffold` / `member_scaffolds` columns carry the raw
+scaffold names as well.
+
+**Name maps are deliberately left on the reference frame until step 4.** `new_name`,
+`ref_span` and `flags` all speak the reference frame and are internally consistent with each
+other; flipping only the flags would put `refN` and `chrN_p` in the same row, which reads
+worse than leaving both. The interim ambiguity — `chr20` in a name map is a reference piece,
+`chr17` in `chromosome_components.tsv` is a consensus chromosome — is stated explicitly in a
+`# frame_vocabulary` report header rather than left latent.
+
+Renaming the name-map prefix to `refN_p` now was considered and rejected: it has a real
+blast radius (see step 4) including one silent-failure path, and the names change again at
+step 4 regardless, so it would cost two churns instead of one.
 
 ### Pangenome guarantees
 
@@ -349,6 +425,33 @@ Also in scope:
 **Deliberately last.** Its premise is that the reference is split; establish that with Hi-C
 and telomeres before renaming ten assemblies on it.
 
+### Downstream blast radius — and a landmine step 4 fixes for free
+
+Four places hard-code `^chr[0-9]+_[0-9]+$`, which **does not match composites** (the `+`
+breaks it):
+
+| location | consequence of composite-named chromosomes |
+|---|---|
+| `cactus_pangenome.nf:86` | refContigs selection drops them |
+| `pangenome.nf:96` | `refm.cn` undercounts the reference's chromosomes, tightening the assembly gate |
+| `dotplot_paf.R:134` | chromosome number extraction → NA, ordering degrades |
+| `riparian_paf.R:90` | same |
+
+**The current run got lucky.** `Sde-CBau_104_hap2` has 20 chromosome-class scaffolds and
+zero composites, so refContigs came out complete. Pin `Sde-CMat_203_hap1` as reference today
+and refContigs would be **11 of its 15 chromosomes** — the four composite chromosomes
+(~280 Mb, 26% of the assembly) excluded. I have not verified exactly what `cactus-pangenome`
+does with non-refContig reference sequences, so the severity is unconfirmed; at minimum the
+reference path decomposition and per-chromosome outputs change. Worth checking before any
+build with a less-fragmented reference. Same for `pangenome.nf`'s `cn`, which should count
+chromosome-scale named *units* rather than only pattern-matching plain names.
+
+Step 4 resolves all four without touching them: consensus names are `chrN_p`, which matches
+the existing pattern, and fused chromosomes stop being composites — so the matchers start
+catching chromosomes they currently miss. This is the argument for doing the name-map
+vocabulary flip *at* step 4 rather than earlier.
+
+
 ---
 
 ## Steps 5–7 — haplotig and phase-switch channels
@@ -398,12 +501,13 @@ Not the goal, but the running test case and the thing that will validate each st
 
 | basis | estimate |
 |---|---|
-| per-voter chromosome-set counts (8 clean) | 15, 15, 15, 15, 17, 19, 20, 26 — mode **15** |
-| join graph, majority (chr8/17, chr18/19, chr4/20) | **17** |
-| join graph, plurality (adds chr10/15, chr14/16) | **15** |
+| per-voter chromosome-set counts (8 voters) | 15, 15, 15, 15, 17, 19, 20, 26 — mode **15** |
+| join graph, `majority` — ref8+17 (7f/1s), ref18+19 (6f/2s), ref4+20 (5f/1s) | **17** |
+| join graph, `permissive` / `plurality` with floor — adds ref10+15 and ref14+16 (both 4f/4s) | **15** |
 | four male haplotypes independently | **15** each, same junctions, same breakpoints |
 
-**15–17 per haplotype**, and the two 4f/4s ties are the entire remaining width. chr20 is
+**15–17 per haplotype.** All three rules now agree on ref8+17, ref18+19 and ref4+20; the two
+4f/4s ties are the entire remaining width. chr20 is
 resolved: a distinct ~7.5–7.9 Mb segment of chr4 (exclusive footprint 0.69–0.90 in five
 assemblies), not sex-limited, not a haplotig. The ZW reading of chr20 is dead — it was an
 artifact of the `secondary_frac` blind spot, and the one apparently informative female
@@ -422,5 +526,12 @@ where that gets looked at, without a nominated candidate.
   than filtering it out of view.
 - **Test the mechanism before building on a correlation.** The chr20 sex pattern had exactly
   one informative observation and was presented as replicated.
+- **Rule families are not monotone.** `permissive` is stricter than `plurality` at n_f = 1,
+  because its `n_f > 1` clause incidentally does a support floor's job. Reporting several
+  rules is only useful if each one's failure mode is understood; a rule that looks like the
+  loose end of a spectrum can be the one that gets it right.
+- **Union-find has no notion of plausibility.** One accepted spurious edge chains whole
+  components together. Every edge predicate needs a minimum-support floor, not just a
+  comparison.
 - **Fix order matters.** Removing CPla before step 0a would have demoted chr8 (51.5 Mb) and
   chr17 (26.5 Mb) to unplaced *and* silently renumbered every chromosome after them.

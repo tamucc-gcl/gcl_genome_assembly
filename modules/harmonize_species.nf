@@ -70,6 +70,7 @@ process HARMONIZE_SPECIES {
     def mem_cover    = (params.harmonize_member_cover_frac != null) ? params.harmonize_member_cover_frac : 0.5
     def infl_tol     = (params.harmonize_inflated_aln_tol  != null) ? params.harmonize_inflated_aln_tol  : 1.05
     def graph_rule   = params.harmonize_graph_rule ?: 'majority'
+    def graph_minf   = (params.harmonize_graph_min_fused != null) ? params.harmonize_graph_min_fused : 2
     """
     set -euo pipefail
 
@@ -186,6 +187,7 @@ process HARMONIZE_SPECIES {
         --member-cover-frac ${mem_cover} \\
         --inflated-aln-tol ${infl_tol} \\
         --graph-rule ${graph_rule} \\
+        --graph-min-fused ${graph_minf} \\
         --outdir .
 
     # ------------------------------------------------------------------
@@ -214,11 +216,11 @@ process HARMONIZE_SPECIES {
     printf 'id\\tn_chrom_scaffolds\\tscaffold_n50\\n' > "${taxid}.reference_selection.tsv"
     printf 'id\\trole\\tis_reference\\tn_chrom_set\\tchrom_set_method\\tcut_ratio\\tgenome_fraction\\tscaffold_n50\\tn_scaffolds\\tchrom_set_flags\\trole_reasons\\n' \\
         > "${taxid}.chromosome_sets.tsv"
-    printf 'chr_a\\tchr_b\\tlen_a\\tlen_b\\tn_fused\\tn_split\\tn_voters\\tedge_permissive\\tedge_majority\\tedge_plurality\\n' \\
+    printf 'ref_a\\tref_b\\tref_scaffold_a\\tref_scaffold_b\\tlen_a\\tlen_b\\tn_fused\\tn_split\\tn_voters\\tedge_permissive\\tedge_majority\\tedge_plurality\\n' \\
         > "${taxid}.chromosome_graph.tsv"
-    printf 'rule\\tn_components\\tn_edges\\tcomponent_id\\tn_members\\tmembers\\ttotal_bp\\n' \\
+    printf 'rule\\tn_chromosomes\\tn_edges\\tchromosome\\tn_members\\tmembers\\tmember_scaffolds\\ttotal_bp\\n' \\
         > "${taxid}.chromosome_components.tsv"
-    printf 'chromosome\\tlength\\tn_chromosome\\tn_composite\\tn_absent\\tn_individuals_present\\tn_individuals\\n' \\
+    printf 'ref\\tref_scaffold\\tlength\\tn_chromosome\\tn_composite\\tn_absent\\tn_individuals_present\\tn_individuals\\n' \\
         > "${taxid}.presence_matrix.tsv"
     printf 'assembly\\trole\\told_name\\tcurrent_new_name\\tclass\\tlength\\torient\\tconsensus_chrom\\tconsensus_members\\tflags\\n' \\
         > "${taxid}.consensus_chromosome_map.provisional.tsv"

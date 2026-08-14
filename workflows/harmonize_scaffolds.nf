@@ -57,6 +57,13 @@ workflow HARMONIZE_SCAFFOLDS {
             .map { meta, fa -> tuple(meta.taxid?.toString(), meta.id, fa) }
             .groupTuple()
             .filter { taxid, ids, fas -> ids.size() >= 2 }
+            // groupTuple() emits in arrival order, which is not stable across runs. Sort ids
+            // and assemblies together with one permutation so ids[i] <-> assemblies[i] is
+            // preserved (the module contract) and the task hash stops churning.
+            .map { taxid, ids, fas ->
+                def perm = (0..<ids.size()).toList().sort { ids[it] }
+                tuple(taxid, perm.collect { ids[it] }, perm.collect { fas[it] })
+            }
 
         HARMONIZE_SPECIES( ch_species, resolver )
         ch_versions = ch_versions.mix( HARMONIZE_SPECIES.out.versions )
