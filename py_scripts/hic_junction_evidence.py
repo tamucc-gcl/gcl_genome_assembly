@@ -1,74 +1,76 @@
 #!/usr/bin/env python3
 """
 hic_junction_evidence.py -- does Hi-C say two scaffolds of ONE assembly are a single
-chromosome that the scaffolder failed to join?
+chromosome the scaffolder failed to join?
 
-This is the only evidence channel that can break a tie the cross-assembly alignment
-consensus cannot. It is a WITHIN-assembly measurement, so it is independent of the
-harmonization frame, of the choice of reference, and of every other assembly in the cohort.
+A WITHIN-assembly measurement, independent of the harmonization frame, of the reference
+choice, and of every other assembly -- which is what lets it speak to junctions the
+cross-assembly alignment consensus cannot decide.
 
-THE TEST
---------
-If scaffolds A and B are two halves of one chromosome, Hi-C contacts between them
-concentrate at the two ends that abut. If they are genuinely separate chromosomes, contacts
-between them are flat inter-chromosomal background.
+--------------------------------------------------------------------------------------
+THE NULL: OBSERVED COVERAGE, NOT AREA
+--------------------------------------------------------------------------------------
+Expected contacts in a corner are proportional to the coverage actually present in those
+windows, not to their area:
 
-For each candidate scaffold pair, contacts are counted in the four terminal windows
-(A-start/B-start, A-start/B-end, A-end/B-start, A-end/B-end) and compared to the density
-over the whole A x B block:
+    expected = total_AB * (cov_A[window] / cov_A[total]) * (cov_B[window] / cov_B[total])
 
-    corner_enrichment = (corner_contacts / corner_area) / (total_AB / (len_A * len_B))
+This is not a refinement -- an area-based null is unusable on real scaffold ends. Measured
+on Sde-CBau_104_hap2, contact density relative to each chromosome's own mean runs:
 
-Self-normalizing: it asks whether contacts are CONCENTRATED at a corner, not how many there
-are. A repeat-driven or mappability artifact elevates the whole block and cancels out; only
-corner localization survives. Which of the four corners wins also gives the relative
-ORIENTATION, which frame decoupling needs to reorient composites.
+    0-100 kb from the end   0.31      <- ~70% depleted
+    100-200 kb              0.71
+    200-300 kb              0.92
+    300-400 kb              1.05      <- recovered
+    1-5 Mb                  1.4-1.9   <- sub-terminal EXCESS
 
-DECISION RULE, FIXED BEFORE LOOKING
------------------------------------
-Under the null that A and B are separate chromosomes, contacts are spread uniformly over the
-A x B block, so the expected count in a corner is
+A ~6x swing along a chromosome. Under an area null a 200 kb terminal window predicted 6.6
+contacts where coverage supports ~0.6, so observing zero looked like extreme depletion
+(enrichment 0.0000) when it was unremarkable. At the other extreme a 10 Mb window sits
+mostly inside the 1.4-1.9x zone, so everything looked mildly enriched -- which is why the
+first run's apparent 1.22-1.25 "signal" on the three known junctions cannot be trusted: it
+is the same magnitude as the coverage artifact it was measured against.
 
-    expected = total_AB * (window_a * window_b) / (len_a * len_b)
+Conditioning on marginal coverage removes both failure modes. A window with no coverage
+predicts no contacts and contributes no evidence, rather than manufacturing depletion.
 
-and the observed count is Poisson about it. A pair is called 'join' when its best corner
-clears BOTH
+--------------------------------------------------------------------------------------
+THE POSITIVE CONTROL: ARTIFICIAL SPLITS
+--------------------------------------------------------------------------------------
+A null says what a non-junction looks like. It does not say whether this library, at this
+depth, with this window, can detect a junction at all. Without that, "no support" is
+uninterpretable -- and it is a live outcome here, because YaHS had this same Hi-C and
+declined to make these joins.
 
-    enrichment = observed / expected  >=  --min-corner-enrichment
-    z          = (observed - expected) / sqrt(expected)  >=  --min-z
+So each large scaffold is split at its midpoint and the two halves scored with the identical
+statistic. Those halves are a KNOWN single chromosome, so they give the empirical
+distribution of true-junction signal in this dataset. Candidates are then read against two
+distributions:
 
-The z term is what makes this coverage-aware: a 2x enrichment on an expectation of 5 is
-noise (z = 1.3), the same 2x on an expectation of 1000 is not (z = 31). Both terms are
-needed -- z alone would call a 1.2x enrichment significant on a deep library, and
-enrichment alone would call noise on a shallow one.
+    inter-scaffold pairs   -> the null      (what "separate" looks like)
+    artificial splits      -> the positive  (what "joined" looks like)
 
-An earlier version used a percentile of the other pairs' enrichments as the threshold. That
-was wrong: real junctions are a few percent of pairs, so they sit INSIDE the top 5% and the
-p95 lands among the signal it is supposed to be measured against. On a synthetic test with
-one planted junction out of six pairs the threshold rose to 7.8 and the junction at 10.0
-only just cleared its own contribution; two junctions would have suppressed each other. The
-Poisson null needs no background distribution at all. The median enrichment is still
-reported, as a sanity check that the null sits near 1.
+Interpretation follows without tuning:
 
-Pairs with fewer than --min-total-contacts are reported 'low_coverage' and never called
-either way -- absence of contact is not evidence of separation.
+    splits high, candidate high  -> real junction
+    splits high, candidate low   -> Hi-C refutes the join
+    splits low                   -> the test is insensitive here. Say so and stop. Do NOT
+                                    lower thresholds until something passes.
 
-WHY A DIRECT PASS AND NOT COOLER
---------------------------------
-Bin-free. One streaming pass, O(candidate_pairs) counters, no resolution to choose and no
-quantization of the window edges. It also removes a dependency and the need to pick a bin
-size that is fine enough to localize a junction but coarse enough for stable counts.
+The control is free: split halves are scored from the same streaming pass, using the
+intra-scaffold contacts the junction test discards anyway.
 
-CANDIDATE SCAFFOLDS
--------------------
-Every scaffold >= --min-scaffold-bp in this assembly's own fai. Deliberately NOT the
-drop-off caller used elsewhere: this must not depend on the harmonization frame, and
-over-inclusion is harmless -- an extra scaffold contributes rows that get called
-'no_support' or 'low_coverage' and widens the background distribution slightly.
+--------------------------------------------------------------------------------------
+WINDOWS
+--------------------------------------------------------------------------------------
+The window is [--window-inner, --window-inner + --window-bp) from each scaffold end. The
+inner offset skips the dead zone. Both are recorded in the output; --scan sweeps them and
+makes no calls.
 
 Usage:
     hic_junction_evidence.py --pairs in.pairs.gz --fai asm.fa.fai \
-        --assembly-id <id> --out <id>.junction_evidence.tsv
+        --assembly-id ID --out ID.junction_evidence.tsv
+    hic_junction_evidence.py ... --scan          # calibration sweep, no calls
 """
 import argparse
 import gzip
@@ -76,47 +78,59 @@ import sys
 from collections import defaultdict
 
 CORNERS = (("start", "start"), ("start", "end"), ("end", "start"), ("end", "end"))
+COVBIN = 100_000
 
 
 def openf(p):
     return gzip.open(p, "rt") if p.endswith(".gz") else open(p)
 
 
-def median(vals):
+def quantiles(vals, qs):
     if not vals:
-        return 0.0
+        return [0.0] * len(qs)
     s = sorted(vals)
-    n = len(s)
-    return s[n // 2] if n % 2 else 0.5 * (s[n // 2 - 1] + s[n // 2])
+    out = []
+    for q in qs:
+        k = (len(s) - 1) * q
+        lo = int(k)
+        hi = min(lo + 1, len(s) - 1)
+        out.append(s[lo] + (s[hi] - s[lo]) * (k - lo))
+    return out
+
+
+def window_cov(covbins, lo, hi):
+    """Coverage (contact ends) in [lo, hi) from COVBIN-sized marginal bins."""
+    if hi <= lo:
+        return 0
+    tot = 0
+    for b in range(lo // COVBIN, (hi - 1) // COVBIN + 1):
+        tot += covbins.get(b, 0)
+    return tot
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pairs", required=True, help="pairs.gz in THIS assembly's coordinates")
+    ap.add_argument("--pairs", required=True)
     ap.add_argument("--fai", required=True)
     ap.add_argument("--assembly-id", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--min-scaffold-bp", type=int, default=1_000_000,
-                    help="candidate scaffolds are those at least this long")
-    ap.add_argument("--window-frac", type=float, default=0.25,
-                    help="terminal window as a fraction of each scaffold's length")
-    ap.add_argument("--window-max-bp", type=int, default=10_000_000,
-                    help="cap on the terminal window")
-    ap.add_argument("--min-corner-enrichment", type=float, default=2.0,
-                    help="floor on observed/expected corner contacts")
-    ap.add_argument("--min-z", type=float, default=5.0,
-                    help="floor on the Poisson deviate (obs - exp) / sqrt(exp). Guards "
-                         "against calling noise on a shallow library; 5.0 over ~10^5 tests "
-                         "is still conservative after multiple-testing correction")
-    ap.add_argument("--min-total-contacts", type=int, default=100,
-                    help="below this a pair is 'low_coverage' and never called either way")
-    ap.add_argument("--max-candidates", type=int, default=1000,
-                    help="safety valve: if an assembly has more candidates than this, keep "
-                         "only the longest (a shattered assembly would otherwise generate "
-                         "millions of pair counters for no useful signal)")
+    ap.add_argument("--min-scaffold-bp", type=int, default=1_000_000)
+    ap.add_argument("--window-bp", type=int, default=1_000_000)
+    ap.add_argument("--window-inner", type=int, default=300_000,
+                    help="skip this much from the scaffold end before the window starts, "
+                         "covering the terminal coverage dead zone")
+    ap.add_argument("--min-total-contacts", type=int, default=100)
+    ap.add_argument("--min-window-cov", type=int, default=200,
+                    help="a corner whose windows carry less coverage than this is reported "
+                         "low_coverage and never called; absence of contact is not "
+                         "evidence of separation")
+    ap.add_argument("--max-candidates", type=int, default=1000)
+    ap.add_argument("--min-enrichment", type=float, default=2.0)
+    ap.add_argument("--min-z", type=float, default=5.0)
+    ap.add_argument("--control-min-scaffold-bp", type=int, default=8_000_000)
+    ap.add_argument("--scan", action="store_true")
     a = ap.parse_args()
 
-    # ---- candidates and their terminal windows
     lens = {}
     with open(a.fai) as fh:
         for line in fh:
@@ -125,21 +139,23 @@ def main():
                 lens[f[0]] = int(f[1])
     cand = sorted((n for n, L in lens.items() if L >= a.min_scaffold_bp),
                   key=lambda n: (-lens[n], n))
-    trimmed = 0
     if len(cand) > a.max_candidates:
-        trimmed = len(cand) - a.max_candidates
+        sys.stderr.write("[hic-junction %s] %d candidates trimmed to %d\n"
+                         % (a.assembly_id, len(cand), a.max_candidates))
         cand = cand[:a.max_candidates]
     idx = {n: i for i, n in enumerate(cand)}
-    win = {n: max(1, min(a.window_max_bp, int(a.window_frac * lens[n]))) for n in cand}
+    ctrl = [n for n in cand if lens[n] >= a.control_min_scaffold_bp]
+    mid = {n: lens[n] // 2 for n in ctrl}
 
-    sys.stderr.write("[hic-junction %s] %d candidate scaffolds (>= %d bp)%s\n" % (
-        a.assembly_id, len(cand), a.min_scaffold_bp,
-        "; %d dropped by --max-candidates" % trimmed if trimmed else ""))
-
-    # ---- one streaming pass
+    cov = defaultdict(lambda: defaultdict(int))
+    covtot = defaultdict(int)
     total = defaultdict(int)
-    corner = defaultdict(lambda: defaultdict(int))
-    n_pairs = n_inter = 0
+    pos = defaultdict(list)
+    ctrl_total = defaultdict(int)
+    ctrl_pos = defaultdict(list)
+    keep = 12_000_000 if a.scan else a.window_inner + a.window_bp
+    n_pairs = 0
+
     with openf(a.pairs) as fh:
         for line in fh:
             if line.startswith("#"):
@@ -147,81 +163,178 @@ def main():
             n_pairs += 1
             f = line.rstrip("\n").split("\t")
             c1, c2 = f[1], f[3]
-            if c1 == c2:
-                continue
-            i1 = idx.get(c1)
-            i2 = idx.get(c2)
+            i1, i2 = idx.get(c1), idx.get(c2)
             if i1 is None or i2 is None:
                 continue
-            n_inter += 1
             p1, p2 = int(f[2]), int(f[4])
+            cov[c1][(p1 - 1) // COVBIN] += 1
+            cov[c2][(p2 - 1) // COVBIN] += 1
+            covtot[c1] += 1
+            covtot[c2] += 1
+            if c1 == c2:
+                m = mid.get(c1)
+                if m is not None and ((p1 <= m) != (p2 <= m)):
+                    ctrl_total[c1] += 1
+                    d1, d2 = abs(p1 - m), abs(p2 - m)
+                    if d1 < keep and d2 < keep:
+                        ctrl_pos[c1].append((d1, d2))
+                continue
             if i1 <= i2:
                 ka, kb, pa, pb = c1, c2, p1, p2
             else:
                 ka, kb, pa, pb = c2, c1, p2, p1
-            key = (ka, kb)
-            total[key] += 1
-            ea = "start" if pa <= win[ka] else ("end" if pa > lens[ka] - win[ka] else None)
+            total[(ka, kb)] += 1
+            da = min(pa - 1, lens[ka] - pa)
+            db = min(pb - 1, lens[kb] - pb)
+            if da < keep and db < keep:
+                pos[(ka, kb)].append((pa, pb))
+
+    def score_pair(ka, kb, inner, width):
+        La, Lb = lens[ka], lens[kb]
+        tot = total[(ka, kb)]
+        if tot == 0:
+            return None
+        wa = {"start": (inner, inner + width), "end": (La - inner - width, La - inner)}
+        wb = {"start": (inner, inner + width), "end": (Lb - inner - width, Lb - inner)}
+        fa = {e: window_cov(cov[ka], max(0, lo), min(La, hi)) / max(1, covtot[ka])
+              for e, (lo, hi) in wa.items()}
+        fb = {e: window_cov(cov[kb], max(0, lo), min(Lb, hi)) / max(1, covtot[kb])
+              for e, (lo, hi) in wb.items()}
+        cnt = defaultdict(int)
+        for pa, pb in pos[(ka, kb)]:
+            ea = ("start" if wa["start"][0] <= pa - 1 < wa["start"][1] else
+                  ("end" if wa["end"][0] <= pa - 1 < wa["end"][1] else None))
             if ea is None:
                 continue
-            eb = "start" if pb <= win[kb] else ("end" if pb > lens[kb] - win[kb] else None)
+            eb = ("start" if wb["start"][0] <= pb - 1 < wb["start"][1] else
+                  ("end" if wb["end"][0] <= pb - 1 < wb["end"][1] else None))
             if eb is None:
                 continue
-            corner[key][(ea, eb)] += 1
-
-    # ---- enrichment per pair, then the per-assembly background
-    rows = []
-    for (ka, kb), tot in total.items():
-        La, Lb = lens[ka], lens[kb]
-        Wa, Wb = win[ka], win[kb]
-        exp = tot * (float(Wa) * Wb) / (float(La) * Lb)
-        best = (0.0, None, 0, 0.0)
+            cnt[(ea, eb)] += 1
+        best = None
         for c in CORNERS:
-            cnt = corner[(ka, kb)].get(c, 0)
-            enr = (cnt / exp) if exp > 0 else 0.0
-            if enr > best[0]:
-                z = (cnt - exp) / (exp ** 0.5) if exp > 0 else 0.0
-                best = (enr, c, cnt, z)
-        rows.append({"a": ka, "b": kb, "La": La, "Lb": Lb, "Wa": Wa, "Wb": Wb,
-                     "tot": tot, "exp": exp, "enr": best[0], "corner": best[1],
-                     "cnt": best[2], "z": best[3]})
+            exp = tot * fa[c[0]] * fb[c[1]]
+            if exp <= 0:
+                continue
+            obs = cnt.get(c, 0)
+            enr = obs / exp
+            if best is None or enr > best["enr"]:
+                best = {"corner": c, "obs": obs, "exp": exp, "enr": enr,
+                        "z": (obs - exp) / (exp ** 0.5), "tot": tot,
+                        "wcov": min(fa[c[0]] * covtot[ka], fb[c[1]] * covtot[kb])}
+        return best
 
-    scored = [r for r in rows if r["tot"] >= a.min_total_contacts]
-    med = median([r["enr"] for r in scored])
+    def score_control(c, inner, width):
+        L = lens[c]
+        tot = ctrl_total[c]
+        if tot == 0:
+            return None
+        m = mid[c]
+        lo, hi = inner, inner + width
+        cA = window_cov(cov[c], max(0, m - hi), max(0, m - lo))
+        cB = window_cov(cov[c], min(L, m + lo), min(L, m + hi))
+        totA = window_cov(cov[c], 0, m)
+        totB = window_cov(cov[c], m, L)
+        if totA <= 0 or totB <= 0:
+            return None
+        exp = tot * (cA / totA) * (cB / totB)
+        if exp <= 0:
+            return None
+        obs = sum(1 for d1, d2 in ctrl_pos[c] if lo <= d1 < hi and lo <= d2 < hi)
+        return {"obs": obs, "exp": exp, "enr": obs / exp,
+                "z": (obs - exp) / (exp ** 0.5), "tot": tot, "wcov": min(cA, cB)}
+
+    if a.scan:
+        print("%-8s %-9s | %-26s | %-26s | verdict"
+              % ("inner", "width", "SPLITS (positive control)", "INTER-SCAFFOLD (null)"))
+        print("%-8s %-9s | %8s %8s %8s | %8s %8s %8s |"
+              % ("", "", "med", "p90", "max", "med", "p90", "max"))
+        for inner in (0, 100_000, 300_000, 500_000):
+            for width in (250_000, 500_000, 1_000_000, 2_000_000):
+                ps = []
+                for c in ctrl:
+                    r = score_control(c, inner, width)
+                    if r and r["wcov"] >= a.min_window_cov:
+                        ps.append(r["enr"])
+                ns = []
+                for i, ka in enumerate(cand):
+                    for kb in cand[i + 1:]:
+                        r = score_pair(ka, kb, inner, width)
+                        if (r and r["tot"] >= a.min_total_contacts
+                                and r["wcov"] >= a.min_window_cov):
+                            ns.append(r["enr"])
+                pm, p9, pmx = quantiles(ps, [0.5, 0.9, 1.0])
+                nm, n9, nmx = quantiles(ns, [0.5, 0.9, 1.0])
+                ok = "usable" if (ps and ns and pm > max(2.0, n9 * 2)) else "INSENSITIVE"
+                print("%-8d %-9d | %8.2f %8.2f %8.2f | %8.2f %8.2f %8.2f | %s (%d/%d)"
+                      % (inner, width, pm, p9, pmx, nm, n9, nmx, ok, len(ps), len(ns)))
+        print("\nThe SPLITS columns are artificial mid-chromosome splits -- what a TRUE")
+        print("junction looks like in this library. If their median is not clearly above")
+        print("the null p90, this test cannot resolve junctions at this depth, and the")
+        print("honest response is to report that, not to lower the thresholds.")
+        return
+
+    ctrl_rows = [(c, r) for c, r in
+                 ((c, score_control(c, a.window_inner, a.window_bp)) for c in ctrl) if r]
+    ctrl_enr = [r["enr"] for _c, r in ctrl_rows if r["wcov"] >= a.min_window_cov]
+    cmed, c10 = quantiles(ctrl_enr, [0.5, 0.1])
+
+    rows = [(ka, kb, r) for ka, kb, r in
+            ((ka, kb, score_pair(ka, kb, a.window_inner, a.window_bp))
+             for i, ka in enumerate(cand) for kb in cand[i + 1:]) if r]
+    null_enr = [r["enr"] for _a, _b, r in rows
+                if r["tot"] >= a.min_total_contacts and r["wcov"] >= a.min_window_cov]
+    nmed, n90 = quantiles(null_enr, [0.5, 0.9])
+    call_floor = max(a.min_enrichment, n90 * 2)
+    sensitive = bool(ctrl_enr) and cmed > call_floor
 
     n_join = n_low = 0
     with open(a.out, "w") as fh:
         fh.write("# assembly\t%s\n" % a.assembly_id)
-        fh.write("# params\tmin_scaffold_bp=%d\twindow_frac=%s\twindow_max_bp=%d\t"
-                 "min_corner_enrichment=%s\tmin_z=%s\tmin_total_contacts=%d\n"
-                 % (a.min_scaffold_bp, a.window_frac, a.window_max_bp,
-                    a.min_corner_enrichment, a.min_z, a.min_total_contacts))
-        fh.write("# candidates\t%d\tpairs_scored\t%d\tmedian_enrichment\t%.4f"
-                 "\t(null should sit near 1.0)\n" % (len(cand), len(scored), med))
-        fh.write("# contacts\ttotal_pairs\t%d\tinter_candidate\t%d\n" % (n_pairs, n_inter))
-        fh.write("assembly\tscaf_a\tscaf_b\tlen_a\tlen_b\twindow_a\twindow_b\t"
-                 "total_contacts\tbest_corner\tcorner_contacts\texpected_contacts\t"
-                 "corner_enrichment\tpoisson_z\tcall\torientation\n")
-        for r in sorted(rows, key=lambda r: -r["z"]):
-            if r["tot"] < a.min_total_contacts:
+        fh.write("# params\tmin_scaffold_bp=%d\twindow_inner=%d\twindow_bp=%d\t"
+                 "min_enrichment=%s\tmin_z=%s\tmin_total_contacts=%d\tmin_window_cov=%d\n"
+                 % (a.min_scaffold_bp, a.window_inner, a.window_bp, a.min_enrichment,
+                    a.min_z, a.min_total_contacts, a.min_window_cov))
+        fh.write("# null\tinter_scaffold_pairs\t%d\tmedian\t%.3f\tp90\t%.3f\n"
+                 % (len(null_enr), nmed, n90))
+        fh.write("# positive_control\tartificial_splits\t%d\tmedian\t%.3f\tp10\t%.3f\n"
+                 % (len(ctrl_enr), cmed, c10))
+        fh.write("# sensitivity\t%s\tcall_floor\t%.3f\n"
+                 % ("SENSITIVE" if sensitive else "INSENSITIVE", call_floor))
+        if not sensitive:
+            fh.write("# WARNING\tartificial splits of KNOWN single chromosomes do not "
+                     "separate from the null, so this library cannot resolve junctions at "
+                     "these settings. All calls are suppressed to 'insensitive'. Do NOT "
+                     "lower thresholds to make calls appear.\n")
+        for c, r in sorted(ctrl_rows, key=lambda x: -x[1]["enr"]):
+            fh.write("# control\t%s\tenrichment\t%.3f\tz\t%.2f\tobs\t%d\texp\t%.1f\n"
+                     % (c, r["enr"], r["z"], r["obs"], r["exp"]))
+        fh.write("assembly\tscaf_a\tscaf_b\tlen_a\tlen_b\ttotal_contacts\tbest_corner\t"
+                 "corner_contacts\texpected_contacts\tcorner_enrichment\tpoisson_z\t"
+                 "window_coverage\tcontrol_median\tnull_p90\tcall\torientation\n")
+        for ka, kb, r in sorted(rows, key=lambda x: -x[2]["enr"]):
+            if not sensitive:
+                call = "insensitive"
+            elif r["tot"] < a.min_total_contacts or r["wcov"] < a.min_window_cov:
                 call = "low_coverage"
                 n_low += 1
-            elif r["enr"] >= a.min_corner_enrichment and r["z"] >= a.min_z:
+            elif r["enr"] >= call_floor and r["z"] >= a.min_z:
                 call = "join"
                 n_join += 1
             else:
                 call = "no_support"
-            c = r["corner"] or ("-", "-")
+            c = r["corner"]
             fh.write("\t".join(str(x) for x in (
-                a.assembly_id, r["a"], r["b"], r["La"], r["Lb"], r["Wa"], r["Wb"],
-                r["tot"], "%s-%s" % c, r["cnt"], "%.2f" % r["exp"],
-                "%.4f" % r["enr"], "%.2f" % r["z"],
-                call, "a_%s-b_%s" % c if r["corner"] else "-")) + "\n")
+                a.assembly_id, ka, kb, lens[ka], lens[kb], r["tot"], "%s-%s" % c,
+                r["obs"], "%.2f" % r["exp"], "%.4f" % r["enr"], "%.2f" % r["z"],
+                int(r["wcov"]), "%.3f" % cmed, "%.3f" % n90, call,
+                "a_%s-b_%s" % c)) + "\n")
 
-    sys.stderr.write("[hic-junction %s] %d pairs scored, %d join, %d low_coverage; "
-                     "median enrichment %.2f (null ~1.0); thresholds enr>=%.1f z>=%.1f\n"
-                     % (a.assembly_id, len(scored), n_join, n_low, med,
-                        a.min_corner_enrichment, a.min_z))
+    sys.stderr.write(
+        "[hic-junction %s] %d candidates, %d controls; control median %.2f vs null p90 "
+        "%.2f -> %s; %d join, %d low_coverage\n"
+        % (a.assembly_id, len(cand), len(ctrl_enr), cmed, n90,
+           "SENSITIVE" if sensitive else "INSENSITIVE", n_join, n_low))
 
 
 if __name__ == "__main__":
