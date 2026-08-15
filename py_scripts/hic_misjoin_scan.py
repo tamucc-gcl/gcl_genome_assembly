@@ -72,6 +72,7 @@ Usage:
         --junctions junctions.tsv
 """
 import argparse
+import bisect
 import gzip
 import sys
 from collections import defaultdict
@@ -205,16 +206,27 @@ def main():
     for c in keep:
         near[c].sort()
 
+    # Sorted index for observed_at, so a cut point does not have to scan every
+    # near-contact in the scaffold.
+    near_lo = {c: [lo for lo, _hi in near[c]] for c in keep}
+    near_hi = {c: [hi for _lo, hi in near[c]] for c in keep}
+
     # local decay counts around the cut currently being scored (filled by set_local)
     local_decay = defaultdict(dict)
 
     def set_local(c, cut):
+        # Same O(n*m) trap observed_at had: this rescanned every near-contact in the
+        # scaffold for every cut point. A contact inside the local window must START in
+        # [cut - w, cut + w), so bisect that range instead.
         w = a.local_window
         lo_lim, hi_lim = cut - w, cut + w
+        los, his = near_lo[c], near_hi[c]
+        i = bisect.bisect_left(los, lo_lim)
+        j = bisect.bisect_left(los, hi_lim)
         d = defaultdict(int)
-        for lo, hi in near[c]:
-            if lo >= lo_lim and hi < hi_lim:
-                d[(hi - lo) // BIN] += 1
+        for k in range(i, j):
+            if his[k] < hi_lim:
+                d[(his[k] - los[k]) // BIN] += 1
         local_decay[c] = d
 
     def straddle_mass(cv, lo, hi, db):
@@ -277,9 +289,22 @@ def main():
         return exp
 
     def observed_at(c, cut):
-        # near[] already holds only d < flank, and d < flank plus straddling implies both
-        # ends are inside the flanks, so straddling is the only condition needed.
-        return sum(1 for lo, hi in near[c] if lo < cut <= hi)
+        # near[] holds only spans < flank, and span < flank plus straddling implies both
+        # ends lie inside the flanks, so straddling is the only condition to test.
+        #
+        # Scanning all of near[c] for every cut point is O(n*m) -- ~800k contacts x ~800
+        # cut points per scaffold -- which is why the scan was slow enough to look stalled.
+        # A straddling contact must START in [cut - flank, cut), so bisect that range and
+        # test only those.
+        los = near_lo[c]
+        i = bisect.bisect_left(los, cut - a.flank)
+        j = bisect.bisect_left(los, cut)
+        his = near_hi[c]
+        n = 0
+        for k in range(i, j):
+            if his[k] >= cut:
+                n += 1
+        return n
 
     def score(c, cut):
         set_local(c, cut)
