@@ -996,8 +996,6 @@ workflow {
     if (params.run_final_contact_maps) {
         FINAL_HIC_MAPS(
             ch_finalized_assembly,
-            ch_final_assembly,
-            FINALIZE_ASSEMBLY.out.applied_lift,
             TRIM_HIC.out.trimmed_reads,
             ch_compartments_script,
             ch_tad_book_script

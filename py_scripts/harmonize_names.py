@@ -320,7 +320,7 @@ def classify(chr_ev, scaf_len, min_frac, sec_frac, chrom_len=None,
             if by_cover and not by_share:
                 # only reachable via the size-invariant test -- worth surfacing, because
                 # every one of these was silently dropped before
-                reasons[k] = "size_asymmetric(chr%d:share=%.3f,cover=%.2f)" % (
+                reasons[k] = "size_asymmetric(ref%d:share=%.3f,cover=%.2f)" % (
                     k, e["bp"] / total_bp, (cov.get(k, 0) / klen) if klen else 0.0)
     members = sorted([primary] + partners)
     orient = {k: ("-" if chr_ev[k]["minus"] > chr_ev[k]["plus"] else "+")
@@ -731,10 +731,10 @@ def main():
         for k in sorted(set(chrom_of.values())):
             n_i = len(ind_cov[k])
             if support[k] == 0 and n_i < a.restricted_presence_min_individuals:
-                consensus_notes[k] = "reference_specific(chr%d:%d/%d_individuals)" % (
+                consensus_notes[k] = "reference_specific(ref%d:%d/%d_individuals)" % (
                     k, n_i, n_ind)
             elif n_i < n_ind:
-                consensus_notes[k] = "restricted_presence(chr%d:%d/%d_individuals)" % (
+                consensus_notes[k] = "restricted_presence(ref%d:%d/%d_individuals)" % (
                     k, n_i, n_ind)
         if unsupported:
             tags = ",".join("chr%d" % k for k in unsupported)
@@ -770,25 +770,92 @@ def main():
         return n_f, n_s
 
     # ---- assign per-chromosome part indices, names, order ----
+    # ---- CONSENSUS NAMING FRAME ---------------------------------------------------------
+    # The reference is now an ALIGNMENT COORDINATE SYSTEM ONLY. Scaffold names come from the
+    # join graph's connected components, not from whichever assembly won reference
+    # selection. A reference that is split at a junction therefore accumulates _2 parts in
+    # ITSELF, instead of exporting its fragmentation into every other assembly's names.
+    chrom_nums = sorted(set(chrom_of.values()))
+    cand_pairs = set()
+    for r in conc_pool:
+        cand_pairs |= set(fused_pairs[r])
+    pair_stats = {}
+    for pr in cand_pairs:
+        x, y = sorted(pr)
+        pair_stats[(x, y)] = concordance(x, y)
+
+    # refN = reference-frame piece (size rank in the reference); chrN = consensus
+    # chromosome. Two namespaces, never the same token for both.
+    rs = {i: n for n, i in chrom_of.items()}
+    rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
+
+    graph = {}
+    for rule in GRAPH_RULES:
+        edges = [(x, y) for (x, y), (n_f, n_s) in pair_stats.items()
+                 if edge_keep(rule, n_f, n_s, a.graph_min_fused)]
+        # rl orders consensus ids by descending total length -> chr1 is the largest
+        comp_of, comp_members = components(chrom_nums, edges, rl)
+        graph[rule] = {"edges": edges, "comp_of": comp_of, "comp_members": comp_members}
+
+    frame = graph[a.graph_rule]
+    comp_of = frame["comp_of"]
+    comp_members = frame["comp_members"]
+    # Order of reference pieces WITHIN a consensus chromosome: descending length, then
+    # piece number. Arbitrary but deterministic -- the reference cannot tell us the true
+    # order of pieces it failed to join, and part indices only have to be stable.
+    piece_rank = {}
+    for _cid, _mem in comp_members.items():
+        for _r, _m in enumerate(sorted(_mem, key=lambda m: (-rl.get(m, 0), m)), start=1):
+            piece_rank[_m] = _r
+    n_consensus = len(comp_members)
+    sys.stderr.write(
+        "[harmonize %s] naming frame: rule=%s -> %d consensus chromosomes from %d "
+        "reference pieces\n" % (a.species, a.graph_rule, n_consensus, len(chrom_nums)))
+
     results = {}
     for rid in by_id:
         p = place[rid]
-        claimants = defaultdict(list)          # chr -> [(tstart, scaffold)]
+        # --- reference-piece level: overlap detection only. Comparing coordinates across
+        #     two different reference pieces is meaningless, so overlap stays in the piece
+        #     frame with exactly the pre-Step-4 semantics.
+        rclaim = defaultdict(list)
         for n, info in p.items():
             if info["class"] in ("chromosome", "composite"):
                 for k in info["members"]:
-                    claimants[k].append((info["tstart"][k], n))
-        part = defaultdict(dict)               # scaffold -> {chr: index}
-        overlap = defaultdict(set)             # scaffold -> set(chr)
-        for k, lst in claimants.items():
+                    rclaim[k].append((info["tstart"][k], n))
+        overlap = defaultdict(set)
+        for k, lst in rclaim.items():
             lst.sort(key=lambda x: (x[0], x[1]))
             prev_end, prev = None, None
-            for idx, (ts, n) in enumerate(lst, start=1):
-                part[n][k] = idx
+            for ts, n in lst:
                 if prev_end is not None and ts < prev_end - a.overlap_tol:
                     overlap[n].add(k)
                     overlap[prev].add(k)
                 prev_end, prev = p[n]["tend"][k], n
+
+        # --- consensus level: part indices. A scaffold claims a consensus chromosome ONCE,
+        #     positioned by its earliest-ranked reference piece within that chromosome --
+        #     otherwise a scaffold carrying two pieces of the same chromosome would claim it
+        #     twice and take two part numbers.
+        cclaim = defaultdict(list)
+        for n, info in p.items():
+            if info["class"] not in ("chromosome", "composite"):
+                continue
+            best = {}
+            for k in info["members"]:
+                c = comp_of.get(k)
+                if c is None:
+                    continue
+                key = (piece_rank.get(k, 999), info["tstart"][k])
+                if c not in best or key < best[c]:
+                    best[c] = key
+            for c, key in best.items():
+                cclaim[c].append((key[0], key[1], n))
+        part = defaultdict(dict)               # scaffold -> {consensus chr: index}
+        for c, lst in cclaim.items():
+            lst.sort()
+            for idx, (_r, _t, n) in enumerate(lst, start=1):
+                part[n][c] = idx
 
         unplaced = sorted([(n, info["length"]) for n, info in p.items()
                            if info["class"] == "unplaced"],
@@ -798,30 +865,45 @@ def main():
         out = []
         for n, info in p.items():
             flags = []
-            if info["class"] == "chromosome":
-                k = info["primary"]
-                new = f"chr{k}_{part[n][k]}"
-                orient = "rev" if info["orient"][k] == "-" else "fwd"
-                span = f"chr{k}:{info['tstart'][k]}-{info['tend'][k]}"
-                key = (0, k, part[n][k])
-                if k in overlap[n]:
-                    flags.append("overlap")
-                if k in consensus_notes:
-                    flags.append(consensus_notes[k])
-                if info.get("aligned_frac", 0) > a.inflated_aln_tol:
-                    flags.append("inflated_aln(bp=%.2f,cov=%.2f)" % (
-                        info["aligned_frac"], info.get("cover_frac", 0.0)))
-                flags += info.get("extra_flags", [])
-            elif info["class"] == "composite":
-                toks = [f"chr{k}_{part[n][k]}" for k in info["members"]]
-                new = "+".join(toks)
-                orient = "fwd"                 # never reorient a composite
-                span = ";".join(f"chr{k}:{info['tstart'][k]}-{info['tend'][k]}"
-                                for k in info["members"])
-                prim = info["primary"]
-                key = (0, prim, part[n][prim])
-                flags.append("fusion")
-                for x, y in combinations(info["members"], 2):
+            if info["class"] in ("chromosome", "composite"):
+                mem = list(info["members"])
+                cons = sorted({comp_of[k] for k in mem if k in comp_of})
+                span = ";".join(f"ref{k}:{info['tstart'][k]}-{info['tend'][k]}"
+                                for k in mem)
+                if len(cons) == 1:
+                    # ONE consensus chromosome. This is where the frame decoupling pays:
+                    # a scaffold spanning ref8+ref17 is a whole chromosome, not a
+                    # composite, and gets a plain chrN_p name that downstream
+                    # /^chr[0-9]+_[0-9]+$/ matchers -- cactus_pangenome.nf refContigs,
+                    # pangenome.nf, dotplot_paf.R, riparian_paf.R -- actually match.
+                    c = cons[0]
+                    new = f"chr{c}_{part[n][c]}"
+                    rcls = "chromosome"
+                    key = (0, c, part[n][c])
+                    # orient by the piece contributing most alignment, and say so when the
+                    # pieces disagree. Pre-Step-4 a composite was NEVER reoriented, leaving
+                    # 22-26% of some assemblies unnormalised and inflating apparent SV in
+                    # the pangenome.
+                    prim = max(mem, key=lambda k: info["tend"][k] - info["tstart"][k])
+                    orient = "rev" if info["orient"][prim] == "-" else "fwd"
+                    if len(mem) > 1:
+                        flags.append("spans(" + "+".join("ref%d" % k for k in mem) + ")")
+                        if len({info["orient"][k] for k in mem}) > 1:
+                            flags.append("orient_conflict(" + ",".join(
+                                "ref%d:%s" % (k, info["orient"][k]) for k in mem) + ")")
+                elif len(cons) > 1:
+                    # spans several consensus chromosomes -- a genuine chimera in this
+                    # frame, and the only case that still earns a '+' name
+                    toks = [f"chr{c}_{part[n][c]}" for c in cons]
+                    new = "+".join(toks)
+                    rcls = "composite"
+                    orient = "fwd"
+                    key = (0, cons[0], part[n][cons[0]])
+                    flags.append("fusion")
+                else:
+                    new, rcls, orient, key = f"unframed_{n}", "unplaced", "fwd", (2, 0, 0)
+                    flags.append("no_consensus_chromosome")
+                for x, y in combinations(mem, 2):
                     n_f, n_s = concordance(x, y)
                     if n_f == 0:
                         # no voter carries this junction -- only reachable for a passenger,
@@ -831,8 +913,8 @@ def main():
                         tag = "concordant"
                     else:
                         tag = "chimera_suspect"
-                    flags.append(f"{tag}(chr{min(x, y)}+chr{max(x, y)}:{n_f}f/{n_s}s)")
-                for k in info["members"]:
+                    flags.append(f"{tag}(ref{min(x, y)}+ref{max(x, y)}:{n_f}f/{n_s}s)")
+                for k in mem:
                     if k in consensus_notes:
                         flags.append(consensus_notes[k])
                 for k in sorted(info.get("member_reasons") or {}):
@@ -840,19 +922,20 @@ def main():
                 if info.get("aligned_frac", 0) > a.inflated_aln_tol:
                     flags.append("inflated_aln(bp=%.2f,cov=%.2f)" % (
                         info["aligned_frac"], info.get("cover_frac", 0.0)))
-                if any(k in overlap[n] for k in info["members"]):
+                if any(k in overlap[n] for k in mem):
                     flags.append("overlap")
+                flags += info.get("extra_flags", [])
             else:
                 u = unplaced_idx[n]
                 new = f"unplaced_{u}"
-                orient, span = "fwd", "-"
+                rcls, orient, span = "unplaced", "fwd", "-"
                 key = (1, u, 0)
                 if info.get("contained_in") is not None:
-                    flags.append(f"contained(chr{info['contained_in']})")
+                    flags.append(f"contained(ref{info['contained_in']})")
                 elif info.get("aligned_frac", 0) > 0:
                     flags.append(f"low_cov({info['aligned_frac']:.2f})")
             out.append({"old": n, "new": new, "orient": orient, "length": info["length"],
-                        "class": info["class"], "span": span,
+                        "class": rcls, "span": span,
                         "flags": ";".join(flags) if flags else "-", "_key": key})
         out.sort(key=lambda d: d["_key"])
         for i, d in enumerate(out, start=1):
@@ -887,32 +970,9 @@ def main():
                 ";".join(m["set_flags"]) if m["set_flags"] else "-",
                 role_reasons[rid])) + "\n")
 
-    # ---- join graph over voter fusion evidence, plus a presence matrix. REPORTING ONLY:
-    # scaffold names above are still derived from the reference frame. The point is to make
-    # the consensus topology visible -- how many chromosomes the batch actually supports,
-    # which junctions are open, and which chromosomes are missing from which assembly --
-    # before anything is renamed on it.
-    chrom_nums = sorted(set(chrom_of.values()))
-    cand_pairs = set()
-    for r in conc_pool:
-        cand_pairs |= set(fused_pairs[r])
-    pair_stats = {}
-    for pr in cand_pairs:
-        x, y = sorted(pr)
-        pair_stats[(x, y)] = concordance(x, y)
-
-    # refN = reference-frame piece (size rank in the reference); chrN = consensus
-    # chromosome. Two namespaces, never the same token for both.
-    rs = {i: n for n, i in chrom_of.items()}
-    rl = {i: ref_len.get(n, 0) for n, i in chrom_of.items()}
-
-    graph = {}
-    for rule in GRAPH_RULES:
-        edges = [(x, y) for (x, y), (n_f, n_s) in pair_stats.items()
-                 if edge_keep(rule, n_f, n_s, a.graph_min_fused)]
-        # rl orders consensus ids by descending total length -> chr1 is the largest
-        comp_of, comp_members = components(chrom_nums, edges, rl)
-        graph[rule] = {"edges": edges, "comp_of": comp_of, "comp_members": comp_members}
+    # graph, rs and rl are computed above -- the naming frame is derived from them, so
+    # they cannot be rebuilt here without risking the report describing a different frame
+    # from the one the names came out of.
     gpath = os.path.join(a.outdir, f"{a.species}.chromosome_graph.tsv")
     with open(gpath, "w") as fh:
         fh.write("# refN = reference-frame piece (size rank in %s); chrN = consensus "
@@ -982,14 +1042,13 @@ def main():
     # would consume. Written under --graph-rule and labelled provisional because names are
     # NOT yet derived from it.
     gr = graph[a.graph_rule]
-    mpath = os.path.join(a.outdir, f"{a.species}.consensus_chromosome_map.provisional.tsv")
+    mpath = os.path.join(a.outdir, f"{a.species}.consensus_chromosome_map.tsv")
     with open(mpath, "w") as fh:
-        fh.write("# PROVISIONAL -- consensus frame under graph rule '%s' "
-                 "(min_fused=%d). consensus_chrom is chrN in the CONSENSUS namespace; "
-                 "current_new_name is still chrN_p in the interim REFERENCE-FRAME "
-                 "namespace, so the same chrN token means different things in those two "
-                 "columns until step 4 retires reference-frame naming. consensus_members "
-                 "are refN pieces.\n" % (a.graph_rule, a.graph_min_fused))
+        fh.write("# Consensus frame under graph rule '%s' (min_fused=%d). This IS the "
+                 "naming frame: new_name is derived from consensus_chrom. refN identifies "
+                 "a reference-frame piece, chrN a consensus chromosome -- one namespace "
+                 "each, never the same token for both.\n"
+                 % (a.graph_rule, a.graph_min_fused))
         fh.write("assembly\trole\told_name\tcurrent_new_name\tclass\tlength\torient\t"
                  "consensus_chrom\tconsensus_members\tflags\n")
         for rid in ids_sorted:
@@ -1023,11 +1082,11 @@ def main():
     if multi:
         sys.stderr.write(
             "[harmonize %s] reference is split across %d consensus chromosome(s) under "
-            "rule '%s': %s. Scaffold names still follow the reference frame -- see "
-            "%s.consensus_chromosome_map.provisional.tsv for what a decoupled frame "
-            "would produce.\n" % (
+            "rule '%s': %s. The consensus frame now names it -- those pieces become _1/_2 "
+            "parts of one chrN in the reference's own name map, and assemblies that made "
+            "the join get a plain chrN_1.\n" % (
                 a.species, len(multi), a.graph_rule,
-                ", ".join("+".join("ref%d" % m for m in g) for g in multi), a.species))
+                ", ".join("+".join("ref%d" % m for m in g) for g in multi)))
 
     rep = os.path.join(a.outdir, f"{a.species}.harmonization_report.tsv")
     with open(rep, "w") as fh:
@@ -1069,6 +1128,18 @@ def main():
                                  for mem in g["comp_members"].values()
                                  if len(mem) > 1) or "-"))
         fh.write("# chromosome_graph_rule_reported\t%s\n" % a.graph_rule)
+        fh.write("# n_consensus_chromosomes\t%d\tfrom\t%d\treference_pieces\trule\t%s\n"
+                 % (n_consensus, len(chrom_nums), a.graph_rule))
+        # how many '+' names each rule would leave. A '+' name now means a scaffold spans
+        # several CONSENSUS chromosomes, i.e. a genuine chimera -- and it is the thing that
+        # breaks /^chr[0-9]+_[0-9]+$/ downstream, so the count is worth stating per rule.
+        for rule in GRAPH_RULES:
+            co = graph[rule]["comp_of"]
+            n_plus = sum(1 for rid in by_id for _n, inf in place[rid].items()
+                         if inf["class"] in ("chromosome", "composite")
+                         and len({co[k] for k in inf["members"] if k in co}) > 1)
+            fh.write("# composite_names_under\t%s\tchromosomes\t%d\tplus_names\t%d\n"
+                     % (rule, len(graph[rule]["comp_members"]), n_plus))
         fh.write("# frame_vocabulary\tnew_name/ref_span/flags=reference-frame chrN_p "
                  "(interim)\tchromosome_graph+components=refN pieces -> chrN consensus\n")
         fh.write("# chromosome_consensus_notes\t"
@@ -1095,7 +1166,8 @@ def main():
     n_flagged = sum(1 for out in results.values() for d in out if d["flags"] != "-")
     sys.stderr.write(
         f"[harmonize {a.species}] reference={a.reference_id} "
-        f"chromosomes={n_chrom} ({chrom_meta['method']}, "
+        f"consensus_chromosomes={n_consensus} reference_pieces={n_chrom} "
+        f"({chrom_meta['method']}, "
         f"{chrom_meta['genome_fraction']:.2f} of genome) "
         f"assemblies={len(results)} "
         f"voters={len(voters)} passengers={len(by_id) - len(voters)} "
