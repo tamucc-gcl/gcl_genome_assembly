@@ -132,6 +132,16 @@ def main():
     ap.add_argument("--min-z", type=float, default=-5.0,
                     help="and its Poisson deviate must be at or below this (negative: a "
                          "DEFICIT of spanning contacts)")
+    ap.add_argument("--allow-starved", action="store_true", default=False,
+                    help="continue when a scaffold in the fai has no intra-scaffold "
+                         "contacts, instead of refusing. Default is to refuse: it almost "
+                         "always means the pairs and the fai are from different runs")
+    ap.add_argument("--profile",
+                    help="write the full ratio-vs-position profile here. This is the "
+                         "output that matters -- --scan reports only the worst interior "
+                         "dip per scaffold, and thresholding a minimum-statistic is "
+                         "invalid, so those calls say more about the threshold than about "
+                         "the assembly. WHERE the dips fall is the evidence")
     ap.add_argument("--local-window", type=int, default=3_000_000,
                     help="decay profile and placement mass are estimated within this "
                          "distance of the cut, not scaffold-wide, so long-range coverage "
@@ -174,6 +184,23 @@ def main():
             n_intra += 1
             if d < a.flank:
                 near[c1].append((lo, hi))
+
+    starved = sorted(c for c in keep if not near[c])
+    if starved:
+        sys.stderr.write(
+            "[misjoin %s] ERROR: %d scaffold(s) in the fai carry ZERO intra-scaffold "
+            "contacts: %s\n"
+            "[misjoin %s]        The pairs and the fai describe different assemblies. A "
+            "scaffold that exists in the fai but not in the pairs header is usually a "
+            "vintage mismatch -- e.g. a composite created by a later harmonization run, "
+            "where the published pairs still call it two separate scaffolds.\n"
+            "[misjoin %s]        Re-map or re-run so both come from the same run, or pass "
+            "--allow-starved to score the rest and report these as no_contacts.\n"
+            % (a.assembly_id, len(starved), ", ".join(starved[:6]),
+               a.assembly_id, a.assembly_id))
+        if not a.allow_starved:
+            sys.exit(2)
+        keep = keep - set(starved)
 
     for c in keep:
         near[c].sort()
@@ -288,6 +315,26 @@ def main():
                 if len(f) >= 2 and f[0] in keep:
                     targets.append((f[0], int(f[1]), f[2] if len(f) > 2 else "-"))
 
+    if a.profile:
+        with open(a.profile, "w") as pf:
+            pf.write("# assembly\t%s\tflank\t%d\tstep\t%d\tlocal_window\t%d\n"
+                     % (a.assembly_id, a.flank, a.step, a.local_window))
+            pf.write("# interior null median ratio %.4f -- read dips RELATIVE to this, not "
+                     "to 1.0\n" % gmed)
+            pf.write("assembly\tscaffold\tscaffold_len\tposition\tobserved\texpected\t"
+                     "ratio\tz\tratio_over_scaffold_median\n")
+            for c in sorted(keep):
+                rr = [r["ratio"] for r in profiles[c] if r["exp"] >= a.min_expected]
+                smed = quantiles(rr, [0.5])[0] if rr else float("nan")
+                for r in profiles[c]:
+                    pf.write("\t".join(str(x) for x in (
+                        a.assembly_id, c, lens[c], r["cut"], r["obs"],
+                        "%.2f" % r["exp"], "%.4f" % r["ratio"], "%.2f" % r["z"],
+                        "%.4f" % (r["ratio"] / smed) if smed == smed and smed > 0
+                        else "NA")) + "\n")
+        sys.stderr.write("[misjoin %s] profile written to %s\n"
+                         % (a.assembly_id, a.profile))
+
     with open(a.out, "w") as fh:
         fh.write("# assembly\t%s\n" % a.assembly_id)
         fh.write("# params\tflank=%d\tstep=%d\tedge_margin=%d\tmin_expected=%.1f\t"
@@ -333,12 +380,23 @@ def main():
             for c, cut, label in targets:
                 calls[emit(c, cut, label, score(c, cut))] += 1
         if a.scan or not targets:
+            # The worst interior point sits at the bottom of its own null by construction,
+            # so no threshold applied to it is meaningful. Reported for orientation only,
+            # with the call column forced to 'worst_dip_not_a_call'. Use --profile and look
+            # at WHERE the dips fall.
             for c in sorted(keep):
                 rows = [r for r in profiles[c] if r["exp"] >= a.min_expected]
                 if not rows:
                     continue
-                worst = min(rows, key=lambda r: r["ratio"])
-                calls[emit(c, worst["cut"], "worst_interior_dip", worst)] += 1
+                w = min(rows, key=lambda r: r["ratio"])
+                nl = nulls.get(c) or all_null
+                below = sum(1 for x in nl if x <= w["ratio"])
+                fh.write("\t".join(str(x) for x in (
+                    a.assembly_id, c, lens[c], w["cut"], "worst_interior_dip", w["obs"],
+                    "%.2f" % w["exp"], "%.4f" % w["ratio"], "%.2f" % w["z"], "NA",
+                    "%.1f" % (100.0 * below / max(1, len(nl))),
+                    "worst_dip_not_a_call")) + "\n")
+                calls["worst_dip_not_a_call"] += 1
 
     sys.stderr.write("[misjoin %s] interior null median ratio %.3f (1.0 = intact); "
                      "calls: %s\n" % (a.assembly_id, gmed,
