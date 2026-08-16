@@ -208,6 +208,7 @@ process HARMONIZE_SPECIES {
         > "${taxid}.presence_matrix.tsv"
     printf 'assembly\\trole\\told_name\\tcurrent_new_name\\tclass\\tlength\\torient\\tconsensus_chrom\\tconsensus_members\\tflags\\n' \\
         > "${taxid}.consensus_chromosome_map.tsv"
+    printf '%s\\n' "${chosen_ref}" > "${taxid}.reference_id.txt"
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }
