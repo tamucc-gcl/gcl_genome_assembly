@@ -507,6 +507,12 @@ def main():
                     help="a 2nd chromosome contributing >= this share -> composite")
     ap.add_argument("--overlap-tol", type=int, default=0,
                     help="bp of reference overlap between two pieces before flagging")
+    ap.add_argument("--score-only", action="store_true", default=False,
+                    help="score this reference and stop: emit one metrics row to --out "
+                         "and write no name maps or reports. Used by the two-pass "
+                         "selection, which scores every candidate reference by actually "
+                         "running the alignment and the graph rather than approximating "
+                         "from scaffold counts")
     ap.add_argument("--graph-min-fused", type=int, default=2,
                     help="join-graph support floor: a junction must be seen fused in at "
                          "least this many voters before any rule can keep it. Guards "
@@ -811,6 +817,61 @@ def main():
     sys.stderr.write(
         "[harmonize %s] naming frame: rule=%s -> %d consensus chromosomes from %d "
         "reference pieces\n" % (a.species, a.graph_rule, n_consensus, len(chrom_nums)))
+
+    if a.score_only:
+        # ---- SCORE-ONLY --------------------------------------------------------------
+        # Everything needed to judge a candidate reference exists by this point: the
+        # chromosome set, the placements, and the join graph. Naming adds nothing to the
+        # judgement, so stop here.
+        #
+        # PRIMARY METRIC -- multiplicity. Of the OTHER voters (the reference's own
+        # scaffolds are trivially placed, they define the frame, so counting them measures
+        # which assembly was chosen rather than how good the frame is):
+        #
+        #     multiplicity = placed_scaffolds / (n_consensus x n_other_voters)
+        #
+        # 1.0 is a clean 1:1 chromosome mapping. Above 1, assemblies contribute several
+        # scaffolds per chromosome -- a fragmented frame, or redundancy it failed to
+        # absorb. Below 1, chromosomes are missing.
+        #
+        # It is the primary metric because edge count alone has a blind spot: a reference
+        # that wrongly FUSES two chromosomes needs no edges to correct it and would score
+        # best, but queries keeping them apart then pile onto one piece and multiplicity
+        # rises. Edges catch over-splitting, multiplicity catches over-fusion.
+        others = sorted(voters - {a.reference_id})
+        placed = sum(1 for rid in others for _n, inf in place[rid].items()
+                     if inf["class"] in ("chromosome", "composite"))
+        denom = float(n_consensus * len(others)) if others and n_consensus else 0.0
+        mult = (placed / denom) if denom else float("nan")
+        cm = set_meta[a.reference_id]
+        row = [
+            ("reference_id", a.reference_id),
+            ("role", roles.get(a.reference_id, "?")),
+            ("n_reference_pieces", n_chrom),
+            ("n_consensus_chromosomes", n_consensus),
+            ("graph_rule", a.graph_rule),
+            ("n_edges", len(frame["edges"])),
+            ("n_voters", len(voters)),
+            ("n_other_voters", len(others)),
+            ("placed_other_voters", placed),
+            ("multiplicity", "%.4f" % mult),
+            ("abs_multiplicity_dev", "%.4f" % abs(mult - 1.0)),
+            ("genome_fraction", "%.4f" % cm["genome_fraction"]),
+            ("cut_ratio", "NA" if cm["cut_ratio"] is None else "%.4f" % cm["cut_ratio"]),
+            ("chrom_set_method", cm["method"]),
+            ("chrom_set_flags", ";".join(cm["flags"]) if cm["flags"] else "-"),
+            ("scaffold_n50", fai_n50[a.reference_id]),
+        ]
+        dest = os.path.join(a.outdir, f"{a.species}.{a.reference_id}.score.tsv")
+        with open(dest, "w") as fh:
+            fh.write("\t".join(k for k, _v in row) + "\n")
+            fh.write("\t".join(str(v) for _k, v in row) + "\n")
+        sys.stderr.write(
+            "[harmonize %s] SCORE %s: consensus=%d pieces=%d edges=%d mult=%.3f "
+            "(|dev|=%.3f) gfrac=%.3f\n"
+            % (a.species, a.reference_id, n_consensus, n_chrom, len(frame["edges"]),
+               mult, abs(mult - 1.0), cm["genome_fraction"]))
+        return
 
     results = {}
     for rid in by_id:
