@@ -507,6 +507,13 @@ def main():
                     help="a 2nd chromosome contributing >= this share -> composite")
     ap.add_argument("--overlap-tol", type=int, default=0,
                     help="bp of reference overlap between two pieces before flagging")
+    ap.add_argument("--list-candidates", type=int, default=0, metavar="N",
+                    help="emit the top N reference candidates and exit, using ONLY the "
+                         "fai files -- no PAF is read, so this runs before any alignment. "
+                         "Candidates are voters ranked by chromosome-set genome fraction. "
+                         "Needed because voter roles are computed here, but the two-pass "
+                         "selection has to know which assemblies are worth aligning "
+                         "against before it can align anything")
     ap.add_argument("--score-only", action="store_true", default=False,
                     help="score this reference and stop: emit one metrics row to --out "
                          "and write no name maps or reports. Used by the two-pass "
@@ -578,6 +585,53 @@ def main():
         sys.exit(f"reference id {a.reference_id!r} not in manifest")
 
     # ---- reference chromosome set (chrN = descending-size rank) ----
+    if a.list_candidates:
+        # ---- LIST-CANDIDATES ----------------------------------------------------------
+        # Only the fais are touched. Every assembly is scored with the same drop-off caller
+        # and voter criteria the main pass uses, so the candidate pool is consistent with
+        # the roles assigned later rather than a bash approximation of them.
+        cm, cn50 = {}, {}
+        for rid, row in by_id.items():
+            f = read_fai(row["fai"])
+            _cs, meta = select_chromosome_set(
+                f, a.min_scaffold_bp, a.chromosome_set_method,
+                a.dropoff_ratio, a.dropoff_min_frac, a.min_chrom_frac)
+            cm[rid] = meta
+            cn50[rid] = scaffold_n50([L for _n, L in f])
+        met = {rid: {"n_chrom": cm[rid]["n_chrom"], "method": cm[rid]["method"],
+                     "cut_ratio": cm[rid]["cut_ratio"],
+                     "genome_fraction": cm[rid]["genome_fraction"],
+                     "set_flags": list(cm[rid]["flags"]), "n_scaffolds": 0,
+                     "n50": cn50[rid]} for rid in by_id}
+        # reference_id=None: assign_roles force-promotes the reference to voter, which
+        # here would smuggle a passenger into the candidate pool purely because the
+        # manifest happened to name it. roles_no_promote
+        rl, rr, _rf = assign_roles(
+            met, a.voter_min_cut_ratio, a.voter_min_genome_frac, a.voter_min_n50_ratio,
+            a.voter_require_dropoff, a.min_voters, None)
+        pool = sorted((r for r in by_id if rl[r] == "voter"),
+                      key=lambda r: (-met[r]["genome_fraction"], -met[r]["n50"], r))
+        if not pool:
+            pool = sorted(by_id, key=lambda r: (-met[r]["genome_fraction"], r))
+            sys.stderr.write("[harmonize %s] WARNING: no voters; offering all assemblies "
+                             "as candidates\n" % a.species)
+        keep = pool[:a.list_candidates]
+        dest = os.path.join(a.outdir, f"{a.species}.reference_candidates.tsv")
+        with open(dest, "w") as fh:
+            fh.write("# top %d of %d voters by chromosome-set genome fraction\n"
+                     % (len(keep), len(pool)))
+            fh.write("candidate\trole\tn_chrom_set\tgenome_fraction\tcut_ratio\t"
+                     "scaffold_n50\tchrom_set_method\treason\n")
+            for rid in keep:
+                m = met[rid]
+                fh.write("\t".join(str(x) for x in (
+                    rid, rl[rid], m["n_chrom"], "%.4f" % m["genome_fraction"],
+                    "NA" if m["cut_ratio"] is None else "%.2f" % m["cut_ratio"],
+                    m["n50"], m["method"], rr[rid])) + "\n")
+        sys.stderr.write("[harmonize %s] candidates (%d of %d voters): %s\n"
+                         % (a.species, len(keep), len(pool), ", ".join(keep)))
+        return
+
     ref_fai = read_fai(by_id[a.reference_id]["fai"])
     chrom, chrom_meta = select_chromosome_set(
         ref_fai, a.min_scaffold_bp, a.chromosome_set_method,
@@ -846,7 +900,14 @@ def main():
         cm = set_meta[a.reference_id]
         row = [
             ("reference_id", a.reference_id),
-            ("role", roles.get(a.reference_id, "?")),
+            # the role WITHOUT the reference force-promotion. assign_roles promotes the
+            # reference to voter so the run can proceed, so roles[] would say "voter" for
+            # every candidate and select_reference.py's voter filter would never filter
+            # anything. roles_unpromoted
+            ("role", assign_roles(
+                metrics, a.voter_min_cut_ratio, a.voter_min_genome_frac,
+                a.voter_min_n50_ratio, a.voter_require_dropoff, a.min_voters,
+                None)[0].get(a.reference_id, "?")),
             ("n_reference_pieces", n_chrom),
             ("n_consensus_chromosomes", n_consensus),
             ("graph_rule", a.graph_rule),

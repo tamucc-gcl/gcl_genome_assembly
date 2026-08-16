@@ -4,18 +4,30 @@
 ========================================================================================
     Repo location: modules/harmonize_species.nf
 
-    One task per species (meta.taxid) over ALL its long-read assemblies (>= 2).
-    Picks an in-batch reference -- the assembly whose chromosome-scale scaffold count is
-    nearest the batch median (N50 tie-break), which avoids N50's bias toward spuriously
-    fused assemblies, or a pinned id -- aligns every other assembly to it with minimap2,
-    and runs py_scripts/harmonize_names.py to emit a per-assembly homology name map.
+    One task per species (meta.taxid) over ALL its long-read assemblies (>= 2). Aligns
+    every other assembly to the reference with minimap2 and runs
+    py_scripts/harmonize_names.py to emit a per-assembly homology name map.
+
+    THE REFERENCE arrives as the 4th tuple element:
+      * an assembly id  -- chosen upstream by two-pass scoring (modules/harmonize_two_pass.nf)
+                           or pinned via params.harmonize_reference_ids
+      * 'NO_SELECTION'  -- fall back to the in-module bash heuristic below (count nearest
+                           the batch median, N50 tie-break). Kept reachable so the old
+                           behaviour cannot silently become unavailable, but it optimises a
+                           number the harmonizer never uses and assumes the batch is centred
+                           on truth; on this data two failed assemblies moved the median and
+                           it chose a reference split at five junctions.
+
+    HARMONIZER ARGUMENTS come in as `hargs`, built once in workflows/harmonize_scaffolds.nf
+    and shared with HARMONIZE_SCORE, so a candidate is scored under exactly the settings its
+    frame is then built with.
     Alignments are currently serial within the task
     (fine at a handful of same-species individuals; parallelise later if needed).
 
     Inputs preserve positional correspondence between `ids` and `assemblies` (both come
     from the same groupTuple), so ids[i] <-> assemblies[i].
 
-    Input : tuple(taxid, [ids], [assemblies]) ; path(resolver)
+    Input : tuple(taxid, [ids], [assemblies], reference|'NO_SELECTION') ; path(resolver) ; val(hargs)
     Output: name_maps (per assembly) / report (per species) / versions / logs
 ========================================================================================
 */
@@ -28,8 +40,9 @@ process HARMONIZE_SPECIES {
         saveAs: { fn -> fn == 'versions.tsv' ? null : fn }
 
     input:
-    tuple val(taxid), val(ids), path(assemblies)
+    tuple val(taxid), val(ids), path(assemblies), val(chosen_ref)
     path(resolver)
+    val(hargs)
 
     output:
     tuple val(taxid), path("*.harmonized_name_map.tsv"), emit: name_maps
@@ -40,43 +53,21 @@ process HARMONIZE_SPECIES {
     path("*.chromosome_graph.tsv"),                      emit: chromosome_graph
     path("*.chromosome_components.tsv"),                 emit: chromosome_components
     path("*.presence_matrix.tsv"),                       emit: presence_matrix
-    path("*.consensus_chromosome_map.provisional.tsv"),  emit: consensus_map_provisional
+    path("*.consensus_chromosome_map.tsv"),              emit: consensus_map
     path("versions.tsv"),                                emit: versions
     path("*.minimap2.log"),                              emit: logs, optional: true
 
     script:
     def preset       = params.harmonize_minimap2_preset ?: 'asm5'
     def min_scaffold = params.harmonize_min_scaffold_bp ?: (params.finalize_min_scaffold_bp ?: 1000000)
-    def chr_method   = params.harmonize_chromosome_method ?: 'dropoff'
-    def drop_ratio   = params.harmonize_dropoff_ratio ?: 2.0
-    def drop_minfrac = params.harmonize_dropoff_min_frac ?: 0.5
-    def min_frac     = params.harmonize_min_aligned_frac ?: 0.5
-    def contained_frac = params.harmonize_contained_frac ?: 0.9
-    def demote       = (params.harmonize_demote_contained == false) ? '--no-demote-contained' : '--demote-contained'
-    def sec_frac     = params.harmonize_secondary_frac ?: 0.2
     def ref_pref     = params.harmonize_reference_ids ?: ''
-    def min_chrom_frac  = params.harmonize_min_chrom_frac ?: 0.1
-    def batch_consensus = (params.harmonize_batch_consensus == false) ? '--no-batch-consensus' : '--batch-consensus'
-    def bc_action    = params.harmonize_batch_consensus_action ?: 'flag'
-    // NB explicit null checks, not `?:` -- 0 is falsy in Groovy, so `?:` would silently
-    // ignore an intentional 0 (the documented way to disable these thresholds).
-    def v_cut        = (params.harmonize_voter_min_cut_ratio   != null) ? params.harmonize_voter_min_cut_ratio   : 0.0
-    def v_gfrac      = (params.harmonize_voter_min_genome_frac != null) ? params.harmonize_voter_min_genome_frac : 0.8
-    def v_n50r       = (params.harmonize_voter_min_n50_ratio   != null) ? params.harmonize_voter_min_n50_ratio   : 0.2
-    def v_dropoff    = (params.harmonize_voter_require_dropoff == false) ? '--no-voter-require-dropoff' : '--voter-require-dropoff'
-    def min_voters   = (params.harmonize_min_voters != null) ? params.harmonize_min_voters : 3
-    def rp_min_ind   = (params.harmonize_restricted_presence_min_individuals != null) ? params.harmonize_restricted_presence_min_individuals : 2
-    def conc_excl_ref = (params.harmonize_concordance_exclude_reference == true) ? '--concordance-exclude-reference' : ''
-    def mem_cover    = (params.harmonize_member_cover_frac != null) ? params.harmonize_member_cover_frac : 0.5
-    def infl_tol     = (params.harmonize_inflated_aln_tol  != null) ? params.harmonize_inflated_aln_tol  : 1.05
-    def graph_rule   = params.harmonize_graph_rule ?: 'majority'
-    def graph_minf   = (params.harmonize_graph_min_fused != null) ? params.harmonize_graph_min_fused : 2
     """
     set -euo pipefail
 
     ids=(${ids.join(' ')})
     fastas=(${assemblies})
     PREF="${ref_pref}"
+    CHOSEN="${chosen_ref}"
 
     # ------------------------------------------------------------------
     # id-based symlinks + index (avoids filename collisions / decouples
@@ -110,7 +101,18 @@ process HARMONIZE_SPECIES {
     done
 
     REF=""
-    if [ -n "\${PREF}" ]; then
+    # upstream two-pass selection wins when it ran
+    if [ "\${CHOSEN}" != "NO_SELECTION" ]; then
+        for id in "\${ids[@]}"; do
+            if [ "\$id" = "\${CHOSEN}" ]; then REF="\${CHOSEN}"; break; fi
+        done
+        if [ -z "\${REF}" ]; then
+            echo "[HARMONIZE taxid ${taxid}] ERROR: selected reference \${CHOSEN} is not in this species group" >&2
+            exit 1
+        fi
+        echo "[HARMONIZE taxid ${taxid}] reference = \${REF} (two-pass selection)"
+    fi
+    if [ -z "\${REF}" ] && [ -n "\${PREF}" ]; then
         IFS=',' read -ra PREFA <<< "\${PREF}"
         for p in "\${PREFA[@]}"; do
             for id in "\${ids[@]}"; do
@@ -120,6 +122,7 @@ process HARMONIZE_SPECIES {
     fi
     AMB=0
     if [ -z "\${REF}" ]; then
+        echo "[HARMONIZE taxid ${taxid}] NOTE: falling back to the bash count-nearest-median heuristic" >&2
         SEL=\$(tail -n +2 ${taxid}.reference_selection.tsv | awk 'BEGIN{FS=OFS="\\t"}
             { id[NR]=\$1; cnt[NR]=\$2; nfifty[NR]=\$3; n=NR }
             END{
@@ -167,27 +170,7 @@ process HARMONIZE_SPECIES {
         --manifest manifest.tsv \\
         --reference-id "\${REF}" \\
         --species "${taxid}" \\
-        --min-scaffold-bp ${min_scaffold} \\
-        --chromosome-set-method ${chr_method} \\
-        --dropoff-ratio ${drop_ratio} \\
-        --dropoff-min-frac ${drop_minfrac} \\
-        --min-aligned-frac ${min_frac} \\
-        --contained-frac ${contained_frac} ${demote} \\
-        --secondary-frac ${sec_frac} \\
-        --min-chrom-frac ${min_chrom_frac} \\
-        ${batch_consensus} \\
-        --batch-consensus-action ${bc_action} \\
-        --voter-min-cut-ratio ${v_cut} \\
-        --voter-min-genome-frac ${v_gfrac} \\
-        --voter-min-n50-ratio ${v_n50r} \\
-        ${v_dropoff} \\
-        --min-voters ${min_voters} \\
-        --restricted-presence-min-individuals ${rp_min_ind} \\
-        ${conc_excl_ref} \\
-        --member-cover-frac ${mem_cover} \\
-        --inflated-aln-tol ${infl_tol} \\
-        --graph-rule ${graph_rule} \\
-        --graph-min-fused ${graph_minf} \\
+        ${hargs} \\
         --outdir .
 
     # ------------------------------------------------------------------
@@ -207,6 +190,7 @@ process HARMONIZE_SPECIES {
     stub:
     """
     ids=(${ids.join(' ')})
+    echo "stub reference: ${chosen_ref}" > /dev/null
     for id in "\${ids[@]}"; do
         printf 'old_name\\tnew_name\\torient\\torder\\tlength\\tclass\\tref_span\\tflags\\n' \\
             > "\${id}.harmonized_name_map.tsv"
@@ -223,7 +207,7 @@ process HARMONIZE_SPECIES {
     printf 'ref\\tref_scaffold\\tlength\\tn_chromosome\\tn_composite\\tn_absent\\tn_individuals_present\\tn_individuals\\n' \\
         > "${taxid}.presence_matrix.tsv"
     printf 'assembly\\trole\\told_name\\tcurrent_new_name\\tclass\\tlength\\torient\\tconsensus_chrom\\tconsensus_members\\tflags\\n' \\
-        > "${taxid}.consensus_chromosome_map.provisional.tsv"
+        > "${taxid}.consensus_chromosome_map.tsv"
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }
