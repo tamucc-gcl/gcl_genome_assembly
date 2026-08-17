@@ -233,7 +233,27 @@ workflow PANGENOME {
             ch_prog_png    = PANGENOME_PROGRESSIVE_PLOT.out.png
         }
 
-        // downstream manifest (role -> file) over the graph products
+        // full-graph product NAMES for the manifest. These are already declared and published
+        // via CACTUS_PANGENOME's `all` catch-all; picking them by name here means that process
+        // needs no new output declarations (its cache is expensive to lose). A product cactus
+        // did not emit yields '' and the manifest omits its row rather than erroring.
+        //
+        // Matched on EXACT basename, not suffix: <label>.chroms/ contains per-chromosome files
+        // named chrN_M.full.og, so endsWith('.full.og') would happily return a chromosome graph
+        // instead of the whole-graph one.
+        ch_full_names = CACTUS_PANGENOME.out.all
+            .map { taxid, files ->
+                def fl   = (files instanceof List) ? files : [files]
+                def pick = { String sfx ->
+                    def want = "${taxid}${sfx}"
+                    def f = fl.find { it.name == want }
+                    f ? f.name : ''
+                }
+                tuple(taxid, pick('.full.gbz'), pick('.full.gfa.gz'),
+                             pick('.full.og'),  pick('.full.snarls'))
+            }
+
+        // downstream manifest (role -> file, per graph) over the graph products
         PANGENOME_MANIFEST(
             CACTUS_PANGENOME.out.gbz
                 .join( CACTUS_PANGENOME.out.gfa )
@@ -244,6 +264,7 @@ workflow PANGENOME {
                 .join( PANGENOME_VARIANTS.out.tbi )
                 .join( PANGENOME_REF_FASTA.out.ref_fasta )
                 .join( PANGENOME_REF_FASTA.out.ref_fai )
+                .join( ch_full_names )
         )
 
         // pangenome report fragment + stats JSON (workstream F) — always on when built.

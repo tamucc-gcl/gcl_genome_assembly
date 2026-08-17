@@ -78,47 +78,71 @@ add(sprintf("Minigraph-Cactus pangenome graph for *%s*%s.",
             gsub("_", " ", species),
             if (!is.na(g(gr, "n_haplotypes"))) sprintf(", over %s haplotypes", g(gr, "n_haplotypes")) else ""), "")
 
-# ---- downstream files (manifest-driven; sits at the top of the section) ----------------
-# pangenome_manifest.tsv is the frozen downstream seam (role -> file). Rendering the table
-# from it means a new role added to PANGENOME_MANIFEST appears here automatically; roles
-# without a description below still render (the role name is humanized as a fallback).
+# ---- downstream files (manifest-driven, pivoted by graph) ------------------------------
+# pangenome_manifest.tsv is the downstream seam: role -> file, one row per (role, graph). The
+# table is rendered from it, so a role added to PANGENOME_MANIFEST appears here automatically;
+# roles with no entry below fall back to a humanized role name. A manifest without a `graph`
+# column (the pre-clip/full schema) is treated as all-clip.
+role_name <- c(
+  graph_gbz        = "Graph (GBZ)",
+  graph_gfa        = "Graph (GFA)",
+  snarls           = "Snarls",
+  haplotype_index  = "Haplotype index",
+  variants_vcf     = "Variant catalog",
+  variants_vcf_tbi = "Variant catalog index",
+  reference_fasta  = "Reference FASTA",
+  reference_fai    = "Reference FASTA index"
+)
 role_desc <- c(
   graph_gbz        = "Compressed graph + haplotype paths \u2014 the mapping substrate (`vg giraffe`, `vg call`).",
   graph_gfa        = "Text graph interchange (gzipped) \u2014 panacus, odgi, Bandage, `vg convert`.",
-  odgi             = "odgi graph \u2014 path/node queries, similarity, sorting, 1D/2D layout.",
   snarls           = "Snarl (bubble) decomposition \u2014 the genotyping units for `vg call`.",
   haplotype_index  = "Haplotype-sampling index \u2014 builds personalized reference graphs for `vg giraffe`.",
   variants_vcf     = "Variant catalog vs the reference path: top-level bubbles, one allele per row, SNP/indel/SV.",
   variants_vcf_tbi = "Tabix index for the variant catalog.",
   reference_fasta  = "Reference-path FASTA \u2014 surjection target and linear-coordinate seam.",
-  reference_fai    = "faidx index for the reference-path FASTA.",
-  manifest         = "This table, machine-readable (`role` / `file` / `label`) \u2014 resolve files by role, not by name."
+  reference_fai    = "faidx index for the reference-path FASTA."
 )
+# Published, and listed in the manifest by role -- but NOT linked in this table. The whole-graph
+# odgi files are one to two orders of magnitude larger than everything else here and would
+# dominate a table meant to be read by a person. The footnote points at them instead; machine
+# consumers resolve them from the manifest, which is the interface that matters for them.
+role_skip <- c("odgi")
 
 if (!is_missing(args$manifest)) {
   mf <- tryCatch(read.delim(args$manifest, header = TRUE, stringsAsFactors = FALSE,
                             check.names = FALSE), error = function(e) NULL)
   if (!is.null(mf) && nrow(mf) > 0 && all(c("role", "file") %in% names(mf))) {
-    rows <- data.frame(role = as.character(mf$role),
-                       file = basename(as.character(mf$file)),
-                       stringsAsFactors = FALSE)
-    if (!"manifest" %in% rows$role) {
-      rows <- rbind(rows, data.frame(role = "manifest",
-                                     file = basename(args$manifest),
-                                     stringsAsFactors = FALSE))
+    mf$role  <- as.character(mf$role)
+    mf$file  <- basename(as.character(mf$file))
+    mf$graph <- if ("graph" %in% names(mf)) as.character(mf$graph) else "clip"
+    roles <- setdiff(unique(mf$role), role_skip)   # manifest row order = display order
+    if (length(roles) > 0) {
+      cell <- function(r, gg) {
+        f <- mf$file[mf$role == r & mf$graph == gg]
+        if (length(f) == 0) "\u2014" else sprintf("[`%s`](%s)", f[1], rel(f[1]))
+      }
+      nm <- vapply(roles, function(r) if (r %in% names(role_name)) role_name[[r]] else gsub("_", " ", r), "")
+      ds <- vapply(roles, function(r) if (r %in% names(role_desc)) role_desc[[r]] else "", "")
+      add("### Downstream files", "",
+          sprintf(paste("Graph products for downstream use, split by graph: **clip** is the",
+                        "reference-anchored graph (the default for mapping and variant work);",
+                        "**full** retains sequence that had no reference alignment. Paths are",
+                        "relative to this report; [`%s`](%s) carries the same set machine-readably."),
+                  basename(args$manifest), rel(basename(args$manifest))), "",
+          "| product | clip graph | full graph | description |", "|---|---|---|---|",
+          sprintf("| %s | %s | %s | %s |", nm,
+                  vapply(roles, cell, "", gg = "clip"),
+                  vapply(roles, cell, "", gg = "full"),
+                  ds), "",
+          paste("*The whole-graph odgi graphs (`.og`, `.full.og`) are published alongside these",
+                "but not linked above \u2014 they are far larger than every other product. Resolve",
+                "them from the manifest by the `odgi` role, or rebuild either from its GFA with",
+                "`odgi build -g`. Per-chromosome graphs sit under `<label>.chroms/`. Read-mapping",
+                "indexes (`.dist` / `.min`) are not built here: haplotype sampling makes them",
+                "sample-specific, so the consuming pipeline builds them from the GBZ + `.hapl`",
+                "at map time.*"), "")
     }
-    desc <- ifelse(rows$role %in% names(role_desc),
-                   role_desc[rows$role],
-                   gsub("_", " ", rows$role))
-    add("### Downstream files", "",
-        paste("The graph products an external pipeline consumes. Paths are relative to this",
-              "report; `pangenome_manifest.tsv` carries the same set machine-readably."),
-        "",
-        "| file | description |", "|---|---|",
-        sprintf("| [`%s`](%s) | %s |", rows$file, rel(rows$file), desc), "",
-        paste("*Read-mapping indexes (`.dist` / `.min`) are deliberately not built here \u2014",
-              "haplotype sampling makes them sample-specific, so the consuming pipeline builds",
-              "them from the GBZ + `.hapl` at map time.*"), "")
   }
 }
 
