@@ -197,20 +197,36 @@ plot_level <- function(M, lvl, pca_path, nj_path) {
     tcol <- col_pal[tind]; tpch <- shp_of(thapn)
     dep  <- suppressWarnings(max(node.depth.edgelength(tr)))
     if (!is.finite(dep) || dep <= 0) dep <- 1
+    hl   <- if (has_hap) paste0("hap", uh) else character(0)
     png(nj_path, width = 8.5 * 150, height = 6 * 150, res = 150)
-    old <- par(mar = c(5.5, 0.6, 3, 0.6), xpd = NA)
+    old <- par(mar = c(2, 0.6, 3.5, 0.6), xpd = NA)   # provisional: measure, then re-set below
+    # Legend geometry in inches, before anything is drawn (par("cin")/par("pin") are valid as
+    # soon as mar is set, and pin[1] does not depend on mar[1]): how many entries fit across
+    # one row, hence how many text lines the bottom margin has to hold. Sizing the margin from
+    # this instead of hard-coding it is what keeps the legends on the page as the cohort grows.
+    ncol_fit <- function(labs) {
+      if (!length(labs)) return(1L)
+      ew <- (max(nchar(labs)) + 5) * par("cin")[1]     # entry width: label + symbol + gap
+      max(1L, min(length(labs), floor(par("pin")[1] / ew)))
+    }
+    nc_i <- ncol_fit(ind_levels); nc_h <- ncol_fit(hl)
+    lrow <- ceiling(length(ind_levels) / nc_i) +
+            (if (length(hl)) ceiling(length(hl) / nc_h) else 0)
+    par(mar = c(2.4 + 1.15 * (lrow + 1L + as.integer(length(hl) > 0)), 0.6, 3.5, 0.6))
     plot(tr, type = "phylogram", direction = "rightwards", align.tip.label = TRUE,
-         cex = 0.9, font = 1, tip.color = tcol, label.offset = 0.03 * dep, no.margin = FALSE,
-         main = sprintf("%s %s %s NJ tree (graph similarity, midpoint-rooted)", label, DASH, lvl),
-         cex.main = 0.9)
+         underscore = TRUE, cex = 0.9, font = 1, tip.color = tcol, label.offset = 0.03 * dep,
+         no.margin = FALSE, cex.main = 0.9,
+         main = sprintf("%s %s %s NJ tree (graph similarity, midpoint-rooted)", label, DASH, lvl))
     tiplabels(pch = tpch, col = tcol, cex = 1.3)
     usr <- par("usr"); dy <- par("cxy")[2]
-    add.scale.bar(x = usr[1], y = usr[4] + 0.9 * dy, length = signif(dep / 4, 1), cex = 0.8, lwd = 2)
-    legend(x = usr[1], y = usr[3] - 1.6 * dy, legend = ind_levels, col = col_pal[ind_levels],
-           pch = 16, pt.cex = 1.2, bty = "n", cex = 0.85, horiz = TRUE, title = "individual")
-    if (has_hap) legend(x = usr[1], y = usr[3] - 3.4 * dy, legend = paste0("hap", uh),
+    # scale bar just above the plot region: main sits ~1.2 lines higher, so this clears it
+    add.scale.bar(x = usr[1], y = usr[4] + 0.3 * dy, length = signif(dep / 4, 1), cex = 0.8, lwd = 2)
+    l1 <- legend(x = usr[1], y = usr[3] - 1.1 * dy, legend = ind_levels, col = col_pal[ind_levels],
+                 pch = 16, pt.cex = 1.2, bty = "n", cex = 0.85, ncol = nc_i,
+                 title = "individual", title.adj = 0)
+    if (has_hap) legend(x = usr[1], y = l1$rect$top - l1$rect$h - 0.3 * dy, legend = hl,
                         pch = shp_of(uh), col = "grey30", pt.cex = 1.2, bty = "n", cex = 0.85,
-                        horiz = TRUE, title = "haplotype")
+                        ncol = nc_h, title = "haplotype", title.adj = 0)
     par(old); dev.off()
   } else placeholder(nj_path, "NJ tree failed")
 }
