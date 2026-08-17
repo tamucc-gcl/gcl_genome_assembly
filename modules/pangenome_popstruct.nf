@@ -10,8 +10,11 @@
 
     Dedicated 'pangenome_popstruct' env (r-base + r-ggplot2 + r-ape + r-ggrepel; cmdscale is
     base R) so adding these does not bust the shared 'pairwise_alignment' cache. Labels are
-    shortened (drop 'Sde-' prefix, collapse '_dip_hapN#0' to '#N') and repelled (ggrepel) so
-    they neither overlap nor run off the page.
+    shortened -- a species tag such as 'Sde-' is dropped when every unit shares it, and the
+    reference individual's flat '<ind>_hapN#0' names collapse to '<ind>#N' so the reference is
+    not split into two pseudo-individuals. PCoA labels are repelled (ggrepel) so they neither
+    overlap nor run off the page; the NJ trees are midpoint-rooted rightwards phylograms with
+    aligned tip labels (midpoint rooting is done with ape primitives -- no extra dependency).
 
     Input : tuple(taxid, similarity_tsv), popstruct_script
     Output: pca_png (PCoA) / nj_png
