@@ -26,6 +26,7 @@ p$add_argument("--variant_summary", default = "NO_VARIANTS")
 p$add_argument("--graph_stats",     default = "NO_GRAPH")   # odgi stats -S text (length/nodes/edges/paths/steps)
 p$add_argument("--popstruct",       default = "NO_POPSTRUCT") # sentinel/indicator; PCA+NJ PNGs sit next to the other figures
 p$add_argument("--progressive",     default = "NO_PROGRESSIVE") # sentinel/indicator; progressive growth PNG (opt-in)
+p$add_argument("--manifest",        default = "NO_MANIFEST")   # pangenome_manifest.tsv (role/file/label)
 p$add_argument("--species",         default = "pangenome")
 p$add_argument("--output",          default = "pangenome_report.md")
 p$add_argument("--json",            default = "pangenome_stats.json")
@@ -64,7 +65,10 @@ if (!is_missing(args$graph_stats)) {
 }
 
 species <- args$species
-fig <- function(suffix) sprintf("pangenome/%s/%s.%s", species, species, suffix)
+# Paths are written relative to the outdir ROOT, which is where the main report lives, so
+# both figures and file links resolve once this fragment is embedded in assembly_report.md.
+rel <- function(f)      sprintf("pangenome/%s/%s", species, f)
+fig <- function(suffix) rel(sprintf("%s.%s", species, suffix))
 md <- character(0)
 add <- function(...) md <<- c(md, ...)
 
@@ -73,6 +77,50 @@ add("## Pangenome", "")
 add(sprintf("Minigraph-Cactus pangenome graph for *%s*%s.",
             gsub("_", " ", species),
             if (!is.na(g(gr, "n_haplotypes"))) sprintf(", over %s haplotypes", g(gr, "n_haplotypes")) else ""), "")
+
+# ---- downstream files (manifest-driven; sits at the top of the section) ----------------
+# pangenome_manifest.tsv is the frozen downstream seam (role -> file). Rendering the table
+# from it means a new role added to PANGENOME_MANIFEST appears here automatically; roles
+# without a description below still render (the role name is humanized as a fallback).
+role_desc <- c(
+  graph_gbz        = "Compressed graph + haplotype paths \u2014 the mapping substrate (`vg giraffe`, `vg call`).",
+  graph_gfa        = "Text graph interchange (gzipped) \u2014 panacus, odgi, Bandage, `vg convert`.",
+  odgi             = "odgi graph \u2014 path/node queries, similarity, sorting, 1D/2D layout.",
+  snarls           = "Snarl (bubble) decomposition \u2014 the genotyping units for `vg call`.",
+  haplotype_index  = "Haplotype-sampling index \u2014 builds personalized reference graphs for `vg giraffe`.",
+  variants_vcf     = "Variant catalog vs the reference path: top-level bubbles, one allele per row, SNP/indel/SV.",
+  variants_vcf_tbi = "Tabix index for the variant catalog.",
+  reference_fasta  = "Reference-path FASTA \u2014 surjection target and linear-coordinate seam.",
+  reference_fai    = "faidx index for the reference-path FASTA.",
+  manifest         = "This table, machine-readable (`role` / `file` / `label`) \u2014 resolve files by role, not by name."
+)
+
+if (!is_missing(args$manifest)) {
+  mf <- tryCatch(read.delim(args$manifest, header = TRUE, stringsAsFactors = FALSE,
+                            check.names = FALSE), error = function(e) NULL)
+  if (!is.null(mf) && nrow(mf) > 0 && all(c("role", "file") %in% names(mf))) {
+    rows <- data.frame(role = as.character(mf$role),
+                       file = basename(as.character(mf$file)),
+                       stringsAsFactors = FALSE)
+    if (!"manifest" %in% rows$role) {
+      rows <- rbind(rows, data.frame(role = "manifest",
+                                     file = basename(args$manifest),
+                                     stringsAsFactors = FALSE))
+    }
+    desc <- ifelse(rows$role %in% names(role_desc),
+                   role_desc[rows$role],
+                   gsub("_", " ", rows$role))
+    add("### Downstream files", "",
+        paste("The graph products an external pipeline consumes. Paths are relative to this",
+              "report; `pangenome_manifest.tsv` carries the same set machine-readably."),
+        "",
+        "| file | description |", "|---|---|",
+        sprintf("| [`%s`](%s) | %s |", rows$file, rel(rows$file), desc), "",
+        paste("*Read-mapping indexes (`.dist` / `.min`) are deliberately not built here \u2014",
+              "haplotype sampling makes them sample-specific, so the consuming pipeline builds",
+              "them from the GBZ + `.hapl` at map time.*"), "")
+  }
+}
 
 # ---- graph ----------------------------------------------------------------------------
 add("### Graph", "",

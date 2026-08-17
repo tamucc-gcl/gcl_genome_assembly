@@ -20,7 +20,8 @@
       - REPORTING: add a `ch_pangenome_report` take and pass it through.
       - main.nf: pass PANGENOME.out.report (or a NO_PANGENOME sentinel) into REPORTING.
 
-    Input : tuple(taxid, qc_metrics, growth_fit, variant_summary, graph_stats), report_script
+    Input : tuple(taxid, qc_metrics, growth_fit, variant_summary, graph_stats, popstruct,
+                  progressive, manifest), report_script
     Output: report (pangenome_report.md) / json (pangenome_stats.json) / versions
 ========================================================================================
 */
@@ -32,7 +33,7 @@ process PANGENOME_REPORT {
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), path(qc_metrics), path(growth_fit), path(variant_summary), path(graph_stats), path(popstruct), path(progressive)
+    tuple val(taxid), path(qc_metrics), path(growth_fit), path(variant_summary), path(graph_stats), path(popstruct), path(progressive), path(manifest)
     path(report_script)
 
     output:
@@ -49,6 +50,7 @@ process PANGENOME_REPORT {
         --graph_stats ${graph_stats} \\
         --popstruct ${popstruct} \\
         --progressive ${progressive} \\
+        --manifest ${manifest} \\
         --species ${taxid} \\
         --output pangenome_report.md \\
         --json pangenome_stats.json

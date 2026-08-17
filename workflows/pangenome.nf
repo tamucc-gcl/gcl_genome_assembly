@@ -233,30 +233,6 @@ workflow PANGENOME {
             ch_prog_png    = PANGENOME_PROGRESSIVE_PLOT.out.png
         }
 
-        // pangenome report fragment + stats JSON (workstream F) — always on when built.
-        // Base on the always-present variant summary; feed NO_* sentinels for any sub-analysis
-        // that was disabled (the R script skips sentinels).
-        if( params.pangenome_report != false ) {
-            def report_script = file("${projectDir}/r_scripts/pangenome_report.R", checkIfExists: true)
-            ch_report_in = PANGENOME_VARIANTS.out.summary
-                .join( ch_qc,                          remainder: true )
-                .join( ch_growth_fit,                  remainder: true )
-                .join( PANGENOME_STATS.out.odgi_stats, remainder: true )
-                .join( ch_pca_png,                     remainder: true )
-                .join( ch_prog_png,                    remainder: true )
-                .map { taxid, vs, qc, gf, gs, pca, prog ->
-                    tuple(taxid,
-                          qc ?: file('NO_QC'),
-                          gf ?: file('NO_GROWTH'),
-                          vs ?: file('NO_VARIANTS'),
-                          gs ?: file('NO_GRAPH'),
-                          pca ?: file('NO_POPSTRUCT'),
-                          prog ?: file('NO_PROGRESSIVE')) }
-            PANGENOME_REPORT( ch_report_in, report_script )
-            ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
-            ch_report   = PANGENOME_REPORT.out.report
-        }
-
         // downstream manifest (role -> file) over the graph products
         PANGENOME_MANIFEST(
             CACTUS_PANGENOME.out.gbz
@@ -269,6 +245,32 @@ workflow PANGENOME {
                 .join( PANGENOME_REF_FASTA.out.ref_fasta )
                 .join( PANGENOME_REF_FASTA.out.ref_fai )
         )
+
+        // pangenome report fragment + stats JSON (workstream F) — always on when built.
+        // Base on the always-present variant summary; feed NO_* sentinels for any sub-analysis
+        // that was disabled (the R script skips sentinels).
+        if( params.pangenome_report != false ) {
+            def report_script = file("${projectDir}/r_scripts/pangenome_report.R", checkIfExists: true)
+            ch_report_in = PANGENOME_VARIANTS.out.summary
+                .join( ch_qc,                          remainder: true )
+                .join( ch_growth_fit,                  remainder: true )
+                .join( PANGENOME_STATS.out.odgi_stats, remainder: true )
+                .join( ch_pca_png,                     remainder: true )
+                .join( ch_prog_png,                    remainder: true )
+                .join( PANGENOME_MANIFEST.out.manifest, remainder: true )
+                .map { taxid, vs, qc, gf, gs, pca, prog, mf ->
+                    tuple(taxid,
+                          qc ?: file('NO_QC'),
+                          gf ?: file('NO_GROWTH'),
+                          vs ?: file('NO_VARIANTS'),
+                          gs ?: file('NO_GRAPH'),
+                          pca ?: file('NO_POPSTRUCT'),
+                          prog ?: file('NO_PROGRESSIVE'),
+                          mf ?: file('NO_MANIFEST')) }
+            PANGENOME_REPORT( ch_report_in, report_script )
+            ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
+            ch_report   = PANGENOME_REPORT.out.report
+        }
 
         ch_gbz       = CACTUS_PANGENOME.out.gbz
         ch_gfa       = CACTUS_PANGENOME.out.gfa
