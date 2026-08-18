@@ -872,12 +872,12 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     rename(Sample = sample_id, Metric = metric)
   
   if (nrow(final_detail) > 0) {
-    md <- c(md,
-            make_collapsible(
-              make_markdown_table(final_detail),
-              "Click to expand: All final assembly metrics"
-            )
-    )
+#    md <- c(md,
+#            make_collapsible(
+#              make_markdown_table(final_detail),
+#              "Click to expand: All final assembly metrics"
+#            )
+#    )
   }
 }
 
@@ -1131,13 +1131,13 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
         mutate(sample_id = if_else(lag(sample_id, default = "") == sample_id, "", sample_id)) %>%
         rename(Sample = sample_id, Metric = metric)
 
-      plot_lines <- c(plot_lines,
-                      make_collapsible(
-                        c("#### Cross-Stage Metrics Table", "",
-                          make_markdown_table(cross_table)),
-                        "Click to expand: Assembly metrics across all pipeline stages"
-                      )
-      )
+#      plot_lines <- c(plot_lines,
+#                      make_collapsible(
+#                        c("#### Cross-Stage Metrics Table", "",
+#                          make_markdown_table(cross_table)),
+#                        "Click to expand: Assembly metrics across all pipeline stages"
+#                      )
+#      )
     }
 
     md <- c(md,
@@ -1279,11 +1279,11 @@ if (has_teloclip) {
       ) %>%
       arrange(haplotype_id)
 
-    md <- c(md,
-            "#### Telomere Extension (teloclip)", "",
-            "Soft-clipped HiFi read overhangs containing telomeric motifs were used to",
-            "extend contig/scaffold ends missing telomeric sequence. Per-haplotype summary:", ""
-    )
+#    md <- c(md,
+#            "#### Telomere Extension (teloclip)", "",
+#            "Soft-clipped HiFi read overhangs containing telomeric motifs were used to",
+#            "extend contig/scaffold ends missing telomeric sequence. Per-haplotype summary:", ""
+#    )
 
     if (nrow(teloclip_summary) > 0) {
       tc_table <- teloclip_summary %>%
@@ -1300,7 +1300,7 @@ if (has_teloclip) {
           `Mean Extension (bp)` = mean_extension_bp,
           `Max Extension (bp)`  = max_extension_bp
         )
-      md <- c(md, make_markdown_table(tc_table), "")
+#      md <- c(md, make_markdown_table(tc_table), "")
 
       # remap pre-harmonization scaffold_N -> final harmonized names (chrN_1 / unplaced_N)
       nm_path <- args$name_map
@@ -1328,12 +1328,12 @@ if (has_teloclip) {
           `Extension (bp)` = comma(extension_length)
         ) %>%
         arrange(Haplotype, Contig)
-      md <- c(md,
-              make_collapsible(
-                make_markdown_table(tc_detail),
-                sprintf("Click to expand: per-contig extension detail (%s extensions)", nrow(tc_detail))
-              )
-      )
+#      md <- c(md,
+#              make_collapsible(
+#                make_markdown_table(tc_detail),
+#                sprintf("Click to expand: per-contig extension detail (%s extensions)", nrow(tc_detail))
+#              )
+#      )
     }
   }
 } else {
