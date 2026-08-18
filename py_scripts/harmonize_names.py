@@ -261,6 +261,28 @@ def components(nodes, edges, node_len=None):
     return comp_of, comp_members
 
 
+def merge_intervals(ivals):
+    """Union of [start, end) intervals as a sorted, non-overlapping list.
+
+    merged_length() returns only the total; the containment test needs the
+    intervals themselves so it can intersect two footprints rather than two
+    envelopes.
+    """
+    if not ivals:
+        return []
+    out = []
+    iv = sorted(ivals)
+    cs, ce = iv[0]
+    for s, e in iv[1:]:
+        if s > ce:
+            out.append((cs, ce))
+            cs, ce = s, e
+        elif e > ce:
+            ce = e
+    out.append((cs, ce))
+    return out
+
+
 def merged_length(ivals):
     """Total length of the union of [start, end) intervals."""
     if not ivals:
@@ -331,6 +353,11 @@ def classify(chr_ev, scaf_len, min_frac, sec_frac, chrom_len=None,
         "members": members,
         "tstart": {k: (chr_ev[k]["tstart"] or 0) for k in members},
         "tend": {k: chr_ev[k]["tend"] for k in members},
+        # merged target footprint per member. tstart/tend are an ENVELOPE and are
+        # 95%+ of a reference chromosome whenever alignments are scattered, so any
+        # test that needs "which territory does this piece actually hold" must use
+        # this instead (see apply_containment).
+        "ivals": {k: merge_intervals(chr_ev[k].get("ivals") or []) for k in members},
         "orient": orient,
         "aligned_frac": total_bp / scaf_len,
         "cover_frac": sum(cov.get(k, 0) for k in chr_ev) / scaf_len if scaf_len else 0.0,
@@ -437,6 +464,20 @@ def apply_containment(place, contained_frac, demote):
     size floor cannot (a haplotig is the same size as a real fragment) while keeping genuine
     splits (whose pieces cover disjoint reference territory and so are not contained).
 
+    Both sides of the ratio are MERGED FOOTPRINTS, not envelopes. Using
+    (tstart, tend) makes the test unsound in exactly the case it is meant to
+    survive: a 42 Mb arm whose alignments scatter across an 80.7 Mb reference
+    chromosome has an envelope covering 95% of it, so the complementary 41 Mb arm
+    is 100% "contained" and is demoted. That is a genuine split, and the whole
+    point of the test was to keep it. Merged footprints of two arms are disjoint
+    by construction, so the ratio is ~0 and both survive; a true haplotig still
+    reads ~1.0 because it occupies the same territory as the piece above it.
+
+    Repeat-driven double counting cannot inflate either side: the numerator sums
+    interval_coverage() over the smaller piece's already-merged intervals, and the
+    denominator is that piece's merged length. This is the same discipline
+    classify()'s member cover test uses.
+
     demote=True  -> reclassify contained pieces as unplaced (they lose the chromosome name).
     demote=False -> keep them as chromosomes but tag 'contained(chrK)'.
     """
@@ -444,24 +485,45 @@ def apply_containment(place, contained_frac, demote):
     for nm, info in place.items():
         if info["class"] == "chromosome":
             by_chr[info["primary"]].append(nm)
-    demote_to, flag_to = {}, {}                # nm -> chr  (decisions, applied after the scan)
+
+    def footprint(nm, k):
+        """Merged target intervals of piece nm on chromosome k.
+
+        Falls back to the envelope only when 'ivals' is absent, which happens for
+        placements built without a PAF (the reference's own scaffolds). Those are
+        not routed through apply_containment today; the fallback keeps the
+        function total rather than raising if that changes.
+        """
+        iv = (place[nm].get("ivals") or {}).get(k)
+        if iv:
+            return list(iv)
+        b0 = place[nm]["tstart"][k]
+        b1 = place[nm]["tend"][k]
+        return [(b0, b1)] if b1 > b0 else []
+
+    demote_to, flag_to = {}, {}                # nm -> (chr, observed_fraction)
     for k, names in by_chr.items():
         names.sort(key=lambda nm: -place[nm]["length"])     # largest keeper first
-        ivals = {nm: (place[nm]["tstart"][k], place[nm]["tend"][k]) for nm in names}
+        fp = {nm: footprint(nm, k) for nm in names}
         for i, nm in enumerate(names):
-            b0, b1 = ivals[nm]
-            span = b1 - b0
-            if span <= 0:
+            own = fp[nm]
+            own_len = sum(e - s for s, e in own)
+            if own_len <= 0:
                 continue
-            larger = [ivals[o] for o in names[:i]]           # every larger piece on this chr
-            if interval_coverage(b0, b1, larger) / span >= contained_frac:
-                (demote_to if demote else flag_to)[nm] = k
+            larger = [iv for o in names[:i] for iv in fp[o]]  # every larger piece on this chr
+            if not larger:
+                continue
+            covered = sum(interval_coverage(s, e, larger) for s, e in own)
+            frac = covered / own_len
+            if frac >= contained_frac:
+                (demote_to if demote else flag_to)[nm] = (k, frac)
     # mutate only after all decisions are made (reading a demoted dict mid-scan would KeyError)
-    for nm, k in demote_to.items():
+    for nm, (k, frac) in demote_to.items():
         place[nm] = {"class": "unplaced", "length": place[nm]["length"],
-                     "aligned_frac": 0.0, "contained_in": k}
-    for nm, k in flag_to.items():
-        place[nm].setdefault("extra_flags", []).append(f"contained(chr{k})")
+                     "aligned_frac": 0.0, "contained_in": k, "contained_cov": frac}
+    for nm, (k, frac) in flag_to.items():
+        place[nm].setdefault("extra_flags", []).append(
+            "contained(chr%d:cov=%.2f)" % (k, frac))
 
 
 def main():
@@ -1053,7 +1115,10 @@ def main():
                 rcls, orient, span = "unplaced", "fwd", "-"
                 key = (1, u, 0)
                 if info.get("contained_in") is not None:
-                    flags.append(f"contained(ref{info['contained_in']})")
+                    # carry the observed fraction: a bare contained(refN) is what
+                    # made the envelope bug invisible for a whole cohort
+                    flags.append("contained(ref%d:cov=%.2f)" % (
+                        info["contained_in"], info.get("contained_cov", float("nan"))))
                 elif info.get("aligned_frac", 0) > 0:
                     flags.append(f"low_cov({info['aligned_frac']:.2f})")
             out.append({"old": n, "new": new, "orient": orient, "length": info["length"],
