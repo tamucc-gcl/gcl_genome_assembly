@@ -8,13 +8,34 @@
     graph-ready set, PanSN-names them, and builds one minigraph-cactus graph per species
     using the harmonization reference as the graph reference.
 
-    Gate (all tunable):
+    Gate:
       - long-read only (short-read excluded; nuclear-only is already guaranteed upstream)
-      - exclude assemblies whose chromosome-scale scaffold count (>= finalize_min_scaffold_bp)
-        exceeds pangenome_max_chrom_scaffold_mult x the reference chromosome count
-        (drops fragmented / primary-contig intermediates like *_hifi_primary)
+      - OPTIONAL contiguity gate, OFF BY DEFAULT. When pangenome_max_chrom_scaffold_mult
+        is set (> 0), exclude assemblies whose chromosome-scale scaffold count
+        (>= finalize_min_scaffold_bp) exceeds that multiple of the reference chromosome
+        count. OFF because minigraph-cactus does not require chromosome-scale INPUT:
+        only the reference defines the chromosome components, and every other sample's
+        contigs are assigned to a component by minigraph alignment. Contigs that map
+        nowhere confidently are dropped PER CONTIG as ambiguous by
+        cactus-graphmap-split, which is the correct granularity -- so a sub-chromosome-
+        scale but otherwise sound assembly is a real individual and belongs in the
+        graph. (NB a hifiasm primary assembly is never a redundant second copy of
+        an individual already in the graph: forkHaplotypeMeta() returns EITHER
+        [<sample>_primary] OR [<sample>_hap1, <sample>_hap2], never both.)
+      - COMPARABILITY gate: drop a collapsed (n_hap == 1) assembly when the same species
+        also has phased (n_hap == 2) assemblies. A collapsed assembly is a PHASE MOSAIC,
+        not a haplotype -- it switches parental haplotype along the genome and drops one
+        allele at heterozygous sites -- so it is not a comparable unit for the graph, for
+        panacus --groupby-haplotype (Heaps' gamma, core/accessory), or for the ordination.
+        When EVERY assembly of a species is collapsed the species is haploid (or uniformly
+        collapsed), no phased peer exists, and all are kept. Ploidy is inferred at the
+        GROUP level because main.nf strips meta.ploidy onto a sample-keyed side-channel.
+        Override with pangenome_allow_collapsed = true.
       - the reference is always kept
       - require >= pangenome_min_haplotypes kept assemblies
+
+    The kept/dropped set is written to the log as "[PANGENOME] taxid <n>: ...", so
+    an exclusion appears in .nextflow.log rather than happening silently.
 
     PanSN naming (cactus seqfile convention SAMPLE.HAPLOTYPE):
       - sample  = meta.id with a trailing _hap<N> stripped ('.' -> '_' to protect the
@@ -84,8 +105,27 @@ workflow PANGENOME {
 
     if( params.run_pangenome ) {
         def min_scaf = (params.finalize_min_scaffold_bp ?: 1000000) as long
-        def mult     = (params.pangenome_max_chrom_scaffold_mult ?: 3)
+        // contiguity-gate multiplier. null / '' / 'false' / <= 0  =>  GATE OFF (default).
+        // Kept as a param so a run can re-enable it, but no longer a default-on filter.
+        // A non-numeric, non-disabling value throws rather than falling back to a
+        // default: a silent wrong-value run is the failure mode to avoid here.
+        def multRaw  = params.pangenome_max_chrom_scaffold_mult
+        def multStr  = multRaw?.toString()?.trim()
+        def multOff  = (!multStr || multStr.toLowerCase() in ['null', 'false', 'off', 'none'])
+        if( !multOff && !multStr.isNumber() )
+            throw new IllegalArgumentException(
+                "pangenome_max_chrom_scaffold_mult must be a number > 0, or one of " +
+                   "null/false/off/0 to disable the contiguity gate (got '${multRaw}')")
+        def mult     = (multOff || (multStr as BigDecimal) <= 0) ? null : (multStr as BigDecimal)
         def min_hap  = (params.pangenome_min_haplotypes ?: 2)
+        // comparability-gate toggle. Parsed strictly: a non-boolean value is a typo, and a
+        // silent fall-back to the default is the failure mode to avoid.
+        def acRaw    = params.pangenome_allow_collapsed
+        def acStr    = acRaw?.toString()?.trim()?.toLowerCase()
+        if( acStr && !(acStr in ['true', 'false']) )
+            throw new IllegalArgumentException(
+                "pangenome_allow_collapsed must be true or false (got '${acRaw}')")
+        def allowCol = (acStr == 'true')
 
         // per-assembly gate metrics from the .fai (long-read only)
         ch_metrics = ch_finalized
@@ -106,8 +146,69 @@ workflow PANGENOME {
                 def refm = members.find { it.meta.id == ref_id }
                 if( refm == null ) return []
                 def ref_chrom = (refm.cn ?: 1) as int
-                def kept = members.findAll { it.meta.id == ref_id || it.cs <= mult * ref_chrom }
-                if( kept.size() < min_hap ) return []
+
+                // ---- comparability gate -------------------------------------------------
+                // A collapsed (n_hap == 1) assembly is a PHASE MOSAIC, not a haplotype: it
+                // switches parental haplotype along the genome and drops one allele at every
+                // heterozygous site. Mixed into a graph of phased haplotypes it is not a
+                // comparable unit -- it lands at an artificial intermediate position in the
+                // PCoA/NJ (spuriously similar to everything, interpretable as nothing), and
+                // it breaks the one-unit-per-haploid-genome assumption behind panacus
+                // --groupby-haplotype, biasing Heaps' gamma in an uncontrolled direction.
+                //
+                // meta.ploidy is NOT available here: main.nf strips it onto a sample-keyed
+                // side-channel so ploidy tweaks stay off the task hash. Ploidy is therefore
+                // inferred at the GROUP level -- if any assembly of this species is phased,
+                // a collapsed assembly of the same species is a collapsed DIPLOID. If every
+                // assembly in the group is collapsed the species is haploid (or uniformly
+                // collapsed): no phased peer exists, nothing is incomparable, all are kept.
+                def nhap       = { m -> ((m.meta.n_hap ?: 2) as int) }
+                def anyPhased  = members.any { nhap(it) > 1 }
+                def comparable = { m -> allowCol || !anyPhased || nhap(m) > 1 }
+                if( anyPhased && nhap(refm) == 1 )
+                    log.warn("[PANGENOME] taxid ${taxid}: graph reference ${ref_id} is a " +
+                             "COLLAPSED (n_hap=1) assembly while the cohort also has phased " +
+                             "haplotypes. It is kept as the reference (the harmonization frame " +
+                             "was built against it), but the reference path is a phase mosaic, " +
+                             "so the variant catalog and every reference-relative coordinate " +
+                             "sit on a chimeric frame.")
+
+                // ---- kept set: comparability AND (optional) contiguity -------------------
+                // mult == null => contiguity gate off (the default): only the REFERENCE has to
+                // be chromosome-scale, since non-reference contigs are assigned to reference
+                // chromosome components by minigraph alignment.
+                def kept = members.findAll { m ->
+                    m.meta.id == ref_id ||
+                        (comparable(m) && (mult == null || m.cs <= mult * ref_chrom))
+                }
+
+                // make the gate decision visible, with the REASON per dropped assembly: a
+                // dropped haplotype used to vanish silently into a smaller graph.
+                def keptIds = kept.collect { it.meta.id }.sort()
+                def why     = { m ->
+                    def r = []
+                    if( !comparable(m) )                                r << "collapsed(n_hap=${nhap(m)})"
+                    if( mult != null && m.cs > mult * ref_chrom )        r << "scaffolds(cs=${m.cs})"
+                    r ? r.join('+') : 'unknown'
+                }
+                def dropMsg = members.findAll { !(it.meta.id in keptIds) }
+                                     .sort { it.meta.id }
+                                     .collect { "${it.meta.id}[${why(it)}]" }
+                def gateMsg = (mult == null) ? 'contiguity gate OFF'
+                                            : "contiguity gate cs <= ${mult} * ${ref_chrom}"
+                def compMsg = allowCol ? 'comparability gate OFF (allow_collapsed)'
+                                       : (anyPhased ? 'comparability gate ON'
+                                                    : 'comparability gate n/a (no phased peers)')
+                log.info("[PANGENOME] taxid ${taxid}: ref=${ref_id} (${ref_chrom} chrN_p names); " +
+                         "kept ${keptIds.size()}/${members.size()} [${keptIds.join(' ')}]; " +
+                         "${gateMsg}; ${compMsg}" +
+                         (dropMsg ? "; DROPPED ${dropMsg.join(' ')}" : ''))
+                if( kept.size() < min_hap ) {
+                    log.warn("[PANGENOME] taxid ${taxid}: only ${kept.size()} assemblies survive " +
+                             "the gate (pangenome_min_haplotypes=${min_hap}) -- NO GRAPH built " +
+                             "for this species")
+                    return []
+                }
                 def sampleOf = { String id -> id.replaceFirst(/_hap[0-9]+$/, '').replaceAll(/\./, '_') }
                 def hapOf    = { String id -> def m = (id =~ /_hap([0-9]+)$/); m ? m[0][1] : '0' }
                 def flat     = { String id -> id.replaceAll(/\./, '_') }   // full id, dots -> _

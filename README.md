@@ -419,9 +419,24 @@ below). A species is only built if, after gating, at least `pangenome_min_haplot
 remain. The gate:
 
 - long-read only (short-read assemblies excluded; nuclear-only is guaranteed upstream)
-- drop assemblies whose chromosome-scale scaffold count (≥ `finalize_min_scaffold_bp`) exceeds
-  `pangenome_max_chrom_scaffold_mult` × the reference chromosome count — this removes fragmented
-  intermediates
+- **optional** contiguity gate, **off by default** (`pangenome_max_chrom_scaffold_mult =
+  null`). When set to a value > 0, drop assemblies whose chromosome-scale scaffold count
+  (≥ `finalize_min_scaffold_bp`) exceeds that multiple of the reference chromosome count.
+  Off because Minigraph-Cactus only requires the *reference* to be chromosome-scale — every
+  other sample's contigs are assigned to a reference chromosome component by minigraph
+  alignment, and contigs that map nowhere confidently are dropped *per contig* as ambiguous
+  by `cactus-graphmap-split`. A sub-chromosome-scale but otherwise sound long-read assembly
+  is a real individual and belongs in the graph.
+- **comparability** gate, **on by default** (`pangenome_allow_collapsed = false`): drop a
+  collapsed (`n_hap == 1`) assembly when the same species also has phased (`n_hap == 2`)
+  assemblies. A collapsed assembly is a *phase mosaic*, not a haplotype — it switches
+  parental haplotype along the genome and drops one allele at every heterozygous site — so
+  it is not a comparable unit for the graph, for panacus `--groupby-haplotype`, or for the
+  ordination, where it lands at an artificial intermediate position. When *every* assembly of a
+  species is collapsed the species is haploid (or uniformly collapsed) and all are kept. Ploidy
+  is inferred at the group level because `main.nf` keeps `meta.ploidy` on a side-channel.
+- the kept/dropped set is logged with a per-assembly reason
+  (`[PANGENOME] taxid <n>: ... DROPPED id[collapsed(n_hap=1)]`) so an exclusion is never silent
 - the harmonization reference is always kept
 
 The report (`pangenome_report`) is robust to any sub-analysis being off: absent inputs arrive as
@@ -780,7 +795,8 @@ See [Pangenome](#pangenome) for behaviour. Parameters:
 | `--run_pangenome` | `false` | Master gate |
 | `--pangenome_use_gpu` | `false` | GPU cactus image + `gpu` queue (24 h cap) instead of CPU (48 h) |
 | `--pangenome_min_haplotypes` | `2` | Min kept assemblies per species |
-| `--pangenome_max_chrom_scaffold_mult` | `3` | Drop assemblies above this × reference chromosome count |
+| `--pangenome_max_chrom_scaffold_mult` | `null` | Optional contiguity gate, **off**. If > 0, drop assemblies above this × reference chromosome count |
+| `--pangenome_allow_collapsed` | `false` | Keep collapsed (`n_hap=1`) assemblies alongside phased ones. Off = comparability gate on |
 | `--pangenome_cactus_extra` | `''` | Extra `cactus-pangenome` args |
 | `--pangenome_sv_min_bp` | `50` | Indel/SV threshold in the catalog |
 | `--pangenome_vcfbub_max_ref` | `100000` | `vcfbub`: drop bubbles with REF above this |

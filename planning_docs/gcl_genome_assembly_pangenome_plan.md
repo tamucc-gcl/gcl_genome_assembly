@@ -58,9 +58,13 @@ pangenome resource, as a self-contained subworkflow reusable in other pipelines.
 
 - **`workflows/pangenome.nf` — `PANGENOME`.** Take: `(meta, fasta, fai)` finalized assemblies,
   `(taxid, ref_id)` harmonization reference, `(taxid, species)` resolved name. Gate: long-read
-  only; exclude assemblies with chromosome-scale scaffold count > `pangenome_max_chrom_scaffold_mult` ×
-  reference chromosome count (drops `*_hifi_primary`); reference always kept; require ≥
-  `pangenome_min_haplotypes`. PanSN naming: reference + same-individual siblings get flat full-id
+  only; contiguity gate (`pangenome_max_chrom_scaffold_mult`) **off by default** since
+  2026-08-18 — Minigraph-Cactus needs only the *reference* chromosome-scale and drops
+  unplaceable contigs *per contig* as ambiguous, so a fragmented-but-sound assembly is a real
+  individual; **comparability gate** drops a collapsed (`n_hap == 1`) assembly when the
+  species also has phased assemblies (`pangenome_allow_collapsed = false`); reference always
+  kept; require ≥ `pangenome_min_haplotypes`; kept/dropped set logged with a
+  per-assembly reason. PanSN naming: reference + same-individual siblings get flat full-id
   names; other individuals group `<individual>.<hap>`. Species-derived publish/output label.
   Emit: `gbz`, `vcf`, `stats`, `versions`.
 - **`modules/cactus_pangenome.nf` — `CACTUS_PANGENOME`.** Builds two-column seqfile; derives
@@ -72,7 +76,7 @@ pangenome resource, as a self-contained subworkflow reusable in other pipelines.
 - **`modules/pangenome_stats.nf` — `PANGENOME_STATS`.** `vg stats -lz` + `odgi stats -S` on the
   clip graph (`cactus_tools` CPU label).
 - **Config:** `run_pangenome` (false), `pangenome_min_haplotypes` (2), `pangenome_max_chrom_scaffold_mult`
-  (3), `pangenome_cactus_extra` (''), `pangenome_use_gpu` (false); `singularity { }` block;
+  (`null` = contiguity gate off), `pangenome_cactus_extra` (''), `pangenome_use_gpu` (false); `singularity { }` block;
   `cactus_pangenome` (toggled GPU) + `cactus_tools` (CPU) labels.
 - **`main.nf`:** `ch_finalized_with_fai` join; `PANGENOME(finalized+fai, reference_id, species)`.
 - **Harmonization:** `HARMONIZE_SPECIES` emits `${taxid}.reference_id.txt`; `HARMONIZE_SCAFFOLDS`
@@ -299,6 +303,45 @@ users can disable):**
 ---
 
 ## 10. Change Log
+
+- **2026-08-18** — **Comparability gate added** (`pangenome_allow_collapsed`, default
+  `false`). Turning the contiguity gate off admitted three kinds of assembly, only one of
+  which belongs in the graph. **(1)** A phased diploid from HiFi+Hi-C that missed chromosome
+  scale is a genuine haplotype pair whose only defect is contiguity — which
+  `cactus-graphmap-split` already handles per contig. It belongs in. **(2)** A HiFi-only
+  *primary* is a collapsed diploid: a phase mosaic, not a haplotype. It has no interpretable
+  ordination position, breaks panacus's one-unit-per-haploid-genome assumption, and (with
+  `run_purge_dups = false`) carries retained haplotigs that FINALIZE preserves —
+  harmonization *demotes* contained haplotigs to `unplaced_N` but never removes a sequence
+  (the `NROWS == NSEQ` check guarantees it), so they reach cactus and read as duplication.
+  It stays out. **(3)** A short-read primary was already excluded by `!meta.shortread` and
+  is unaffected. The gate is decided at the GROUP level — collapsed is dropped only when
+  a phased peer of the same species exists — because `main.nf:198` strips `meta.ploidy`
+  onto a sample-keyed side-channel to keep ploidy tweaks off the task hash, so `n_hap` is the
+  only ploidy signal surviving to `PANGENOME`.
+
+  **Route 1 (align a non-member assembly to the finished graph) is dropped from the plan.**
+  It only fixes contiguity, which is case (1)'s problem — and case (1) does not need it,
+  because building works. Cases (2) and (3) have a *representation* problem that
+  assembly-to-graph alignment does not touch. Both belong in the read-based downstream route,
+  where every individual is genotyped against the graph by the same procedure regardless of
+  how its assembly turned out.
+
+- **2026-08-18** — **Contiguity gate off by default.** `pangenome_max_chrom_scaffold_mult` 3 → `null`; the scaffold-count filter is now
+  opt-in and the kept/dropped set is logged. It had been silently excluding both haplotypes
+  of one individual from the *Sde* graph. Minigraph-Cactus requires only the *reference* to
+  be chromosome-scale: non-reference contigs are assigned to reference chromosome components
+  by minigraph alignment, and unplaceable contigs are dropped *per contig* as ambiguous by
+  `cactus-graphmap-split`, which is the right granularity. A `*_primary` assembly is never a
+  redundant second copy of an individual already in the graph (`forkHaplotypeMeta` returns
+  either `[_primary]` or `[_hap1, _hap2]`, never both), so the artifact the gate was written
+  to catch cannot arrive by that route.
+  **Caveat carried forward:** graph-derived Jaccard distances, and therefore the PCoA and NJ
+  tree in §8, are sensitive to per-haplotype contiguity — a haplotype with more
+  clipped/ambiguous sequence looks more distant for assembly reasons, not biological ones.
+  Emit per-haplotype bp-retained-in-graph and check it against PCoA axis 1 before reading the
+  ordination biologically. `midpoint_root` in `pangenome_popstruct.R` roots at the midpoint of
+  the longest tip-to-tip path, so a single inflated tip can capture the root.
 
 - **2026-08-08** — **Workstream G done (interface frozen + documented).** `pangenome_interface.md`
   (params table, gating logic, compute-env/label table, output tree, ops notes) + a consolidated
