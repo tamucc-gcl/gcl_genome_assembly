@@ -62,6 +62,13 @@ process SUMMARY_REPORT {
         --flag_qv ${params.qc_flag_qv} \\
         --flag_kmer ${params.qc_flag_kmer} \\
         --flag_size_pct ${params.qc_flag_size_pct} \\
+        --flag_aun_mult ${params.qc_flag_aun_mult} \\
+        --flag_aun_pieces_contig ${params.qc_flag_aun_pieces_contig} \\
+        --flag_aun_pieces_shortread ${params.qc_flag_aun_pieces_shortread} \\
+        --flag_largest_frac ${params.qc_flag_largest_frac} \\
+        --flag_largest_upper ${params.qc_flag_largest_upper} \\
+        --flag_cohort_mad ${params.qc_flag_cohort_mad} \\
+        --expected_chrom_count ${params.qc_expected_chrom_count} \\
         --busco_fallback ${params.busco_lineage} \\
         --ran_purge_dups ${params.run_purge_dups} \\
         --ran_decontam ${params.run_decon_contigs ?: false} \\

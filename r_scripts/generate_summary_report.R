@@ -43,6 +43,13 @@ parser$add_argument("--flag_busco", default = 90, type = "double", help = "Statu
 parser$add_argument("--flag_qv",    default = 40, type = "double", help = "Status flag: warn if Merqury QV below this")
 parser$add_argument("--flag_kmer",  default = 90, type = "double", help = "Status flag: warn if k-mer completeness percent below this")
 parser$add_argument("--flag_size_pct", default = 0, type = "double", help = "Status flag: warn if assembled length deviates from estimate by more than this percent (0 = off)")
+parser$add_argument("--flag_aun_mult", default = 2, type = "double", help = "Status flag: warn if auN pieces (total length / auN) exceed this multiple of the expected chromosome count, for chromosome-scale (HiFi+Hi-C) samples (0 = off)")
+parser$add_argument("--flag_aun_pieces_contig", default = 500, type = "double", help = "Status flag: warn if auN pieces exceed this for contig-scale (HiFi, no Hi-C) samples (0 = off)")
+parser$add_argument("--flag_aun_pieces_shortread", default = 0, type = "double", help = "Status flag: warn if auN pieces exceed this for short-read samples (0 = off)")
+parser$add_argument("--flag_largest_frac", default = 0.5, type = "double", help = "Status flag: warn if the largest scaffold is below this fraction of the mean chromosome length (0 = off)")
+parser$add_argument("--flag_largest_upper", default = 1.5, type = "double", help = "Advisory: note if the largest scaffold exceeds this multiple of the mean chromosome length (0 = off)")
+parser$add_argument("--flag_cohort_mad", default = 3, type = "double", help = "Status flag: warn if log10(auN pieces) exceeds the (taxid, tier) cohort median by this many MADs; needs >= 4 samples in the group (0 = off)")
+parser$add_argument("--expected_chrom_count", default = 0, type = "double", help = "Expected chromosome count for the contiguity gate; 0 = derive from the harmonization name map")
 parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Configured BUSCO fallback lineage (params.busco_lineage), for provenance flagging")
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
@@ -132,6 +139,16 @@ ri <- NULL
 if (!str_detect(basename(args$run_info), "NO_RUN_INFO") &&
     file.exists(args$run_info) && file.size(args$run_info) > 0) {
   ri <- tryCatch(read_tsv(args$run_info, col_types = cols(.default = "c")), error = function(e) NULL)
+}
+
+# Harmonization name map, read early: the §2 contiguity gate needs an expected chromosome
+# count before the overview table is built. The teloclip section re-reads it locally as
+# `nm`; this is a separate binding so that block is untouched.
+nm_early <- NULL
+if (!str_detect(basename(args$name_map), "NO_NAMEMAP") &&
+    file.exists(args$name_map) && file.size(args$name_map) > 0) {
+  nm_early <- tryCatch(read_tsv(args$name_map, show_col_types = FALSE),
+                       error = function(e) NULL)
 }
 
 prov <- character()
@@ -441,19 +458,208 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       }
     }
 
+    # --- Contiguity: auN pieces + chromosome-scale sanity (report-improvement batch) ---
+    # `aun_pieces = total length / auN` is the length-weighted effective piece count: for
+    # an assembly of n equal pieces it is exactly n. Dimensionless, so it needs no
+    # genome-size estimate (which the % of Estimate column above shows we cannot trust),
+    # and being length-weighted it is dominated by the chromosomes rather than the unplaced
+    # tail -- unlike raw scaffold count, and unlike L90, which degrades nonlinearly once
+    # the unplaced fraction exceeds 10%. Both terms span all scaffolds, so unplaced
+    # sequence does inflate the count; the largest/mean-chromosome ratio is what separates
+    # "the chromosomes never formed" from "chromosomes fine, large unplaced tail".
+    thr_aun_mult   <- suppressWarnings(as.numeric(args$flag_aun_mult))
+    thr_aun_ctg    <- suppressWarnings(as.numeric(args$flag_aun_pieces_contig))
+    thr_aun_sr     <- suppressWarnings(as.numeric(args$flag_aun_pieces_shortread))
+    thr_lrg_lo     <- suppressWarnings(as.numeric(args$flag_largest_frac))
+    thr_lrg_hi     <- suppressWarnings(as.numeric(args$flag_largest_upper))
+    thr_mad_k      <- suppressWarnings(as.numeric(args$flag_cohort_mad))
+    chrom_override <- suppressWarnings(as.numeric(args$expected_chrom_count))
+    for (v in c("thr_aun_mult", "thr_aun_ctg", "thr_aun_sr", "thr_lrg_lo",
+                "thr_lrg_hi", "thr_mad_k", "chrom_override"))
+      if (is.na(get(v))) assign(v, 0)
+
+    cont     <- NULL   # per-haplotype
+    cont_smp <- NULL   # per-sample, worst haplotype
+
+    # Evidence tier, from run_info.tsv. An absolute contiguity bar is meaningless across
+    # tiers: HiFi+Hi-C claims chromosome scale, HiFi-only claims contigs, short-read
+    # claims neither. Tier decides which bar (if any) applies.
+    truthy <- function(x) tolower(trimws(as.character(x))) %in% c("true", "t", "yes", "1")
+    tier_tbl <- tibble(sample_id = overview_wide$Sample, tier = "unknown")
+    if (!is.null(ri) && "sample" %in% names(ri)) {
+      ri2 <- ri
+      for (cc in c("hifi", "hic", "shortread"))
+        if (!cc %in% names(ri2)) ri2[[cc]] <- "false"
+      tier_tbl <- ri2 %>%
+        transmute(sample_id = as.character(sample),
+                  is_hifi = truthy(hifi), is_hic = truthy(hic), is_sr = truthy(shortread)) %>%
+        mutate(tier = case_when(is_hifi & is_hic ~ "hifi+hic",
+                                is_hifi          ~ "hifi",
+                                is_sr            ~ "shortread",
+                                TRUE             ~ "unknown")) %>%
+        select(sample_id, tier) %>%
+        right_join(tibble(sample_id = overview_wide$Sample), by = "sample_id") %>%
+        mutate(tier = replace_na(tier, "unknown"))
+    }
+
+    # Grouping key for anything cohort-scoped: taxid where available, one pooled group
+    # otherwise. Used by both the expected-chromosome-count derivation and the MAD test.
+    add_tx <- function(df) {
+      df$tx <- "all"
+      if (!is.null(tax_tbl) && all(c("sample", "taxid") %in% names(tax_tbl))) {
+        df <- df %>%
+          select(-tx) %>%
+          left_join(tax_tbl %>% transmute(sample_id = as.character(sample),
+                                          tx = as.character(taxid)),
+                    by = "sample_id") %>%
+          mutate(tx = replace_na(tx, "all"))
+      }
+      df
+    }
+
+    # Expected chromosome count: explicit param, else derived from the harmonization name
+    # map. Composite scaffolds (chrA_i+chrB_j) carry two chromosome labels in one name, so
+    # count distinct labels rather than scaffolds. Per assembly, then the modal count within
+    # taxid -- modal not mean/median so the answer is an integer karyotype and a single
+    # fragmented assembly cannot drag it. Unresolved -> NA: the chromosome-scale gates are
+    # skipped and §2b says which samples were skipped and why.
+    chrom_tbl <- tibble(sample_id = overview_wide$Sample,
+                        n_chrom = NA_real_, chrom_src = "unavailable")
+    if (chrom_override > 0) {
+      chrom_tbl$n_chrom   <- chrom_override
+      chrom_tbl$chrom_src <- "param"
+    } else if (!is.null(nm_early) && all(c("assembly", "new_name") %in% names(nm_early))) {
+      .labs <- str_extract_all(as.character(nm_early$new_name), "chr[^_+]+")
+      per_asm <- tibble(assembly = rep(as.character(nm_early$assembly), lengths(.labs)),
+                        lab      = unlist(.labs)) %>%
+        filter(!is.na(lab), !is.na(assembly)) %>%
+        distinct(assembly, lab) %>%
+        count(assembly, name = "n_chrom")
+      if (nrow(per_asm) > 0) {
+        modal <- function(x) {
+          x <- x[!is.na(x)]
+          if (!length(x)) return(NA_real_)
+          as.numeric(names(sort(table(x), decreasing = TRUE))[1])
+        }
+        by_tx <- per_asm %>%
+          mutate(sample_id = str_replace(assembly, "_(hap[12]|primary)$", "")) %>%
+          add_tx() %>%
+          group_by(tx) %>%
+          summarise(n_chrom = modal(n_chrom), .groups = "drop")
+        chrom_tbl <- tibble(sample_id = overview_wide$Sample) %>%
+          add_tx() %>%
+          left_join(by_tx, by = "tx") %>%
+          mutate(n_chrom   = ifelse(is.finite(n_chrom), n_chrom, NA_real_),
+                 chrom_src = ifelse(is.na(n_chrom), "unavailable", "name map")) %>%
+          select(sample_id, n_chrom, chrom_src)
+      }
+    }
+
+    cont_cols <- c("Total length", "auN", "Largest contig")
+    if (all(cont_cols %in% overview_long$metric)) {
+      cont <- overview_long %>%
+        filter(metric %in% cont_cols, haplotype %in% c("hap1", "hap2")) %>%
+        select(sample_id, haplotype, metric, value) %>%
+        pivot_wider(names_from = metric, values_from = value) %>%
+        mutate(aun_pieces = `Total length` / auN)
+
+      cont_smp <- cont %>%
+        left_join(chrom_tbl, by = "sample_id") %>%
+        mutate(lrg_ratio = ifelse(is.na(n_chrom) | n_chrom <= 0, NA_real_,
+                                  `Largest contig` / (`Total length` / n_chrom))) %>%
+        group_by(sample_id) %>%
+        summarise(pieces_worst = suppressWarnings(max(aun_pieces, na.rm = TRUE)),
+                  lrg_min      = suppressWarnings(min(lrg_ratio,  na.rm = TRUE)),
+                  lrg_max      = suppressWarnings(max(lrg_ratio,  na.rm = TRUE)),
+                  n_chrom      = first(n_chrom),
+                  chrom_src    = first(chrom_src),
+                  .groups = "drop") %>%
+        mutate(across(c(pieces_worst, lrg_min, lrg_max),
+                      ~ ifelse(is.finite(.x), .x, NA_real_))) %>%
+        left_join(tier_tbl, by = "sample_id") %>%
+        mutate(tier = replace_na(tier, "unknown"),
+               gate = case_when(
+                 tier == "hifi+hic" & thr_aun_mult > 0 & !is.na(n_chrom) ~ thr_aun_mult * n_chrom,
+                 tier == "hifi"      & thr_aun_ctg  > 0                  ~ thr_aun_ctg,
+                 tier == "shortread" & thr_aun_sr   > 0                  ~ thr_aun_sr,
+                 TRUE                                                    ~ NA_real_))
+
+      # Cohort-relative outlier: within (taxid, tier), median + max(k x MAD, log10(1.5)) of
+      # log10(auN pieces). Scale-free and needs no absolute bar, so it is the part that
+      # generalises to short-read. The log10(1.5) floor stops a tight cohort (tiny MAD)
+      # from flagging ordinary karyotype variation. stats::mad() applies its 1.4826
+      # consistency constant. Needs n >= 4 in the group to mean anything.
+      cont_smp$mad_z   <- NA_real_
+      cont_smp$mad_thr <- NA_real_
+      if (thr_mad_k > 0) {
+        cont_smp <- cont_smp %>%
+          add_tx() %>%
+          mutate(lp = log10(pieces_worst)) %>%
+          group_by(tx, tier) %>%
+          mutate(n_ok   = sum(is.finite(lp)),
+                 med_lp = suppressWarnings(median(lp, na.rm = TRUE)),
+                 mad_lp = suppressWarnings(stats::mad(lp, na.rm = TRUE)),
+                 mad_thr = ifelse(n_ok >= 4,
+                                  med_lp + pmax(thr_mad_k * mad_lp, log10(1.5)), NA_real_),
+                 mad_z   = ifelse(n_ok >= 4 & mad_lp > 0, (lp - med_lp) / mad_lp, NA_real_)) %>%
+          ungroup() %>%
+          select(-n_ok, -med_lp, -mad_lp, -lp, -tx)
+      }
+
+      # auN Pieces column for the overview table, same slash notation as the other
+      # per-haplotype metrics. Delete this block to keep the main table narrower -- §2b
+      # below carries the same numbers.
+      ap <- cont %>%
+        mutate(v = comma(aun_pieces, accuracy = 0.1)) %>%
+        select(sample_id, haplotype, v) %>%
+        pivot_wider(names_from = haplotype, values_from = v, values_fill = "—")
+      if (!"hap1" %in% names(ap)) ap$hap1 <- "—"
+      if (!"hap2" %in% names(ap)) ap$hap2 <- "—"
+      ap <- ap %>% transmute(sample_id, `auN Pieces` = paste(hap1, "/", hap2))
+      overview_wide <- overview_wide %>%
+        left_join(ap, by = c("Sample" = "sample_id")) %>%
+        mutate(`auN Pieces` = replace_na(`auN Pieces`, "—"))
+      if ("auN" %in% names(overview_wide))
+        overview_wide <- overview_wide %>% relocate(`auN Pieces`, .after = `auN`)
+    }
+
     # --- Per-sample QC Status flag (report-improvement batch) ---
-    # ✅ = all checks pass · ⚠️ = one or more below the configured threshold. Worst-case
-    # (min) across haplotypes per sample. Thresholds are organism-dependent, so they're
-    # per-run tunable via --flag_busco / --flag_qv / --flag_kmer / --flag_size_pct.
+    # ✅ = all checks pass · ⚠️ = one or more below the configured threshold. Thresholds
+    # are organism-dependent, so they're per-run tunable via --flag_busco / --flag_qv /
+    # --flag_kmer / --flag_size_pct.
+    #
+    # Each metric is evaluated on the SAME value the overview table above displays --
+    # per-haplotype metrics worst-case (min over hap1/hap2), diploid metrics on the
+    # combined 'both' line. Do not min() `qv` / `kmer_completeness` across hap1/hap2/both:
+    # per-haplotype k-mer completeness is scored against the diploid read k-mer DB, so a
+    # correctly phased haplotype tops out near 70-85% by construction (it lacks the other
+    # haplotype's heterozygous k-mers). min()-ing over that flagged every diploid sample
+    # `k-mer<90%` while the table printed 97-99%.
     thr_busco <- suppressWarnings(as.numeric(args$flag_busco))
     thr_qv    <- suppressWarnings(as.numeric(args$flag_qv))
     thr_kmer  <- suppressWarnings(as.numeric(args$flag_kmer))
     thr_size  <- suppressWarnings(as.numeric(args$flag_size_pct))   # ±% window; <= 0 disables
 
-    verdict_src <- overview_long %>%
-      filter(metric %in% c("complete", "qv", "kmer_completeness")) %>%
+    # Per-haplotype metrics: worst haplotype.
+    verdict_hap <- overview_long %>%
+      filter(metric %in% c("complete", "qv", "kmer_completeness"),
+             !metric %in% diploid_metrics,
+             haplotype %in% c("hap1", "hap2")) %>%
       group_by(sample_id, metric) %>%
-      summarise(value = suppressWarnings(min(value, na.rm = TRUE)), .groups = "drop") %>%
+      summarise(value = suppressWarnings(min(value, na.rm = TRUE)), .groups = "drop")
+
+    # Diploid metrics: prefer the combined ('both') value; fall back to hap1/hap2 only for
+    # haploid samples with no 'both' line. Same precedence as the `diploid` display block.
+    verdict_dip <- overview_long %>%
+      filter(metric %in% diploid_metrics, haplotype %in% c("both", "hap1", "hap2")) %>%
+      mutate(haplotype = factor(haplotype, levels = c("both", "hap1", "hap2"))) %>%
+      group_by(sample_id, metric) %>%
+      arrange(haplotype, .by_group = TRUE) %>%
+      slice(1) %>%
+      ungroup() %>%
+      select(sample_id, metric, value)
+
+    verdict_src <- bind_rows(verdict_hap, verdict_dip) %>%
       pivot_wider(names_from = metric, values_from = value)
     for (m in c("complete", "qv", "kmer_completeness"))
       if (!m %in% names(verdict_src)) verdict_src[[m]] <- NA_real_
@@ -476,6 +682,17 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
     verdict_src <- verdict_src %>% left_join(size_dev, by = "sample_id")
     if (!"size_ratio" %in% names(verdict_src)) verdict_src$size_ratio <- NA_real_
 
+    # Contiguity columns for the verdict. NA wherever a gate does not apply, so the flag
+    # expressions below stay uniform.
+    if (!is.null(cont_smp)) {
+      verdict_src <- verdict_src %>%
+        left_join(cont_smp %>% select(sample_id, pieces_worst, gate,
+                                      lrg_min, lrg_max, mad_z, mad_thr),
+                  by = "sample_id")
+    }
+    for (m in c("pieces_worst", "gate", "lrg_min", "lrg_max", "mad_z", "mad_thr"))
+      if (!m %in% names(verdict_src)) verdict_src[[m]] <- NA_real_
+
     # 'complete' is a 0–1 fraction (normalised upstream); qv & kmer_completeness are 0–100.
     verdict <- verdict_src %>%
       rowwise() %>%
@@ -485,7 +702,16 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
           if (!is.na(qv)                && qv < thr_qv)                  sprintf("QV<%g", thr_qv),
           if (!is.na(kmer_completeness) && kmer_completeness < thr_kmer) sprintf("k-mer<%g%%", thr_kmer),
           if (thr_size > 0 && !is.na(size_ratio) &&
-              abs(size_ratio - 1) * 100 > thr_size)                      sprintf("size %s", percent(size_ratio, accuracy = 1))
+              abs(size_ratio - 1) * 100 > thr_size)                      sprintf("size %s", percent(size_ratio, accuracy = 1)),
+          if (!is.na(gate) && !is.na(pieces_worst) && pieces_worst > gate)
+            sprintf("auN-pieces %s > %s", comma(pieces_worst, accuracy = 1),
+                                          comma(gate, accuracy = 1)),
+          if (thr_lrg_lo > 0 && !is.na(lrg_min) && lrg_min < thr_lrg_lo)
+            sprintf("largest %.2f× mean chrom", lrg_min),
+          if (thr_mad_k > 0 && !is.na(mad_thr) && !is.na(pieces_worst) &&
+              log10(pieces_worst) > mad_thr)
+            sprintf("cohort outlier%s",
+                    if (is.na(mad_z)) "" else sprintf(" %.1f MAD", mad_z))
         ), collapse = ", "),
         Status = if (nchar(flags) == 0) "✅" else "⚠️"
       ) %>%
@@ -503,6 +729,22 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                     thr_busco, thr_qv, thr_kmer)
     if (thr_size > 0)
       crit <- paste0(crit, sprintf(", assembled length within ±%g%% of estimate", thr_size))
+    if (!is.null(cont_smp)) {
+      gbits <- cont_smp %>%
+        filter(!is.na(gate)) %>%
+        distinct(tier, n_chrom, gate) %>%
+        arrange(tier) %>%
+        rowwise() %>%
+        mutate(b = if (tier == "hifi+hic" && !is.na(n_chrom))
+                     sprintf("auN pieces ≤ %g (%g × %g chromosomes) for %s",
+                             gate, thr_aun_mult, n_chrom, tier)
+                   else sprintf("auN pieces ≤ %g for %s", gate, tier)) %>%
+        ungroup() %>%
+        pull(b)
+      if (length(gbits) > 0) crit <- paste0(crit, ", ", paste(gbits, collapse = ", "))
+      if (thr_lrg_lo > 0 && any(!is.na(cont_smp$lrg_min)))
+        crit <- paste0(crit, sprintf(", largest scaffold ≥ %g × mean chromosome", thr_lrg_lo))
+    }
     md <- c(md,
       paste0("> **Status:** ✅ all checks pass · ⚠️ below threshold (", crit,
              "). Thresholds are per-run tunable."),
@@ -548,6 +790,62 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
                     paste(sprintf("**%s**", on_fb), collapse = ", ")),
             "")
         }
+      }
+    }
+
+    # --- Contiguity detail (report-improvement batch) ---
+    # Same numbers as the auN Pieces column, plus the inputs to the gate so a flag is
+    # readable without re-deriving it: which tier, which chromosome count and where it came
+    # from, the bar, the largest/mean-chromosome ratio and the cohort z.
+    if (!is.null(cont_smp) && nrow(cont_smp) > 0) {
+      md <- c(md, "### Contiguity Detail", "")
+      cont_table <- cont_smp %>%
+        arrange(sample_id) %>%
+        transmute(
+          Sample = sample_id,
+          Tier   = tier,
+          `Expected chrom`         = ifelse(is.na(n_chrom), "—",
+                                            sprintf("%g (%s)", n_chrom, chrom_src)),
+          `auN Pieces (worst hap)` = ifelse(is.na(pieces_worst), "—",
+                                            comma(pieces_worst, accuracy = 0.1)),
+          Gate                     = ifelse(is.na(gate), "—",
+                                            sprintf("≤ %g", gate)),
+          `Largest / mean chrom`   = ifelse(is.na(lrg_min), "—",
+                                            sprintf("%.2f×", lrg_min)),
+          `Cohort MAD z`           = ifelse(is.na(mad_z), "—",
+                                            sprintf("%.1f", mad_z))
+        )
+      md <- c(md, make_markdown_table(cont_table), "")
+
+      cnotes <- character()
+      mt <- sort(unique(cont_smp$mad_thr[is.finite(cont_smp$mad_thr)]))
+      if (length(mt) > 0)
+        cnotes <- c(cnotes,
+          sprintf("cohort bar within (taxid, tier) = median + max(%g × MAD, log10(1.5)) of log10(auN pieces) = %s pieces",
+                  thr_mad_k, paste(comma(10^mt, accuracy = 0.1), collapse = " / ")))
+      no_gate <- cont_smp$sample_id[is.na(cont_smp$gate)]
+      if (length(no_gate) > 0)
+        cnotes <- c(cnotes,
+          sprintf("no gate applied for %s (evidence tier or expected chromosome count unavailable)",
+                  paste(sprintf("**%s**", sort(no_gate)), collapse = ", ")))
+      md <- c(md,
+        paste0("> **auN pieces** = total length / auN, the length-weighted effective piece ",
+               "count (exactly n for n equal pieces); worst haplotype per sample. ",
+               "Chromosome-scale gates apply only to the HiFi+Hi-C tier",
+               if (length(cnotes) > 0) paste0("; ", paste(cnotes, collapse = "; ")) else "",
+               "."),
+        "")
+
+      if (thr_lrg_hi > 0) {
+        adv <- cont_smp %>% filter(!is.na(lrg_max), lrg_max > thr_lrg_hi) %>% arrange(sample_id)
+        if (nrow(adv) > 0)
+          md <- c(md,
+            paste0("Advisory — largest scaffold above ", sprintf("%g×", thr_lrg_hi),
+                   " mean chromosome, i.e. a possible over-join that a worst-haplotype gate ",
+                   "cannot see: ",
+                   paste(sprintf("**%s** (%.2f×)", adv$sample_id, adv$lrg_max),
+                         collapse = "; "), "."),
+            "")
       }
     }
   }
