@@ -76,8 +76,49 @@ workflow ORGANELLE {
     ch_gene_map = MITOHIFI.out.gene_map
         .mix( ORGANELLE_ANNOTATION.out.gene_map.map { meta, org, png -> tuple(meta, png) } )
 
+    // ---- Per-sample bait bundles for FILTER_ORGANELLE ---------------------------------
+    // Exactly one emission per input sample (empty list = produced no organelle), with the
+    // gather confined to a SINGLE read-type branch. main.nf used to gather globally over
+    // ch_assemblies, so one slow or newly added sample in either branch stalled contig
+    // filtering -- and every step downstream of it -- for every other sample.
+    //
+    // Both arms end in groupTuple() so the bait value stays the same ArrayBag the global
+    // gather produced. A bare [fa] list would be a different collection type and is not
+    // guaranteed to hash identically, which would re-run FILTER_ORGANELLE and cascade from
+    // there through every downstream task.
+    //
+    //   HiFi       MITOHIFI.out.mitogenome is NOT optional and errorStrategy is
+    //              retry/terminate (never 'ignore'), so a HiFi sample yields exactly one
+    //              mitogenome or the run fails. groupKey(sample, 1) therefore lets
+    //              groupTuple emit on that single arrival with no dependence on any channel
+    //              closing. If MITOHIFI ever gains 'ignore' or an optional mitogenome this
+    //              arm needs the remainder join the short-read arm uses, or a sample will
+    //              go missing from the combine in main.nf.
+    //   short-read GETORGANELLE.out.assembly IS optional and a sample can have >1 organelle
+    //              target, so the count is not knowable up front and this arm gathers --
+    //              but only over ch_org.other. The remainder join re-attaches an empty list
+    //              for samples that produced none. Sorting is applied only above size 1,
+    //              where groupTuple's arrival order is genuinely unstable; at size 1 it
+    //              would convert the ArrayBag to a List for no benefit.
+    ch_hifi_baits = MITOHIFI.out.mitogenome
+        .map { meta, fa -> tuple(groupKey(meta.sample, 1), meta.sample, fa) }
+        .groupTuple()
+        .map { key, samples, fas -> tuple(samples[0], fas) }
+
+    ch_sr_baits = ch_org.other
+        .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.sample, meta.sample) }
+        .join( SHORTREAD_ORGANELLE.out.assembly
+                   .map { meta, org, fa -> tuple(meta.sample, fa) }
+                   .groupTuple(),
+               remainder: true )
+        .map { sample, s, fas ->
+            tuple(sample, (fas == null) ? [] : (fas.size() > 1 ? fas.sort { it.name } : fas)) }
+
+    ch_baits = ch_hifi_baits.mix( ch_sr_baits )
+
     emit:
     assemblies   = ch_assemblies                       // tuple(meta, fasta)  -> FILTER_ORGANELLE bait
+    baits        = ch_baits                            // tuple(sample, [fasta,...]) per sample
     annotation   = ch_annotation                       // tuple(meta, gb)
     stats        = ch_stats                            // tuple(meta, tsv)    MitoHiFi-format
     circular_map = ch_circular                         // tuple(meta, png)

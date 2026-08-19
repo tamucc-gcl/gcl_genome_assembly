@@ -485,33 +485,28 @@ workflow {
         HiFi and short-read conditioning paths.
     ====================================================================================
     */
-    // Per-sample bait = ALL organelle assemblies for the sample (mito + plastid).
-    ch_organelle_baits = ORGANELLE.out.assemblies
-        .map { meta, fa -> tuple(meta.sample, fa) }
-        .groupTuple()
-
-    // Only samples that actually produced an organelle get filtered; the rest pass through
-    // untouched (so a failed organelle assembly can't drop a whole nuclear assembly).
-    ch_bait_samples = ch_organelle_baits.map { sample, baits -> sample }.collect()
-
+    // Per-sample bait = ALL organelle assemblies for that sample (mito + plastid), emitted
+    // one-per-sample by ORGANELLE with branch-local gathers (see workflows/organelle.nf) so
+    // one sample can't stall the rest. An empty bait list means the sample produced no
+    // organelle: those bypass FILTER_ORGANELLE untouched, so a failed organelle assembly
+    // still can't drop a whole nuclear assembly.
     ch_contigs
-        .combine( ch_bait_samples.map { [ it ] } )   // [ it ] stops .combine() from spreading the sample list into the tuple
-        .branch { meta, fasta, bait_samples ->
-            has_bait: bait_samples.contains(meta.sample)
+        .map { meta, fasta -> tuple(meta.sample, meta, fasta) }
+        .combine( ORGANELLE.out.baits, by: 0 )
+        .branch { sample, meta, fasta, baits ->
+            has_bait: baits.size() > 0
             no_bait:  true
         }
         .set { ch_contigs_baitsplit }
 
     ch_contigs_baitsplit.has_bait
-        .map { meta, fasta, s -> tuple(meta.sample, meta, fasta) }
-        .combine( ch_organelle_baits, by: 0 )
         .map { sample, meta, fasta, baits -> tuple(meta, fasta, baits) }
         .set { ch_organelle_filter_input }
 
     FILTER_ORGANELLE(ch_organelle_filter_input)
 
     ch_organelle_filtered = FILTER_ORGANELLE.out.filtered
-        .mix( ch_contigs_baitsplit.no_bait.map { meta, fasta, s -> tuple(meta, fasta) } )
+        .mix( ch_contigs_baitsplit.no_bait.map { s, meta, fasta, b -> tuple(meta, fasta) } )
 
     // Fork the FILTERED contigs into the read-type-specific conditioning paths.
     ch_organelle_filtered
@@ -948,12 +943,17 @@ workflow {
     // =========================================================================
     //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
     // =========================================================================
-    ch_final_assembly = ch_final_assembly.mix(ch_shortread_finished)
-
     // Harmonize scaffold names across same-species long-read assemblies (>= 2) before
     // finalizing, so homologous chromosomes share names and FINAL_VIZ inherits them.
+    // Short-read assemblies are never harmonized (harmonize_scaffolds.nf branches them out),
+    // and mixing them into the INPUT here would hold its cross-sample groupTuple open until
+    // the short-read path finished -- blocking FINALIZE and everything after it for every
+    // long-read assembly. They bypass it and rejoin at the output with the same sentinel.
     HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script)
     ch_versions = ch_versions.mix(HARMONIZE_SCAFFOLDS.out.versions)
+
+    ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
+        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
 
     ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies
         .map { meta, fa, nm -> nm }
@@ -962,7 +962,7 @@ workflow {
     COLLECT_NAME_MAPS( ch_name_map_files )
     ch_name_map_for_report = COLLECT_NAME_MAPS.out.map.ifEmpty( file('NO_NAMEMAP') )
 
-    FINALIZE_ASSEMBLY(HARMONIZE_SCAFFOLDS.out.assemblies)
+    FINALIZE_ASSEMBLY(ch_pre_finalize)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
 
     // =========================================================================
