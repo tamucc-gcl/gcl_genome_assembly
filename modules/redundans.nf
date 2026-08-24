@@ -41,9 +41,24 @@ process REDUNDANS {
 
     script:
     // --- stage toggles: the user-facing on/off for redundans' internal steps ---
-    def do_reduction   = params.containsKey('redundans_run_reduction')   ? params.run_redundans_reduction   : true
-    def do_scaffolding = params.containsKey('redundans_run_scaffolding') ? params.run_redundans_scaffolding : true
-    def do_gapclosing  = params.containsKey('redundans_run_gapclosing')  ? params.run_redundans_gapclosing  : true
+    // Boolean knobs can't use the Elvis default (`params.x ?: true` can never yield
+    // false), so existence has to be tested separately from the value. boolParam
+    // mirrors meta.nf's `pick`: the key is written ONCE, as a String, and read via
+    // params[key], so the existence check and the value read cannot drift apart.
+    // (They had: the check named 'redundans_run_*' while the read named
+    // 'run_redundans_*', so containsKey was always false, all three stages were
+    // pinned on, and --noreduction/--noscaffolding/--nogapclosing were unreachable.)
+    // Also normalises the String 'false' a CLI `--x false` can deliver.
+    def boolParam = { String key, boolean dflt ->
+        if (!params.containsKey(key) || params[key] == null) return dflt
+        def v = params[key]
+        return (v instanceof Boolean) ? v
+             : !(v.toString().trim().toLowerCase() in ['false', 'no', '0', 'off'])
+    }
+
+    def do_reduction   = boolParam('run_redundans_reduction',   true)
+    def do_scaffolding = boolParam('run_redundans_scaffolding', true)
+    def do_gapclosing  = boolParam('run_redundans_gapclosing',  true)
 
     // --- reduction params ---
     def identity  = params.redundans_identity   ?: 0.51
