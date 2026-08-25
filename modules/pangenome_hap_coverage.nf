@@ -15,13 +15,13 @@
     the marginal sum_h M[h,i]/i reproduces the panacus histogram exactly -- the emitted
     hap_coverage_check.tsv exists to be diffed against it.
 
-    Single-threaded and I/O bound: two passes over the GFA (segment lengths + haplotype
-    group scan, then one bitmask word per node). Memory scales with node count, ~20 bytes
-    per node, not with genome size.
+    Single-threaded and I/O bound: three streaming passes over the GFA -- segment lengths +
+    haplotype group scan, then one bitmask word per node, then per-contig attribution of the
+    private column. Memory scales with NODE COUNT (~25 B/node), not genome size.
 
     Input : tuple(taxid, gfa)   (CACTUS_PANGENOME.out.gfa -- the clip GFA .gfa.gz)
             hapcov_script       (py_scripts/gfa_hap_coverage.py)
-    Output: matrix / hap_private / check / versions
+    Output: matrix / hap_private / by_contig / check / versions
 ========================================================================================
 */
 
@@ -39,6 +39,7 @@ process PANGENOME_HAP_COVERAGE {
     tuple val(taxid), path("${taxid}.hap_coverage_matrix.tsv"), emit: matrix
     tuple val(taxid), path("${taxid}.hap_private.tsv"),         emit: hap_private
     tuple val(taxid), path("${taxid}.hap_coverage_check.tsv"),  emit: check
+    tuple val(taxid), path("${taxid}.hap_private_by_contig.tsv"), emit: by_contig
     path("versions.tsv"),                                       emit: versions
 
     script:
@@ -63,6 +64,7 @@ process PANGENOME_HAP_COVERAGE {
     printf 'haplotype\\tcoverage_level\\tbp\\n' > ${taxid}.hap_coverage_matrix.tsv
     printf 'haplotype\\tsample\\thap\\tprivate_bp\\thap_bp\\tpct_of_private\\tpct_of_haplotype\\n' > ${taxid}.hap_private.tsv
     printf 'coverage_level\\tsum_over_haplotypes_bp\\tbp_reconstructed\\n' > ${taxid}.hap_coverage_check.tsv
+    printf 'haplotype\\tcontig\\tprivate_bp\\tcontig_graph_bp\\tpct_of_contig\\tpct_of_hap_private\\tpct_of_pangenome_private\\n' > ${taxid}.hap_private_by_contig.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }

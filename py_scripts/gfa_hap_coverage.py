@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # ======================================================================================
-# gfa_hap_coverage.py
+# gfa_hap_coverage.py  (v3)
 # Repo location: py_scripts/gfa_hap_coverage.py
+#
+# v3 adds a per-contig breakdown of the private column. The v1 code below it -- the two
+# numpy passes that produced output matching panacus exactly at all 10 coverage levels on
+# Spratelloides -- is UNCHANGED. by_contig() is a separate third pass with its own parsing
+# rather than a refactor of the verified path, deliberately: the small duplication buys
+# zero risk to a result that is already validated against an independent implementation.
 #
 # Decomposes a pangenome GFA's coverage histogram BY HAPLOTYPE. panacus `hist` gives
 # h(i) = bp of graph sequence covered by exactly i haplotypes, but it is a marginal: it
@@ -29,6 +35,7 @@
 # Outputs (in outdir):
 #   <label>.hap_coverage_matrix.tsv   haplotype, coverage_level, bp        (the joint table)
 #   <label>.hap_private.tsv           per-haplotype private bp + shares    (the plot input)
+#   <label>.hap_private_by_contig.tsv per-contig private bp + share of that contig
 #   <label>.hap_coverage_check.tsv    reconstructed marginal h(i) vs panacus
 # ======================================================================================
 
@@ -36,6 +43,7 @@ import argparse
 import gzip
 import os
 import sys
+from array import array
 from collections import OrderedDict
 
 try:
@@ -180,12 +188,93 @@ def popcount(mask):
     return cov
 
 
+# ---- pass 3: per-contig attribution of the private column ------------------------------
+# Self-contained: parses P/W lines independently rather than sharing helpers with the two
+# passes above, so nothing on the verified path is touched.
+def by_contig(gfa, cov, nlen, groups):
+    """
+    Each P/W line is one contig walk, so `last` (the contig index that most recently touched
+    a node) both de-duplicates repeats within a contig and, for private nodes, detects a
+    second contig of the same haplotype walking the same node.
+
+    Returns (order, priv, tot, multi_bp). A private node is credited to the FIRST contig that
+    claims it; multi_bp is how much private sequence a second contig also walks -- a
+    diagnostic, NOT additional bp, since it is already counted once in priv.
+
+    tot can exceed a haplotype's hap_bp when two of its contigs share nodes; that is correct
+    for "bp this contig walks", and is why pct_of_contig divides by tot.
+    """
+    # numpy scalar indexing is slow in a 1e8-iteration Python loop; copy to array module
+    cov_l = cov.tolist()                      # values 0..nhap, all interned small ints
+    nlen_a = array("q")
+    if nlen_a.itemsize != 8:
+        sys.exit("array('q') is not 8 bytes on this platform")
+    nlen_a.frombytes(nlen.astype(np.int64).tobytes())
+
+    cidx, order, priv, tot = {}, [], [], []
+    last = array("i", bytes(4 * len(cov_l)))
+    for i in range(len(last)):
+        last[i] = -1
+    multi_bp = 0
+    known = set(groups)
+    top = len(cov_l) - 1
+    with gopen(gfa) as fh:
+        for line in fh:
+            k = line[:2]
+            if k == b"P\t":
+                f = line.rstrip(b"\r\n").split(b"\t")
+                if len(f) < 3:
+                    continue
+                p = f[1].split(b"#")
+                if len(p) >= 3:
+                    hap, contig = p[0] + b"#" + p[1], b"#".join(p[2:])
+                elif len(p) == 2:
+                    hap, contig = p[0] + b"#" + p[1], b"."
+                else:
+                    hap, contig = f[1], b"."
+                fld, tr = f[2], _TR_P
+            elif k == b"W\t":
+                f = line.rstrip(b"\r\n").split(b"\t")
+                if len(f) < 7:
+                    continue
+                hap, contig, fld, tr = f[1] + b"#" + f[2], f[3], f[6], _TR_W
+            else:
+                continue
+            if hap not in known:
+                continue
+            key = (hap, contig)
+            c = cidx.get(key)
+            if c is None:
+                c = len(order)
+                cidx[key] = c
+                order.append(key)
+                priv.append(0)
+                tot.append(0)
+            for i in map(int, fld.translate(tr).split()):
+                if not (0 <= i <= top):
+                    continue
+                prev = last[i]
+                if prev == c:
+                    continue
+                last[i] = c
+                L = nlen_a[i]
+                tot[c] += L
+                if cov_l[i] == 1:
+                    if prev == -1:
+                        priv[c] += L
+                    else:
+                        multi_bp += L
+    return order, priv, tot, multi_bp
+
+
 # ---- main ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="per-haplotype coverage decomposition of a pangenome GFA")
     ap.add_argument("--gfa", required=True, help="GFA (plain or gzipped); the clip GFA is the right input")
     ap.add_argument("--label", required=True, help="output filename prefix (species / taxid)")
     ap.add_argument("--outdir", default=".")
+    ap.add_argument("--min-contig-private-bp", type=int, default=0,
+                    help="omit contigs below this private bp from the per-contig table (default 0 = all)")
     ap.add_argument("--min-node-len", type=int, default=0,
                     help="ignore nodes shorter than this (default 0 = keep all)")
     a = ap.parse_args()
@@ -254,7 +343,30 @@ def main():
             out.write("%s\t%s\t%s\t%d\t%d\t%.6f\t%.6f\n"
                       % (nm, smp, hp, int(private_bp[g]), int(hap_bp[g]), pp, ph))
 
-    # 3. marginal cross-check against panacus hist -------------------------------------
+    # 3. per-contig attribution of the private column -----------------------------------
+    order, cpriv, ctot, multi_bp = by_contig(a.gfa, cov, nlen, groups)
+    hap_priv_lookup = dict(zip(groups, (int(x) for x in private_bp)))
+    pct = lambda num, den: (100.0 * num / den) if den else None
+    f4 = lambda v: "NA" if v is None else "%.4f" % v
+    rows = []
+    for c, (hg, cn) in enumerate(order):
+        if cpriv[c] < a.min_contig_private_bp:
+            continue
+        rows.append((hg.decode("utf-8", "replace"), cn.decode("utf-8", "replace"),
+                     cpriv[c], ctot[c], pct(cpriv[c], ctot[c]),
+                     pct(cpriv[c], hap_priv_lookup.get(hg, 0)), pct(cpriv[c], tot_private)))
+    rows.sort(key=lambda r: (r[0], -r[2]))
+    with open(op(".hap_private_by_contig.tsv"), "w") as out:
+        out.write("# private bp credited to the FIRST contig that walks each private node.\n")
+        out.write("# multi_contig_private_bp=%d -- private sequence a SECOND contig of the same\n" % multi_bp)
+        out.write("#   haplotype also walks. Diagnostic only: already counted once in private_bp.\n")
+        out.write("# contig_graph_bp is bp this contig walks; contigs of one haplotype sharing a\n")
+        out.write("#   node are each credited, so it can sum to more than that haplotype's hap_bp.\n")
+        out.write("haplotype\tcontig\tprivate_bp\tcontig_graph_bp\tpct_of_contig\tpct_of_hap_private\tpct_of_pangenome_private\n")
+        for r in rows:
+            out.write("%s\t%s\t%d\t%d\t%s\t%s\t%s\n" % (r[0], r[1], r[2], r[3], f4(r[4]), f4(r[5]), f4(r[6])))
+
+    # 4. marginal cross-check against panacus hist -------------------------------------
     marg = M.sum(axis=0)
     with open(op(".hap_coverage_check.tsv"), "w") as out:
         out.write("# bp_reconstructed = sum over haplotypes / coverage_level; compare to panacus hist\n")
@@ -265,6 +377,11 @@ def main():
     recon_total = int(sum(marg[c] // c for c in range(1, nhap + 1)))
     sys.stderr.write("[gfa_hap_coverage] private_bp=%d  reconstructed_graph_bp=%d  (S-line bp=%d)\n"
                      % (tot_private, recon_total, total_bp))
+    sys.stderr.write("[gfa_hap_coverage] contigs=%d  multi-contig private bp=%d (%.3f%% of private)\n"
+                     % (len(order), multi_bp, 100.0 * multi_bp / tot_private if tot_private else 0.0))
+    for r in sorted(rows, key=lambda x: -x[2])[:10]:
+        sys.stderr.write("    %-26s %-18s %8.1f Mb private  %5.1f%% of contig (%.1f Mb)\n"
+                         % (r[0], r[1], r[2] / 1e6, r[4] or 0.0, r[3] / 1e6))
 
 
 if __name__ == "__main__":
