@@ -57,6 +57,7 @@ include { PANGENOME_VARIANTS  } from '../modules/pangenome_variants.nf'
 include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
+include { PANGENOME_HAP_COVERAGE } from '../modules/pangenome_hap_coverage.nf'
 include { PANGENOME_2D_VIZ    } from '../modules/pangenome_2d_viz.nf'
 include { PANGENOME_QC        } from '../modules/pangenome_qc.nf'
 include { PANGENOME_ODGI_STATS_MQC } from '../modules/pangenome_odgi_stats_mqc.nf'
@@ -94,6 +95,8 @@ workflow PANGENOME {
     ch_core_acc    = Channel.empty()
     ch_figures     = Channel.empty()
     ch_growth_fit  = Channel.empty()
+    ch_hap_cov     = Channel.empty()
+    ch_hap_priv    = Channel.empty()
     ch_viz2d       = Channel.empty()
     ch_qc          = Channel.empty()
     ch_mqc         = Channel.empty()
@@ -258,13 +261,28 @@ workflow PANGENOME {
             ch_growth_hist = PANGENOME_GROWTH.out.hist
             ch_core_acc    = PANGENOME_GROWTH.out.core_accessory
 
+            // WHO owns the private sequence. panacus's coverage histogram is a marginal
+            // over haplotypes, so the private bar can never be attributed from it after the
+            // fact; this reads the clip GFA directly and resolves the owning haplotype per
+            // node. Same PanSN grouping as panacus, so the emitted hap_coverage_check.tsv
+            // should reproduce the hist exactly. Gated with the rest of the growth analysis
+            // -- no separate toggle.
+            def hapcov_script = file("${projectDir}/py_scripts/gfa_hap_coverage.py", checkIfExists: true)
+            PANGENOME_HAP_COVERAGE( CACTUS_PANGENOME.out.gfa, hapcov_script )
+            ch_versions    = ch_versions.mix( PANGENOME_HAP_COVERAGE.out.versions )
+            ch_hap_cov     = PANGENOME_HAP_COVERAGE.out.matrix
+            ch_hap_priv    = PANGENOME_HAP_COVERAGE.out.hap_private
+
             // report figures: growth/core + Heaps + band (from the coverage histogram),
             // SV size spectrum + variant-class bar (from the catalog) — workstream D
             def plots_script = file("${projectDir}/r_scripts/pangenome_plots.R", checkIfExists: true)
             PANGENOME_PLOTS(
                 PANGENOME_GROWTH.out.hist
                     .join( PANGENOME_VARIANTS.out.sv_sizes )
-                    .join( PANGENOME_VARIANTS.out.summary ),
+                    .join( PANGENOME_VARIANTS.out.summary )
+                    .join( ch_hap_priv, remainder: true )
+                    .map { taxid, hist, sv, vs, hp ->
+                        tuple(taxid, hist, sv, vs, hp ?: file('NO_HAP_PRIVATE')) },
                 plots_script
             )
             ch_figures    = PANGENOME_PLOTS.out.figures
@@ -380,7 +398,8 @@ workflow PANGENOME {
                 .join( ch_pca_png,                     remainder: true )
                 .join( ch_prog_png,                    remainder: true )
                 .join( PANGENOME_MANIFEST.out.manifest, remainder: true )
-                .map { taxid, vs, qc, gf, gs, pca, prog, mf ->
+                .join( ch_hap_priv,                     remainder: true )
+                .map { taxid, vs, qc, gf, gs, pca, prog, mf, hp ->
                     tuple(taxid,
                           qc ?: file('NO_QC'),
                           gf ?: file('NO_GROWTH'),
@@ -388,7 +407,8 @@ workflow PANGENOME {
                           gs ?: file('NO_GRAPH'),
                           pca ?: file('NO_POPSTRUCT'),
                           prog ?: file('NO_PROGRESSIVE'),
-                          mf ?: file('NO_MANIFEST')) }
+                          mf ?: file('NO_MANIFEST'),
+                          hp ?: file('NO_HAP_PRIVATE')) }
             PANGENOME_REPORT( ch_report_in, report_script )
             ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
             ch_report   = PANGENOME_REPORT.out.report
@@ -428,6 +448,8 @@ workflow PANGENOME {
     core_accessory = ch_core_acc    // core/accessory/private partition (report)
     figures      = ch_figures       // rendered report PNGs (growth/SV/coverage/variants)
     growth_fit   = ch_growth_fit    // machine-readable Heaps gamma / open-closed / sizes
+    hap_coverage = ch_hap_cov       // joint haplotype x coverage-level bp matrix
+    hap_private  = ch_hap_priv      // per-haplotype private-sequence breakdown
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
     multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)

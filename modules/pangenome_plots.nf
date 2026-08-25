@@ -23,7 +23,7 @@ process PANGENOME_PLOTS {
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), path(hist), path(sv_sizes), path(variant_summary)
+    tuple val(taxid), path(hist), path(sv_sizes), path(variant_summary), path(hap_private)
     path(plots_script)
 
     output:
@@ -32,7 +32,11 @@ process PANGENOME_PLOTS {
 
     script:
     """
-    Rscript ${plots_script} ${hist} ${sv_sizes} ${variant_summary} ${taxid} .
+    Rscript ${plots_script} ${hist} ${sv_sizes} ${variant_summary} ${taxid} . \\
+        hap_private=${hap_private} \\
+        core=${params.pangenome_tier_core} \\
+        softcore=${params.pangenome_tier_softcore} \\
+        shell=${params.pangenome_tier_shell}
     """
 
     stub:
