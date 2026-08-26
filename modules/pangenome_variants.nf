@@ -63,7 +63,7 @@ process PANGENOME_VARIANTS {
     def wavemax = params.pangenome_vcfwave_max_len ?: 100000
     def nchunk = params.pangenome_vcfwave_chunks ?: (task.cpus * 4)
     def waveargs = params.pangenome_vcfwave_args ?: ''
-    def wavecmd = usewave ? "vcfwave -L \${wavemax} \${waveargs}".toString() : 'cat'
+    def wavecmd = usewave ? "vcfwave -L ${wavemax} ${waveargs}" : 'cat'
     """
     set -euo pipefail
 
@@ -75,6 +75,15 @@ process PANGENOME_VARIANTS {
 
     WAVE_CMD='${wavecmd}'
     export WAVE_CMD
+
+    # WAVE_CMD is built in the Groovy prelude, where a backslash-dollar escapes Groovy
+    # interpolation rather than protecting a shell dollar. Getting that wrong leaves an
+    # un-interpolated placeholder that only fails later inside eval, once per chunk.
+    case "\$WAVE_CMD" in
+      *'\${'*) echo "ERROR: WAVE_CMD holds an unexpanded Groovy placeholder: \$WAVE_CMD" >&2
+                echo '       the script: prelude must interpolate, not backslash-escape.' >&2
+                exit 1 ;;
+    esac
 
     # vcflib < ~1.0.9 has no vcfwave, and the env would otherwise build fine and then break
     # mid-pipe hours in. Check up front, with a message that says what is actually wrong.
