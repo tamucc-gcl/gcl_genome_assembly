@@ -112,7 +112,8 @@ role_desc <- c(
   graph_gfa        = "Text graph interchange (gzipped) \u2014 panacus, odgi, Bandage, `vg convert`.",
   snarls           = "Snarl (bubble) decomposition \u2014 the genotyping units for `vg call`.",
   haplotype_index  = "Haplotype-sampling index \u2014 builds personalized reference graphs for `vg giraffe`.",
-  variants_vcf     = "Variant catalog vs the reference path: top-level bubbles, one allele per row, SNP/indel/SV.",
+  variants_vcf     = "Variant catalog vs the reference path: top-level bubbles decomposed to minimal variants by vcfwave, one allele per row, SNP/indel/SV.",
+  blocks_vcf       = "Pre-decomposition block-level VCF (vcfbub output). Kept so the vcfwave decomposition can be audited.",
   variants_vcf_tbi = "Tabix index for the variant catalog.",
   reference_fasta  = "Reference-path FASTA \u2014 surjection target and linear-coordinate seam.",
   reference_fai    = "faidx index for the reference-path FASTA."
@@ -178,6 +179,10 @@ if (length(vs) > 0) {
       sprintf("| SNP | %s |", comma(g(vs, "SNP"))),
       sprintf("| Indel | %s |", comma(g(vs, "INDEL"))),
       sprintf("| SV | %s (INS %s / DEL %s) |", comma(g(vs, "SV")), comma(g(vs, "SV_INS")), comma(g(vs, "SV_DEL"))),
+      # BLOCKSUB = both alleles >= minsv and lengths differ: what vcfwave could not
+      # decompose. A large count means alleles are genuinely unrelated at those loci.
+      sprintf("| &nbsp;&nbsp;of which block substitutions | %s |", comma(g(vs, "SV_BLOCKSUB", "0"))),
+      sprintf("| &nbsp;&nbsp;of which same-length substitutions | %s |", comma(g(vs, "SV_COMPLEX", "0"))),
       "",
       sprintf("Total: %s variants relative to the reference path.", comma(total)), "")
 }
