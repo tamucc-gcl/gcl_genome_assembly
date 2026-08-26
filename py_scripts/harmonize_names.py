@@ -283,6 +283,72 @@ def merge_intervals(ivals):
     return out
 
 
+def _report_span(info, k):
+    """Reported ref_span for member piece k: merged footprint extent plus its bp.
+
+    The envelope form reads as if a 42 Mb scaffold covers 79 Mb of its chromosome, because
+    tstart/tend span every scattered distal alignment. fp= is the merged aligned bp, so the
+    reported column reflects the quantity the ordering and orientation decisions are now
+    made on. Falls back to the envelope when there is no footprint.
+    """
+    fp = piece_footprint(info, k)
+    if not fp:
+        return "ref%d:%s-%s" % (k, info["tstart"][k], info["tend"][k])
+    return "ref%d:%d-%d(fp=%d)" % (k, fp[0][0], fp[-1][1],
+                                   sum(e - s for s, e in fp))
+
+
+def piece_footprint(info, k):
+    """Merged target intervals of member piece k, as a sorted non-overlapping list.
+
+    info is a placement dict (place[name]); info["ivals"][k] is already merged by
+    merge_intervals() at placement time. Falls back to the ENVELOPE only when 'ivals' is
+    absent, which happens for placements built without a PAF (the reference's own
+    scaffolds). Same discipline as apply_containment()'s footprint().
+    """
+    iv = (info.get("ivals") or {}).get(k)
+    if iv:
+        return list(iv)
+    b0 = (info.get("tstart") or {}).get(k, 0) or 0
+    b1 = (info.get("tend") or {}).get(k, 0) or 0
+    return [(b0, b1)] if b1 > b0 else []
+
+
+def footprint_bp(info, k):
+    """Merged aligned bp of member piece k. Never inflated by overlapping alignments."""
+    return sum(e - s for s, e in piece_footprint(info, k))
+
+
+def footprint_start(info, k):
+    """Start of the LARGEST merged block of piece k, or None if it has no footprint.
+
+    Ordering key. The envelope's leftmost start is pulled forward by a single distal
+    spurious alignment; the largest merged block is where the piece actually sits.
+    """
+    fp = piece_footprint(info, k)
+    if not fp:
+        return None
+    return max(fp, key=lambda se: se[1] - se[0])[0]
+
+
+def footprints_overlap(fa, fb, tol=0):
+    """bp of intersection between two merged interval lists, minus tol (>= 0)."""
+    if not fa or not fb:
+        return 0
+    i = j = 0
+    total = 0
+    while i < len(fa) and j < len(fb):
+        s = max(fa[i][0], fb[j][0])
+        e = min(fa[i][1], fb[j][1])
+        if e > s:
+            total += e - s
+        if fa[i][1] <= fb[j][1]:
+            i += 1
+        else:
+            j += 1
+    return max(0, total - tol)
+
+
 def merged_length(ivals):
     """Total length of the union of [start, end) intervals."""
     if not ivals:
@@ -1006,16 +1072,27 @@ def main():
         for n, info in p.items():
             if info["class"] in ("chromosome", "composite"):
                 for k in info["members"]:
-                    rclaim[k].append((info["tstart"][k], n))
+                    # carry the MERGED footprint, not the envelope: two arms that tile a
+                    # chromosome have envelopes spanning nearly all of it (cov~0.98 with a
+                    # 1.12-1.23x inflated bp), so envelope comparison reports them as
+                    # overlapping when their footprints are effectively disjoint.
+                    _fp = piece_footprint(info, k)
+                    _fs = footprint_start(info, k)
+                    rclaim[k].append((info["tstart"][k] if _fs is None else _fs, n, _fp))
         overlap = defaultdict(set)
         for k, lst in rclaim.items():
             lst.sort(key=lambda x: (x[0], x[1]))
-            prev_end, prev = None, None
-            for ts, n in lst:
-                if prev_end is not None and ts < prev_end - a.overlap_tol:
-                    overlap[n].add(k)
-                    overlap[prev].add(k)
-                prev_end, prev = p[n]["tend"][k], n
+            # pairwise on MERGED FOOTPRINTS. The old form walked a single running
+            # envelope end, which both missed non-adjacent overlaps and manufactured
+            # adjacent ones out of scattered alignments. len(lst) is 2 for a voter
+            # chromosome and <= 23 for a fragmented passenger, so the quadratic is free.
+            for _i in range(len(lst)):
+                for _j in range(_i + 1, len(lst)):
+                    _ni, _fi = lst[_i][1], lst[_i][2]
+                    _nj, _fj = lst[_j][1], lst[_j][2]
+                    if footprints_overlap(_fi, _fj, a.overlap_tol) > 0:
+                        overlap[_ni].add(k)
+                        overlap[_nj].add(k)
 
         # --- consensus level: part indices. A scaffold claims a consensus chromosome ONCE,
         #     positioned by its earliest-ranked reference piece within that chromosome --
@@ -1030,7 +1107,12 @@ def main():
                 c = comp_of.get(k)
                 if c is None:
                     continue
-                key = (piece_rank.get(k, 999), info["tstart"][k])
+                # ORDER BY MERGED FOOTPRINT, not the envelope start: the envelope's
+                # leftmost start is pulled forward by any single distal spurious
+                # alignment, which reorders pieces that genuinely cover later territory.
+                _fs = footprint_start(info, k)
+                key = (piece_rank.get(k, 999),
+                       info["tstart"][k] if _fs is None else _fs)
                 if c not in best or key < best[c]:
                     best[c] = key
             for c, key in best.items():
@@ -1052,8 +1134,7 @@ def main():
             if info["class"] in ("chromosome", "composite"):
                 mem = list(info["members"])
                 cons = sorted({comp_of[k] for k in mem if k in comp_of})
-                span = ";".join(f"ref{k}:{info['tstart'][k]}-{info['tend'][k]}"
-                                for k in mem)
+                span = ";".join(_report_span(info, k) for k in mem)
                 if len(cons) == 1:
                     # ONE consensus chromosome. This is where the frame decoupling pays:
                     # a scaffold spanning ref8+ref17 is a whole chromosome, not a
@@ -1068,7 +1149,13 @@ def main():
                     # pieces disagree. Pre-Step-4 a composite was NEVER reoriented, leaving
                     # 22-26% of some assemblies unnormalised and inflating apparent SV in
                     # the pangenome.
-                    prim = max(mem, key=lambda k: info["tend"][k] - info["tstart"][k])
+                    # ORIENTATION is decided here. Choose the piece with the most MERGED
+                    # ALIGNED bp, not the widest envelope: an envelope inflated by scattered
+                    # distal alignments can outrank a piece carrying one large contiguous
+                    # alignment, and a wrong pick reverse-complements a chromosome-scale
+                    # scaffold. The comment above records what that cost previously.
+                    # Tie-break on member id so the choice is deterministic.
+                    prim = max(mem, key=lambda k: (footprint_bp(info, k), -k))
                     orient = "rev" if info["orient"][prim] == "-" else "fwd"
                     if len(mem) > 1:
                         flags.append("spans(" + "+".join("ref%d" % k for k in mem) + ")")
