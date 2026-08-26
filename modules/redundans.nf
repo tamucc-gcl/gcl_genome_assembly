@@ -117,6 +117,46 @@ process REDUNDANS {
     # which stages ran): all stages -> scaffolds.reduced.fa; no final reduce ->
     # scaffolds.filled.fa; no gap-closing -> scaffolds.fa; reduction only -> contigs.reduced.fa
     outdir=${meta.sample}_redundans
+
+    # --- stage completion guards -----------------------------------------------------
+    # redundans exits 0 even when an internal stage stops early (GapCloser in
+    # particular processes what it can and still returns success), and the ladder
+    # below selects by file EXISTENCE -- so a partial FASTA gets promoted and
+    # published as though the stage had finished. These are conservation invariants,
+    # not quality thresholds: each asserts that a stage which was REQUESTED actually
+    # did its work. A violation exits non-zero so errorStrategy/maxRetries can act,
+    # rather than feeding a truncated assembly to every downstream process.
+    nseq() { grep -c '^>' "\$1" || true; }
+
+    if [ "${do_reduction}" = "true" ] && [ ! -s "\$outdir/contigs.reduced.fa" ]; then
+        echo "ERROR: reduction requested but \$outdir/contigs.reduced.fa is missing or empty" >&2
+        exit 1
+    fi
+
+    if [ "${do_scaffolding}" = "true" ] && [ ! -s "\$outdir/scaffolds.fa" ]; then
+        echo "ERROR: scaffolding requested but \$outdir/scaffolds.fa is missing or empty" >&2
+        exit 1
+    fi
+
+    if [ "${do_gapclosing}" = "true" ]; then
+        if [ ! -s "\$outdir/scaffolds.filled.fa" ]; then
+            echo "ERROR: gap-closing requested but \$outdir/scaffolds.filled.fa is missing or empty" >&2
+            exit 1
+        fi
+        if [ "${do_scaffolding}" = "true" ]; then
+            n_in=\$(nseq "\$outdir/scaffolds.fa")
+            n_out=\$(nseq "\$outdir/scaffolds.filled.fa")
+            if [ "\$n_in" -ne "\$n_out" ]; then
+                echo "ERROR: gap-closing did not process every scaffold; output is partial." >&2
+                echo "         scaffolds.fa        : \$n_in sequences" >&2
+                echo "         scaffolds.filled.fa : \$n_out sequences" >&2
+                echo "       Gap-closing fills gaps; it cannot add or drop sequences, so these" >&2
+                echo "       counts must be equal. GapCloser returns 0 when it stops early, so" >&2
+                echo "       this count is the only evidence that the stage was incomplete." >&2
+                exit 1
+            fi
+        fi
+    fi
     if   [ -s \$outdir/scaffolds.reduced.fa ]; then final=\$outdir/scaffolds.reduced.fa
     elif [ -s \$outdir/scaffolds.filled.fa  ]; then final=\$outdir/scaffolds.filled.fa
     elif [ -s \$outdir/scaffolds.fa         ]; then final=\$outdir/scaffolds.fa
