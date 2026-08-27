@@ -267,6 +267,124 @@ def by_contig(gfa, cov, nlen, groups):
     return order, priv, tot, multi_bp
 
 
+# ---- pass 5: private segments (additive; passes 1-4 above are unchanged) ------------
+def private_segments(gfa, cov, nlen, groups):
+    """Maximal runs of consecutive private (cov == 1) nodes along each haplotype walk.
+
+    Modelled on by_contig, which is the verified template for iterating P/W step lists, but
+    it accumulates a POSITION along the walk instead of a bp total, so runs can be emitted
+    with coordinates.
+
+    Yields one record per run: (haplotype, contig, seg_index, n_nodes, seg_bp, start, end)
+    where start/end are offsets in the contig's own coordinate space.
+
+    Two deliberate differences from by_contig:
+
+      1. No `last` deduplication. A private node walked twice is two positions in the
+         contig, and a size spectrum is about positions. The bp a haplotype re-walks is
+         accumulated separately as repeat_traversed_bp so the discrepancy against
+         by_contig's deduplicated total is visible rather than mysterious.
+
+      2. Offsets. W lines carry the contig interval in fields 5-6, so a clip-graph subpath
+         starts where it actually starts. P lines have no coordinate and start at 0.
+    """
+    cov_l = cov.tolist()
+    nlen_a = array("q")
+    if nlen_a.itemsize != 8:
+        sys.exit("array('q') is not 8 bytes on this platform")
+    nlen_a.frombytes(nlen.astype(np.int64).tobytes())
+
+    segs = []
+    known = set(groups)
+    top = len(cov_l) - 1
+    # Marker array, not a per-haplotype reset: store WHICH haplotype last walked each
+    # private node, exactly as by_contig stores which contig did. Zeroing a 153M-entry
+    # array once per haplotype would be 10 x 153M Python iterations.
+    seen_hap = array("i", bytes(4 * len(cov_l)))
+    for _i in range(len(seen_hap)):
+        seen_hap[_i] = -1
+    hap_ids = {}
+    repeat_bp = 0
+    n_oor = 0
+
+    with gopen(gfa) as fh:
+        for line in fh:
+            k = line[:2]
+            if k == b"P\t":
+                f = line.rstrip(b"\r\n").split(b"\t")
+                if len(f) < 3:
+                    continue
+                p = f[1].split(b"#")
+                if len(p) >= 3:
+                    hap, contig = p[0] + b"#" + p[1], b"#".join(p[2:])
+                elif len(p) == 2:
+                    hap, contig = p[0] + b"#" + p[1], b"."
+                else:
+                    hap, contig = f[1], b"."
+                fld, tr, base = f[2], _TR_P, 0
+            elif k == b"W\t":
+                f = line.rstrip(b"\r\n").split(b"\t")
+                if len(f) < 7:
+                    continue
+                hap, contig, fld, tr = f[1] + b"#" + f[2], f[3], f[6], _TR_W
+                try:
+                    base = int(f[4])
+                except ValueError:
+                    base = 0
+            else:
+                continue
+            if hap not in known:
+                continue
+
+            h = hap_ids.get(hap)
+            if h is None:
+                h = len(hap_ids)
+                hap_ids[hap] = h
+
+            hs = hap.decode("utf-8", "replace")
+            cs = contig.decode("utf-8", "replace")
+            pos = base
+            run_bp = run_n = 0
+            run_start = base
+            idx = 0
+            for i in map(int, fld.translate(tr).split()):
+                if not (0 <= i <= top):
+                    n_oor += 1
+                    if run_n:
+                        segs.append((hs, cs, idx, run_n, run_bp, run_start, run_start + run_bp))
+                        idx += 1
+                        run_bp = run_n = 0
+                    continue
+                L = nlen_a[i]
+                if cov_l[i] == 1:
+                    if seen_hap[i] == h:
+                        repeat_bp += L
+                    else:
+                        seen_hap[i] = h
+                    if run_n == 0:
+                        run_start = pos
+                    run_bp += L
+                    run_n += 1
+                elif run_n:
+                    segs.append((hs, cs, idx, run_n, run_bp, run_start, run_start + run_bp))
+                    idx += 1
+                    run_bp = run_n = 0
+                pos += L
+            if run_n:
+                segs.append((hs, cs, idx, run_n, run_bp, run_start, run_start + run_bp))
+    return segs, repeat_bp, n_oor
+
+
+SEG_BINS = [0, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, float("inf")]
+
+
+def seg_bin(x):
+    for lo, hi in zip(SEG_BINS, SEG_BINS[1:]):
+        if lo <= x < hi:
+            return (">=%d" % lo) if hi == float("inf") else ("%d-%d" % (lo, hi))
+    return "unbinned"
+
+
 # ---- main ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="per-haplotype coverage decomposition of a pangenome GFA")
@@ -277,6 +395,12 @@ def main():
                     help="omit contigs below this private bp from the per-contig table (default 0 = all)")
     ap.add_argument("--min-node-len", type=int, default=0,
                     help="ignore nodes shorter than this (default 0 = keep all)")
+    ap.add_argument("--min-private-bp", type=int, default=1000,
+                    help="size floor for the private-segment TABLE and BED (default 1000). "
+                         "The spectrum and totals are reported unfiltered as well, so the "
+                         "floor never hides sequence -- it only bounds the row count.")
+    ap.add_argument("--no-private-segments", action="store_true",
+                    help="skip pass 5; the four original passes are unaffected either way")
     a = ap.parse_args()
 
     os.makedirs(a.outdir, exist_ok=True)
@@ -365,6 +489,72 @@ def main():
         out.write("haplotype\tcontig\tprivate_bp\tcontig_graph_bp\tpct_of_contig\tpct_of_hap_private\tpct_of_pangenome_private\n")
         for r in rows:
             out.write("%s\t%s\t%d\t%d\t%s\t%s\t%s\n" % (r[0], r[1], r[2], r[3], f4(r[4]), f4(r[5]), f4(r[6])))
+
+    # 5. private segments: the size spectrum, and coordinates for everything downstream --
+    if not a.no_private_segments:
+        segs, repeat_bp, n_oor = private_segments(a.gfa, cov, nlen, groups)
+        if n_oor:
+            sys.stderr.write("WARNING: %d out-of-range node ids in step lists; each broke a "
+                             "private run\n" % n_oor)
+
+        seg_total = sum(s[4] for s in segs)
+        kept = [s for s in segs if s[4] >= a.min_private_bp]
+        kept_total = sum(s[4] for s in kept)
+
+        with open(op(".private_segments.tsv"), "w") as out:
+            out.write("# maximal runs of consecutive private (coverage==1) nodes along each\n")
+            out.write("#   haplotype walk. start/end are offsets in the contig's own frame;\n")
+            out.write("#   W lines supply a real start, P lines begin at 0.\n")
+            out.write("# rows are filtered at --min-private-bp=%d; unfiltered totals are in\n"
+                      % a.min_private_bp)
+            out.write("#   the header below and in .private_segment_spectrum.tsv.\n")
+            out.write("# segments_all=%d segment_bp_all=%d\n" % (len(segs), seg_total))
+            out.write("# segments_kept=%d segment_bp_kept=%d\n" % (len(kept), kept_total))
+            out.write("# repeat_traversed_bp=%d -- private bp a haplotype walks MORE THAN\n"
+                      % repeat_bp)
+            out.write("#   ONCE. by_contig (pass 4) credits such a node once, this pass counts\n")
+            out.write("#   each position, so segment_bp_all exceeds hap_private.tsv by about\n")
+            out.write("#   this amount. Not an error; it is repeat content within a haplotype.\n")
+            out.write("haplotype\tcontig\tseg_index\tn_nodes\tseg_bp\tstart\tend\n")
+            for s in sorted(kept, key=lambda x: (x[0], x[1], x[5])):
+                out.write("%s\t%s\t%d\t%d\t%d\t%d\t%d\n" % s)
+
+        with open(op(".private_segments.bed"), "w") as out:
+            out.write('track name="private_segments" description="private sequence >=%dbp"\n'
+                      % a.min_private_bp)
+            for s in sorted(kept, key=lambda x: (x[1], x[5])):
+                out.write("%s\t%d\t%d\t%s|seg%d\t%d\t.\n"
+                          % (s[1], s[5], s[6], s[0], s[2], min(1000, s[4])))
+
+        # the histogram Chris asked for: count AND bp per bin, on the SV bin edges so the
+        # two spectra can be read on one axis
+        spec_n = {}
+        spec_bp = {}
+        per_hap_n = {}
+        per_hap_bp = {}
+        for hs, cs, si, nn, bp, st, en in segs:
+            b = seg_bin(bp)
+            spec_n[b] = spec_n.get(b, 0) + 1
+            spec_bp[b] = spec_bp.get(b, 0) + bp
+            per_hap_n[(hs, b)] = per_hap_n.get((hs, b), 0) + 1
+            per_hap_bp[(hs, b)] = per_hap_bp.get((hs, b), 0) + bp
+        with open(op(".private_segment_spectrum.tsv"), "w") as out:
+            out.write("# UNFILTERED. Count and bp per size bin, on the same edges as the SV\n")
+            out.write("#   spectrum so the two are directly comparable -- which is the actual\n")
+            out.write("#   question: is the private-haplotype spectrum shaped like the SV one?\n")
+            out.write("scope\tsize_bin\tn_segments\tsegment_bp\n")
+            for b in sorted(spec_n, key=lambda x: SEG_BINS.index(
+                    int(x.split("-")[0].lstrip(">="))) if x.split("-")[0].lstrip(">=").isdigit()
+                    else 99):
+                out.write("ALL\t%s\t%d\t%d\n" % (b, spec_n[b], spec_bp[b]))
+            for (hs, b), n in sorted(per_hap_n.items()):
+                out.write("%s\t%s\t%d\t%d\n" % (hs, b, n, per_hap_bp[(hs, b)]))
+
+        sys.stderr.write("[gfa_hap_coverage] private segments: %d all (%d bp), "
+                         "%d >=%dbp (%d bp)\n"
+                         % (len(segs), seg_total, len(kept), a.min_private_bp, kept_total))
+        sys.stderr.write("[gfa_hap_coverage]   repeat_traversed_bp=%d; segment_bp_all - "
+                         "private_bp = %d\n" % (repeat_bp, seg_total - tot_private))
 
     # 4. marginal cross-check against panacus hist -------------------------------------
     marg = M.sum(axis=0)
