@@ -33,7 +33,13 @@
     unrelated at that locus rather than an artifact of representation.
 
     Input : tuple(taxid, raw_vcf)          (CACTUS_PANGENOME.out.raw_vcf)
-    Output: filtered vcf (+tbi) / blocks vcf (+tbi) / variant_summary / sv_sizes / versions
+    Output: parents vcf (+tbi) / filtered vcf (+tbi) / blocks vcf (+tbi) / tier_audit /
+            bcftools_stats / versions
+
+    NOTE: variant_summary and sv_sizes have MOVED to PANGENOME_CLASSIFY, which classifies
+    from graph traversals rather than allele string lengths and emits richer versions
+    (topology labels, exclusive primary_class, AC/AN, and three distinct bp measures -- per
+    allele, merged reference footprint, and pangenome node footprint).
 ========================================================================================
 */
 
@@ -51,8 +57,12 @@ process PANGENOME_VARIANTS {
     tuple val(taxid), path("${taxid}.variants.vcf.gz.tbi"), emit: tbi
     tuple val(taxid), path("${taxid}.blocks.vcf.gz"),       emit: blocks_vcf
     tuple val(taxid), path("${taxid}.blocks.vcf.gz.tbi"),   emit: blocks_tbi
-    tuple val(taxid), path("${taxid}.variant_summary.tsv"), emit: summary
-    tuple val(taxid), path("${taxid}.sv_sizes.tsv"),        emit: sv_sizes
+    // parent tier: LV == 0, no vcfbub popping. The ONLY view where AT is interpretable,
+    // because vcfwave + `bcftools norm -m` rewrite REF/ALT while AT is inherited from the
+    // parent record, so allele i stops corresponding to traversal i+1.
+    tuple val(taxid), path("${taxid}.parents.vcf.gz"),       emit: parents_vcf
+    tuple val(taxid), path("${taxid}.parents.vcf.gz.tbi"),   emit: parents_tbi
+    tuple val(taxid), path("${taxid}.tier_audit.tsv"),       emit: tier_audit
     tuple val(taxid), path("${taxid}.variants.bcftools_stats.txt"), emit: bcftools_stats
     path("versions.tsv"),                                   emit: versions
 
@@ -135,35 +145,37 @@ process PANGENOME_VARIANTS {
     rm -rf wchunks wave.norm.vcf.gz
     tabix -p vcf ${taxid}.variants.vcf.gz
 
-    bcftools query -f '%REF\\t%ALT\\n' ${taxid}.variants.vcf.gz > refalt.tsv
+    # ---- parent tier -----------------------------------------------------------------
+    # LV == 0 is exactly the top-level bubble set: on Spratelloides this yields 23,877,797
+    # records, identical to `vcfbub --max-level 0`. Derived by filter rather than a second
+    # vcfbub run, and NOT OR-ed with a size threshold -- vcfbub's hierarchy already handles
+    # nesting, so OR-ing a span floor would count a large nested bubble twice, once inside
+    # its parent and once as itself.
+    bcftools view -i 'INFO/LV=0' -Oz -o ${taxid}.parents.vcf.gz ${raw_vcf}
+    tabix -p vcf ${taxid}.parents.vcf.gz
 
-    # SNP + INDEL + SV is the exhaustive top-level partition (the report sums those three);
-    # SV_INS + SV_DEL + SV_COMPLEX + SV_BLOCKSUB sums to SV. m = the SHORTER allele: a clean
-    # presence/absence event has m ~ 1, whereas m >= minsv means both haplotypes carry
-    # substantial sequence at the locus and it was never a simple insertion or deletion.
-    awk -v minsv=${minsv} 'BEGIN{FS=OFS="\\t"}
-        { rl=length(\$1); al=length(\$2); d=(rl>al?rl-al:al-rl); m=(rl<al?rl:al)
-          if(rl==1 && al==1)              snp++
-          else if(d<minsv && m<minsv)     indel++
-          else if(d<minsv)              { sv++; cpx++ }
-          else if(m>=minsv)             { sv++; blk++ }
-          else { sv++; if(al>rl) ins++; else del++ } }
-        END{ print "class","count"
-             print "SNP",snp+0; print "INDEL",indel+0; print "SV",sv+0
-             print "SV_INS",ins+0; print "SV_DEL",del+0
-             print "SV_COMPLEX",cpx+0; print "SV_BLOCKSUB",blk+0 }' \\
-        refalt.tsv > ${taxid}.variant_summary.tsv
+    # ---- tier audit ------------------------------------------------------------------
+    # Emitted every run. The vcfbub cap is resolution recovery, not a ceiling: it ADDS
+    # records by popping oversized top-level bubbles into their children (31,365,160 with
+    # the cap vs 23,877,797 without on this graph, and 0 records at --max-ref-length 0,
+    # which is a literal zero limit). Reporting the three counts side by side keeps that
+    # from being rediscovered, and makes any change in the representation visible.
+    {
+      printf 'tier\\trecords\\tnote\\n'
+      printf 'raw\\t%s\\tall nesting levels, pre-vcfbub\\n' \\
+        "\$(bcftools index -n ${raw_vcf} 2>/dev/null || bcftools view -H ${raw_vcf} | wc -l)"
+      printf 'parent_LV0\\t%s\\ttop-level only; AT interpretable here\\n' \\
+        "\$(bcftools index -n ${taxid}.parents.vcf.gz)"
+      printf 'blocks_vcfbub\\t%s\\tmax-level 0, max-ref-length ${maxref}\\n' \\
+        "\$(bcftools index -n ${taxid}.blocks.vcf.gz)"
+      printf 'fine_decomposed\\t%s\\tafter vcfwave + norm -m; AT NO LONGER VALID\\n' \\
+        "\$(bcftools index -n ${taxid}.variants.vcf.gz)"
+    } > ${taxid}.tier_audit.tsv
 
-    # SV size spectrum (bp) + type, for the histogram. ref_len/alt_len are carried so the
-    # shorter allele is recoverable: sv_size_bp is only |REF|-|ALT|, which for a block
-    # substitution silently discards the kilobases sitting on the other side.
-    awk -v minsv=${minsv} 'BEGIN{FS=OFS="\\t"; print "sv_size_bp","sv_type","ref_len","alt_len"}
-        { rl=length(\$1); al=length(\$2); d=(rl>al?rl-al:al-rl); m=(rl<al?rl:al)
-          if(rl==1 && al==1) next
-          if(d<minsv && m>=minsv)      { print d,"COMPLEX",rl,al }
-          else if(d>=minsv && m>=minsv){ print d,"BLOCKSUB",rl,al }
-          else if(d>=minsv)            { print d,(al>rl?"INS":"DEL"),rl,al } }' \\
-        refalt.tsv > ${taxid}.sv_sizes.tsv
+    # Classification is NOT done here. PANGENOME_CLASSIFY derives classes from AT traversals
+    # rather than REF/ALT string lengths; the old awk discarded AT, LV/PS, AC/AN and every
+    # sample column before deciding, and its SV_COMPLEX / SV_BLOCKSUB were not variant
+    # classes but the buckets it used when it could not tell.
 
     # bcftools stats on the filtered catalog -> MultiQC bcftools module
     bcftools stats ${taxid}.variants.vcf.gz > ${taxid}.variants.bcftools_stats.txt
@@ -180,8 +192,11 @@ process PANGENOME_VARIANTS {
     """
     : > ${taxid}.variants.vcf.gz
     : > ${taxid}.variants.vcf.gz.tbi
-    printf 'class\\tcount\\n' > ${taxid}.variant_summary.tsv
-    printf 'sv_size_bp\\tsv_type\\n' > ${taxid}.sv_sizes.tsv
+    : > ${taxid}.parents.vcf.gz
+    : > ${taxid}.parents.vcf.gz.tbi
+    : > ${taxid}.blocks.vcf.gz
+    : > ${taxid}.blocks.vcf.gz.tbi
+    printf 'tier\\trecords\\tnote\\n' > ${taxid}.tier_audit.tsv
     : > ${taxid}.variants.bcftools_stats.txt
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """

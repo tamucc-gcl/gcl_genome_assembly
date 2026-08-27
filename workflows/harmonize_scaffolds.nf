@@ -87,6 +87,7 @@ workflow HARMONIZE_SCAFFOLDS {
         // pass-through: every assembly gets the sentinel, no barrier
         ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
         ch_report = Channel.empty()
+        ch_report_by_taxid = Channel.empty()
         ch_ref_id = Channel.empty()
         ch_ref_scores = Channel.empty()
     }
@@ -159,6 +160,13 @@ workflow HARMONIZE_SCAFFOLDS {
         HARMONIZE_SPECIES( ch_harm_in, resolver, hargs )
         ch_versions = ch_versions.mix( HARMONIZE_SPECIES.out.versions )
         ch_report   = HARMONIZE_SPECIES.out.report
+        // Taxid recovered from the FILENAME (<taxid>.harmonization_report.tsv) rather than
+        // from a tupled emit, so modules/harmonize_species.nf stays byte-identical and no
+        // task hash can move. Keep this in the workflow: adding the emit to the process is
+        // tidier to read and was the first attempt, but it risks re-running harmonization
+        // and everything downstream of it, cactus included.
+        ch_report_by_taxid = HARMONIZE_SPECIES.out.report
+            .map { f -> tuple(f.name.replaceFirst(/\..*$/, ''), f) }
 
         // re-key emitted name maps by assembly id (filename = <id>.harmonized_name_map.tsv)
         ch_name_map_by_id = HARMONIZE_SPECIES.out.name_maps
@@ -186,5 +194,6 @@ workflow HARMONIZE_SCAFFOLDS {
     reference_id   = ch_ref_id
     reference_scores = ch_ref_scores
     report         = ch_report
+    report_by_taxid = ch_report_by_taxid   // tuple(taxid, report) for per-species joins
     versions       = ch_versions
 }

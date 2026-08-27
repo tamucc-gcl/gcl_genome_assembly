@@ -40,9 +40,21 @@ process PANGENOME_HAP_COVERAGE {
     tuple val(taxid), path("${taxid}.hap_private.tsv"),         emit: hap_private
     tuple val(taxid), path("${taxid}.hap_coverage_check.tsv"),  emit: check
     tuple val(taxid), path("${taxid}.hap_private_by_contig.tsv"), emit: by_contig
+    // ---- private SEGMENTS (pass 5) ----------------------------------------------------
+    // Maximal runs of consecutive private (coverage == 1) nodes along each haplotype walk.
+    // The four outputs above are TOTALS and cannot answer "what does the private-haplotype
+    // size distribution look like"; these can. optional: true so the process still succeeds
+    // if py_scripts/gfa_hap_coverage.py has not yet had its fifth pass added.
+    tuple val(taxid), path("${taxid}.private_segments.tsv"),         emit: segments,  optional: true
+    tuple val(taxid), path("${taxid}.private_segments.bed"),         emit: segments_bed, optional: true
+    tuple val(taxid), path("${taxid}.private_segment_spectrum.tsv"), emit: spectrum,  optional: true
     path("versions.tsv"),                                       emit: versions
 
     script:
+    // Floor for the per-segment TABLE and BED only. The spectrum and the totals are written
+    // unfiltered regardless, so raising this bounds row count without hiding sequence --
+    // which matters because 33.5M of the 33.7M segments are under 1 kb.
+    def minpriv = params.pangenome_private_min_bp ?: 1000
     """
     set -euo pipefail
 
@@ -50,6 +62,7 @@ process PANGENOME_HAP_COVERAGE {
     python3 ${hapcov_script} \\
         --gfa ${gfa} \\
         --label ${taxid} \\
+        --min-private-bp ${minpriv} \\
         --outdir .
 
     {
@@ -65,6 +78,9 @@ process PANGENOME_HAP_COVERAGE {
     printf 'haplotype\\tsample\\thap\\tprivate_bp\\thap_bp\\tpct_of_private\\tpct_of_haplotype\\n' > ${taxid}.hap_private.tsv
     printf 'coverage_level\\tsum_over_haplotypes_bp\\tbp_reconstructed\\n' > ${taxid}.hap_coverage_check.tsv
     printf 'haplotype\\tcontig\\tprivate_bp\\tcontig_graph_bp\\tpct_of_contig\\tpct_of_hap_private\\tpct_of_pangenome_private\\n' > ${taxid}.hap_private_by_contig.tsv
+    printf 'haplotype\\tcontig\\tseg_index\\tn_nodes\\tseg_bp\\tstart\\tend\\n' > ${taxid}.private_segments.tsv
+    : > ${taxid}.private_segments.bed
+    printf 'scope\\tsize_bin\\tn_segments\\tsegment_bp\\n' > ${taxid}.private_segment_spectrum.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }

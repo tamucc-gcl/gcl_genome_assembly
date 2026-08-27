@@ -54,6 +54,11 @@ include { CACTUS_PANGENOME } from '../modules/cactus_pangenome.nf'
 include { PANGENOME_STATS     } from '../modules/pangenome_stats.nf'
 include { PANGENOME_REF_FASTA } from '../modules/pangenome_ref_fasta.nf'
 include { PANGENOME_VARIANTS  } from '../modules/pangenome_variants.nf'
+include { PANGENOME_CLASSIFY  } from '../modules/pangenome_classify.nf'
+include { PANGENOME_INVERSION_RESCUE } from '../modules/pangenome_inversion_rescue.nf'
+include { PANGENOME_STEPINDEX } from '../modules/pangenome_stepindex.nf'
+include { PANGENOME_UNTANGLE  } from '../modules/pangenome_untangle.nf'
+include { PANGENOME_REARRANGE } from '../modules/pangenome_rearrange.nf'
 include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
@@ -74,6 +79,8 @@ workflow PANGENOME {
     ch_finalized       // tuple(meta, fasta, fai)
     ch_reference_ids   // tuple(taxid, ref_id)
     ch_species         // tuple(taxid, species_name)  resolved from the taxid (RESOLVE_TAXONOMY)
+    ch_harm_report     // tuple(taxid, harmonization_report.tsv) -- PANGENOME_REARRANGE joins
+                       // it to tell real inversions from chimeric joins. May be empty.
 
     main:
     ch_versions  = Channel.empty()
@@ -88,6 +95,8 @@ workflow PANGENOME {
     ch_ref_fasta = Channel.empty()
     ch_variants  = Channel.empty()
     ch_sv_sizes  = Channel.empty()
+    ch_candidates = Channel.empty()
+    ch_untangle   = Channel.empty()
     ch_manifest  = Channel.empty()
     ch_stats     = Channel.empty()
     ch_growth    = Channel.empty()
@@ -249,9 +258,121 @@ workflow PANGENOME {
         ch_ref_name = ch_cactus_in.map { taxid, ref_name, names, fastas -> tuple(taxid, ref_name) }
         PANGENOME_REF_FASTA( ch_ref_name.join( CACTUS_PANGENOME.out.gbz ) )
 
-        // variant catalog (SNP / indel / SV counts + SV size spectrum) from the raw VCF
+        // decomposition only: parent tier (LV==0) + fine tier (vcfbub -> vcfwave -> norm).
+        // Classification moved to PANGENOME_CLASSIFY, which reads the graph's own allele
+        // traversals instead of REF/ALT string lengths.
         PANGENOME_VARIANTS( CACTUS_PANGENOME.out.raw_vcf )
         ch_versions = ch_versions.mix( PANGENOME_VARIANTS.out.versions )
+
+        // ---- topological classification + allele frequencies ---------------------------
+        // The PARENT tier is the only view where AT is interpretable: vcfwave and
+        // `bcftools norm -m` rewrite REF/ALT while AT is inherited from the parent record,
+        // so allele i stops corresponding to traversal i+1. The module refuses to compute
+        // topology on a decomposed VCF rather than trusting this wiring to be right.
+        if( params.pangenome_classify != false ) {
+            def classify_script = file("${projectDir}/py_scripts/classify_variants.py",
+                                       checkIfExists: true)
+
+            ch_classify_in = PANGENOME_VARIANTS.out.parents_vcf
+                .map { taxid, vcf -> tuple(taxid, 'clip', 'parent', vcf) }
+                .mix( PANGENOME_VARIANTS.out.vcf
+                        .map { taxid, vcf -> tuple(taxid, 'clip', 'fine', vcf) } )
+
+            PANGENOME_CLASSIFY( ch_classify_in, CACTUS_PANGENOME.out.gfa, classify_script )
+            ch_versions = ch_versions.mix( PANGENOME_CLASSIFY.out.versions )
+
+            // canonical arm for the existing per-taxid consumers: clip + parent, mapped back
+            // to tuple(taxid, file). The fine tier publishes alongside without entering the
+            // report; making the report flavour-aware is the report-matrix work.
+            ch_variants = PANGENOME_CLASSIFY.out.summary
+                .filter { taxid, flavor, tier, f -> flavor == 'clip' && tier == 'parent' }
+                .map    { taxid, flavor, tier, f -> tuple(taxid, f) }
+            ch_sv_sizes = PANGENOME_CLASSIFY.out.spectrum
+                .filter { taxid, flavor, tier, f -> flavor == 'clip' && tier == 'parent' }
+                .map    { taxid, flavor, tier, f -> tuple(taxid, f) }
+        }
+
+        // ---- alignment-rescued inversions ----------------------------------------------
+        // Recovers inversions whose alleles are DISJOINT node sets and therefore look like
+        // allele replacement to topology. Separate process because it is minimap2 over
+        // ~310k allele pairs while classification is minutes; its thresholds will be tuned.
+        if( params.pangenome_inv_rescue != false ) {
+            def rescue_script = file("${projectDir}/py_scripts/rescue_inversions.py",
+                                     checkIfExists: true)
+            PANGENOME_INVERSION_RESCUE(
+                PANGENOME_VARIANTS.out.parents_vcf.map { taxid, vcf -> tuple(taxid, 'clip', vcf) },
+                rescue_script
+            )
+            ch_versions = ch_versions.mix( PANGENOME_INVERSION_RESCUE.out.versions )
+        }
+
+        // ---- rearrangement: odgi untangle ----------------------------------------------
+        // The PRIMARY inversion / duplication instrument. chr10 alone yields ~21.5 Mb of
+        // inverted sequence against ~11 Mb genome-wide from both bubble-based detectors
+        // combined, and self.cov > 1 is the only duplication signal available at all.
+        //
+        // FULL graph first: clipping cuts paths into subpaths (556 vs 394 on chr10) and a
+        // rearrangement straddling a boundary is lost to path projection. Per chromosome
+        // because the whole-graph clip .og is 118 GB.
+        if( params.pangenome_untangle != false ) {
+            def rearr_script = file("${projectDir}/py_scripts/rearrange_from_untangle.py",
+                                    checkIfExists: true)
+            def unt_flavors = (params.pangenome_untangle_flavors ?: 'full,clip')
+                                  .toString().split(',').collect { it.trim() }
+
+            ch_unt_scatter = Channel.empty()
+            if( unt_flavors.contains('full') ) {
+                ch_unt_scatter = ch_unt_scatter.mix(
+                    CACTUS_PANGENOME.out.chrom_og_full.flatMap { taxid, ogs ->
+                        (ogs instanceof List ? ogs : [ogs]).collect { og -> tuple(taxid, 'full', og) }
+                    } )
+            }
+            if( unt_flavors.contains('clip') ) {
+                ch_unt_scatter = ch_unt_scatter.mix(
+                    CACTUS_PANGENOME.out.chrom_og.flatMap { taxid, ogs ->
+                        (ogs instanceof List ? ogs : [ogs])
+                            .findAll { !it.name.endsWith('.full.og') }
+                            .collect { og -> tuple(taxid, 'clip', og) }
+                    } )
+            }
+
+            // stepindex is a SEPARATE process for two reasons: odgi v0.9.2 in the cactus
+            // image crashes building the index inside untangle, and the index is invariant
+            // to every untangle parameter, so it survives retuning -e / -j / -n.
+            PANGENOME_STEPINDEX( ch_unt_scatter )
+            PANGENOME_UNTANGLE( PANGENOME_STEPINDEX.out.stpidx )
+            ch_versions = ch_versions.mix( PANGENOME_STEPINDEX.out.versions )
+            ch_versions = ch_versions.mix( PANGENOME_UNTANGLE.out.versions )
+            ch_untangle = PANGENOME_UNTANGLE.out.tsv
+
+            // one NO_FILE placeholder per taxid so an absent harmonization report cannot
+            // silently stop REARRANGE from ever running; the real report wins where present
+            ch_harm_safe = ch_species
+                .map { taxid, sp -> tuple(taxid, file('NO_FILE')) }
+                .mix( ch_harm_report )
+                .groupTuple()
+                .map { taxid, fs ->
+                    def real = fs.findAll { it.name != 'NO_FILE' }
+                    tuple(taxid, real ? real[0] : file('NO_FILE'))
+                }
+
+            // groupTuple WITHOUT size: on purpose. The count per flavour is known (one per
+            // chromosome), but PANGENOME_UNTANGLE carries errorStrategy 'ignore', so a
+            // single failed chromosome would leave a fixed-size groupTuple waiting forever.
+            // The barrier is the correct trade: collect whatever completed.
+            //
+            // combine by taxid, NOT a separate channel: the grouped channel emits once per
+            // flavour while the report channel emits once per taxid, so passing them
+            // separately would run this process once and silently drop a flavour.
+            PANGENOME_REARRANGE(
+                ch_untangle.groupTuple( by: [0, 1] )
+                    .combine( ch_harm_safe, by: 0 )
+                    .map { taxid, flavor, tsvs, harm -> tuple(taxid, flavor, tsvs, harm) },
+                rearr_script
+            )
+            ch_versions   = ch_versions.mix( PANGENOME_REARRANGE.out.versions )
+            ch_candidates = PANGENOME_REARRANGE.out.candidates
+        }
 
         // openness / growth (panacus on the finished clip GFA; workstream E)
         if( params.pangenome_growth != false ) {
@@ -278,8 +399,8 @@ workflow PANGENOME {
             def plots_script = file("${projectDir}/r_scripts/pangenome_plots.R", checkIfExists: true)
             PANGENOME_PLOTS(
                 PANGENOME_GROWTH.out.hist
-                    .join( PANGENOME_VARIANTS.out.sv_sizes )
-                    .join( PANGENOME_VARIANTS.out.summary )
+                    .join( ch_sv_sizes )
+                    .join( ch_variants )
                     .join( ch_hap_priv, remainder: true )
                     .map { taxid, hist, sv, vs, hp ->
                         tuple(taxid, hist, sv, vs, hp ?: file('NO_HAP_PRIVATE')) },
@@ -391,7 +512,7 @@ workflow PANGENOME {
         // that was disabled (the R script skips sentinels).
         if( params.pangenome_report != false ) {
             def report_script = file("${projectDir}/r_scripts/pangenome_report.R", checkIfExists: true)
-            ch_report_in = PANGENOME_VARIANTS.out.summary
+            ch_report_in = ch_variants
                 .join( ch_qc,                          remainder: true )
                 .join( ch_growth_fit,                  remainder: true )
                 .join( PANGENOME_STATS.out.odgi_stats, remainder: true )
@@ -423,8 +544,8 @@ workflow PANGENOME {
         ch_chrom_og  = CACTUS_PANGENOME.out.chrom_og
         ch_viz       = CACTUS_PANGENOME.out.viz
         ch_ref_fasta = PANGENOME_REF_FASTA.out.ref_fasta
-        ch_variants  = PANGENOME_VARIANTS.out.summary
-        ch_sv_sizes  = PANGENOME_VARIANTS.out.sv_sizes
+        // ch_variants / ch_sv_sizes are set by the PANGENOME_CLASSIFY block above; the
+        // length-based awk that used to fill them here has been removed.
         ch_manifest  = PANGENOME_MANIFEST.out.manifest
         ch_stats     = PANGENOME_STATS.out.vg_stats
     }
@@ -440,7 +561,9 @@ workflow PANGENOME {
     viz       = ch_viz          // 1D odgi viz PNGs (report)
     ref_fasta = ch_ref_fasta    // reference-path FASTA (downstream surjection)
     variants  = ch_variants     // variant summary table (report)
-    sv_sizes  = ch_sv_sizes     // SV size spectrum (report)
+    sv_sizes  = ch_sv_sizes     // SV size spectrum, coarse-binned (report)
+    candidates = ch_candidates  // rearrangement candidate loci, artifact-flagged
+    untangle  = ch_untangle     // per-chromosome path projections
     manifest  = ch_manifest     // role -> file downstream manifest
     stats     = ch_stats        // vg/odgi stats (report)
     growth       = ch_growth        // panacus growth/core curves (report)

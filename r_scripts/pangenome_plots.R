@@ -10,13 +10,16 @@
 # variance band, which panacus does not emit). Robust to small n.
 #
 # Usage:
-#   Rscript pangenome_plots.R <hist.tsv> <sv_sizes.tsv> <variant_summary.tsv> <label> <outdir> \
+#   Rscript pangenome_plots.R <hist.tsv> <size_spectrum.tsv> <variant_summary.tsv> <label> <outdir> \
 #       [hap_private=<tsv>] [ref=<sample#hap>] [core=1.0] [softcore=-1] [shell=2]
 #
 # Inputs:
 #   hist.tsv            panacus coverage histogram: col1 = coverage level (1..N), col2 = count (bp)
-#   sv_sizes.tsv        PANGENOME_VARIANTS: columns sv_size_bp, sv_type
-#   variant_summary.tsv PANGENOME_VARIANTS: columns class, count
+#   size_spectrum.tsv   PANGENOME_CLASSIFY: primary_class, size_bin, n_alleles,
+#                       per_allele_bp  (PRE-AGGREGATED: sv_sizes.tsv is one row per allele,
+#                       31.3M on a 10-haplotype fish graph, too large to read in R)
+#   variant_summary.tsv PANGENOME_CLASSIFY: primary_class, n_alleles, per_allele_bp,
+#                       pangenome_node_bp, novel_node_bp, merged_ref_footprint_bp
 # Outputs (in outdir):
 #   <label>.growth_curves.png, <label>.coverage_histogram.png,
 #   <label>.sv_size_histogram.png, <label>.variant_summary.png, <label>.growth_fit.tsv
@@ -29,7 +32,7 @@ suppressPackageStartupMessages({
 })
 
 args   <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 5) stop("usage: pangenome_plots.R <hist.tsv> <sv_sizes.tsv> <variant_summary.tsv> <label> <outdir>")
+if (length(args) < 5) stop("usage: pangenome_plots.R <hist.tsv> <size_spectrum.tsv> <variant_summary.tsv> <label> <outdir>")
 hist_f <- args[1]; sv_f <- args[2]; vs_f <- args[3]; label <- args[4]; outdir <- args[5]
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 op <- function(x) file.path(outdir, paste0(label, x))
@@ -228,38 +231,128 @@ if (!is.null(h_mat) && nrow(h_mat) >= 1) {
 write.table(growth_fit, op(".growth_fit.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
 
 # ======================================================================================
-# 2. SV size histogram (from sv_sizes.tsv: sv_size_bp, sv_type)
+# 2. SV size spectrum, COARSE BINS, count and bp (from size_spectrum.tsv)
+#
+# Both panels are drawn on purpose. Chris Bird's request was for "coarse bins on the x axis
+# and the y axis representing number of bp in SV, rather than number of SV" -- and the two
+# genuinely disagree: the small end is dominated by enormous numbers of tiny alleles that
+# carry almost no sequence, so a count histogram is close to a single spike while the bp
+# histogram shows where the sequence actually is.
+#
+# The y axis is labelled "summed allele bp" rather than "bp in SV" and NO TOTAL is printed,
+# because per-allele bp is a size-spectrum measure only: multiallelic sites reuse one
+# reference span and max(REF,ALT) counts ALT length when ALT is longer, which inflates the
+# SV sum to 2.95 Gb on a ~1 Gb reference. Panel 3b carries the defensible totals.
 # ======================================================================================
-sv <- try(read.delim(sv_f, stringsAsFactors = FALSE), silent = TRUE)
-if (!inherits(sv, "try-error") && nrow(sv) > 0 && "sv_size_bp" %in% names(sv)) {
-  sv$sv_size_bp <- suppressWarnings(as.numeric(sv$sv_size_bp))
-  sv <- sv[is.finite(sv$sv_size_bp) & sv$sv_size_bp > 0, , drop = FALSE]
-  if (nrow(sv) > 0) {
-    p3 <- ggplot(sv, aes(sv_size_bp, fill = sv_type)) +
-      geom_histogram(bins = 60, position = "stack", colour = NA) +
-      scale_x_log10(labels = scales::comma) +
-      labs(title = paste0(label, " \u2014 SV size spectrum"),
-           x = "SV size (bp, log scale)", y = "count", fill = NULL)
-    ggsave(op(".sv_size_histogram.png"), p3, width = 7, height = 5, dpi = 150)
+sv <- read_tsv_hash(sv_f)
+if (!is.null(sv) && nrow(sv) > 0 && all(c("primary_class", "size_bin") %in% names(sv))) {
+  sv$n_alleles    <- suppressWarnings(as.numeric(sv$n_alleles))
+  sv$per_allele_bp <- suppressWarnings(as.numeric(sv$per_allele_bp))
+
+  # order bins by their lower edge, taken from the label, so the axis is not alphabetical
+  lower <- suppressWarnings(as.numeric(sub("^>=", "", sub("-.*$", "", sv$size_bin))))
+  sv$size_bin <- factor(sv$size_bin, levels = unique(sv$size_bin[order(lower)]))
+
+  # SNP and INDEL are dropped from the SV spectrum: they are below the SV floor by
+  # definition and would compress every SV bin to invisibility
+  svsv <- sv[!(sv$primary_class %in% c("SNP", "INDEL")), , drop = FALSE]
+
+  if (nrow(svsv) > 0) {
+    p3 <- ggplot(svsv, aes(size_bin, n_alleles, fill = primary_class)) +
+      geom_col() +
+      scale_y_continuous(labels = scales::comma) +
+      labs(title = paste0(label, " \u2014 SV size spectrum (count)"),
+           x = "size of longer allele (bp)", y = "alleles", fill = NULL) +
+      theme_bw(base_size = 11) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    ggsave(op(".sv_size_histogram.png"), p3, width = 8, height = 5, dpi = 150)
+
+    p3b <- ggplot(svsv, aes(size_bin, per_allele_bp, fill = primary_class)) +
+      geom_col() +
+      scale_y_continuous(labels = scales::comma) +
+      labs(title = paste0(label, " \u2014 SV size spectrum (bp)"),
+           subtitle = "summed allele bp per bin; not a genome-wide total (see bp measures)",
+           x = "size of longer allele (bp)", y = "summed allele bp", fill = NULL) +
+      theme_bw(base_size = 11) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    ggsave(op(".sv_size_histogram_bp.png"), p3b, width = 8, height = 5, dpi = 150)
   }
-} else message("sv_sizes table empty/unreadable; skipping SV histogram")
+} else message("size_spectrum table empty/unreadable; skipping SV spectra")
 
 # ======================================================================================
-# 3. variant class summary bar (from variant_summary.tsv: class, count)
+# 3. variant class bar, from primary_class (topology-derived, exclusive partition)
 # ======================================================================================
-vs <- try(read.delim(vs_f, stringsAsFactors = FALSE), silent = TRUE)
-if (!inherits(vs, "try-error") && nrow(vs) > 0 && all(c("class", "count") %in% names(vs))) {
-  keep <- c("SNP", "INDEL", "SV")
-  vv <- vs[vs$class %in% keep, , drop = FALSE]
-  vv$class <- factor(vv$class, levels = keep)
-  vv$count <- as.numeric(vv$count)
-  p4 <- ggplot(vv, aes(class, count, fill = class)) +
+vs <- read_tsv_hash(vs_f)
+if (!is.null(vs) && nrow(vs) > 0 && all(c("primary_class", "n_alleles") %in% names(vs))) {
+  vs$n_alleles <- suppressWarnings(as.numeric(vs$n_alleles))
+
+  # SNP / INDEL / SV roll-up, so the figure stays comparable with published runs that
+  # predate the topological classifier
+  sv_classes <- setdiff(unique(vs$primary_class), c("SNP", "INDEL"))
+  roll <- data.frame(
+    class = c("SNP", "INDEL", "SV"),
+    count = c(sum(vs$n_alleles[vs$primary_class == "SNP"],   na.rm = TRUE),
+              sum(vs$n_alleles[vs$primary_class == "INDEL"], na.rm = TRUE),
+              sum(vs$n_alleles[vs$primary_class %in% sv_classes], na.rm = TRUE)),
+    stringsAsFactors = FALSE)
+  roll$class <- factor(roll$class, levels = c("SNP", "INDEL", "SV"))
+  p4 <- ggplot(roll, aes(class, count, fill = class)) +
     geom_col(show.legend = FALSE) +
     geom_text(aes(label = scales::comma(count)), vjust = -0.3, size = 3.5) +
     scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
-    labs(title = paste0(label, " \u2014 variant catalog"), x = NULL, y = "count")
+    labs(title = paste0(label, " \u2014 variant catalog"), x = NULL, y = "alleles") +
+    theme_bw(base_size = 11)
   ggsave(op(".variant_summary.png"), p4, width = 6, height = 5, dpi = 150)
-} else message("variant_summary table empty/unreadable; skipping variant bar")
+
+  # the topological partition itself, which is what replaced COMPLEX / BLOCKSUB
+  vv <- vs[vs$primary_class %in% sv_classes, , drop = FALSE]
+  vv <- vv[order(-vv$n_alleles), , drop = FALSE]
+  if (nrow(vv) > 0) {
+    vv$primary_class <- factor(vv$primary_class, levels = vv$primary_class)
+    p4b <- ggplot(vv, aes(primary_class, n_alleles, fill = primary_class)) +
+      geom_col(show.legend = FALSE) +
+      scale_y_log10(labels = scales::comma) +
+      labs(title = paste0(label, " \u2014 SV classes from graph topology"),
+           subtitle = "INV_PATH_EXPLICIT is a FLOOR: topology sees only path-explicit inversions",
+           x = NULL, y = "alleles (log scale)") +
+      theme_bw(base_size = 11) +
+      theme(axis.text.x = element_text(angle = 30, hjust = 1))
+    ggsave(op(".variant_primary_class.png"), p4b, width = 7, height = 5, dpi = 150)
+  }
+
+  # ---- 3b. the three bp measures, side by side --------------------------------------
+  # They differ by more than an order of magnitude and choosing one silently would be a
+  # real error. novel_node_bp is 0 for DEL by construction -- a deletion traverses only
+  # reference nodes -- while merged_ref_footprint_bp is near 0 for INS for the mirror
+  # reason. Neither alone answers "how much sequence is in structural variants".
+  bpcols <- c("per_allele_bp", "novel_node_bp", "merged_ref_footprint_bp")
+  if (all(bpcols %in% names(vs))) {
+    long <- do.call(rbind, lapply(bpcols, function(cc) {
+      data.frame(primary_class = vs$primary_class,
+                 measure = cc,
+                 bp = suppressWarnings(as.numeric(vs[[cc]])),
+                 stringsAsFactors = FALSE)
+    }))
+    long <- long[long$primary_class %in% sv_classes & is.finite(long$bp) & long$bp > 0,
+                 , drop = FALSE]
+    if (nrow(long) > 0) {
+      long$measure <- factor(long$measure, levels = bpcols,
+                             labels = c("per allele (size spectrum only)",
+                                        "novel node bp (graph-native)",
+                                        "merged reference footprint"))
+      p4c <- ggplot(long, aes(primary_class, bp, fill = measure)) +
+        geom_col(position = "dodge") +
+        scale_y_log10(labels = scales::comma) +
+        labs(title = paste0(label, " \u2014 three bp measures per SV class"),
+             subtitle = "per-allele bp is NOT a total; DEL has no novel sequence by construction",
+             x = NULL, y = "bp (log scale)", fill = NULL) +
+        theme_bw(base_size = 11) +
+        theme(axis.text.x = element_text(angle = 30, hjust = 1),
+              legend.position = "bottom")
+      ggsave(op(".variant_bp_measures.png"), p4c, width = 8, height = 5.5, dpi = 150)
+    }
+  }
+} else message("variant_summary table empty/unreadable; skipping variant bars")
 
 # ======================================================================================
 # 4. private-sequence ownership by haplotype  (from PANGENOME_HAP_COVERAGE)
