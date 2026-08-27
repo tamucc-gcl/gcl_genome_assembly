@@ -311,6 +311,24 @@ def load_node_lengths(gfa):
     return arr, max_id
 
 
+def merged_length_by_chrom(iv_by_key, want_class=None):
+    """Sum of per-chromosome merged lengths. Intervals from different chromosomes must
+    NEVER be merged together; they are different coordinate spaces."""
+    total = 0
+    for (cls, chrom), ivs in iv_by_key.items():
+        if want_class is None or cls == want_class:
+            total += merged_length(ivs)
+    return total
+
+
+def merged_length_all_chroms(iv_by_key):
+    """Merged footprint pooling all classes, still per chromosome."""
+    per = defaultdict(list)
+    for (cls, chrom), ivs in iv_by_key.items():
+        per[chrom].extend(ivs)
+    return sum(merged_length(v) for v in per.values()), len(per)
+
+
 def merged_length(intervals):
     if not intervals:
         return 0
@@ -393,7 +411,14 @@ def main():
     label_n, label_bp = Counter(), Counter()
     cooc = Counter()
     xtab = Counter()
-    ref_iv = defaultdict(list)        # primary_class -> reference intervals
+    # KEYED BY (class, chrom). Keying by class alone overlays every chromosome onto one
+    # coordinate axis, so chr1:5,000,000 and chr7:5,000,000 merge into a single interval and
+    # every footprint is silently bounded by the longest chromosome. That produced SUBST
+    # 89,538,307 and all-classes 90,307,914 against chr1_1's 94.7 Mb -- and a subset of SUBST
+    # (>=500 kb alleles, merged per chromosome) came to 146,413,587, exceeding the supposed
+    # whole. Third instance of the same error class in this project: a footprint computed
+    # without respecting the coordinate frame.
+    ref_iv = defaultdict(list)        # (primary_class, chrom) -> reference intervals
     af_spec = Counter()
     ac_present = 0
     priv_sample = Counter()
@@ -508,7 +533,7 @@ def main():
                 _b = bin_label(longer, edges)
                 prim_bins[(pc, _b)] += 1
                 prim_bins_bp[(pc, _b)] += longer
-                ref_iv[pc].append((r0, r1))
+                ref_iv[(pc, chrom)].append((r0, r1))
 
                 ac = ac_list[i] if i < len(ac_list) else -1
                 af = (ac / an_i) if (an_i and ac >= 0) else -1.0
@@ -566,7 +591,8 @@ def main():
         for k in sorted(prim_n, key=lambda x: -prim_n[x]):
             inv, nov = nt.get(k, (-1, -1))
             out.write("%s\t%d\t%d\t%d\t%d\t%d\n"
-                      % (k, prim_n[k], prim_bp[k], inv, nov, merged_length(ref_iv[k])))
+                      % (k, prim_n[k], prim_bp[k], inv, nov,
+                         merged_length_by_chrom(ref_iv, k)))
 
     # separate file: two tables in one file cannot be read by read.delim, and the
     # length-based classes are legacy context rather than the primary partition
@@ -580,6 +606,15 @@ def main():
             out.write("%s\t%d\t%d\n" % (k, cls_n[k], cls_bp[k]))
         out.write("SV\t%d\t%d\n" % (sum(cls_n[k] for k in SV_CLASSES),
                                       sum(cls_bp[k] for k in SV_CLASSES)))
+
+    with open(op(".ref_footprint_by_chrom.tsv"), "w") as out:
+        out.write("# Merged reference footprint per CHROMOSOME per class. Emitted so a wrong\n")
+        out.write("# total is decomposable: if one row's footprint exceeds its chromosome's\n")
+        out.write("# length, or the table has one row where it should have fifteen, the\n")
+        out.write("# intervals were merged across coordinate spaces.\n")
+        out.write("chrom\tprimary_class\tmerged_ref_footprint_bp\n")
+        for (cls, chrom), ivs in sorted(ref_iv.items(), key=lambda x: (x[0][1], x[0][0])):
+            out.write("%s\t%s\t%d\n" % (chrom, cls, merged_length(ivs)))
 
     with open(op(".size_spectrum.tsv"), "w") as out:
         out.write("# PRE-AGGREGATED plot input. sv_sizes.tsv has one row per allele -- 31.3M\n")
@@ -644,8 +679,11 @@ def main():
         out.write("sv_alleles\t%d\n" % sv_alleles)
         out.write("sv_per_allele_bp_SUM_DO_NOT_USE_AS_TOTAL\t%d\n"
                   % sum(cls_bp[k] for k in SV_CLASSES))
-        allref = merged_length([iv for k in prim_n for iv in ref_iv[k]])
+        allref, n_chroms = merged_length_all_chroms(ref_iv)
         out.write("merged_ref_footprint_all_classes\t%d\n" % allref)
+        out.write("chromosomes_seen\t%d\n" % n_chroms)
+        out.write("# A footprint total near the length of ONE chromosome when many are\n")
+        out.write("# present means intervals were merged across coordinate spaces.\n")
         if nodefp is not None:
             ai, an = nodefp.totals(node_lengths).get("__ALL__", (-1, -1))
             out.write("graph_total_bp\t%d\n" % int(node_lengths.sum()))
@@ -669,8 +707,9 @@ def main():
                                      sorted(prim_n.items(), key=lambda x: -x[1])))
         sys.stderr.write("[classify] INV_PATH_EXPLICIT=%d -- a FLOOR, not an inversion count\n"
                          % label_n["INV_PATH_EXPLICIT"])
-    sys.stderr.write("[classify] merged REFERENCE footprint, all classes: %d bp\n"
-                     % merged_length([iv for k in prim_n for iv in ref_iv[k]]))
+    _allref, _nchrom = merged_length_all_chroms(ref_iv)
+    sys.stderr.write("[classify] merged REFERENCE footprint, all classes: %d bp "
+                     "across %d chromosomes\n" % (_allref, _nchrom))
     if nodefp is not None:
         ai, an = nodefp.totals(node_lengths).get("__ALL__", (-1, -1))
         sys.stderr.write("[classify] PANGENOME node footprint, all classes: %d bp\n" % ai)
