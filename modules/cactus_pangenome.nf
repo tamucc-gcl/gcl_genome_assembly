@@ -45,6 +45,23 @@ process CACTUS_PANGENOME {
     tuple val(taxid), path("out/${taxid}.chroms/*"),   emit: chrom_og
     tuple val(taxid), path("out/${taxid}.gaf.gz"),      emit: gaf, optional: true
     tuple val(taxid), path("out/${taxid}.viz/*"),      emit: viz
+    // ---- full-graph handles -----------------------------------------------------------
+    // Produced by the `full clip` arguments already passed to --gfa/--gbz/--odgi/--chrom-og
+    // and by --vcf full clip below, but previously reachable only via the out/** catch-all.
+    // The full graph carries 704,499,041 bp that clipping removes, 99.1% of it private, so
+    // private-sequence and large-event analyses belong on this arm rather than the clip arm.
+    // All optional: a wrong naming assumption must not fail a multi-hour cactus task.
+    tuple val(taxid), path("out/${taxid}.full.gbz"),        emit: gbz_full,      optional: true
+    tuple val(taxid), path("out/${taxid}.full.og"),         emit: og_full,       optional: true
+    tuple val(taxid), path("out/${taxid}.full.gfa.gz"),     emit: gfa_full,      optional: true
+    tuple val(taxid), path("out/${taxid}.full.snarls"),     emit: snarls_full,   optional: true
+    tuple val(taxid), path("out/${taxid}.full.vcf.gz"),     emit: vcf_full,      optional: true
+    tuple val(taxid), path("out/${taxid}.full.vcf.gz.tbi"), emit: vcf_full_tbi,  optional: true
+    tuple val(taxid), path("out/${taxid}.full.raw.vcf.gz"), emit: raw_vcf_full,  optional: true
+    // per-chromosome graphs, both flavours. chrom_og above globs out/<taxid>.chroms/* and so
+    // already includes the .full.og files; these give each flavour its own named channel so
+    // consumers stop having to filter on the filename.
+    tuple val(taxid), path("out/${taxid}.chroms/*.full.og"), emit: chrom_og_full, optional: true
     // catch-all: keeps + publishes everything cactus produced EXCEPT the construction scratch
     // removed in-script (full graphs, HAL, GAF/PAF, SV graph, raw VCF, stats bundle, ...).
     // '**' so future cactus outputs are retained automatically (general-purpose).
@@ -101,7 +118,7 @@ process CACTUS_PANGENOME {
         --outName ${taxid} \\
         --reference ${ref_name} \\
         --refContigs \${REFCONTIGS} \\
-        --vcf \\
+        --vcf full clip \\
         --haplo \\
         --gfa full clip \\
         --gbz full clip \\
@@ -125,7 +142,12 @@ process CACTUS_PANGENOME {
     stub:
     """
     mkdir -p out out/${taxid}.chroms out/${taxid}.viz
-    for x in gbz og hapl snarls gfa.gz vcf.gz vcf.gz.tbi; do : > "out/${taxid}.\$x"; done
+    for x in gbz og hapl snarls gfa.gz vcf.gz vcf.gz.tbi raw.vcf.gz; do : > "out/${taxid}.\$x"; done
+    # full-graph twins, so -stub-run exercises the same channel topology as a real run
+    for x in full.gbz full.og full.gfa.gz full.snarls full.vcf.gz full.vcf.gz.tbi full.raw.vcf.gz; do
+        : > "out/${taxid}.\$x"
+    done
+    : > out/${taxid}.chroms/chr1_1.full.og
     : > out/${taxid}.chroms/chr1_1.og
     : > out/${taxid}.viz/chr1_1.viz.png
     : > seqfile.txt
