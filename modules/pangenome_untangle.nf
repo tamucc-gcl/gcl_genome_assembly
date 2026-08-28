@@ -83,6 +83,15 @@ process PANGENOME_UNTANGLE {
     path("versions.tsv"), emit: versions, optional: true
 
     script:
+    // og is now the COMPACTED graph from PANGENOME_STEPINDEX (<chrom>.opt.og). Nextflow's
+    // simpleName strips ALL extensions (documented: file.tar.gz -> file), so this yields
+    // <chrom> for chr8_1.og, chr8_1.full.og and chr8_1.opt.og alike, and published names
+    // stay <chrom>.<flavor>.untangle.tsv.gz.
+    //
+    // Deliberately NOT stripping ".opt" defensively here: the output: block above must use
+    // the same expression, and it cannot see a script-block variable. If the two ever
+    // diverged the task would fail with a missing output -- so a "defensive" transform here
+    // would create exactly the breakage it was meant to guard against.
     def base   = og.simpleName
     def cutev  = params.pangenome_untangle_cut_every   ?: 10000
     def minjac = params.pangenome_untangle_min_jaccard ?: 0.1

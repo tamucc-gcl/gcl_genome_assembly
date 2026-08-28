@@ -268,6 +268,14 @@ def by_contig(gfa, cov, nlen, groups):
 
 
 # ---- pass 5: private segments (additive; passes 1-4 above are unchanged) ------------
+# WARNING -- DO NOT RUN THIS SCRIPT ON A COMPACTED PER-CHROMOSOME GRAPH.
+# Every pass here indexes node IDs into arrays sized from the whole-graph GFA's max node id.
+# PANGENOME_STEPINDEX emits `<chrom>.opt.og` with a renumbered, dense ID space (needed because
+# odgi's untangle overflows an atomic bitvector on the clip graphs' sparse IDs). Those IDs do
+# NOT correspond to the whole-graph IDs, so coverage would be attributed to the wrong nodes
+# and the result would be silently wrong rather than an error. This script runs WHOLE-GRAPH
+# per flavour for that reason, and also because 139 composite scaffolds span more than one
+# chromosome subgraph, which would fragment private runs at subgraph boundaries.
 def private_segments(gfa, cov, nlen, groups):
     """Maximal runs of consecutive private (cov == 1) nodes along each haplotype walk.
 

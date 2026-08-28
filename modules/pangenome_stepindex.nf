@@ -26,8 +26,15 @@
        The index is 26% of the cost and ~900 MB on disk, so caching it separately is the
        same argument as splitting PANGENOME_VARIANTS from PANGENOME_CLASSIFY.
 
+    3. IT COMPACTS THE NODE ID SPACE, which is a second and unrelated odgi bug. Cactus
+       compacts IDs for the FULL per-chromosome graphs but not the CLIP ones -- chr8_1.og
+       holds 9,395,486 nodes with IDs to 142,488,970 (15.2x) while chr8_1.full.og is 1.00x.
+       odgi's atomic bitvector is sized by node COUNT and indexed by node ID, so untangle
+       aborts in "set target nodes" with `atomic_bitvector.hpp:159 Assertion idx < _size`.
+       All 15 clip tasks failed this way; all 15 full tasks passed. `odgi sort -O` fixes it.
+
     Input : tuple(taxid, flavor, og)
-    Output: tuple(taxid, flavor, og, stpidx) / versions
+    Output: tuple(taxid, flavor, COMPACTED og, stpidx) / versions
 ========================================================================================
 */
 
@@ -39,8 +46,12 @@ process PANGENOME_STEPINDEX {
     tuple val(taxid), val(flavor), path(og)
 
     output:
-    tuple val(taxid), val(flavor), path(og), path("${og.simpleName}.stpidx"), emit: stpidx
-    path("versions.tsv"),                                                    emit: versions
+    // the COMPACTED graph is emitted, not the input: the step index is built against
+    // renumbered node IDs and is meaningless applied to the original.
+    tuple val(taxid), val(flavor),
+          path("${og.simpleName}.opt.og"),
+          path("${og.simpleName}.opt.stpidx"), emit: stpidx
+    path("versions.tsv"),                      emit: versions
 
     script:
     def base = og.simpleName
@@ -48,7 +59,24 @@ process PANGENOME_STEPINDEX {
     set -euo pipefail
     export HOME="\$PWD"
 
-    odgi stepindex -i ${og} -o ${base}.stpidx -t ${task.cpus} -P
+    # ---- compact the node ID space ---------------------------------------------------
+    # MANDATORY for clip-flavour graphs. Cactus compacts IDs for the full per-chromosome
+    # graphs but not the clip ones, so a clip graph can hold 9.4M nodes with IDs running to
+    # 142M (measured on chr8_1: 15.2x). odgi's atomic bitvector is sized by node COUNT and
+    # indexed by node ID, so untangle aborts in "set target nodes" with
+    # `atomic_bitvector.hpp:159 Assertion idx < _size failed`. All 15 clip tasks failed this
+    # way while all 15 full tasks succeeded.
+    #
+    # Applied unconditionally: detecting whether it is needed costs a full `odgi view -g`
+    # scan for the max node id, which is more expensive than just doing it. Cheap and
+    # idempotent on an already-dense graph.
+    #
+    # Renumbering is invisible downstream -- untangle reports in PATH coordinates, so no
+    # node ID escapes this process.
+    odgi sort -i ${og} -o ${base}.opt.og -O -t ${task.cpus} -P
+
+    # index MUST be built on the compacted graph
+    odgi stepindex -i ${base}.opt.og -o ${base}.opt.stpidx -t ${task.cpus} -P
 
     {
       printf 'process\\ttool\\tversion\\n'
@@ -58,7 +86,8 @@ process PANGENOME_STEPINDEX {
 
     stub:
     """
-    : > ${og.simpleName}.stpidx
+    : > ${og.simpleName}.opt.og
+    : > ${og.simpleName}.opt.stpidx
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }
