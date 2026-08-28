@@ -69,8 +69,13 @@ process PANGENOME_UNTANGLE {
     tag "${taxid}:${flavor}:${og.simpleName}"
     label 'pangenome_untangle'
 
-    // best-effort per chromosome: one oversized graph must not fail the run
-    errorStrategy 'ignore'
+    // Deliberately NOT 'ignore'. That was set assuming a failure would mean one oversized
+    // graph, but the clip-arm failures were a systematic odgi bug hitting all 15 tasks
+    // identically -- and 'ignore' let the run continue with an empty clip channel, so
+    // PANGENOME_REARRANGE silently never ran and the run "succeeded" with no clip
+    // rearrangement data. A missing chromosome must be loud.
+    errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'terminate' }
+    maxRetries 2
 
     publishDir "${params.outdir}/pangenome/${taxid}/untangle", mode: params.publish_dir_mode
 
