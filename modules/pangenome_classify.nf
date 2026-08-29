@@ -39,19 +39,25 @@
     --gfa is what enables the node measures, and its own S-line total is checked against
     odgi: 1,926,892,905 bp for the clip graph, matching `odgi stats -S` exactly.
 
+    NOT SCATTERED BY CHROMOSOME. The whole 23,877,797-record parent view classifies in
+    well under an hour single-threaded, so a tabix split would add 15x the task count, a
+    merge step and a groupTuple barrier for no measurable gain. Same reasoning that keeps
+    PANGENOME_HAP_COVERAGE whole-graph. If a future cohort makes this the bottleneck, adding
+    the scatter is a channel change, not a module change.
+
     Input : tuple(taxid, flavor, tier, vcf), gfa, script
     Output: summary / sv_sizes / bed / spectrum / xtab / cooccurrence / af / private / audit
 ========================================================================================
 */
 
 process PANGENOME_CLASSIFY {
-    tag "${taxid}:${flavor}:${tier}:${chrom}"
+    tag "${taxid}:${flavor}:${tier}"
     label 'pangenome_classify'
 
     publishDir "${params.outdir}/pangenome/${taxid}/variants", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), val(flavor), val(tier), val(chrom), path(vcf)
+    tuple val(taxid), val(flavor), val(tier), path(vcf)
     tuple val(gtaxid), path(gfa)
     path(script)
 
@@ -86,7 +92,7 @@ process PANGENOME_CLASSIFY {
         --label ${taxid} \\
         --flavor ${flavor} \\
         --tier ${tier} \\
-        --chrom ${chrom} \\
+        --chrom all \\
         --minsv ${minsv} \\
         --sv-bins '${bins}' \\
         ${usegfa}
@@ -99,7 +105,7 @@ process PANGENOME_CLASSIFY {
 
     stub:
     """
-    S=${taxid}.${flavor}.${tier}.${chrom}
+    S=${taxid}.${flavor}.${tier}.all
     for f in variant_summary sv_sizes size_spectrum af_spectrum representation_audit \\
              topology_xtab label_cooccurrence private_variants; do : > \$S.\$f.tsv; done
     : > \$S.variants.bed

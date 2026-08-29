@@ -43,19 +43,23 @@
     affordable and cannot introduce a selection bias; the prefilter's sampling once passed
     only 0.08% of candidates, almost all of them large.
 
+    NOT SCATTERED BY CHROMOSOME either. The whole-VCF run over ~310,000 candidate pairs
+    completed comfortably as one task during development, so the scatter would buy little
+    and cost a merge. Revisit only if measurement says otherwise.
+
     Input : tuple(taxid, flavor, vcf), script
     Output: candidates / calls BED / summary / unresolved profile / versions
 ========================================================================================
 */
 
 process PANGENOME_INVERSION_RESCUE {
-    tag "${taxid}:${flavor}:${chrom}"
+    tag "${taxid}:${flavor}"
     label 'pangenome_inversion_rescue'
 
     publishDir "${params.outdir}/pangenome/${taxid}/variants", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), val(flavor), val(chrom), path(vcf)
+    tuple val(taxid), val(flavor), path(vcf)
     path(script)
 
     output:
@@ -77,7 +81,7 @@ process PANGENOME_INVERSION_RESCUE {
     python3 ${script} \\
         --vcf ${vcf} \\
         --outdir . \\
-        --label ${taxid}.${flavor}.${chrom} \\
+        --label ${taxid}.${flavor} \\
         --min-bp ${minbp} \\
         --minsv ${minsv} \\
         --min-frac ${minfrac} \\
@@ -95,7 +99,7 @@ process PANGENOME_INVERSION_RESCUE {
 
     stub:
     """
-    S=${taxid}.${flavor}.${chrom}
+    S=${taxid}.${flavor}
     for f in rescue_candidates rescue_summary rescue_unresolved_profile; do : > \$S.\$f.tsv; done
     : > \$S.rescue_calls.bed
     printf 'process\\ttool\\tversion\\n' > versions.tsv
