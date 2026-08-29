@@ -264,6 +264,23 @@ workflow PANGENOME {
         PANGENOME_VARIANTS( CACTUS_PANGENOME.out.raw_vcf )
         ch_versions = ch_versions.mix( PANGENOME_VARIANTS.out.versions )
 
+        // parents_vcf feeds BOTH classification and inversion rescue. Referencing it twice
+        // starves one of them: on the first run PANGENOME_INVERSION_RESCUE got the item and
+        // PANGENOME_CLASSIFY submitted only its `fine` task, so the PARENT tier -- the only
+        // view where AT is interpretable, and therefore the only place topology is valid --
+        // silently never ran. No error, no warning, just a missing analysis.
+        //
+        // multiMap forks a single read into named outputs so both consumers are fed. It sits
+        // OUTSIDE both `if` blocks on purpose: defined inside the classify block it would be
+        // undefined whenever pangenome_classify = false, breaking rescue with a missing
+        // property error for a reason that has nothing to do with rescue.
+        PANGENOME_VARIANTS.out.parents_vcf
+            .multiMap { taxid, vcf ->
+                classify: tuple(taxid, 'clip', 'parent', vcf)
+                rescue:   tuple(taxid, 'clip', vcf)
+            }
+            .set { ch_parents }
+
         // ---- topological classification + allele frequencies ---------------------------
         // The PARENT tier is the only view where AT is interpretable: vcfwave and
         // `bcftools norm -m` rewrite REF/ALT while AT is inherited from the parent record,
@@ -273,8 +290,7 @@ workflow PANGENOME {
             def classify_script = file("${projectDir}/py_scripts/classify_variants.py",
                                        checkIfExists: true)
 
-            ch_classify_in = PANGENOME_VARIANTS.out.parents_vcf
-                .map { taxid, vcf -> tuple(taxid, 'clip', 'parent', vcf) }
+            ch_classify_in = ch_parents.classify
                 .mix( PANGENOME_VARIANTS.out.vcf
                         .map { taxid, vcf -> tuple(taxid, 'clip', 'fine', vcf) } )
 
@@ -299,10 +315,8 @@ workflow PANGENOME {
         if( params.pangenome_inv_rescue != false ) {
             def rescue_script = file("${projectDir}/py_scripts/rescue_inversions.py",
                                      checkIfExists: true)
-            PANGENOME_INVERSION_RESCUE(
-                PANGENOME_VARIANTS.out.parents_vcf.map { taxid, vcf -> tuple(taxid, 'clip', vcf) },
-                rescue_script
-            )
+            // ch_parents.rescue, not a second read of parents_vcf -- see the multiMap above
+            PANGENOME_INVERSION_RESCUE( ch_parents.rescue, rescue_script )
             ch_versions = ch_versions.mix( PANGENOME_INVERSION_RESCUE.out.versions )
         }
 
@@ -402,6 +416,15 @@ workflow PANGENOME {
                     .join( ch_sv_sizes )
                     .join( ch_variants )
                     .join( ch_hap_priv, remainder: true )
+                    // remainder: true is right for hap_priv, which is genuinely optional --
+                    // but it also emits UNMATCHED RIGHT-HAND entries when the left side is
+                    // empty, as [taxid, null, hap_private] with a single null placeholder
+                    // because Nextflow never saw the left channel's arity. Destructuring that
+                    // into five parameters aborts the whole pipeline with a Groovy arity
+                    // error that names a closure and says nothing about the cause. An absent
+                    // variant catalog must mean "no plots", not "kill the run".
+                    .filter { def l = it as List
+                              l.size() >= 4 && l[1] != null && l[2] != null && l[3] != null }
                     .map { taxid, hist, sv, vs, hp ->
                         tuple(taxid, hist, sv, vs, hp ?: file('NO_HAP_PRIVATE')) },
                 plots_script
