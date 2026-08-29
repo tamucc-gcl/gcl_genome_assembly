@@ -74,6 +74,19 @@ process PANGENOME_CLASSIFY {
           path("*.af_spectrum.tsv"),           emit: af
     tuple val(taxid), val(flavor), val(tier),
           path("*.representation_audit.tsv"),  emit: audit
+    // Per-chromosome merged reference footprint. Emitted because a single total is not
+    // auditable: keying reference intervals by class alone silently overlays all fifteen
+    // chromosomes onto one coordinate axis, so every footprint gets bounded by the LONGEST
+    // chromosome. That bug gave SUBST 89,538,307 bp and all-classes 90,307,914 against
+    // chr1_1's 94.7 Mb -- while a SUBSET of SUBST, merged per chromosome, came to
+    // 146,413,587. Fifteen rows where there should be fifteen is the check; one row, or a
+    // row whose footprint exceeds its own chromosome, means the frames were mixed again.
+    tuple val(taxid), val(flavor), val(tier),
+          path("*.ref_footprint_by_chrom.tsv"), emit: footprint_by_chrom
+    // Legacy length-based classes, in their own file: two tables in one file cannot be read
+    // by read.delim, which is why they were split out of variant_summary.tsv.
+    tuple val(taxid), val(flavor), val(tier),
+          path("*.length_class_summary.tsv"),  emit: length_classes
     path("*.topology_xtab.tsv"),               emit: xtab,        optional: true
     path("*.label_cooccurrence.tsv"),          emit: cooccurrence, optional: true
     path("*.private_variants.tsv"),            emit: private_variants, optional: true
@@ -107,6 +120,7 @@ process PANGENOME_CLASSIFY {
     """
     S=${taxid}.${flavor}.${tier}.all
     for f in variant_summary sv_sizes size_spectrum af_spectrum representation_audit \\
+             ref_footprint_by_chrom length_class_summary \\
              topology_xtab label_cooccurrence private_variants; do : > \$S.\$f.tsv; done
     : > \$S.variants.bed
     printf 'process\\ttool\\tversion\\n' > versions.tsv
