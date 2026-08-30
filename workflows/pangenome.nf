@@ -274,6 +274,8 @@ workflow PANGENOME {
         // OUTSIDE both `if` blocks on purpose: defined inside the classify block it would be
         // undefined whenever pangenome_classify = false, breaking rescue with a missing
         // property error for a reason that has nothing to do with rescue.
+        PANGENOME_VARIANTS.out.parents_vcf.view { "PARENTS_VCF: $it" }
+
         PANGENOME_VARIANTS.out.parents_vcf
             .multiMap { taxid, vcf ->
                 classify: tuple(taxid, 'clip', 'parent', vcf)
@@ -291,8 +293,10 @@ workflow PANGENOME {
                                        checkIfExists: true)
 
             ch_classify_in = ch_parents.classify
+                .view { "PARENT_BRANCH: $it" }
                 .mix( PANGENOME_VARIANTS.out.vcf
                         .map { taxid, vcf -> tuple(taxid, 'clip', 'fine', vcf) } )
+                .view { "CLASSIFY_IN: $it" }
 
             PANGENOME_CLASSIFY( ch_classify_in, CACTUS_PANGENOME.out.gfa, classify_script )
             ch_versions = ch_versions.mix( PANGENOME_CLASSIFY.out.versions )
