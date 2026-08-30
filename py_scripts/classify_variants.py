@@ -173,7 +173,7 @@ def length_class(rl, al, minsv):
     return "SV_INS" if al > rl else "SV_DEL"
 
 
-def primary_class(labels, lc):
+def primary_class(labels, lc, topology_on=True):
     """Exclusive partition. SUBST is deliberately NOT subdivided here.
 
     rescue_inversions.py measures frac_fwd/frac_rev per SUBST allele and the join step
@@ -183,6 +183,12 @@ def primary_class(labels, lc):
     the GRAPH chose to represent homologous sequence, not about the sequences themselves.
     """
     if lc in ("SNP", "INDEL"):
+        return lc
+    # Fine tier: AT is not interpretable after decomposition, so no labels exist and every SV
+    # would otherwise fall through to UNCLASSIFIED -- 2,088,522 of them on this cohort, which
+    # is true but useless. The LENGTH class is the honest answer for that tier: it says the
+    # call is length-based, which is exactly what it is.
+    if not topology_on:
         return lc
     dup = ("DUP" in labels) or ("DUP_NOVEL" in labels)
     if "INV_PATH_EXPLICIT" in labels:
@@ -520,7 +526,7 @@ def main():
                         xtab[(lc, lab)] += 1
                     cooc[",".join(sorted(labels)) or "NONE"] += 1
 
-                pc = primary_class(labels, lc)
+                pc = primary_class(labels, lc, topology_on)
                 if nodefp is not None and trav is not None and i + 1 < len(trav):
                     ref_ids = [n for n, _ in trav[0]]
                     alt_ids = [n for n, _ in trav[i + 1]]
@@ -589,7 +595,10 @@ def main():
                   "novel_node_bp\tmerged_ref_footprint_bp\n")
         nt = nodefp.totals(node_lengths) if nodefp is not None else {}
         for k in sorted(prim_n, key=lambda x: -prim_n[x]):
-            inv, nov = nt.get(k, (-1, -1))
+            # node accounting needs traversals, so it is NOT COMPUTABLE without topology.
+            # Reporting 0 there would read as "measured zero" -- INS having 0 novel bp is a
+            # real and meaningful result in the parent tier, so the two must not look alike.
+            inv, nov = nt.get(k, (-1, -1)) if topology_on else (-1, -1)
             out.write("%s\t%d\t%d\t%d\t%d\t%d\n"
                       % (k, prim_n[k], prim_bp[k], inv, nov,
                          merged_length_by_chrom(ref_iv, k)))
