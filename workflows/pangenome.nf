@@ -298,7 +298,29 @@ workflow PANGENOME {
                         .map { taxid, vcf -> tuple(taxid, 'clip', 'fine', vcf) } )
                 .view { "CLASSIFY_IN: $it" }
 
-            PANGENOME_CLASSIFY( ch_classify_in, CACTUS_PANGENOME.out.gfa, classify_script )
+            // Pair each VCF with its OWN graph, by taxid, and hand the process two channels
+            // of EQUAL cardinality.
+            //
+            // Passing CACTUS_PANGENOME.out.gfa directly was the bug: it is a queue channel
+            // with one item, ch_classify_in has two (parent and fine), and Nextflow consumes
+            // input channels in LOCKSTEP -- one item from each per task. Two against one
+            // makes one task, and the parent tuple was discarded with no error and nothing
+            // in the log. The parent tier is the only view where AT is interpretable, so
+            // topological classification never ran at all while the fine tier published a
+            // complete set of files and made the absence look like a downstream problem.
+            //
+            // .first() would also make both tasks run, but takes the first item regardless
+            // of taxid -- correct for one species, silently wrong for two, and wrong in a
+            // way that produces plausible numbers rather than an error.
+            ch_classify_in
+                .combine( CACTUS_PANGENOME.out.gfa, by: 0 )
+                .multiMap { taxid, flavor, tier, vcf, gfa ->
+                    vcfs: tuple(taxid, flavor, tier, vcf)
+                    gfas: tuple(taxid, gfa)
+                }
+                .set { ch_cls }
+
+            PANGENOME_CLASSIFY( ch_cls.vcfs, ch_cls.gfas, classify_script )
             ch_versions = ch_versions.mix( PANGENOME_CLASSIFY.out.versions )
 
             // canonical arm for the existing per-taxid consumers: clip + parent, mapped back
