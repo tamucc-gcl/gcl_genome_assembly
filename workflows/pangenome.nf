@@ -547,6 +547,7 @@ workflow PANGENOME {
                     }
 
                 ch_priv_keyed = ch_priv_fa.combine( ch_hap_asm, by: [0, 1] )
+                ch_priv_keyed.count().view { "PRIV_KEYED_COUNT: $it" }
 
                 // .first() is load-bearing: the index is a queue channel with ONE item, and
                 // without it the twenty MAP tasks would consume it once and nineteen would
