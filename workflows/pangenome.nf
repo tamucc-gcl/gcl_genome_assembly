@@ -274,7 +274,6 @@ workflow PANGENOME {
         // OUTSIDE both `if` blocks on purpose: defined inside the classify block it would be
         // undefined whenever pangenome_classify = false, breaking rescue with a missing
         // property error for a reason that has nothing to do with rescue.
-        PANGENOME_VARIANTS.out.parents_vcf.view { "PARENTS_VCF: $it" }
 
         PANGENOME_VARIANTS.out.parents_vcf
             .multiMap { taxid, vcf ->
@@ -293,10 +292,8 @@ workflow PANGENOME {
                                        checkIfExists: true)
 
             ch_classify_in = ch_parents.classify
-                .view { "PARENT_BRANCH: $it" }
                 .mix( PANGENOME_VARIANTS.out.vcf
                         .map { taxid, vcf -> tuple(taxid, 'clip', 'fine', vcf) } )
-                .view { "CLASSIFY_IN: $it" }
 
             // Pair each VCF with its OWN graph, by taxid, and hand the process two channels
             // of EQUAL cardinality.
@@ -384,7 +381,6 @@ workflow PANGENOME {
             ch_versions = ch_versions.mix( PANGENOME_STEPINDEX.out.versions )
             ch_versions = ch_versions.mix( PANGENOME_UNTANGLE.out.versions )
             ch_untangle = PANGENOME_UNTANGLE.out.tsv
-            ch_untangle.groupTuple( by: [0, 1] ).count().view { "GROUPED_COUNT: $it" }
 
             // one NO_FILE placeholder per taxid so an absent harmonization report cannot
             // silently stop REARRANGE from ever running; the real report wins where present
@@ -393,7 +389,6 @@ workflow PANGENOME {
                 .unique()
                 .combine( ch_harm_report.map { taxid, rpt -> rpt }.ifEmpty( file('NO_FILE') ) )
                 .map { label, rpt -> tuple(label, rpt) }
-                .view { "HARM_SAFE: $it" }
 
             // groupTuple WITHOUT size: on purpose. The count per flavour is known (one per
             // chromosome), but PANGENOME_UNTANGLE carries errorStrategy 'ignore', so a
@@ -405,12 +400,10 @@ workflow PANGENOME {
             // separately would run this process once and silently drop a flavour.
             ch_rearr_in = ch_untangle.groupTuple( by: [0, 1] )
                 .combine( ch_harm_safe, by: 0 )
-                .view { "REARR_IN: $it" }
 
             PANGENOME_REARRANGE(
                 ch_rearr_in
                     .map { taxid, flavor, tsvs, harm -> tuple(taxid, flavor, tsvs, harm) }
-                    .view { "REARR_PASSED: $it" },
                 rearr_script
             )
             ch_versions   = ch_versions.mix( PANGENOME_REARRANGE.out.versions )
