@@ -260,14 +260,34 @@ workflow PANGENOME {
                 return [ tuple(label, refName, named*.name, named*.fa) ]
             }
 
-        CACTUS_PANGENOME( ch_cactus_in )
+        // ch_cactus_in has FIVE consumers: this call, ch_ref_name, ch_hap_asm,
+        // PANGENOME_PRIVATE_INDEX and ch_prog_in. It is a plain queue channel with one item
+        // per species -- not a process output -- so ONE read consumes it and the other four
+        // are starved silently: no error, no warning, just a process that appears in the
+        // summary and never creates a task. PANGENOME_PRIVATE_INDEX was winning the race and
+        // ch_hap_asm came back empty, which is why the private MAP/KMER/JOIN chain never ran.
+        //
+        // multiMap subscribes once and fans out, so every consumer is fed. The branches carry
+        // identical values, so CACTUS_PANGENOME's task hash is unchanged and the existing
+        // graph stays cached -- confirm that on the first resume.
+        ch_cactus_in
+            .multiMap { taxid, ref_name, names, fastas ->
+                cactus:  tuple(taxid, ref_name, names, fastas)
+                refname: tuple(taxid, ref_name)
+                hapasm:  tuple(taxid, ref_name, names, fastas)
+                index:   tuple(taxid, ref_name, names, fastas)
+                prog:    tuple(taxid, ref_name, names, fastas)
+            }
+            .set { ch_cin }
+
+        CACTUS_PANGENOME( ch_cin.cactus )
         ch_versions = ch_versions.mix( CACTUS_PANGENOME.out.versions )
 
         // graph statistics (clip graph)
         PANGENOME_STATS( CACTUS_PANGENOME.out.gbz.join( CACTUS_PANGENOME.out.og ) )
 
         // reference-path FASTA (needs the PanSN reference name from the cactus input)
-        ch_ref_name = ch_cactus_in.map { taxid, ref_name, names, fastas -> tuple(taxid, ref_name) }
+        ch_ref_name = ch_cin.refname
         PANGENOME_REF_FASTA( ch_ref_name.join( CACTUS_PANGENOME.out.gbz ) )
 
         // decomposition only: parent tier (LV==0) + fine tier (vcfbub -> vcfwave -> norm).
@@ -499,7 +519,7 @@ workflow PANGENOME {
                 // The sample id deliberately does NOT apply that dot replacement -- it exists
                 // because cactus forbids dots in sample names, whereas the meryl database is
                 // keyed on the reads' raw meta.id.
-                ch_hap_asm = ch_cactus_in.flatMap { label, refName, names, fas ->
+                ch_hap_asm = ch_cin.hapasm.flatMap { label, refName, names, fas ->
                     def nl = (names instanceof List) ? names : [names]
                     def fl = (fas   instanceof List) ? fas   : [fas]
                     if( nl.size() != fl.size() ) {
@@ -525,7 +545,7 @@ workflow PANGENOME {
                 // tagged <assembly_id>::<contig> because harmonization gives every assembly
                 // the same chromosome names, so an untagged concatenation identifies nothing.
                 PANGENOME_PRIVATE_INDEX(
-                    ch_cactus_in.map { label, refName, names, fas ->
+                    ch_cin.index.map { label, refName, names, fas ->
                         def fl = (fas instanceof List) ? fas : [fas]
                         tuple(label, fl.collect { it.simpleName }, fl)
                     } )
@@ -547,7 +567,6 @@ workflow PANGENOME {
                     }
 
                 ch_priv_keyed = ch_priv_fa.combine( ch_hap_asm, by: [0, 1] )
-                ch_priv_keyed.count().view { "PRIV_KEYED_COUNT: $it" }
 
                 // .first() is load-bearing: the index is a queue channel with ONE item, and
                 // without it the twenty MAP tasks would consume it once and nineteen would
@@ -665,7 +684,7 @@ workflow PANGENOME {
 
         // progressive (incremental-construction) growth via minigraph — opt-in (workstream H)
         if( params.pangenome_progressive ) {
-            ch_prog_in = ch_cactus_in.map { taxid, ref, names, fastas -> tuple(taxid, names.join(' '), fastas) }
+            ch_prog_in = ch_cin.prog.map { taxid, ref, names, fastas -> tuple(taxid, names.join(' '), fastas) }
             PANGENOME_PROGRESSIVE( ch_prog_in )
             ch_versions = ch_versions.mix( PANGENOME_PROGRESSIVE.out.versions )
 
