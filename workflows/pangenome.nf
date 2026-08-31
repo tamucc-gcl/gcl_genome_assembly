@@ -387,10 +387,11 @@ workflow PANGENOME {
 
             // one NO_FILE placeholder per taxid so an absent harmonization report cannot
             // silently stop REARRANGE from ever running; the real report wins where present
-            ch_harm_safe = ch_species
-                .map { taxid, sp -> tuple(taxid, 'x') }
-                .join( ch_harm_report, remainder: true )
-                .map { taxid, marker, rpt -> tuple(taxid, rpt ?: file('NO_FILE')) }
+            ch_harm_safe = ch_untangle
+                .map { label, flavor, f -> label }
+                .unique()
+                .combine( ch_harm_report.map { taxid, rpt -> rpt }.ifEmpty( file('NO_FILE') ) )
+                .map { label, rpt -> tuple(label, rpt) }
                 .view { "HARM_SAFE: $it" }
 
             // groupTuple WITHOUT size: on purpose. The count per flavour is known (one per
