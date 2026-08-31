@@ -971,6 +971,17 @@ workflow {
 
     // Pangenome graph (minigraph-cactus) per species, from the gated finalized assemblies.
     ch_finalized_with_fai = FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.fai)
+
+    /*
+    ========================================================================================
+        BUILD MERYL DATABASE (Once per sample)
+        Runs in parallel with trimming and assembly
+        Reused across ALL assembly QC steps for dramatic speedup
+    ========================================================================================
+    */
+    BUILD_MERYL_DB(ch_qc_reads)
+    ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
+
     // resolved organism name per taxid (RESOLVE_TAXONOMY -> ch_taxonomy; tax.name is the
     // taxid-derived species, e.g. 373251 -> "Spratelloides delicatulus")
     ch_species_by_taxid = ch_taxonomy.map { taxid, tax -> tuple(taxid.toString(), tax.name) }
@@ -1037,16 +1048,6 @@ workflow {
         QC Steps
     ========================================================================================
     */
-
-    /*
-    ========================================================================================
-        BUILD MERYL DATABASE (Once per sample)
-        Runs in parallel with trimming and assembly
-        Reused across ALL assembly QC steps for dramatic speedup
-    ========================================================================================
-    */
-    BUILD_MERYL_DB(ch_qc_reads)
-    ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
 
     /*
     ========================================================================================
