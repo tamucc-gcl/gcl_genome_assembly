@@ -536,6 +536,7 @@ workflow PANGENOME {
                         tuple(label, safe, hk, asm, smp)
                     }
                 }
+                ch_hap_asm.map { it[0..1] }.view { "HAP_ASM_KEY: $it" }
 
                 // GFA read ONCE per flavour; emits one FASTA per haplotype
                 PANGENOME_PRIVATE_FASTA( ch_hc_in, pf_script )
@@ -567,6 +568,7 @@ workflow PANGENOME {
                     }
 
                 ch_priv_keyed = ch_priv_fa.combine( ch_hap_asm, by: [0, 1] )
+                ch_priv_fa.map { it[0..1] }.view { "PRIV_FA_KEY: $it" }
 
                 // .first() is load-bearing: the index is a queue channel with ONE item, and
                 // without it the twenty MAP tasks would consume it once and nineteen would
