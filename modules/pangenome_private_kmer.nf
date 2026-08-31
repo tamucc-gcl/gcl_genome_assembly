@@ -110,17 +110,19 @@ process PANGENOME_PRIVATE_KMER {
             --kmer ${kmer} --repeat-ratio ${rratio} --single-copy "\$REF"
 
     # ---- one table carrying both sets ------------------------------------------------
+    # Single awk, NO PIPES. `grep -v '^#' "\$P" | head -1` sends SIGPIPE to grep when head
+    # closes after one line, and `set -o pipefail` turns that into exit 141 -- which is
+    # exactly how this task failed, and the same trap already documented in
+    # pangenome_untangle.nf about piping `odgi paths -L` into head.
     P=${stem}.private.private_kmer.tsv
     C=${stem}.control.private_kmer.tsv
-    { grep -h '^#' "\$P"
-      grep -v '^#' "\$P" | head -1
-      grep -v '^#' "\$P" | tail -n +2
-      grep -v '^#' "\$C" | tail -n +2
-    } > ${stem}.private_kmer.combined.tsv
-
-    np=\$(grep -vc '^#' "\$P" || true)
-    nc=\$(grep -vc '^#' "\$C" || true)
-    echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] \$((np-1)) private + \$((nc-1)) control rows" >&2
+    awk '
+      FNR==1          { nf++ }
+      /^#/            { if (nf==1) print; next }
+      \$1=="haplotype" { if (!hdr) { print; hdr=1 } next }
+                      { print; rows[\$3]++ }
+      END             { for (s in rows) printf("[PRIVATE_KMER] %s rows: %d\\n", s, rows[s]) > "/dev/stderr" }
+    ' "\$P" "\$C" > ${stem}.private_kmer.combined.tsv
 
     # High absence means the wrong meryl database was joined -- these are the sample's own
     # reads, so its own k-mers must be present. Measured against EXPECTED positions, since

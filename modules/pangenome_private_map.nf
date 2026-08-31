@@ -115,14 +115,19 @@ process PANGENOME_PRIVATE_MAP {
         fi
     done
 
-    # one table carrying both sets
+    # one table carrying both sets. Single awk, NO PIPES: `grep -v '^#' f | head -1` sends
+    # SIGPIPE to grep when head closes, and `set -o pipefail` turns that into exit 141. That
+    # is how PANGENOME_PRIVATE_KMER failed, and the same trap is already documented in
+    # pangenome_untangle.nf about piping `odgi paths -L` into head.
     P=${stem}.private.private_map.tsv
     C=${stem}.control.private_map.tsv
-    { grep -h '^#' "\$P"
-      grep -v '^#' "\$P" | head -1
-      grep -v '^#' "\$P" | tail -n +2
-      grep -v '^#' "\$C" | tail -n +2
-    } > ${stem}.private_map.combined.tsv
+    awk '
+      FNR==1          { nf++ }
+      /^#/            { if (nf==1) print; next }
+      \$1=="haplotype" { if (!hdr) { print; hdr=1 } next }
+                      { print; rows[\$2]++ }
+      END             { for (s in rows) printf("[PRIVATE_MAP] %s rows: %d\\n", s, rows[s]) > "/dev/stderr" }
+    ' "\$P" "\$C" > ${stem}.private_map.combined.tsv
 
     rm -f hits.private.paf.gz hits.control.paf.gz
 

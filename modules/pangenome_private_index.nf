@@ -93,7 +93,10 @@ PAIRS
     done < pairs.tsv
 
     # duplicate target names would make hit attribution ambiguous; fail rather than guess
-    dup=\$(grep '^>' all.fa | sort | uniq -d | head -5)
+    # awk rather than `| head -5`: head closing early sends SIGPIPE up the pipeline, which
+    # `set -o pipefail` converts into a task failure. Harmless while there are no duplicates
+    # and fatal exactly when there are -- i.e. precisely when the check needs to report.
+    dup=\$(grep '^>' all.fa | sort | uniq -d | awk 'NR<=5')
     if [ -n "\$dup" ]; then
         echo "[PRIVATE_INDEX ${taxid}] ERROR: duplicate target names after tagging:" >&2
         echo "\$dup" >&2
