@@ -404,9 +404,12 @@ workflow PANGENOME {
             // combine by taxid, NOT a separate channel: the grouped channel emits once per
             // flavour while the report channel emits once per taxid, so passing them
             // separately would run this process once and silently drop a flavour.
+            ch_rearr_in = ch_untangle.groupTuple( by: [0, 1] )
+                .combine( ch_harm_safe, by: 0 )
+                .view { "REARR_IN: $it" }
+
             PANGENOME_REARRANGE(
-                ch_untangle.groupTuple( by: [0, 1] )
-                    .combine( ch_harm_safe, by: 0 )
+                ch_rearr_in
                     .map { taxid, flavor, tsvs, harm -> tuple(taxid, flavor, tsvs, harm) },
                 rearr_script
             )
