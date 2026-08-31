@@ -387,16 +387,11 @@ workflow PANGENOME {
 
             // one NO_FILE placeholder per taxid so an absent harmonization report cannot
             // silently stop REARRANGE from ever running; the real report wins where present
-            ch_harm_report.view { "HARM_REPORT: $it" }
-            
             ch_harm_safe = ch_species
-                .map { taxid, sp -> tuple(taxid, file('NO_FILE')) }
-                .mix( ch_harm_report )
-                .groupTuple()
-                .map { taxid, fs ->
-                    def real = fs.findAll { it.name != 'NO_FILE' }
-                    tuple(taxid, real ? real[0] : file('NO_FILE'))
-                }
+                .map { taxid, sp -> tuple(taxid, 'x') }
+                .join( ch_harm_report, remainder: true )
+                .map { taxid, marker, rpt -> tuple(taxid, rpt ?: file('NO_FILE')) }
+                .view { "HARM_SAFE: $it" }
 
             // groupTuple WITHOUT size: on purpose. The count per flavour is known (one per
             // chromosome), but PANGENOME_UNTANGLE carries errorStrategy 'ignore', so a
