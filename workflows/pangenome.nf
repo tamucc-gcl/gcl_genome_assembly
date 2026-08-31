@@ -532,7 +532,7 @@ workflow PANGENOME {
                         // cactus renders seqfile name "X.N" as PanSN X#N, and bare "X" as X#0
                         def hk   = nm.contains('.') ? nm.replaceFirst(/\./, '#') : "${nm}#0"
                         def safe = hk.replace('#', '_')
-                        def smp  = asm.replaceFirst(/_hap[0-9]+\$/, '')
+                        def smp  = asm.replaceAll(/_hap[0-9]+$/, '')
                         tuple(label, safe, hk, asm, smp)
                     }
                 }
@@ -562,7 +562,7 @@ workflow PANGENOME {
                         fl.collect { f ->
                             def safe = f.name
                                 .replaceFirst('^' + java.util.regex.Pattern.quote("${taxid}.${flavor}."), '')
-                                .replaceFirst(/\.private\.fa\$/, '')
+                                .replaceAll('\\.private\\.fa', '')
                             tuple(taxid, safe, flavor, f)
                         }
                     }
