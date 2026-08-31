@@ -40,7 +40,16 @@
     the segment table without a coordinate lookup.
 
     Input : tuple(taxid, flavor, gfa), script
-    Output: per-haplotype FASTAs (flattened for scatter) / manifest / audit / versions
+    Output: per-haplotype PRIVATE and CONTROL FASTAs (flattened for scatter) / manifest /
+            audit / versions
+
+    The control windows are the other half of the deliverable. ~14% of a haplotype is private,
+    so a control drawn without filtering would be ~14% contaminated toward the private value;
+    candidate windows more than control_max_private_frac private are REJECTED rather than
+    masked, because masking creates junction k-mers that exist nowhere in the genome and would
+    be scored as absent. Sizes are drawn from the private distribution of the SAME
+    (haplotype, contig), since multiplicity correlates with length and private sequence is not
+    uniformly distributed across chromosomes.
 ========================================================================================
 */
 
@@ -59,6 +68,13 @@ process PANGENOME_PRIVATE_FASTA {
     // groupTuple barrier on the consumer side
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.*.private.fa"),
         emit: fastas, optional: true
+    // size-matched NON-PRIVATE windows from the same haplotype and contig. Without these the
+    // private set has nothing to be compared against and "is private sequence repeat
+    // enriched?" is not a testable question -- an earlier version calibrated against the
+    // private segments themselves and produced a single-copy reference of 233-436 where the
+    // true value is ~14, because the reference absorbed the signal under test.
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.*.control.fa"),
+        emit: controls, optional: true
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_fasta_manifest.tsv"),
         emit: manifest
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_fasta_audit.tsv"),
@@ -67,6 +83,10 @@ process PANGENOME_PRIVATE_FASTA {
 
     script:
     def minbp = params.pangenome_private_min_bp ?: 1000
+    def ctrl  = (params.pangenome_private_control != false) ? '--control' : ''
+    def cfrac = params.pangenome_private_control_max_private_frac ?: 0.05
+    def cratio = params.pangenome_private_control_bp_ratio ?: 1.0
+    def seed  = params.pangenome_private_control_seed ?: 42
     """
     set -euo pipefail
 
@@ -74,7 +94,11 @@ process PANGENOME_PRIVATE_FASTA {
         --gfa ${gfa} \\
         --label ${taxid}.${flavor} \\
         --outdir . \\
-        --min-bp ${minbp}
+        --min-bp ${minbp} \\
+        ${ctrl} \\
+        --control-max-private-frac ${cfrac} \\
+        --control-bp-ratio ${cratio} \\
+        --seed ${seed}
 
     # The audit asserts internally that segment_bp == fasta_bp_total. It must ALSO match the
     # >=${minbp} bp rows of private_segment_spectrum.tsv from gfa_hap_coverage.py: the two
@@ -97,6 +121,7 @@ process PANGENOME_PRIVATE_FASTA {
     stub:
     """
     : > ${taxid}.${flavor}.stub_hap_1.private.fa
+    : > ${taxid}.${flavor}.stub_hap_1.control.fa
     printf 'label\\thaplotype\\tfasta\\tn_segments\\tfasta_bp\\n' \\
       > ${taxid}.${flavor}.private_fasta_manifest.tsv
     printf 'metric\\tvalue\\nsegment_bp\\t0\\nfasta_bp_total\\t0\\n' \\

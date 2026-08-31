@@ -63,6 +63,8 @@ process PANGENOME_PRIVATE_JOIN {
     tuple val(taxid), val(flavor),
           path("${taxid}.${flavor}.private_evidence_xtab.tsv"),  emit: xtab
     tuple val(taxid), val(flavor),
+          path("${taxid}.${flavor}.private_evidence.csv"),       emit: csv
+    tuple val(taxid), val(flavor),
           path("${taxid}.${flavor}.private_evidence_audit.tsv"), emit: audit
     path("versions.tsv"),                                        emit: versions
 
@@ -75,18 +77,31 @@ process PANGENOME_PRIVATE_JOIN {
         --map ${map_tables} \\
         --kmer ${kmer_tables} \\
         --label ${taxid}.${flavor} \\
+        --flavor ${flavor} \\
         --outdir . \\
         --bins '${bins}'
 
-    # Both streams run on the SAME per-haplotype FASTAs, so every segment must appear in both.
-    # A segment in one and not the other means a task failed or a haplotype was dropped from
-    # one scatter but not the other -- which would quietly bias the cross-tabulation, since
-    # the missing rows are not random with respect to verdict.
+    # A WHOLE HAPLOTYPE absent from either stream is a failed task and is fatal. A handful
+    # of individual segments is NOT: minimap2 omits a query that aligns nowhere at all, so
+    # low-complexity segments legitimately have no map row. The original check conflated the
+    # two and failed the run over 41 such segments while all 20 tasks had succeeded.
     A=${taxid}.${flavor}.private_evidence_audit.tsv
-    mk=\$(awk -F'\\t' '\$1=="segments_without_kmer_row"{print \$2}' "\$A")
-    mm=\$(awk -F'\\t' '\$1=="segments_without_map_row"{print \$2}'  "\$A")
-    if [ "\${mk:-0}" -ne 0 ] || [ "\${mm:-0}" -ne 0 ]; then
-        echo "[PRIVATE_JOIN ${taxid}:${flavor}] ERROR: \$mk segments lack k-mer data and" >&2
+    miss_m=$(awk -F'\t' '$1=="haplotypes_missing_from_map"{print $2}'  "$A")
+    miss_k=$(awk -F'\t' '$1=="haplotypes_missing_from_kmer"{print $2}' "$A")
+    if [ "${miss_m:--}" != "-" ] || [ "${miss_k:--}" != "-" ]; then
+        echo "[PRIVATE_JOIN ${taxid}:${flavor}] ERROR: whole haplotypes missing." >&2
+        echo "  absent from map : ${miss_m}" >&2
+        echo "  absent from kmer: ${miss_k}" >&2
+        echo "  A failed MAP or KMER task would bias the cross-tabulation." >&2
+        exit 1
+    fi
+    nm=$(awk -F'\t' '$1=="segments_without_map_row"{print $2}' "$A")
+    if [ "${nm:-0}" -gt 0 ]; then
+        echo "[PRIVATE_JOIN ${taxid}:${flavor}] NOTE: ${nm} segments have no map row" >&2
+        echo "  (aligned nowhere, incl. to their own assembly). Reported as NO_MAP_ROW." >&2
+    fi
+
+    echo "[PRIVATE_JOIN ${taxid}:${flavor}] ERROR: \$mk segments lack k-mer data and" >&2
         echo "  \$mm lack mapping data. The two scatters processed different haplotype sets;" >&2
         echo "  the cross-tabulation would be biased. Check for a failed MAP or KMER task." >&2
         exit 1

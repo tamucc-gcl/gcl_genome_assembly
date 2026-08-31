@@ -44,7 +44,11 @@
     PRESET must match PANGENOME_PRIVATE_INDEX -- a minimap2 index bakes in k and w, and a
     mismatched query preset is an error. Both read pangenome_private_map_preset.
 
-    Input : tuple(taxid, flavor, haplotype, assembly_id, fasta), index, script
+    Both the PRIVATE set and its size-matched NON-PRIVATE CONTROL run in one task, against
+    the same index with the same parameters. The control is only interpretable if it is
+    measured identically, and one task guarantees that.
+
+    Input : tuple(taxid, flavor, haplotype, assembly_id, private_fa, control_fa), index, script
     Output: per-segment table / audit / versions
 ========================================================================================
 */
@@ -56,12 +60,14 @@ process PANGENOME_PRIVATE_MAP {
     publishDir "${params.outdir}/pangenome/${taxid}/private", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), val(flavor), val(haplotype), val(assembly_id), path(fasta)
+    tuple val(taxid), val(flavor), val(haplotype), val(assembly_id),
+          path(private_fa), path(control_fa)
     tuple val(itaxid), path(index)
     path(script)
 
     output:
-    tuple val(taxid), val(flavor), val(haplotype), path("*.private_map.tsv"), emit: table
+    tuple val(taxid), val(flavor), val(haplotype),
+          path("*.private_map.combined.tsv"), emit: table
     tuple val(taxid), val(flavor), path("*.private_map_audit.tsv"),           emit: audit
     path("versions.tsv"),                                                    emit: versions
 
@@ -69,39 +75,56 @@ process PANGENOME_PRIVATE_MAP {
     def preset  = params.pangenome_private_map_preset ?: 'asm10'
     def minid   = params.pangenome_private_map_min_identity ?: 0.90
     def minfrac = params.pangenome_private_map_min_frac ?: 0.5
+    def hapsafe = haplotype.replaceAll('#', '_').replaceAll('/', '_')
+    def stem    = "${taxid}.${flavor}.${hapsafe}"
     """
     set -euo pipefail
 
-    if [ ! -s ${fasta} ]; then
-        echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] empty FASTA; nothing to map" >&2
-    fi
+    # BOTH sets in one task, so private and control are aligned against the same index with
+    # the same parameters -- the control only means anything if it is measured identically.
+    for SET in private control; do
+        if [ "\$SET" = private ]; then FA=${private_fa}; else FA=${control_fa}; fi
+        [ -s "\$FA" ] || echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] \$SET FASTA empty" >&2
 
-    # --secondary=yes deliberately: a segment present in several places is the collapsed-repeat
-    # signal, and suppressing secondaries would hide exactly that. -N raised for the same reason.
-    minimap2 -x ${preset} -t ${task.cpus} --secondary=yes -N 50 \\
-        ${index} ${fasta} 2> minimap2.log | gzip -c > hits.paf.gz
+        # --secondary=yes deliberately: a segment present in several places IS the
+        # collapsed-repeat signal, and suppressing secondaries would hide exactly that.
+        minimap2 -x ${preset} -t ${task.cpus} --secondary=yes -N 50 \\
+            ${index} "\$FA" 2>> minimap2.log | gzip -c > hits.\$SET.paf.gz
 
-    python3 ${script} \\
-        --paf hits.paf.gz \\
-        --self-assembly ${assembly_id} \\
-        --haplotype '${haplotype}' \\
-        --label ${taxid}.${flavor} \\
-        --outdir . \\
-        --min-identity ${minid} \\
-        --min-frac ${minfrac}
+        python3 ${script} \\
+            --paf hits.\$SET.paf.gz \\
+            --fasta "\$FA" \\
+            --self-assembly ${assembly_id} \\
+            --haplotype '${haplotype}' \\
+            --set "\$SET" \\
+            --label ${taxid}.${flavor} \\
+            --outdir . \\
+            --min-identity ${minid} \\
+            --min-frac ${minfrac}
+    done
 
-    # A run with zero self-hits means the --self-assembly value does not match the index's
-    # tags, which would make every segment look NOT_PRIVATE. Fail rather than publish that.
-    A=\$(ls *.private_map_audit.tsv | head -1)
-    rows=\$(awk -F'\\t' '\$1=="paf_rows"{print \$2}' "\$A")
-    self=\$(awk -F'\\t' '\$1=="rows_self_excluded"{print \$2}' "\$A")
-    if [ "\${rows:-0}" -gt 0 ] && [ "\${self:-0}" -eq 0 ]; then
-        echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] ERROR: ${assembly_id} matched no" >&2
-        echo "  index tags -- self-hits were not excluded, so results are meaningless." >&2
-        exit 1
-    fi
+    # Zero self-hits means the --self-assembly value does not match the index tags, and every
+    # segment would come back NOT_PRIVATE -- a wrong answer that looks like a strong result.
+    for A in *.private_map_audit.tsv; do
+        rows=\$(awk -F'\\t' '\$1=="paf_rows"{print \$2}' "\$A")
+        self=\$(awk -F'\\t' '\$1=="rows_self_excluded"{print \$2}' "\$A")
+        if [ "\${rows:-0}" -gt 0 ] && [ "\${self:-0}" -eq 0 ]; then
+            echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] ERROR: ${assembly_id} matched no" >&2
+            echo "  index tags in \$A -- self-hits were not excluded, results are meaningless." >&2
+            exit 1
+        fi
+    done
 
-    rm -f hits.paf.gz
+    # one table carrying both sets
+    P=${stem}.private.private_map.tsv
+    C=${stem}.control.private_map.tsv
+    { grep -h '^#' "\$P"
+      grep -v '^#' "\$P" | head -1
+      grep -v '^#' "\$P" | tail -n +2
+      grep -v '^#' "\$C" | tail -n +2
+    } > ${stem}.private_map.combined.tsv
+
+    rm -f hits.private.paf.gz hits.control.paf.gz
 
     {
       printf 'process\\ttool\\tversion\\n'
@@ -113,7 +136,7 @@ process PANGENOME_PRIVATE_MAP {
     stub:
     """
     S=${taxid}.${flavor}.stub
-    printf 'haplotype\\tsegment\\tcontig\\tstart\\tend\\tsegment_bp\\tn_other_assemblies\\tbest_identity\\taligned_frac_merged\\tmax_frac_single_assembly\\tverdict\\n' > \$S.private_map.tsv
+    printf 'haplotype\\tset\\tsegment\\tcontig\\tstart\\tend\\tsegment_bp\\tn_other_assemblies\\tbest_identity\\taligned_frac_merged\\tmax_frac_single_assembly\\tverdict\\n' > \$S.private_map.combined.tsv
     printf 'metric\\tvalue\\npaf_rows\\t0\\nrows_self_excluded\\t0\\n' > \$S.private_map_audit.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """

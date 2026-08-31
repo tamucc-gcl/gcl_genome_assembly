@@ -206,6 +206,106 @@ def pass_segments(gfa, cov, lengths, max_id, min_bp):
     return segs
 
 
+def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_frac,
+                         target_bp_per_key, max_tries_mult=20):
+    """Random non-private windows, per (haplotype, contig), size-matched to the private set.
+
+    WHY A CONTROL IS REQUIRED AT ALL
+    The private measurement alone cannot say whether private sequence is repeat-enriched --
+    that needs sequence from the SAME haplotype, measured the SAME way, differing only in
+    privateness. An earlier attempt calibrated against the private segments themselves and
+    produced a "single-copy" reference of 233-436 where the true value is ~14, because the
+    reference absorbed exactly the signal under test.
+
+    WINDOWS CONTAINING PRIVATE SEQUENCE ARE REJECTED, NOT MASKED
+    ~14% of an average haplotype is private, so unfiltered random windows would be ~14%
+    contaminated and biased toward the private value -- conservative, but it also makes the
+    effect size wrong. Masking is worse than rejecting: k-mer multiplicity is a local
+    property, and stitching across a masked gap creates junction k-mers that exist nowhere in
+    the genome and would be scored as absent.
+
+    SIZE-MATCHED PER CONTIG, NOT JUST BP-MATCHED
+    Multiplicity correlates with length (a long window spans more repeat classes), and
+    private segments are non-uniformly distributed across chromosomes. Matching bp genome-wide
+    would confound both length and chromosome identity with privateness. Window sizes are
+    therefore drawn from the private size distribution of the SAME (haplotype, contig).
+
+    Yields (hap, contig, start, bp, [node ids]) in the same shape as pass_segments.
+    """
+    windows = []
+    rejected = {}
+    attempted = {}
+    with gopen(gfa) as fh:
+        for line in fh:
+            k = line[:2]
+            if k == b"P\t":
+                f = line.rstrip(b"\r\n").split(b"\t")
+                if len(f) < 3:
+                    continue
+                p = f[1].split(b"#")
+                hk = hap_key(f[1])
+                contig = b"#".join(p[2:]) if len(p) >= 3 else b"."
+                fld, tr, base = f[2], _TR_P, 0
+            elif k == b"W\t":
+                f = line.rstrip(b"\r\n").split(b"\t")
+                if len(f) < 7:
+                    continue
+                hk, contig, fld, tr = f[1] + b"#" + f[2], f[3], f[6], _TR_W
+                try:
+                    base = int(f[4])
+                except ValueError:
+                    base = 0
+            else:
+                continue
+
+            key = (hk, contig)
+            sizes = size_pool.get(key)
+            if not sizes:
+                continue                      # no private segments here, nothing to match
+
+            # materialise this path's node walk once: ids, per-node length, private flag
+            ids = [i for i in map(int, fld.translate(tr).split()) if 0 <= i <= max_id]
+            if not ids:
+                continue
+            lens = [int(lengths[i]) for i in ids]
+            priv = [1 if cov[i] == 1 else 0 for i in ids]
+            # prefix sums so a window's private fraction is O(1) to evaluate
+            cum_bp, cum_priv = [0], [0]
+            for L, pv in zip(lens, priv):
+                cum_bp.append(cum_bp[-1] + L)
+                cum_priv.append(cum_priv[-1] + (L if pv else 0))
+            total = cum_bp[-1]
+
+            want = target_bp_per_key.get(key, 0)
+            got = 0
+            tries = 0
+            limit = max(50, int(max_tries_mult * len(sizes)))
+            n = len(ids)
+            while got < want and tries < limit:
+                tries += 1
+                target = sizes[rng.randrange(len(sizes))]
+                if target >= total:
+                    continue
+                # pick a start node, then extend to >= target bp
+                s = rng.randrange(n)
+                e = s
+                while e < n and (cum_bp[e + 1] - cum_bp[s]) < target:
+                    e += 1
+                if e >= n:
+                    continue
+                wbp = cum_bp[e + 1] - cum_bp[s]
+                wpriv = cum_priv[e + 1] - cum_priv[s]
+                if wbp <= 0:
+                    continue
+                if (wpriv / wbp) > max_private_frac:
+                    rejected[key] = rejected.get(key, 0) + 1
+                    continue
+                windows.append((hk, contig, base + cum_bp[s], wbp, ids[s:e + 1]))
+                got += wbp
+            attempted[key] = tries
+    return windows, rejected, attempted
+
+
 def pass_sequences(gfa, wanted):
     """S lines -> {node id: sequence bytes} for the given id set only."""
     seqs = {}
@@ -236,6 +336,20 @@ def main():
                          "removes almost all rows and almost no signal.")
     ap.add_argument("--min-node-len", type=int, default=0)
     ap.add_argument("--wrap", type=int, default=0, help="FASTA line wrap (0 = single line)")
+    ap.add_argument("--control", action="store_true",
+                    help="also emit size-matched NON-PRIVATE random windows per "
+                         "(haplotype, contig), as <label>.<hap>.control.fa. Without these the "
+                         "private set has nothing to be compared against and enrichment is "
+                         "not testable.")
+    ap.add_argument("--control-max-private-frac", type=float, default=0.05,
+                    help="reject a candidate window whose private fraction exceeds this "
+                         "(default 0.05). ~14%% of a haplotype is private, so unfiltered "
+                         "windows would be contaminated toward the private value.")
+    ap.add_argument("--control-bp-ratio", type=float, default=1.0,
+                    help="control bp to sample per (haplotype, contig) as a multiple of that "
+                         "key's private bp (default 1.0 = matched)")
+    ap.add_argument("--seed", type=int, default=42,
+                    help="RNG seed for window sampling, so the control set is reproducible")
     a = ap.parse_args()
 
     os.makedirs(a.outdir, exist_ok=True)
@@ -257,8 +371,39 @@ def main():
     if not segs:
         sys.stderr.write("[private_fasta] nothing to extract; writing empty manifest\n")
 
+    # ---- control windows -------------------------------------------------------------
+    ctrl = []
+    ctrl_rejected = {}
+    ctrl_attempted = {}
+    if a.control:
+        import random as _random
+        rng = _random.Random(a.seed)
+        # private size distribution and bp target, per (haplotype, contig)
+        size_pool, bp_target = {}, {}
+        for hk, contig, start, bp, ids in segs:
+            size_pool.setdefault((hk, contig), []).append(bp)
+            bp_target[(hk, contig)] = bp_target.get((hk, contig), 0) + bp
+        for k in bp_target:
+            bp_target[k] = int(bp_target[k] * a.control_bp_ratio)
+        sys.stderr.write("[private_fasta] control: sampling non-private windows over %d "
+                         "(haplotype, contig) keys\n" % len(size_pool))
+        ctrl, ctrl_rejected, ctrl_attempted = pass_control_windows(
+            a.gfa, cov, lengths, max_id, size_pool, rng,
+            a.control_max_private_frac, bp_target)
+        c_bp = sum(w[3] for w in ctrl)
+        sys.stderr.write("[private_fasta] control: %d windows, %d bp (private %d bp, "
+                         "ratio %.3f)\n"
+                         % (len(ctrl), c_bp, tot_bp, (c_bp / tot_bp) if tot_bp else 0))
+        if tot_bp and c_bp < 0.5 * tot_bp * a.control_bp_ratio:
+            sys.stderr.write("WARNING: control is less than half the requested bp. Rejection "
+                             "sampling is saturating -- these haplotypes may be too private "
+                             "for a clean non-private control. Rejections: %d\n"
+                             % sum(ctrl_rejected.values()))
+
     wanted = set()
     for _, _, _, _, ids in segs:
+        wanted.update(ids)
+    for _, _, _, _, ids in ctrl:
         wanted.update(ids)
     sys.stderr.write("[private_fasta] pass 4/4: sequences for %d nodes\n" % len(wanted))
     seqs = pass_sequences(a.gfa, wanted)
@@ -290,6 +435,32 @@ def main():
                 fh.write(s[i:i + a.wrap] + "\n")
         else:
             fh.write(s + "\n")
+    # control FASTAs: same header grammar so downstream parsing is identical, with the
+    # segment field marked ctrl<N> so private and control rows are distinguishable in the
+    # joined table without a separate column in the FASTA itself.
+    c_handles, c_counts, c_bps = {}, {}, {}
+    for hk, contig, start, bp, ids in ctrl:
+        h = hk.decode("utf-8", "replace")
+        safe = h.replace("#", "_").replace("/", "_")
+        if h not in c_handles:
+            c_handles[h] = open(os.path.join(a.outdir, "%s.%s.control.fa" % (a.label, safe)), "w")
+            c_counts[h] = c_bps[h] = 0
+        seq = b"".join(seqs.get(i, b"") for i in ids)
+        c_counts[h] += 1
+        c_bps[h] += len(seq)
+        hdr = "%s|%s|%d|%d|ctrl%d" % (h, contig.decode("utf-8", "replace"),
+                                      start, start + bp, c_counts[h])
+        fh = c_handles[h]
+        fh.write(">%s\n" % hdr)
+        s = seq.decode("ascii", "replace")
+        if a.wrap and a.wrap > 0:
+            for i in range(0, len(s), a.wrap):
+                fh.write(s[i:i + a.wrap] + "\n")
+        else:
+            fh.write(s + "\n")
+    for fh in c_handles.values():
+        fh.close()
+
     for fh in handles.values():
         fh.close()
 
@@ -299,11 +470,15 @@ def main():
         out.write("# so PRIVATE_MAP and PRIVATE_KMER results join back without a lookup.\n")
         out.write("# segment_bp is the private run length; fasta_bp is the sequence written.\n")
         out.write("# They differ only if an S-line was missing for a node (see warnings).\n")
-        out.write("label\thaplotype\tfasta\tn_segments\tfasta_bp\n")
+        out.write("label\thaplotype\tset\tfasta\tn_segments\tfasta_bp\n")
         for h in sorted(handles):
             safe = h.replace("#", "_").replace("/", "_")
-            out.write("%s\t%s\t%s.%s.private.fa\t%d\t%d\n"
+            out.write("%s\t%s\tprivate\t%s.%s.private.fa\t%d\t%d\n"
                       % (a.label, h, a.label, safe, counts[h], bps[h]))
+        for h in sorted(c_handles):
+            safe = h.replace("#", "_").replace("/", "_")
+            out.write("%s\t%s\tcontrol\t%s.%s.control.fa\t%d\t%d\n"
+                      % (a.label, h, a.label, safe, c_counts[h], c_bps[h]))
 
     with open(os.path.join(a.outdir, "%s.private_fasta_audit.tsv" % a.label), "w") as out:
         out.write("metric\tvalue\n")
@@ -315,6 +490,19 @@ def main():
         out.write("segments_kept\t%d\nsegment_bp\t%d\n" % (len(segs), tot_bp))
         out.write("nodes_needed\t%d\nnodes_missing_sequence\t%d\n" % (len(wanted), missing))
         out.write("fasta_bp_total\t%d\n" % sum(bps.values()))
+        out.write("control_enabled\t%s\n" % bool(a.control))
+        out.write("control_windows\t%d\n" % len(ctrl))
+        out.write("control_bp\t%d\n" % sum(c_bps.values()))
+        out.write("control_bp_ratio_achieved\t%.4f\n"
+                  % ((sum(c_bps.values()) / tot_bp) if tot_bp else 0))
+        out.write("control_windows_rejected\t%d\n" % sum(ctrl_rejected.values()))
+        out.write("control_max_private_frac\t%.3f\n" % a.control_max_private_frac)
+        out.write("control_seed\t%d\n" % a.seed)
+        out.write("# The control is size-matched NON-PRIVATE windows from the SAME haplotype\n")
+        out.write("# and contig, rejecting any window more than control_max_private_frac\n")
+        out.write("# private. Rejected rather than masked: masking creates junction k-mers\n")
+        out.write("# that exist nowhere in the genome. A low ratio_achieved with high\n")
+        out.write("# rejections means the haplotype is too private for a clean control.\n")
         out.write("# segment_bp and fasta_bp_total must agree. They also must match the\n")
         out.write("# >=min_bp rows of private_segment_spectrum.tsv from gfa_hap_coverage.py --\n")
         out.write("# the two compute coverage independently, so a mismatch means one of them\n")

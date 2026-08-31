@@ -4,54 +4,48 @@
 ========================================================================================
     Repo location: modules/pangenome_private_kmer.nf
 
-    Per private segment, the k-mer copy number in that haplotype's SAMPLE'S OWN read
-    database. The pipeline's self-contained answer to whether private sequence is
-    repeat-derived.
+    Per segment, k-mer copy number in that haplotype's SAMPLE'S OWN read database -- for the
+    PRIVATE set and for a size-matched NON-PRIVATE CONTROL from the same haplotype.
 
     NO EXTERNAL DEPENDENCY, BY DESIGN
     ---------------------------------
-    This needs no TE library, no reference database and no annotation pipeline, so it works
-    for any species the pipeline is pointed at. It reuses the Merqury meryl database that
-    BUILD_MERYL_DB already produces for assembly QC, so it costs one meryl-lookup pass and
-    nothing else. A RepeatMasker/RepeatModeler analysis can be layered on afterwards from a
-    separate annotation pipeline if wanted, but nothing here waits on that.
+    Needs no TE library, no reference database and no annotation pipeline, so it works for any
+    species the pipeline is pointed at. It reuses the Merqury meryl database that
+    BUILD_MERYL_DB already produces for assembly QC.
 
     READ-DERIVED, NOT ASSEMBLY-DERIVED
     ----------------------------------
-    Copy number comes from the sample's reads. Read multiplicity reflects true genomic copy
-    number and is unaffected by whether the assembler collapsed the repeat -- whereas an
-    assembly-derived count would be circular, because collapse is one of the things that may
-    be producing spurious private sequence in the first place.
+    Read multiplicity reflects true genomic copy number and is unaffected by whether the
+    assembler collapsed the repeat. An assembly-derived count would be circular, because
+    collapse is one of the things that may be producing spurious private sequence.
 
-    A segment that is BOTH private and high copy number is a candidate for graph collapse
-    rather than biology. PRIVATE_MAP reaches the same conclusion by aligning the segment
-    against the other assemblies, which is an entirely independent route, so the two provide a
-    genuine cross-check rather than two views of one measurement.
+    WHY BOTH SETS RUN IN ONE TASK, CONTROL FIRST
+    -------------------------------------------
+    Copy number is read multiplicity, so its scale is sequencing depth: single-copy k-mers
+    measured ~14x on this cohort while a private satellite segment read ~360,000. Ratios are
+    therefore only meaningful against a single-copy reference -- and that reference must NOT
+    come from the private set, because private sequence is repeat-enriched and the reference
+    would absorb the signal under test. Deriving it that way gave 233-436 where the true level
+    is ~14, and called two thirds of private segments repeat-like.
+
+    So the CONTROL run derives the reference and the PRIVATE run is normalised against it.
+    Splitting them into separate tasks would require an ordering dependency between two tasks
+    of the same process, which Nextflow cannot express -- hence one task, two calls, and the
+    reference handed from the first to the second. It also guarantees both sets share a
+    reference, which is what makes copy_ratio comparable between them.
 
     THE SAMPLE JOIN CANNOT BE DERIVED FROM THE HAPLOTYPE NAME
     --------------------------------------------------------
-    meryl databases are per SAMPLE (five here); private segments are per HAPLOTYPE (ten). The
-    workflow builds PanSN names with
+    meryl databases are per SAMPLE (five here); segments are per HAPLOTYPE (ten). The workflow
+    builds PanSN names with
         sampleOf = id -> id.replaceFirst(/_hap[0-9]+$/,'').replaceAll(/\\./,'_')
-        nm       = (sampleOf(id) == refInd) ? flat(id) : "${sampleOf(id)}.${hapOf(id)}"
-    so the reference individual's haplotypes come out as Sde-CMat_203_hap1#0 while everyone
-    else comes out as Sde-CBau_104#1, and dots have become underscores irreversibly. Parsing
-    a sample back out of a PanSN name would appear to work on this cohort and break silently
-    the moment a different individual were chosen as the reference. The sample id is therefore
-    passed in as a value from the workflow's own mapping.
+    so dots become underscores irreversibly and the reference individual's haplotypes take a
+    different shape from everyone else's. Parsing a sample back out would look correct on this
+    cohort and break the moment a different individual became the reference. The sample id is
+    therefore passed in from the workflow's own mapping.
 
-    The audit's overall_frac_absent is the tripwire for a mis-join: these are the sample's own
-    reads, so a large fraction of absent k-mers means the wrong database was paired.
-
-    THE THRESHOLD IS SELF-CALIBRATING. Copy number is read multiplicity, so its scale is
-    sequencing depth -- measured ~14x single-copy on this cohort, against ~360,000 for a
-    satellite segment at chr10 position 0. An absolute cutoff is therefore meaningless, and a
-    shared constant cannot work across samples of differing depth. The script takes the
-    single-copy level from the data and pangenome_private_kmer_repeat_ratio is a MULTIPLE of
-    it; the derived level is written into the audit so the calibration is checkable.
-
-    Input : tuple(taxid, flavor, haplotype, sample, fasta, meryl_db), script
-    Output: per-segment table / audit / versions
+    Input : tuple(taxid, flavor, haplotype, sample, private_fa, control_fa, meryl_db), script
+    Output: one table carrying BOTH sets / audits / versions
 ========================================================================================
 */
 
@@ -62,63 +56,84 @@ process PANGENOME_PRIVATE_KMER {
     publishDir "${params.outdir}/pangenome/${taxid}/private", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), val(flavor), val(haplotype), val(sample), path(fasta), path(meryl_db)
+    tuple val(taxid), val(flavor), val(haplotype), val(sample),
+          path(private_fa), path(control_fa), path(meryl_db)
     path(script)
 
     output:
-    tuple val(taxid), val(flavor), val(haplotype), path("*.private_kmer.tsv"), emit: table
-    tuple val(taxid), val(flavor), path("*.private_kmer_audit.tsv"),           emit: audit
-    path("versions.tsv"),                                                     emit: versions
+    tuple val(taxid), val(flavor), val(haplotype),
+          path("*.private_kmer.combined.tsv"),      emit: table
+    tuple val(taxid), val(flavor),
+          path("*.private_kmer_audit.tsv"),         emit: audit
+    path("versions.tsv"),                           emit: versions
 
     script:
-    // A MULTIPLE of this haplotype's own single-copy coverage, not a raw count. Read
-    // multiplicity is sequencing depth: single-copy measured ~14x on this cohort while a
-    // satellite segment read ~360,000, so an absolute threshold is meaningless and cannot be
-    // shared across samples of differing depth. The script derives the single-copy level from
-    // the data (kmer-weighted median of per-segment medians) and reports it for auditing.
-    def rratio = params.pangenome_private_kmer_repeat_ratio ?: 3.0
-    // k must match the meryl database, because it sets the EXPECTED k-mer count per segment
-    // and hence frac_absent -- -wig-count omits positions with no hit rather than zeroing them.
-    def kmer   = params.analysis_kmer ?: 21
+    // A MULTIPLE of the CONTROL's single-copy level, not a raw count -- see the header.
+    def rratio  = params.pangenome_private_kmer_repeat_ratio ?: 3.0
+    // k must match the meryl database: it sets the EXPECTED k-mer count per segment and hence
+    // frac_absent, because -wig-count OMITS positions with no hit rather than zeroing them.
+    def kmer    = params.kmer_size ?: 21
+    def hapsafe = haplotype.replaceAll('#', '_').replaceAll('/', '_')
+    def stem    = "${taxid}.${flavor}.${hapsafe}"
     """
     set -euo pipefail
 
-    if [ ! -s ${fasta} ]; then
-        echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] empty FASTA; nothing to look up" >&2
-    fi
-
-    # Record the tool's own interface in the log: the report-type names have changed between
-    # meryl releases, and this file is what makes a future change diagnosable from the log.
+    # meryl-lookup's report types are -bed, -bed-runs, -wig-count, -wig-depth, -existence,
+    # -include and -exclude. There is NO -dump; an earlier version asked for one and every
+    # task failed. -wig-count gives "the multiplicity of the kmer starting at each position",
+    # which is the copy-number measure wanted. Capturing --help makes a future rename
+    # diagnosable from the log rather than from guesswork.
     meryl-lookup -wig-count -help > meryl_lookup_help.txt 2>&1 || true
 
-    # -wig-count, NOT -dump. meryl-lookup's report types are -bed, -bed-runs, -wig-count,
-    # -wig-depth, -existence, -include and -exclude; there is no -dump, and asking for one
-    # failed every task. -wig-count gives "the multiplicity of the kmer starting at each
-    # position", which is the copy-number measure wanted; -existence gives only present/absent
-    # counts. Output goes to stdout when -output is omitted, so this streams: ~137 Mb of
-    # private sequence per haplotype is minutes to pipe and tens of GB to store.
-    meryl-lookup -wig-count \\
-        -sequence ${fasta} \\
-        -mers ${meryl_db} \\
+    # ---- CONTROL first: it derives the single-copy reference --------------------------
+    meryl-lookup -wig-count -sequence ${control_fa} -mers ${meryl_db} \\
       | python3 ${script} \\
-            --haplotype '${haplotype}' \\
-            --sample ${sample} \\
-            --label ${taxid}.${flavor} \\
-            --outdir . \\
-            --kmer ${kmer} \\
-            --repeat-ratio ${rratio}
+            --haplotype '${haplotype}' --sample ${sample} --set control \\
+            --label ${taxid}.${flavor} --outdir . \\
+            --kmer ${kmer} --repeat-ratio ${rratio}
 
-    # A high absent fraction means the wrong meryl database was joined to this haplotype --
-    # measured against EXPECTED k-mer positions, since -wig-count omits misses. --
-    # these are the sample's own reads, so its own k-mers must be present. Warn loudly; do not
-    # fail, because a genuinely low-coverage sample could legitimately produce some absence.
-    A=\$(ls *.private_kmer_audit.tsv | head -1)
-    fa=\$(awk -F'\\t' '\$1=="overall_frac_absent"{print \$2}' "\$A")
-    awk -v f="\${fa:-0}" -v h="${haplotype}" -v s="${sample}" 'BEGIN{
-        if (f+0 > 0.5)
-            printf("[PRIVATE_KMER] WARNING: %.1f%% of %s k-mers absent from %s reads -- check the sample join\\n",
-                   100*f, h, s) > "/dev/stderr"
-    }'
+    CA=${stem}.control.private_kmer_audit.tsv
+    REF=\$(awk -F'\\t' '\$1=="single_copy_reference"{print \$2}' "\$CA")
+    if [ -z "\${REF:-}" ] || awk -v r="\${REF:-0}" 'BEGIN{exit !(r+0 <= 0)}'; then
+        echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] ERROR: the control run produced" >&2
+        echo "  no usable single-copy reference (got '\${REF:-}'). The private set cannot be" >&2
+        echo "  normalised, and normalising it against itself is the bug this replaced." >&2
+        exit 1
+    fi
+    echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] single-copy reference \$REF (control)" >&2
+
+    # ---- PRIVATE, normalised against the CONTROL reference ---------------------------
+    meryl-lookup -wig-count -sequence ${private_fa} -mers ${meryl_db} \\
+      | python3 ${script} \\
+            --haplotype '${haplotype}' --sample ${sample} --set private \\
+            --label ${taxid}.${flavor} --outdir . \\
+            --kmer ${kmer} --repeat-ratio ${rratio} --single-copy "\$REF"
+
+    # ---- one table carrying both sets ------------------------------------------------
+    P=${stem}.private.private_kmer.tsv
+    C=${stem}.control.private_kmer.tsv
+    { grep -h '^#' "\$P"
+      grep -v '^#' "\$P" | head -1
+      grep -v '^#' "\$P" | tail -n +2
+      grep -v '^#' "\$C" | tail -n +2
+    } > ${stem}.private_kmer.combined.tsv
+
+    np=\$(grep -vc '^#' "\$P" || true)
+    nc=\$(grep -vc '^#' "\$C" || true)
+    echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] \$((np-1)) private + \$((nc-1)) control rows" >&2
+
+    # High absence means the wrong meryl database was joined -- these are the sample's own
+    # reads, so its own k-mers must be present. Measured against EXPECTED positions, since
+    # -wig-count omits misses. Warn rather than fail: a genuinely low-coverage sample can
+    # legitimately show some absence.
+    for A in ${stem}.private.private_kmer_audit.tsv \$CA; do
+        fa=\$(awk -F'\\t' '\$1=="overall_frac_absent"{print \$2}' "\$A")
+        awk -v f="\${fa:-0}" -v a="\$A" 'BEGIN{
+            if (f+0 > 0.5)
+                printf("[PRIVATE_KMER] WARNING: %.1f%% of expected k-mers absent in %s -- check the sample join\\n",
+                       100*f, a) > "/dev/stderr"
+        }'
+    done
 
     {
       printf 'process\\ttool\\tversion\\n'
@@ -130,8 +145,10 @@ process PANGENOME_PRIVATE_KMER {
     stub:
     """
     S=${taxid}.${flavor}.stub
-    printf 'haplotype\\tsample\\tsegment\\tcontig\\tstart\\tend\\tn_kmers\\tmean_copy\\tmedian_copy\\tfrac_absent\\tverdict\\n' > \$S.private_kmer.tsv
-    printf 'metric\\tvalue\\noverall_frac_absent\\t0\\n' > \$S.private_kmer_audit.tsv
+    printf 'haplotype\\tsample\\tset\\tsegment\\tcontig\\tstart\\tend\\tspan_bp\\tn_kmers_observed\\tn_kmers_expected\\tfrac_absent\\tmean_copy\\tmedian_copy\\tmax_copy\\tsingle_copy_ref\\tcopy_ratio\\tverdict\\n' \\
+      > \$S.private_kmer.combined.tsv
+    printf 'metric\\tvalue\\nsingle_copy_reference\\t14\\noverall_frac_absent\\t0\\n' \\
+      > \$S.private_kmer_audit.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }

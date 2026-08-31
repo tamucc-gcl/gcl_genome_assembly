@@ -49,6 +49,7 @@
 import argparse
 import glob
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 
@@ -97,6 +98,7 @@ def main():
     p.add_argument("--map", nargs="+", required=True)
     p.add_argument("--kmer", nargs="+", required=True)
     p.add_argument("--label", required=True)
+    p.add_argument("--flavor", default="unknown", help="recorded in the CSV")
     p.add_argument("--outdir", required=True)
     p.add_argument("--bins", default="1000,5000,10000,50000,100000,500000,1000000",
                    help="size bin edges, matching the SV and private-segment spectra so all "
@@ -129,7 +131,9 @@ def main():
                    "aligned_frac_merged": fnum(d, "aligned_frac_merged"),
                    "map_verdict": d.get("verdict", "."),
                    "sample": ".", "n_kmers": 0, "mean_copy": -1.0,
-                   "median_copy": -1, "frac_absent": -1.0, "kmer_verdict": "."}
+                   "median_copy": -1, "frac_absent": -1.0, "kmer_verdict": ".",
+                   "max_copy": -1, "single_copy_ref": -1.0, "copy_ratio": -1.0,
+                   "n_kmers_expected": -1}
         n_map += 1
 
     for d, _ in read_tsv(kmer_files):
@@ -148,6 +152,10 @@ def main():
         r["mean_copy"] = fnum(d, "mean_copy", -1.0)
         r["median_copy"] = inum(d, "median_copy", -1)
         r["frac_absent"] = fnum(d, "frac_absent", -1.0)
+        r["max_copy"] = inum(d, "max_copy", -1)
+        r["single_copy_ref"] = fnum(d, "single_copy_ref", -1.0)
+        r["copy_ratio"] = fnum(d, "copy_ratio", -1.0)
+        r["n_kmers_expected"] = inum(d, "n_kmers_expected", -1)
         r["kmer_verdict"] = d.get("verdict", ".")
         n_kmer += 1
 
@@ -186,6 +194,62 @@ def main():
             per_hap[r["haplotype"]][comb] += 1
             out.write("\t".join(str(r.get(c, ".")) for c in cols) + "\n")
 
+    # ---- flat CSV for R --------------------------------------------------------------
+    # One row per segment, carrying BOTH response forms so a binomial model
+    # (repeat_like ~ is_private + ...) and a continuous one (log(median_copy) ~ ...) can be
+    # fitted from the same file without re-deriving anything.
+    #
+    # is_private is 1 for every row here. A matched CONTROL set of non-private random windows
+    # -- same haplotype, same chromosome, size-matched, rejecting any window containing
+    # private sequence -- is what makes the enrichment test possible, and it appends rows with
+    # is_private = 0. Until that exists this file describes the private set only and cannot
+    # answer whether private sequence is repeat-enriched.
+    #
+    # individual is the haplotype minus its PanSN field and any _hapN suffix, so the two
+    # haplotypes of one sample share it -- needed for the nested random effect.
+    csv_cols = ["haplotype", "individual", "sample", "flavor", "chromosome", "segment",
+                "start", "end", "span_bp", "log_span", "is_private",
+                "n_other_assemblies", "best_identity", "aligned_frac_merged", "map_verdict",
+                "n_kmers_observed", "n_kmers_expected", "frac_absent",
+                "mean_copy", "median_copy", "max_copy", "single_copy_ref", "copy_ratio",
+                "kmer_verdict", "repeat_like", "combined"]
+    import math as _math
+    with open(os.path.join(a.outdir, "%s.private_evidence.csv" % a.label), "w") as out:
+        out.write(",".join(csv_cols) + "\n")
+        for k in sorted(rows):
+            r = rows[k]
+            hap = str(r.get("haplotype", "."))
+            indiv = hap.split("#")[0]
+            indiv = re.sub(r"_hap[0-9]+$", "", indiv)
+            chrom = str(r.get("contig", ".")).split("_")[0]
+            span = r.get("segment_bp", 0) or 0
+            kv = r.get("kmer_verdict", ".")
+            vals = {
+                "haplotype": hap, "individual": indiv,
+                "sample": r.get("sample", "."), "flavor": a.flavor,
+                "chromosome": chrom, "segment": r.get("segment", "."),
+                "start": r.get("start", 0), "end": r.get("end", 0),
+                "span_bp": span,
+                "log_span": ("%.6f" % _math.log(span)) if span > 0 else "NA",
+                "is_private": 1,
+                "n_other_assemblies": r.get("n_other_assemblies", -1),
+                "best_identity": r.get("best_identity", -1),
+                "aligned_frac_merged": r.get("aligned_frac_merged", -1),
+                "map_verdict": r.get("map_verdict", "."),
+                "n_kmers_observed": r.get("n_kmers", 0),
+                "n_kmers_expected": r.get("n_kmers_expected", -1),
+                "frac_absent": r.get("frac_absent", -1),
+                "mean_copy": r.get("mean_copy", -1),
+                "median_copy": r.get("median_copy", -1),
+                "max_copy": r.get("max_copy", -1),
+                "single_copy_ref": r.get("single_copy_ref", -1),
+                "copy_ratio": r.get("copy_ratio", -1),
+                "kmer_verdict": kv,
+                "repeat_like": (1 if kv == "REPEAT_LIKE" else (0 if kv == "UNIQUE_LIKE" else "NA")),
+                "combined": r.get("combined", "."),
+            }
+            out.write(",".join(str(vals[c]) for c in csv_cols) + "\n")
+
     # ---- cross-tabulations -----------------------------------------------------------
     with open(os.path.join(a.outdir, "%s.private_evidence_xtab.tsv" % a.label), "w") as out:
         out.write("# THE RESULT. Two independent verdicts, tabulated. See the header of\n")
@@ -214,9 +278,21 @@ def main():
         miss_m = sum(1 for r in rows.values() if r.get("map_verdict") == "NO_MAP_ROW")
         out.write("segments_without_kmer_row\t%d\n" % miss_k)
         out.write("segments_without_map_row\t%d\n" % miss_m)
-        out.write("# Both should be 0. The two streams run on the SAME FASTAs, so a segment\n")
-        out.write("# present in one and absent from the other means a task failed or a\n")
-        out.write("# haplotype was dropped from one scatter but not the other.\n")
+        haps_map = {r["haplotype"] for r in rows.values()
+                    if r.get("map_verdict") != "NO_MAP_ROW"}
+        haps_kmer = {r["haplotype"] for r in rows.values()
+                     if r.get("kmer_verdict", ".") != "."}
+        out.write("haplotypes_with_map_rows\t%d\n" % len(haps_map))
+        out.write("haplotypes_with_kmer_rows\t%d\n" % len(haps_kmer))
+        out.write("haplotypes_missing_from_map\t%s\n"
+                  % (",".join(sorted(haps_kmer - haps_map)) or "-"))
+        out.write("haplotypes_missing_from_kmer\t%s\n"
+                  % (",".join(sorted(haps_map - haps_kmer)) or "-"))
+        out.write("# A WHOLE HAPLOTYPE missing from either stream is a failed task and is\n")
+        out.write("# fatal. A handful of individual segments missing is not: minimap2 omits\n")
+        out.write("# a query that aligns nowhere at all, so low-complexity segments can be\n")
+        out.write("# absent from the map stream legitimately. The original check conflated\n")
+        out.write("# the two and failed the run over 41 such segments.\n")
 
     sys.stderr.write("[private_join] %d segments joined; %d without kmer, %d without map\n"
                      % (len(rows), miss_k, miss_m))

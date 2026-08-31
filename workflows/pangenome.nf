@@ -566,14 +566,36 @@ workflow PANGENOME {
                         }
                     }
 
-                ch_priv_keyed = ch_priv_fa.combine( ch_hap_asm, by: [0, 1] )
+                // the CONTROL set, keyed identically. Suffix stripped with a plain string,
+                // NOT a slashy regex with an escaped '$': /\.private\.fa\$/ matches a
+                // literal dollar at the end and never fires, which left every key as
+                // "<hap>.private.fa" and the combine below matching nothing.
+                ch_ctrl_fa = PANGENOME_PRIVATE_FASTA.out.controls
+                    .flatMap { taxid, flavor, fas ->
+                        def fl = (fas instanceof List) ? fas : [fas]
+                        fl.collect { f ->
+                            def safe = f.name
+                                .replaceFirst('^' + java.util.regex.Pattern.quote("${taxid}.${flavor}."), '')
+                                .replaceAll('\\.control\\.fa', '')
+                            tuple(taxid, safe, flavor, f)
+                        }
+                    }
+
+                // pair private with control per (taxid, haplotype, flavour), then attach the
+                // assembly/sample mapping. Both sets go to ONE task per haplotype: for KMER
+                // the control must run first to derive the single-copy reference that the
+                // private set is normalised against, and separate tasks cannot express that
+                // ordering.
+                ch_priv_keyed = ch_priv_fa
+                    .combine( ch_ctrl_fa, by: [0, 1, 2] )
+                    .combine( ch_hap_asm, by: [0, 1] )
 
                 // .first() is load-bearing: the index is a queue channel with ONE item, and
                 // without it the twenty MAP tasks would consume it once and nineteen would
                 // never run -- silently, with no error.
                 PANGENOME_PRIVATE_MAP(
-                    ch_priv_keyed.map { taxid, safe, flavor, fa, hk, asm, smp ->
-                        tuple(taxid, flavor, hk, asm, fa) },
+                    ch_priv_keyed.map { taxid, safe, flavor, fa, cfa, hk, asm, smp ->
+                        tuple(taxid, flavor, hk, asm, fa, cfa) },
                     PANGENOME_PRIVATE_INDEX.out.index.first(),
                     pm_script )
                 ch_versions = ch_versions.mix( PANGENOME_PRIVATE_MAP.out.versions )
@@ -582,11 +604,11 @@ workflow PANGENOME {
                 // joins on the sample id from ch_hap_asm
                 PANGENOME_PRIVATE_KMER(
                     ch_priv_keyed
-                        .map { taxid, safe, flavor, fa, hk, asm, smp ->
-                            tuple(smp, taxid, flavor, hk, fa) }
+                        .map { taxid, safe, flavor, fa, cfa, hk, asm, smp ->
+                            tuple(smp, taxid, flavor, hk, fa, cfa) }
                         .combine( ch_meryl.map { meta, db -> tuple(meta.id, db) }, by: 0 )
-                        .map { smp, taxid, flavor, hk, fa, db ->
-                            tuple(taxid, flavor, hk, smp, fa, db) },
+                        .map { smp, taxid, flavor, hk, fa, cfa, db ->
+                            tuple(taxid, flavor, hk, smp, fa, cfa, db) },
                     pk_script )
                 ch_versions = ch_versions.mix( PANGENOME_PRIVATE_KMER.out.versions )
 

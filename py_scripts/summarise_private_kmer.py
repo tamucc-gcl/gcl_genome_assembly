@@ -83,6 +83,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--haplotype", required=True, help="PanSN haplotype key")
     ap.add_argument("--sample", required=True, help="sample whose meryl DB was queried")
+    ap.add_argument("--set", dest="segset", default="private", choices=["private", "control"],
+                    help="which sequence set this FASTA is; carried into the table so the "
+                         "enrichment contrast can be made")
     ap.add_argument("--label", required=True)
     ap.add_argument("--outdir", required=True)
     ap.add_argument("--kmer", type=int, default=21,
@@ -93,13 +96,19 @@ def main():
                          "above which a segment is REPEAT_LIKE (default 3.0). A MULTIPLE, "
                          "not a raw count: measured single-copy depth was ~14x on this "
                          "cohort, so an absolute threshold of 3 would flag everything.")
+    ap.add_argument("--single-copy", type=float, default=0.0,
+                    help="single-copy reference to normalise against. Pass the CONTROL run's "
+                         "value when scoring the private set: deriving it from private "
+                         "segments makes the reference absorb the signal under test, which "
+                         "produced 233-436 where the true level is ~14. 0 = derive locally, "
+                         "which is correct only for the control set itself.")
     ap.add_argument("--min-kmers", type=int, default=10,
                     help="segments with fewer observed k-mers than this are reported but "
                          "excluded from the single-copy reference (default 10)")
     a = ap.parse_args()
 
     os.makedirs(a.outdir, exist_ok=True)
-    stem = "%s.%s" % (a.label, a.haplotype.replace("#", "_").replace("/", "_"))
+    stem = "%s.%s.%s" % (a.label, a.haplotype.replace("#", "_").replace("/", "_"), a.segset)
 
     # ---- pass 1: stream the wiggle, one summary per segment --------------------------
     segs = []            # (seg, contig, start, end, span, n_obs, total, med, mx)
@@ -163,6 +172,9 @@ def main():
     #
     # Still a median rather than a mean, so a minority of extreme-copy segments cannot move
     # it: one 390 kb satellite at ~360,000 must not become the single-copy level.
+    # When --single-copy is supplied (private runs, using the control's value) the local
+    # calculation is skipped entirely -- both sets must be normalised against the SAME
+    # reference or copy_ratio is not comparable between them.
     wq = sorted(((s[7], s[5]) for s in segs if s[5] >= a.min_kmers), key=lambda x: x[0])
     tot_w = sum(w for _, w in wq)
     ref_level = 0.0
@@ -174,6 +186,10 @@ def main():
                 ref_level = float(val)
                 break
     per_seg_med = [v for v, _ in wq]
+    ref_source = "derived"
+    if a.single_copy > 0:
+        ref_level = a.single_copy
+        ref_source = "supplied"
     if ref_level <= 0:
         sys.stderr.write("WARNING: single-copy reference computed as %.3f; copy_ratio will be "
                          "reported as -1 and no REPEAT_LIKE calls made\n" % ref_level)
@@ -201,7 +217,7 @@ def main():
         out.write("#   reporting zero. Counting only observed lines would always give 0.\n")
         out.write("#   High absence means the wrong meryl database was joined: these are the\n")
         out.write("#   sample's own reads, so its own k-mers must be present.\n")
-        out.write("haplotype\tsample\tsegment\tcontig\tstart\tend\tspan_bp\t"
+        out.write("haplotype\tsample\tset\tsegment\tcontig\tstart\tend\tspan_bp\t"
                   "n_kmers_observed\tn_kmers_expected\tfrac_absent\t"
                   "mean_copy\tmedian_copy\tmax_copy\tsingle_copy_ref\tcopy_ratio\tverdict\n")
         tot_obs = tot_exp = 0
@@ -221,8 +237,8 @@ def main():
             else:
                 verdict = "UNIQUE_LIKE"
                 n_unique += 1
-            out.write("%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\t%.4f\t%.1f\t%d\t%.4f\t%s\t%s\n"
-                      % (a.haplotype, a.sample, seg, contig, start, end, span,
+            out.write("%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\t%.4f\t%.1f\t%d\t%.4f\t%s\t%s\n"
+                      % (a.haplotype, a.sample, a.segset, seg, contig, start, end, span,
                          n_obs, expected,
                          ("%.4f" % frac_abs) if frac_abs >= 0 else "NA",
                          mean, med, mx, ref_level,
@@ -231,12 +247,14 @@ def main():
     overall_abs = (1.0 - (tot_obs / tot_exp)) if tot_exp else -1.0
     with open(os.path.join(a.outdir, "%s.private_kmer_audit.tsv" % stem), "w") as out:
         out.write("metric\tvalue\n")
-        out.write("haplotype\t%s\nsample\t%s\n" % (a.haplotype, a.sample))
+        out.write("haplotype\t%s\nsample\t%s\nset\t%s\n"
+                  % (a.haplotype, a.sample, a.segset))
         out.write("kmer\t%d\n" % a.kmer)
         out.write("wiggle_headers\t%d\n" % n_headers)
         out.write("kmer_lines\t%d\nunparseable_lines\t%d\n" % (n_lines, n_bad))
         out.write("segments\t%d\n" % len(segs))
         out.write("single_copy_reference\t%.4f\n" % ref_level)
+        out.write("single_copy_reference_source\t%s\n" % ref_source)
         out.write("segments_in_reference\t%d\n" % len(per_seg_med))
         out.write("kmers_in_reference\t%d\n" % tot_w)
         out.write("# the reference is the KMER-WEIGHTED median of per-segment medians, so a\n")

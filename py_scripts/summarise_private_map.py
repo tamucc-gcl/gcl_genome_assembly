@@ -72,9 +72,19 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--paf", required=True)
+    p.add_argument("--fasta", required=True,
+                   help="the query FASTA. Read for its headers ONLY, so that every segment "
+                        "gets a row -- minimap2 omits a query entirely when it aligns "
+                        "nowhere, including to its own assembly, and 41 segments on this "
+                        "cohort did exactly that. Emitting only PAF-observed queries left "
+                        "them absent from the table and broke the downstream join.")
     p.add_argument("--self-assembly", required=True,
                    help="assembly id of the query haplotype; its hits are EXCLUDED")
     p.add_argument("--haplotype", required=True, help="PanSN haplotype key, for the output")
+    p.add_argument("--set", dest="segset", default="private", choices=["private", "control"],
+                   help="which sequence set this FASTA is. Carried into the table so the "
+                        "join can contrast private against its matched control -- the whole "
+                        "point of the control is that it is measured identically.")
     p.add_argument("--label", required=True)
     p.add_argument("--outdir", required=True)
     p.add_argument("--min-identity", type=float, default=0.90,
@@ -85,7 +95,25 @@ def main():
     a = p.parse_args()
 
     os.makedirs(a.outdir, exist_ok=True)
-    stem = "%s.%s" % (a.label, a.haplotype.replace("#", "_").replace("/", "_"))
+    stem = "%s.%s.%s" % (a.label, a.haplotype.replace("#", "_").replace("/", "_"), a.segset)
+
+    # every segment in the FASTA, in file order, so the table is COMPLETE
+    all_q = []
+    fa_len = {}
+    with open(a.fasta, encoding="utf-8", errors="replace") as fh:
+        name = None
+        n = 0
+        for line in fh:
+            if line.startswith(">"):
+                if name is not None:
+                    fa_len[name] = n
+                name = line[1:].strip().split()[0] if len(line) > 1 else ""
+                all_q.append(name)
+                n = 0
+            else:
+                n += len(line.strip())
+        if name is not None:
+            fa_len[name] = n
 
     qlen = {}
     # (query, target assembly) -> merged query intervals
@@ -131,13 +159,18 @@ def main():
         out.write("#   summing PAF block lengths would double-count overlaps.\n")
         out.write("# verdict PRIVATE_CONFIRMED = no other assembly covers >= %.2f of it.\n"
                   % a.min_frac)
-        out.write("haplotype\tsegment\tcontig\tstart\tend\tsegment_bp\t"
+        out.write("haplotype\tset\tsegment\tcontig\tstart\tend\tsegment_bp\t"
                   "n_other_assemblies\tbest_identity\taligned_frac_merged\t"
                   "max_frac_single_assembly\tverdict\n")
 
         rows = 0
-        for q in sorted(seen_q):
-            ql = qlen[q]
+        n_no_paf = 0
+        for q in all_q:
+            # length from the PAF when available, else from the FASTA -- a segment with no
+            # PAF row still has a real length and must not report 0
+            ql = qlen.get(q, fa_len.get(q, 0))
+            if q not in seen_q:
+                n_no_paf += 1
             # header is <haplotype>|<contig>|<start>|<end>|seg<N>
             parts = q.split("|")
             contig = parts[1] if len(parts) > 3 else "."
@@ -154,21 +187,37 @@ def main():
                 fr = merged_len(iv) / ql if ql else 0.0
                 per_max = max(per_max, fr)
             frac = (merged_len(all_iv) / ql) if ql else 0.0
-            verdict = "NOT_PRIVATE" if frac >= a.min_frac else "PRIVATE_CONFIRMED"
-            out.write("%s\t%s\t%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\t%.4f\t%s\n"
-                      % (a.haplotype, seg, contig, start, end, ql,
+            # no PAF row at all means it aligned nowhere, not even to itself. That is not
+            # the same as "aligned nowhere else", so it gets its own verdict rather than
+            # being silently counted as confirmed-private.
+            if q not in seen_q:
+                verdict = "NO_ALIGNMENT"
+            elif frac >= a.min_frac:
+                verdict = "NOT_PRIVATE"
+            else:
+                verdict = "PRIVATE_CONFIRMED"
+            out.write("%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\t%.4f\t%s\n"
+                      % (a.haplotype, a.segset, seg, contig, start, end, ql,
                          len(asms), best_id.get(q, 0.0), min(1.0, frac),
                          min(1.0, per_max), verdict))
             rows += 1
 
     with open(os.path.join(a.outdir, "%s.private_map_audit.tsv" % stem), "w") as out:
         out.write("metric\tvalue\n")
-        out.write("haplotype\t%s\nself_assembly\t%s\n" % (a.haplotype, a.self_assembly))
+        out.write("haplotype\t%s\nset\t%s\nself_assembly\t%s\n"
+                  % (a.haplotype, a.segset, a.self_assembly))
         out.write("paf_rows\t%d\n" % n_rows)
         out.write("rows_self_excluded\t%d\n" % n_self)
         out.write("rows_below_identity_%.2f\t%d\n" % (a.min_identity, n_lowid))
         out.write("rows_kept\t%d\n" % n_kept)
+        out.write("segments_in_fasta\t%d\n" % len(all_q))
         out.write("segments_with_any_paf_row\t%d\n" % len(seen_q))
+        out.write("segments_with_no_alignment\t%d\n" % n_no_paf)
+        out.write("# segments_with_no_alignment aligned NOWHERE, not even to their own\n")
+        out.write("# assembly -- low-complexity or masked sequence, usually. They are\n")
+        out.write("# reported as NO_ALIGNMENT rather than omitted, because omitting them\n")
+        out.write("# left the downstream join with rows present in one stream and not the\n")
+        out.write("# other, which looks identical to a failed task.\n")
         out.write("# segments_with_any_paf_row counts only segments minimap2 reported at all.\n")
         out.write("# Segments absent from the PAF aligned NOWHERE, including to their own\n")
         out.write("# assembly, which should not happen -- rows_self_excluded near zero is a\n")
