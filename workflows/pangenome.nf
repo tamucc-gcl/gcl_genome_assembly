@@ -384,6 +384,7 @@ workflow PANGENOME {
             ch_versions = ch_versions.mix( PANGENOME_STEPINDEX.out.versions )
             ch_versions = ch_versions.mix( PANGENOME_UNTANGLE.out.versions )
             ch_untangle = PANGENOME_UNTANGLE.out.tsv
+            ch_untangle.groupTuple( by: [0, 1] ).count().view { "GROUPED_COUNT: $it" }
 
             // one NO_FILE placeholder per taxid so an absent harmonization report cannot
             // silently stop REARRANGE from ever running; the real report wins where present
