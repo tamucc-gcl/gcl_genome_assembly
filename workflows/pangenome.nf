@@ -415,7 +415,7 @@ workflow PANGENOME {
 
             PANGENOME_REARRANGE(
                 ch_rearr_in
-                    .map { taxid, flavor, tsvs, harm -> tuple(taxid, flavor, tsvs, harm) }
+                    .map { taxid, flavor, tsvs, harm -> tuple(taxid, flavor, tsvs, harm) },
                 rearr_script
             )
             ch_versions   = ch_versions.mix( PANGENOME_REARRANGE.out.versions )
