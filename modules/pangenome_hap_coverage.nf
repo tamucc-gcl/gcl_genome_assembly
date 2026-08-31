@@ -26,28 +26,33 @@
 */
 
 process PANGENOME_HAP_COVERAGE {
-    tag "${taxid}"
+    tag "${taxid}:${flavor}"
     label 'pangenome_hap_coverage'
 
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), path(gfa)
+    // flavor is 'clip' or 'full'. Both are run: clipping removes 698 Mb of private sequence
+    // (99.1% of everything it removes), so the clip arm understates private content by 46%
+    // and inverts the reference's apparent rank.
+    tuple val(taxid), val(flavor), path(gfa)
     path(hapcov_script)
 
     output:
-    tuple val(taxid), path("${taxid}.hap_coverage_matrix.tsv"), emit: matrix
-    tuple val(taxid), path("${taxid}.hap_private.tsv"),         emit: hap_private
-    tuple val(taxid), path("${taxid}.hap_coverage_check.tsv"),  emit: check
-    tuple val(taxid), path("${taxid}.hap_private_by_contig.tsv"), emit: by_contig
+    // flavour is carried in BOTH the tuple and the filename -- without it in the filename
+    // the two tasks publish over each other.
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.hap_coverage_matrix.tsv"), emit: matrix
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.hap_private.tsv"),         emit: hap_private
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.hap_coverage_check.tsv"),  emit: check
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.hap_private_by_contig.tsv"), emit: by_contig
     // ---- private SEGMENTS (pass 5) ----------------------------------------------------
     // Maximal runs of consecutive private (coverage == 1) nodes along each haplotype walk.
     // The four outputs above are TOTALS and cannot answer "what does the private-haplotype
     // size distribution look like"; these can. optional: true so the process still succeeds
     // if py_scripts/gfa_hap_coverage.py has not yet had its fifth pass added.
-    tuple val(taxid), path("${taxid}.private_segments.tsv"),         emit: segments,  optional: true
-    tuple val(taxid), path("${taxid}.private_segments.bed"),         emit: segments_bed, optional: true
-    tuple val(taxid), path("${taxid}.private_segment_spectrum.tsv"), emit: spectrum,  optional: true
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_segments.tsv"),         emit: segments,  optional: true
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_segments.bed"),         emit: segments_bed, optional: true
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_segment_spectrum.tsv"), emit: spectrum,  optional: true
     path("versions.tsv"),                                       emit: versions
 
     script:
@@ -61,7 +66,7 @@ process PANGENOME_HAP_COVERAGE {
     # the script sniffs gzip magic bytes, so the .gfa.gz is read in place (no scratch copy)
     python3 ${hapcov_script} \\
         --gfa ${gfa} \\
-        --label ${taxid} \\
+        --label ${taxid}.${flavor} \\
         --min-private-bp ${minpriv} \\
         --outdir .
 

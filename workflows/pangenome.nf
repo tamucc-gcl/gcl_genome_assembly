@@ -59,6 +59,11 @@ include { PANGENOME_INVERSION_RESCUE } from '../modules/pangenome_inversion_resc
 include { PANGENOME_STEPINDEX } from '../modules/pangenome_stepindex.nf'
 include { PANGENOME_UNTANGLE  } from '../modules/pangenome_untangle.nf'
 include { PANGENOME_REARRANGE } from '../modules/pangenome_rearrange.nf'
+include { PANGENOME_PRIVATE_FASTA } from '../modules/pangenome_private_fasta.nf'
+include { PANGENOME_PRIVATE_INDEX } from '../modules/pangenome_private_index.nf'
+include { PANGENOME_PRIVATE_MAP   } from '../modules/pangenome_private_map.nf'
+include { PANGENOME_PRIVATE_KMER  } from '../modules/pangenome_private_kmer.nf'
+include { PANGENOME_PRIVATE_JOIN  } from '../modules/pangenome_private_join.nf'
 include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
@@ -81,6 +86,9 @@ workflow PANGENOME {
     ch_species         // tuple(taxid, species_name)  resolved from the taxid (RESOLVE_TAXONOMY)
     ch_harm_report     // tuple(taxid, harmonization_report.tsv) -- PANGENOME_REARRANGE joins
                        // it to tell real inversions from chimeric joins. May be empty.
+    ch_meryl           // tuple(meta, <sample>.meryl) from BUILD_MERYL_DB, keyed on the READS
+                       // meta.id (the sample, not the assembly). PANGENOME_PRIVATE_KMER
+                       // measures copy number in a haplotype's own sample's reads.
 
     main:
     ch_versions  = Channel.empty()
@@ -106,6 +114,10 @@ workflow PANGENOME {
     ch_growth_fit  = Channel.empty()
     ch_hap_cov     = Channel.empty()
     ch_hap_priv    = Channel.empty()
+    ch_priv_segments = Channel.empty()   // tuple(taxid, flavor, private_segments.bed)
+    ch_priv_spectrum = Channel.empty()   // tuple(taxid, flavor, spectrum.tsv)
+    ch_priv_evidence = Channel.empty()   // tuple(taxid, flavor, private_evidence.tsv)
+    ch_priv_xtab     = Channel.empty()   // tuple(taxid, flavor, evidence cross-tab)
     ch_viz2d       = Channel.empty()
     ch_qc          = Channel.empty()
     ch_mqc         = Channel.empty()
@@ -425,10 +437,154 @@ workflow PANGENOME {
             // should reproduce the hist exactly. Gated with the rest of the growth analysis
             // -- no separate toggle.
             def hapcov_script = file("${projectDir}/py_scripts/gfa_hap_coverage.py", checkIfExists: true)
-            PANGENOME_HAP_COVERAGE( CACTUS_PANGENOME.out.gfa, hapcov_script )
+            // BOTH flavours. The clip graph understates private content by 46% -- clipping
+            // removes 698 Mb of private sequence, 99.1% of everything it removes -- and the
+            // difference lands entirely in the >=1 kb segments that carry 74% of the signal.
+            // It also inverts the reference's rank: highest of ten on clip (15.08%), lowest
+            // of ten on full (8.08%), because the reference is the backbone and is never
+            // clipped. Chris's private-haplotype spectrum is answered on the FULL arm.
+            def hc_flavors = (params.pangenome_graph_flavors ?: 'clip,full')
+                                 .toString().split(',').collect { it.trim() }
+            ch_hc_in = CACTUS_PANGENOME.out.gfa.map { taxid, g -> tuple(taxid, 'clip', g) }
+            if( hc_flavors.contains('full') ) {
+                ch_hc_in = ch_hc_in.mix(
+                    CACTUS_PANGENOME.out.gfa_full.map { taxid, g -> tuple(taxid, 'full', g) } )
+            }
+
+            PANGENOME_HAP_COVERAGE( ch_hc_in, hapcov_script )
             ch_versions    = ch_versions.mix( PANGENOME_HAP_COVERAGE.out.versions )
+
+            // Existing consumers stay on CLIP and keep their tuple(taxid, file) shape.
+            // PANGENOME_GROWTH runs panacus on the clip GFA and PANGENOME_PLOTS joins its
+            // histogram with ch_hap_priv in the same figure set, so a full-graph private
+            // breakdown here would silently mix arms inside one report. Both arms publish;
+            // making the report flavour-aware is the batch 5 report-matrix work.
             ch_hap_cov     = PANGENOME_HAP_COVERAGE.out.matrix
+                                 .filter { taxid, flavor, f -> flavor == 'clip' }
+                                 .map    { taxid, flavor, f -> tuple(taxid, f) }
             ch_hap_priv    = PANGENOME_HAP_COVERAGE.out.hap_private
+                                 .filter { taxid, flavor, f -> flavor == 'clip' }
+                                 .map    { taxid, flavor, f -> tuple(taxid, f) }
+
+            // BOTH arms, for PRIVATE_FASTA / PRIVATE_MAP / PRIVATE_KMER in batch 3b
+            ch_priv_segments = PANGENOME_HAP_COVERAGE.out.segments_bed
+            ch_priv_spectrum = PANGENOME_HAP_COVERAGE.out.spectrum
+
+            // ---- private-sequence characterisation ----------------------------------
+            // "Private" is defined by GRAPH COVERAGE -- a node walked by exactly one
+            // haplotype -- which is NOT the claim that the sequence is absent from the other
+            // assemblies. A segment can be private in the graph because cactus collapsed a
+            // repeat or because the aligner failed to merge it, while sitting plainly in
+            // three other assemblies. Every private-sequence figure rests on that
+            // distinction and nothing else in the pipeline tests it.
+            //
+            // Live question: chr8 and chr9 carry 23.6% and 22.9% private sequence against an
+            // ~11% floor across other chromosomes, consistently across all ten haplotypes and
+            // both graph flavours. Real divergence, or collapsed repeat?
+            if( params.pangenome_private_analysis != false ) {
+                def pf_script = file("${projectDir}/py_scripts/extract_private_fasta.py",  checkIfExists: true)
+                def pm_script = file("${projectDir}/py_scripts/summarise_private_map.py",   checkIfExists: true)
+                def pk_script = file("${projectDir}/py_scripts/summarise_private_kmer.py",  checkIfExists: true)
+                def pj_script = file("${projectDir}/py_scripts/join_private_evidence.py",   checkIfExists: true)
+
+                // haplotype -> (safe name, PanSN key, assembly id, sample id).
+                //
+                // DERIVED, NOT PARSED. FINALIZE_ASSEMBLY writes ${meta.id}.fasta so the staged
+                // basename IS the assembly id. Recovering a sample from a PanSN name is
+                // impossible: the naming applies .replaceAll(/\./,'_') (irreversible) and the
+                // reference individual's haplotypes take a different shape from everyone
+                // else's, so a parser would look correct here and break the moment a different
+                // individual became the reference.
+                //
+                // The sample id deliberately does NOT apply that dot replacement -- it exists
+                // because cactus forbids dots in sample names, whereas the meryl database is
+                // keyed on the reads' raw meta.id.
+                ch_hap_asm = ch_cactus_in.flatMap { label, refName, names, fas ->
+                    def nl = (names instanceof List) ? names : [names]
+                    def fl = (fas   instanceof List) ? fas   : [fas]
+                    if( nl.size() != fl.size() ) {
+                        log.warn("[PANGENOME] ${label}: ${nl.size()} names vs ${fl.size()} " +
+                                 "fastas -- private analysis skipped for this species")
+                        return []
+                    }
+                    [nl, fl].transpose().collect { nm, fa ->
+                        def asm  = fa.simpleName                       // == meta.id
+                        // cactus renders seqfile name "X.N" as PanSN X#N, and bare "X" as X#0
+                        def hk   = nm.contains('.') ? nm.replaceFirst(/\./, '#') : "${nm}#0"
+                        def safe = hk.replace('#', '_')
+                        def smp  = asm.replaceFirst(/_hap[0-9]+\$/, '')
+                        tuple(label, safe, hk, asm, smp)
+                    }
+                }
+
+                // GFA read ONCE per flavour; emits one FASTA per haplotype
+                PANGENOME_PRIVATE_FASTA( ch_hc_in, pf_script )
+                ch_versions = ch_versions.mix( PANGENOME_PRIVATE_FASTA.out.versions )
+
+                // one index over ALL assemblies, flavour-independent. Sequence names are
+                // tagged <assembly_id>::<contig> because harmonization gives every assembly
+                // the same chromosome names, so an untagged concatenation identifies nothing.
+                PANGENOME_PRIVATE_INDEX(
+                    ch_cactus_in.map { label, refName, names, fas ->
+                        def fl = (fas instanceof List) ? fas : [fas]
+                        tuple(label, fl.collect { it.simpleName }, fl)
+                    } )
+                ch_versions = ch_versions.mix( PANGENOME_PRIVATE_INDEX.out.versions )
+
+                // scatter the per-haplotype FASTAs. The safe name is recovered by stripping
+                // the known <taxid>.<flavor>. prefix and .private.fa suffix rather than by
+                // guessing where the haplotype part starts -- sample ids contain underscores,
+                // so splitting on '_' would mis-parse.
+                ch_priv_fa = PANGENOME_PRIVATE_FASTA.out.fastas
+                    .flatMap { taxid, flavor, fas ->
+                        def fl = (fas instanceof List) ? fas : [fas]
+                        fl.collect { f ->
+                            def safe = f.name
+                                .replaceFirst('^' + java.util.regex.Pattern.quote("${taxid}.${flavor}."), '')
+                                .replaceFirst(/\.private\.fa\$/, '')
+                            tuple(taxid, safe, flavor, f)
+                        }
+                    }
+
+                ch_priv_keyed = ch_priv_fa.combine( ch_hap_asm, by: [0, 1] )
+
+                // .first() is load-bearing: the index is a queue channel with ONE item, and
+                // without it the twenty MAP tasks would consume it once and nineteen would
+                // never run -- silently, with no error.
+                PANGENOME_PRIVATE_MAP(
+                    ch_priv_keyed.map { taxid, safe, flavor, fa, hk, asm, smp ->
+                        tuple(taxid, flavor, hk, asm, fa) },
+                    PANGENOME_PRIVATE_INDEX.out.index.first(),
+                    pm_script )
+                ch_versions = ch_versions.mix( PANGENOME_PRIVATE_MAP.out.versions )
+
+                // meryl DBs are per SAMPLE (5) while segments are per HAPLOTYPE (10), so this
+                // joins on the sample id from ch_hap_asm
+                PANGENOME_PRIVATE_KMER(
+                    ch_priv_keyed
+                        .map { taxid, safe, flavor, fa, hk, asm, smp ->
+                            tuple(smp, taxid, flavor, hk, fa) }
+                        .combine( ch_meryl.map { meta, db -> tuple(meta.id, db) }, by: 0 )
+                        .map { smp, taxid, flavor, hk, fa, db ->
+                            tuple(taxid, flavor, hk, smp, fa, db) },
+                    pk_script )
+                ch_versions = ch_versions.mix( PANGENOME_PRIVATE_KMER.out.versions )
+
+                // groupTuple WITHOUT size: the haplotype count is per species and not known
+                // here, and PRIVATE_MAP/KMER terminate on error rather than being ignored, so
+                // a fixed size is neither available nor needed.
+                PANGENOME_PRIVATE_JOIN(
+                    PANGENOME_PRIVATE_MAP.out.table
+                        .map { taxid, flavor, hk, f -> tuple(taxid, flavor, f) }
+                        .groupTuple( by: [0, 1] )
+                        .join( PANGENOME_PRIVATE_KMER.out.table
+                                   .map { taxid, flavor, hk, f -> tuple(taxid, flavor, f) }
+                                   .groupTuple( by: [0, 1] ), by: [0, 1] ),
+                    pj_script )
+                ch_versions      = ch_versions.mix( PANGENOME_PRIVATE_JOIN.out.versions )
+                ch_priv_evidence = PANGENOME_PRIVATE_JOIN.out.evidence
+                ch_priv_xtab     = PANGENOME_PRIVATE_JOIN.out.xtab
+            }
 
             // report figures: growth/core + Heaps + band (from the coverage histogram),
             // SV size spectrum + variant-class bar (from the catalog) — workstream D
@@ -617,7 +773,11 @@ workflow PANGENOME {
     figures      = ch_figures       // rendered report PNGs (growth/SV/coverage/variants)
     growth_fit   = ch_growth_fit    // machine-readable Heaps gamma / open-closed / sizes
     hap_coverage = ch_hap_cov       // joint haplotype x coverage-level bp matrix
-    hap_private  = ch_hap_priv      // per-haplotype private-sequence breakdown
+    hap_private  = ch_hap_priv      // per-haplotype private-sequence breakdown (clip)
+    priv_segments = ch_priv_segments // private segment BED, BOTH flavours
+    priv_spectrum = ch_priv_spectrum // private segment size spectrum, BOTH flavours
+    priv_evidence = ch_priv_evidence // per-segment mapping + k-mer evidence, BOTH flavours
+    priv_xtab     = ch_priv_xtab     // the map x kmer verdict cross-tabulation
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
     multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)

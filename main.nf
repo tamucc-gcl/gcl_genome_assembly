@@ -979,7 +979,8 @@ workflow {
         ch_finalized_with_fai,
         HARMONIZE_SCAFFOLDS.out.reference_id,
         ch_species_by_taxid,
-        HARMONIZE_SCAFFOLDS.out.report_by_taxid
+        HARMONIZE_SCAFFOLDS.out.report_by_taxid,
+        BUILD_MERYL_DB.out.meryl_db
     )
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 
