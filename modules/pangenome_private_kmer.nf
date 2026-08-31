@@ -43,6 +43,13 @@
     The audit's overall_frac_absent is the tripwire for a mis-join: these are the sample's own
     reads, so a large fraction of absent k-mers means the wrong database was paired.
 
+    THE THRESHOLD IS SELF-CALIBRATING. Copy number is read multiplicity, so its scale is
+    sequencing depth -- measured ~14x single-copy on this cohort, against ~360,000 for a
+    satellite segment at chr10 position 0. An absolute cutoff is therefore meaningless, and a
+    shared constant cannot work across samples of differing depth. The script takes the
+    single-copy level from the data and pangenome_private_kmer_repeat_ratio is a MULTIPLE of
+    it; the derived level is written into the audit so the calibration is checkable.
+
     Input : tuple(taxid, flavor, haplotype, sample, fasta, meryl_db), script
     Output: per-segment table / audit / versions
 ========================================================================================
@@ -64,9 +71,15 @@ process PANGENOME_PRIVATE_KMER {
     path("versions.tsv"),                                                     emit: versions
 
     script:
-    def rthr = params.pangenome_private_kmer_repeat_threshold ?: 3.0
-    def ncol = params.pangenome_private_kmer_name_column  ?: 0
-    def vcol = params.pangenome_private_kmer_value_column ?: 0
+    // A MULTIPLE of this haplotype's own single-copy coverage, not a raw count. Read
+    // multiplicity is sequencing depth: single-copy measured ~14x on this cohort while a
+    // satellite segment read ~360,000, so an absolute threshold is meaningless and cannot be
+    // shared across samples of differing depth. The script derives the single-copy level from
+    // the data (kmer-weighted median of per-segment medians) and reports it for auditing.
+    def rratio = params.pangenome_private_kmer_repeat_ratio ?: 3.0
+    // k must match the meryl database, because it sets the EXPECTED k-mer count per segment
+    // and hence frac_absent -- -wig-count omits positions with no hit rather than zeroing them.
+    def kmer   = params.analysis_kmer ?: 21
     """
     set -euo pipefail
 
@@ -74,14 +87,17 @@ process PANGENOME_PRIVATE_KMER {
         echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] empty FASTA; nothing to look up" >&2
     fi
 
-    # Record the tool's own interface in the log. meryl-lookup's -dump column layout has
-    # varied between releases, and the summariser auto-detects it -- capturing --help here
-    # means a future format change is diagnosable from the log rather than from guesswork.
-    meryl-lookup --help > meryl_lookup_help.txt 2>&1 || true
+    # Record the tool's own interface in the log: the report-type names have changed between
+    # meryl releases, and this file is what makes a future change diagnosable from the log.
+    meryl-lookup -wig-count -help > meryl_lookup_help.txt 2>&1 || true
 
-    # Streamed, never stored: ~137 Mb of private sequence per haplotype is ~137M k-mer lines,
-    # minutes to pipe but tens of GB to write out.
-    meryl-lookup -dump \\
+    # -wig-count, NOT -dump. meryl-lookup's report types are -bed, -bed-runs, -wig-count,
+    # -wig-depth, -existence, -include and -exclude; there is no -dump, and asking for one
+    # failed every task. -wig-count gives "the multiplicity of the kmer starting at each
+    # position", which is the copy-number measure wanted; -existence gives only present/absent
+    # counts. Output goes to stdout when -output is omitted, so this streams: ~137 Mb of
+    # private sequence per haplotype is minutes to pipe and tens of GB to store.
+    meryl-lookup -wig-count \\
         -sequence ${fasta} \\
         -mers ${meryl_db} \\
       | python3 ${script} \\
@@ -89,11 +105,11 @@ process PANGENOME_PRIVATE_KMER {
             --sample ${sample} \\
             --label ${taxid}.${flavor} \\
             --outdir . \\
-            --repeat-threshold ${rthr} \\
-            --name-column ${ncol} \\
-            --value-column ${vcol}
+            --kmer ${kmer} \\
+            --repeat-ratio ${rratio}
 
     # A high absent fraction means the wrong meryl database was joined to this haplotype --
+    # measured against EXPECTED k-mer positions, since -wig-count omits misses. --
     # these are the sample's own reads, so its own k-mers must be present. Warn loudly; do not
     # fail, because a genuinely low-coverage sample could legitimately produce some absence.
     A=\$(ls *.private_kmer_audit.tsv | head -1)
