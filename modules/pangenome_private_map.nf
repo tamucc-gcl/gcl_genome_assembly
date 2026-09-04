@@ -77,7 +77,11 @@ process PANGENOME_PRIVATE_MAP {
     def minid    = params.pangenome_private_map_min_identity ?: 0
     def dpct     = params.pangenome_private_map_derive_percentile ?: 5.0
     def maxnohit = params.pangenome_private_map_max_control_no_hit ?: 0.5
-    def minfrac = params.pangenome_private_map_min_frac ?: 0
+    // NOT derived. Identity is a species property (cross-haplotype divergence measured at
+    // ~0.65 here); coverage is a definitional choice -- how much of a segment must be found
+    // elsewhere before it stops counting as private -- and is the same choice for any taxon.
+    // Deriving it gave 0.082-0.941 across ten haplotypes of ONE species.
+    def minfrac = params.pangenome_private_map_min_frac ?: 0.5
     def hapsafe = haplotype.replaceAll('#', '_').replaceAll('/', '_')
     def stem    = "${taxid}.${flavor}.${hapsafe}"
     """
@@ -106,14 +110,13 @@ process PANGENOME_PRIVATE_MAP {
 
     CA=${stem}.control.private_map_audit.tsv
     MID=\$(awk -F'\\t' '\$1=="derived_min_identity"{print \$2}' "\$CA")
-    MFR=\$(awk -F'\\t' '\$1=="derived_min_frac"{print \$2}' "\$CA")
-    if [ -z "\${MID:-}" ] || [ -z "\${MFR:-}" ]; then
+    if [ -z "\${MID:-}" ]; then
         echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] ERROR: control run wrote no" >&2
-        echo "  thresholds; the private set cannot be filtered comparably." >&2
+        echo "  derived_min_identity; the private set cannot be filtered comparably." >&2
         exit 1
     fi
     echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] thresholds from control:" >&2
-    echo "  min_identity=\$MID min_frac=\$MFR" >&2
+    echo "  min_identity=\$MID (derived)  min_frac=${minfrac} (constant)" >&2
 
     minimap2 -x ${preset} -t ${task.cpus} --secondary=yes -N 50 \
         ${index} ${private_fa} 2>> minimap2.log | gzip -c > hits.private.paf.gz
@@ -122,7 +125,7 @@ process PANGENOME_PRIVATE_MAP {
         --paf hits.private.paf.gz --fasta ${private_fa} \
         --self-assembly ${assembly_id} --haplotype '${haplotype}' --set private \
         --label ${taxid}.${flavor} --outdir . \
-        --min-identity "\$MID" --min-frac "\$MFR"
+        --min-identity "\$MID" --min-frac ${minfrac}
 
     # Zero self-hits means the --self-assembly value does not match the index tags, and every
     # segment would come back NOT_PRIVATE -- a wrong answer that looks like a strong result.

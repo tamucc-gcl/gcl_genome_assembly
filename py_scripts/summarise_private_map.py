@@ -97,10 +97,16 @@ def main():
                         "homology identity for this cohort -- 0.80 fits this clupeid but a "
                         "plant or copepod cohort would differ, and a hardcoded value would "
                         "be wrong invisibly.")
-    p.add_argument("--min-frac", type=float, default=0.0,
-                   help="merged aligned fraction at or above which a segment is NOT_PRIVATE. "
-                        "0 = derive from the CONTROL. Gives the cutoff a defensible meaning: "
-                        "'covered at least as well as most known-shared sequence'.")
+    p.add_argument("--min-frac", type=float, default=0.5,
+                   help="merged aligned fraction at or above which a segment is NOT_PRIVATE "
+                        "(default 0.5). NOT derived, unlike --min-identity: identity measures "
+                        "how diverged two haplotypes are, which is a species property, while "
+                        "coverage is a definitional choice about how much of a segment must "
+                        "be found elsewhere before it stops counting as private -- the same "
+                        "choice regardless of taxon. Deriving it as a p5 of the control gave "
+                        "0.082 to 0.941 across ten haplotypes of ONE species, an 11-fold "
+                        "spread that is sampling noise in the long left tail, not biology, "
+                        "and it made the criterion differ per haplotype.")
     p.add_argument("--derive-percentile", type=float, default=5.0,
                    help="percentile of the control distribution to use as each floor "
                         "(default 5.0 = retain 95%% of known-true homology)")
@@ -137,12 +143,13 @@ def main():
     # Two passes over the control PAF: the first with NO identity filter, to measure what
     # cross-haplotype homology actually looks like in this cohort; the second applies the
     # derived floors. Private runs receive those same values so the two sets stay comparable.
-    derive = (a.min_identity <= 0.0) or (a.min_frac <= 0.0)
+    # ONLY identity derives. See --min-frac for why coverage does not.
+    derive = (a.min_identity <= 0.0)
     derived_note = "supplied"
     if derive and a.segset != "control":
-        sys.exit("ERROR: --min-identity/--min-frac of 0 means DERIVE, which is only valid "
-                 "with --set control. For the private set, pass the values the control run "
-                 "wrote into its audit (derived_min_identity / derived_min_frac).")
+        sys.exit("ERROR: --min-identity of 0 means DERIVE, which is only valid with "
+                 "--set control. For the private set, pass the value the control run wrote "
+                 "into its audit (derived_min_identity).")
     if derive:
         best_id_c = {}
         merged_c = defaultdict(list)
@@ -192,10 +199,7 @@ def main():
 
         if a.min_identity <= 0.0:
             a.min_identity = round(pct(list(best_id_c.values()), a.derive_percentile), 4)
-        if a.min_frac <= 0.0:
-            fr = [min(1.0, merged_len(merged_c[q]) / clen[q]) for q in merged_c if clen.get(q)]
-            a.min_frac = round(pct(fr, a.derive_percentile), 4)
-        derived_note = "derived_p%.1f" % a.derive_percentile
+        derived_note = "identity_derived_p%.1f" % a.derive_percentile
         sys.stderr.write("[private_map] derived min_identity=%.4f min_frac=%.4f "
                          "(p%.1f of %d control segments)\n"
                          % (a.min_identity, a.min_frac, a.derive_percentile, len(best_id_c)))
@@ -304,12 +308,13 @@ def main():
         out.write("rows_below_identity_%.2f\t%d\n" % (a.min_identity, n_lowid))
         out.write("rows_kept\t%d\n" % n_kept)
         out.write("derived_min_identity\t%.4f\n" % a.min_identity)
-        out.write("derived_min_frac\t%.4f\n" % a.min_frac)
+        out.write("min_frac_used\t%.4f\n" % a.min_frac)
         out.write("threshold_source\t%s\n" % derived_note)
         out.write("min_identity_threshold\t%.4f\n" % a.min_identity)
-        out.write("# derived_* are what the PRIVATE run must be given, so both sets are\n")
-        out.write("# filtered identically. threshold_source says whether they came from the\n")
-        out.write("# control distribution or were supplied by hand.\n")
+        out.write("# derived_min_identity is what the PRIVATE run must be given, so both\n")
+        out.write("# sets are filtered identically. min_frac is a constant, not derived:\n")
+        out.write("# deriving it gave 0.082-0.941 across ten haplotypes of one species,\n")
+        out.write("# which is noise in the long left tail of coverage, not biology.\n")
         for b in sorted(id_hist):
             out.write("identity_ge_%s\t%d\n" % (b, id_hist[b]))
         out.write("# identity_ge_* is the gap-compressed identity of every NON-SELF row, in\n")
