@@ -235,6 +235,12 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
     windows = []
     rejected = {}
     attempted = {}
+    # bp SAMPLED SO FAR per (hap, contig), tracked OUTSIDE the path loop. A clip graph cuts
+    # each contig into many W-line subpaths, so a counter reset per path re-samples the whole
+    # per-contig budget once per subpath: the clip arm produced 4,225,487 windows and
+    # 11,768,868,262 bp against a ~1 Gb assembly (ratio 17.4) while the unfragmented full arm
+    # was correct at 1.019.
+    got_by_key = {}
     with gopen(gfa) as fh:
         for line in fh:
             k = line[:2]
@@ -277,7 +283,9 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
             total = cum_bp[-1]
 
             want = target_bp_per_key.get(key, 0)
-            got = 0
+            got = got_by_key.get(key, 0)
+            if got >= want:
+                continue                      # budget already met by earlier subpaths
             tries = 0
             limit = max(50, int(max_tries_mult * len(sizes)))
             n = len(ids)
@@ -302,6 +310,7 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
                     continue
                 windows.append((hk, contig, base + cum_bp[s], wbp, ids[s:e + 1]))
                 got += wbp
+                got_by_key[key] = got
             attempted[key] = tries
     return windows, rejected, attempted
 
