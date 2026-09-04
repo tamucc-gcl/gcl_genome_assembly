@@ -105,7 +105,13 @@ PAIRS
 
     echo "[PRIVATE_INDEX ${taxid}] \$(grep -c '^>' all.fa) target sequences from \$(wc -l < pairs.tsv) assemblies" >&2
 
-    minimap2 -x ${preset} -t ${task.cpus} -d ${taxid}.all_assemblies.mmi all.fa
+    # -I forces a SINGLE-part index. Default is 4G, and ~10 Gb of assembly splits into two
+    # parts (measured: 8.0 Gb + 2.4 Gb). minimap2 then maps against each part in turn and
+    # computes mapping quality and secondary selection PER PART, so results differ from a
+    # single-part index. Sized from the actual input rather than hardcoded.
+    TOT=\$(awk '!/^>/{n+=length(\$0)} END{printf "%d", (n/1000000000)+2}' all.fa)
+    echo "[PRIVATE_INDEX ${taxid}] indexing \${TOT}G in one part" >&2
+    minimap2 -x ${preset} -t ${task.cpus} -I \${TOT}G -d ${taxid}.all_assemblies.mmi all.fa
     rm -f all.fa
 
     {

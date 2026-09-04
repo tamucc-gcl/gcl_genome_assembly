@@ -120,6 +120,13 @@ def main():
     per_asm = defaultdict(list)
     best_id = defaultdict(float)
     n_rows = n_self = n_lowid = n_kept = 0
+    # identity histogram over NON-SELF rows, kept or not. Without it a badly set
+    # --min-identity is invisible: the post-filter counts look like "these segments have no
+    # homologue elsewhere" when the real answer is "every homologue was filtered out". Observed
+    # cross-haplotype identity for shared sequence in this species is 0.75-0.90, so a 0.90
+    # cutoff discarded essentially all of it and 70% of CONTROL windows -- non-private by
+    # construction -- came back with n_other_assemblies = 0.
+    id_hist = defaultdict(int)
     seen_q = set()
 
     with popen(a.paf) as fh:
@@ -139,6 +146,7 @@ def main():
                 n_self += 1
                 continue
             ident = (nmatch / blen) if blen else 0.0
+            id_hist["%.2f" % (int(ident * 20) / 20.0)] += 1
             if ident < a.min_identity:
                 n_lowid += 1
                 continue
@@ -210,6 +218,12 @@ def main():
         out.write("rows_self_excluded\t%d\n" % n_self)
         out.write("rows_below_identity_%.2f\t%d\n" % (a.min_identity, n_lowid))
         out.write("rows_kept\t%d\n" % n_kept)
+        out.write("min_identity_threshold\t%.3f\n" % a.min_identity)
+        for b in sorted(id_hist):
+            out.write("identity_ge_%s\t%d\n" % (b, id_hist[b]))
+        out.write("# identity_ge_* is the gap-compressed identity of every NON-SELF row, in\n")
+        out.write("# 0.05 bins, BEFORE the min_identity filter. If the mass sits below the\n")
+        out.write("# threshold the filter is the reason segments look private, not the data.\n")
         out.write("segments_in_fasta\t%d\n" % len(all_q))
         out.write("segments_with_any_paf_row\t%d\n" % len(seen_q))
         out.write("segments_with_no_alignment\t%d\n" % n_no_paf)
