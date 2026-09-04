@@ -73,35 +73,56 @@ process PANGENOME_PRIVATE_MAP {
 
     script:
     def preset  = params.pangenome_private_map_preset ?: 'asm10'
-    def minid   = params.pangenome_private_map_min_identity ?: 0.90
-    def minfrac = params.pangenome_private_map_min_frac ?: 0.5
+    // 0 = DERIVE from the control (the default). A non-zero value overrides.
+    def minid    = params.pangenome_private_map_min_identity ?: 0
+    def dpct     = params.pangenome_private_map_derive_percentile ?: 5.0
+    def maxnohit = params.pangenome_private_map_max_control_no_hit ?: 0.5
+    def minfrac = params.pangenome_private_map_min_frac ?: 0
     def hapsafe = haplotype.replaceAll('#', '_').replaceAll('/', '_')
     def stem    = "${taxid}.${flavor}.${hapsafe}"
     """
     set -euo pipefail
 
-    # BOTH sets in one task, so private and control are aligned against the same index with
-    # the same parameters -- the control only means anything if it is measured identically.
-    for SET in private control; do
-        if [ "\$SET" = private ]; then FA=${private_fa}; else FA=${control_fa}; fi
-        [ -s "\$FA" ] || echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] \$SET FASTA empty" >&2
+    # CONTROL FIRST, then PRIVATE with the CONTROL's thresholds.
+    #
+    # min_identity and min_frac are DERIVED from the control unless overridden. Control
+    # windows are non-private by construction, so the identity distribution of their hits is
+    # the empirical cross-haplotype homology identity for this cohort -- 0.80 fits this
+    # clupeid, but a plant or copepod cohort would differ and a hardcoded value would be
+    # wrong invisibly. A hand-set 0.90 discarded nearly all real homology here, so 70% of
+    # control windows reported no homologue anywhere.
+    #
+    # Both sets are then filtered IDENTICALLY, which is the only way the contrast means
+    # anything. Same task, so the ordering is guaranteed.
+    minimap2 -x ${preset} -t ${task.cpus} --secondary=yes -N 50 \
+        ${index} ${control_fa} 2>> minimap2.log | gzip -c > hits.control.paf.gz
 
-        # --secondary=yes deliberately: a segment present in several places IS the
-        # collapsed-repeat signal, and suppressing secondaries would hide exactly that.
-        minimap2 -x ${preset} -t ${task.cpus} --secondary=yes -N 50 \\
-            ${index} "\$FA" 2>> minimap2.log | gzip -c > hits.\$SET.paf.gz
+    python3 ${script} \
+        --paf hits.control.paf.gz --fasta ${control_fa} \
+        --self-assembly ${assembly_id} --haplotype '${haplotype}' --set control \
+        --label ${taxid}.${flavor} --outdir . \
+        --min-identity ${minid} --min-frac ${minfrac} \
+        --derive-percentile ${dpct} --max-control-no-hit-frac ${maxnohit}
 
-        python3 ${script} \\
-            --paf hits.\$SET.paf.gz \\
-            --fasta "\$FA" \\
-            --self-assembly ${assembly_id} \\
-            --haplotype '${haplotype}' \\
-            --set "\$SET" \\
-            --label ${taxid}.${flavor} \\
-            --outdir . \\
-            --min-identity ${minid} \\
-            --min-frac ${minfrac}
-    done
+    CA=${stem}.control.private_map_audit.tsv
+    MID=\$(awk -F'\\t' '\$1=="derived_min_identity"{print \$2}' "\$CA")
+    MFR=\$(awk -F'\\t' '\$1=="derived_min_frac"{print \$2}' "\$CA")
+    if [ -z "\${MID:-}" ] || [ -z "\${MFR:-}" ]; then
+        echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] ERROR: control run wrote no" >&2
+        echo "  thresholds; the private set cannot be filtered comparably." >&2
+        exit 1
+    fi
+    echo "[PRIVATE_MAP ${taxid}:${flavor}:${haplotype}] thresholds from control:" >&2
+    echo "  min_identity=\$MID min_frac=\$MFR" >&2
+
+    minimap2 -x ${preset} -t ${task.cpus} --secondary=yes -N 50 \
+        ${index} ${private_fa} 2>> minimap2.log | gzip -c > hits.private.paf.gz
+
+    python3 ${script} \
+        --paf hits.private.paf.gz --fasta ${private_fa} \
+        --self-assembly ${assembly_id} --haplotype '${haplotype}' --set private \
+        --label ${taxid}.${flavor} --outdir . \
+        --min-identity "\$MID" --min-frac "\$MFR"
 
     # Zero self-hits means the --self-assembly value does not match the index tags, and every
     # segment would come back NOT_PRIVATE -- a wrong answer that looks like a strong result.

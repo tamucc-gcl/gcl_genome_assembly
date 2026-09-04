@@ -87,11 +87,29 @@ def main():
                         "point of the control is that it is measured identically.")
     p.add_argument("--label", required=True)
     p.add_argument("--outdir", required=True)
-    p.add_argument("--min-identity", type=float, default=0.90,
-                   help="minimum gap-compressed identity for a hit to count (default 0.90)")
-    p.add_argument("--min-frac", type=float, default=0.5,
-                   help="merged aligned fraction at or above which a segment is called "
-                        "NOT_PRIVATE (default 0.5)")
+    # 0 = DERIVE FROM THE CONTROL. Same convention as --single-copy in
+    # summarise_private_kmer.py, so the two behave alike.
+    p.add_argument("--min-identity", type=float, default=0.0,
+                   help="gap-compressed identity floor for a hit to count. 0 = derive from "
+                        "this run's CONTROL set (only valid with --set control). Control "
+                        "windows are non-private by construction, so the identity "
+                        "distribution of their hits IS the empirical cross-haplotype "
+                        "homology identity for this cohort -- 0.80 fits this clupeid but a "
+                        "plant or copepod cohort would differ, and a hardcoded value would "
+                        "be wrong invisibly.")
+    p.add_argument("--min-frac", type=float, default=0.0,
+                   help="merged aligned fraction at or above which a segment is NOT_PRIVATE. "
+                        "0 = derive from the CONTROL. Gives the cutoff a defensible meaning: "
+                        "'covered at least as well as most known-shared sequence'.")
+    p.add_argument("--derive-percentile", type=float, default=5.0,
+                   help="percentile of the control distribution to use as each floor "
+                        "(default 5.0 = retain 95%% of known-true homology)")
+    p.add_argument("--max-control-no-hit-frac", type=float, default=0.5,
+                   help="if more than this fraction of CONTROL segments have no non-self hit "
+                        "at all, the thresholds are underivable and the run FAILS rather "
+                        "than falling back to a guess (default 0.5). This is the check that "
+                        "would have caught both the split minimap2 index and the 0.90 "
+                        "identity floor immediately.")
     a = p.parse_args()
 
     os.makedirs(a.outdir, exist_ok=True)
@@ -114,6 +132,73 @@ def main():
                 n += len(line.strip())
         if name is not None:
             fa_len[name] = n
+
+    # ---- derive thresholds from the CONTROL, if asked -------------------------------
+    # Two passes over the control PAF: the first with NO identity filter, to measure what
+    # cross-haplotype homology actually looks like in this cohort; the second applies the
+    # derived floors. Private runs receive those same values so the two sets stay comparable.
+    derive = (a.min_identity <= 0.0) or (a.min_frac <= 0.0)
+    derived_note = "supplied"
+    if derive and a.segset != "control":
+        sys.exit("ERROR: --min-identity/--min-frac of 0 means DERIVE, which is only valid "
+                 "with --set control. For the private set, pass the values the control run "
+                 "wrote into its audit (derived_min_identity / derived_min_frac).")
+    if derive:
+        best_id_c = {}
+        merged_c = defaultdict(list)
+        clen = {}
+        n_seen = set()
+        with popen(a.paf) as fh:
+            for line in fh:
+                f = line.rstrip("\n").split("\t")
+                if len(f) < 12:
+                    continue
+                q, ql, qs, qe = f[0], int(f[1]), int(f[2]), int(f[3])
+                if f[5].split("::", 1)[0] == a.self_assembly:
+                    continue
+                nm, bl = int(f[9]), int(f[10])
+                clen[q] = ql
+                n_seen.add(q)
+                idt = (nm / bl) if bl else 0.0
+                if idt > best_id_c.get(q, 0.0):
+                    best_id_c[q] = idt
+                merged_c[q].append((qs, qe))
+
+        # every control segment, including those with no non-self hit at all
+        n_ctrl = 0
+        with open(a.fasta, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    n_ctrl += 1
+        n_nohit = n_ctrl - len(n_seen)
+        frac_nohit = (n_nohit / n_ctrl) if n_ctrl else 1.0
+        sys.stderr.write("[private_map] derive: %d control segments, %d with no non-self hit "
+                         "(%.3f)\n" % (n_ctrl, n_nohit, frac_nohit))
+        if frac_nohit > a.max_control_no_hit_frac:
+            sys.stderr.write(
+                "ERROR: %.1f%% of control segments have NO non-self alignment. Control "
+                "sequence is non-private by construction, so this cannot be right -- the "
+                "index is probably wrong (e.g. split into parts, or missing assemblies) or "
+                "the control windows are not what they claim. Thresholds are not derivable "
+                "from this; refusing to guess.\n" % (100.0 * frac_nohit))
+            sys.exit(1)
+
+        def pct(vals, q):
+            if not vals:
+                return 0.0
+            vs = sorted(vals)
+            i = max(0, min(len(vs) - 1, int(round((q / 100.0) * (len(vs) - 1)))))
+            return vs[i]
+
+        if a.min_identity <= 0.0:
+            a.min_identity = round(pct(list(best_id_c.values()), a.derive_percentile), 4)
+        if a.min_frac <= 0.0:
+            fr = [min(1.0, merged_len(merged_c[q]) / clen[q]) for q in merged_c if clen.get(q)]
+            a.min_frac = round(pct(fr, a.derive_percentile), 4)
+        derived_note = "derived_p%.1f" % a.derive_percentile
+        sys.stderr.write("[private_map] derived min_identity=%.4f min_frac=%.4f "
+                         "(p%.1f of %d control segments)\n"
+                         % (a.min_identity, a.min_frac, a.derive_percentile, len(best_id_c)))
 
     qlen = {}
     # (query, target assembly) -> merged query intervals
@@ -218,7 +303,13 @@ def main():
         out.write("rows_self_excluded\t%d\n" % n_self)
         out.write("rows_below_identity_%.2f\t%d\n" % (a.min_identity, n_lowid))
         out.write("rows_kept\t%d\n" % n_kept)
-        out.write("min_identity_threshold\t%.3f\n" % a.min_identity)
+        out.write("derived_min_identity\t%.4f\n" % a.min_identity)
+        out.write("derived_min_frac\t%.4f\n" % a.min_frac)
+        out.write("threshold_source\t%s\n" % derived_note)
+        out.write("min_identity_threshold\t%.4f\n" % a.min_identity)
+        out.write("# derived_* are what the PRIVATE run must be given, so both sets are\n")
+        out.write("# filtered identically. threshold_source says whether they came from the\n")
+        out.write("# control distribution or were supplied by hand.\n")
         for b in sorted(id_hist):
             out.write("identity_ge_%s\t%d\n" % (b, id_hist[b]))
         out.write("# identity_ge_* is the gap-compressed identity of every NON-SELF row, in\n")
