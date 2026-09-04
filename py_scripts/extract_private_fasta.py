@@ -86,6 +86,26 @@ def hap_key(name):
 
 
 # --------------------------------------------------------------------------------------
+def indiv_key(hk):
+    """haplotype key -> INDIVIDUAL key.
+
+    Sde-CBau_104#1        -> Sde-CBau_104
+    Sde-CMat_203_hap1#0   -> Sde-CMat_203     (reference individual's naming shape)
+
+    Parsing is safe HERE, unlike in the workflow: this only needs to decide whether two
+    haplotypes belong to the same individual, which is an equivalence relation among names
+    that all went through the same transformation. The workflow's problem was different --
+    it needed to JOIN a PanSN name to an external table (the meryl database) keyed on the
+    raw sample id, and sampleOf()'s dot-to-underscore substitution is not invertible. A
+    consistently mangled name still groups correctly.
+    """
+    base = hk.split(b"#")[0]
+    i = base.rfind(b"_hap")
+    if i > 0 and base[i + 4:].isdigit():
+        return base[:i]
+    return base
+
+
 def pass_lengths(gfa):
     """S lines -> (int32 lengths by node id, max_id, n_segments, total_bp)."""
     cap = 1 << 24
@@ -121,12 +141,20 @@ def pass_coverage(gfa, max_id, min_node_len, lengths):
     twice must not make it look shared.
     """
     groups = {}
+    indivs = {}
     # one bitmask byte-pair per node is prohibitive at 153M nodes x 10 haplotypes, so instead
     # track "last group seen" plus a count, exactly as gfa_hap_coverage.py does
     last = array("i", bytes(4 * (max_id + 1)))
     for i in range(len(last)):
         last[i] = -1
     cov = array("B", bytes(max_id + 1))
+    # the same trick again, at INDIVIDUAL rather than haplotype resolution. Needed because
+    # cov >= 2 is satisfied by a node's own SISTER haplotype, which is not the contrast
+    # PRIVATE_MAP performs -- it aligns against other ASSEMBLIES.
+    last_i = array("i", bytes(4 * (max_id + 1)))
+    for i in range(len(last_i)):
+        last_i[i] = -1
+    icov = array("B", bytes(max_id + 1))
 
     with gopen(gfa) as fh:
         for line in fh:
@@ -144,12 +172,19 @@ def pass_coverage(gfa, max_id, min_node_len, lengths):
             else:
                 continue
             g = groups.setdefault(hk, len(groups))
+            iv = indivs.setdefault(indiv_key(hk), len(indivs))
             for i in map(int, fld.translate(tr).split()):
-                if 0 <= i <= max_id and last[i] != g:
+                if not (0 <= i <= max_id):
+                    continue
+                if last[i] != g:
                     last[i] = g
                     if cov[i] < 255:
                         cov[i] += 1
-    return cov, groups
+                if last_i[i] != iv:
+                    last_i[i] = iv
+                    if icov[i] < 255:
+                        icov[i] += 1
+    return cov, icov, groups, indivs
 
 
 def pass_segments(gfa, cov, lengths, max_id, min_bp):
@@ -206,8 +241,8 @@ def pass_segments(gfa, cov, lengths, max_id, min_bp):
     return segs
 
 
-def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_frac,
-                         target_bp_per_key, max_tries_mult=20):
+def pass_control_windows(gfa, cov, icov, lengths, max_id, size_pool, rng, max_private_frac,
+                         min_cross_frac, target_bp_per_key, max_tries_mult=20):
     """Random non-private windows, per (haplotype, contig), size-matched to the private set.
 
     WHY A CONTROL IS REQUIRED AT ALL
@@ -216,6 +251,17 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
     privateness. An earlier attempt calibrated against the private segments themselves and
     produced a "single-copy" reference of 233-436 where the true value is ~14, because the
     reference absorbed exactly the signal under test.
+
+    CONTROL WINDOWS MUST BE CROSS-INDIVIDUAL, NOT MERELY NON-PRIVATE
+    A node with cov >= 2 is walked by at least two HAPLOTYPES -- which is satisfied by its
+    own sister haplotype from the same individual. That is not the contrast PRIVATE_MAP
+    performs: it aligns a segment against other ASSEMBLIES. Measured with cov >= 2 alone,
+    117,492 of 315,303 control windows had ZERO other-assembly hits, so 47% of the control
+    failed a test it should pass by construction.
+
+    So a window additionally requires min_cross_frac of its bp on nodes walked by two or more
+    INDIVIDUALS. That makes the control definitionally aligned with what the mapping measures
+    rather than approximately so.
 
     WINDOWS CONTAINING PRIVATE SEQUENCE ARE REJECTED, NOT MASKED
     ~14% of an average haplotype is private, so unfiltered random windows would be ~14%
@@ -234,6 +280,7 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
     """
     windows = []
     rejected = {}
+    rejected_xind = {}
     attempted = {}
     # bp SAMPLED SO FAR per (hap, contig), tracked OUTSIDE the path loop. A clip graph cuts
     # each contig into many W-line subpaths, so a counter reset per path re-samples the whole
@@ -275,11 +322,13 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
                 continue
             lens = [int(lengths[i]) for i in ids]
             priv = [1 if cov[i] == 1 else 0 for i in ids]
-            # prefix sums so a window's private fraction is O(1) to evaluate
-            cum_bp, cum_priv = [0], [0]
-            for L, pv in zip(lens, priv):
+            xind = [1 if icov[i] >= 2 else 0 for i in ids]
+            # prefix sums so both fractions are O(1) per candidate window
+            cum_bp, cum_priv, cum_xind = [0], [0], [0]
+            for L, pv, xi in zip(lens, priv, xind):
                 cum_bp.append(cum_bp[-1] + L)
                 cum_priv.append(cum_priv[-1] + (L if pv else 0))
+                cum_xind.append(cum_xind[-1] + (L if xi else 0))
             total = cum_bp[-1]
 
             want = target_bp_per_key.get(key, 0)
@@ -308,11 +357,17 @@ def pass_control_windows(gfa, cov, lengths, max_id, size_pool, rng, max_private_
                 if (wpriv / wbp) > max_private_frac:
                     rejected[key] = rejected.get(key, 0) + 1
                     continue
+                # cross-individual requirement: the window must be sequence that another
+                # INDIVIDUAL also carries, which is what PRIVATE_MAP goes looking for
+                wxind = cum_xind[e + 1] - cum_xind[s]
+                if (wxind / wbp) < min_cross_frac:
+                    rejected_xind[key] = rejected_xind.get(key, 0) + 1
+                    continue
                 windows.append((hk, contig, base + cum_bp[s], wbp, ids[s:e + 1]))
                 got += wbp
                 got_by_key[key] = got
             attempted[key] = tries
-    return windows, rejected, attempted
+    return windows, rejected, rejected_xind, attempted
 
 
 def pass_sequences(gfa, wanted):
@@ -354,6 +409,12 @@ def main():
                     help="reject a candidate window whose private fraction exceeds this "
                          "(default 0.05). ~14%% of a haplotype is private, so unfiltered "
                          "windows would be contaminated toward the private value.")
+    ap.add_argument("--control-min-cross-frac", type=float, default=0.95,
+                    help="fraction of a control window's bp that must sit on nodes walked by "
+                         "two or more INDIVIDUALS (default 0.95). cov >= 2 alone is satisfied "
+                         "by a window's own sister haplotype, which is not what PRIVATE_MAP "
+                         "tests -- it aligns against other ASSEMBLIES. Without this, 117,492 "
+                         "of 315,303 control windows had zero other-assembly hits.")
     ap.add_argument("--control-bp-ratio", type=float, default=1.0,
                     help="control bp to sample per (haplotype, contig) as a multiple of that "
                          "key's private bp (default 1.0 = matched)")
@@ -369,9 +430,11 @@ def main():
                      % (n_seg, max_id, graph_bp))
 
     sys.stderr.write("[private_fasta] pass 2/4: coverage\n")
-    cov, groups = pass_coverage(a.gfa, max_id, a.min_node_len, lengths)
+    cov, icov, groups, indivs = pass_coverage(a.gfa, max_id, a.min_node_len, lengths)
     sys.stderr.write("[private_fasta]   %d haplotype groups: %s\n"
                      % (len(groups), ", ".join(sorted(g.decode() for g in groups))))
+    sys.stderr.write("[private_fasta]   %d individuals: %s\n"
+                     % (len(indivs), ", ".join(sorted(i.decode() for i in indivs))))
 
     sys.stderr.write("[private_fasta] pass 3/4: private runs >= %d bp\n" % a.min_bp)
     segs = pass_segments(a.gfa, cov, lengths, max_id, a.min_bp)
@@ -383,6 +446,7 @@ def main():
     # ---- control windows -------------------------------------------------------------
     ctrl = []
     ctrl_rejected = {}
+    ctrl_rej_xind = {}
     ctrl_attempted = {}
     if a.control:
         import random as _random
@@ -396,9 +460,9 @@ def main():
             bp_target[k] = int(bp_target[k] * a.control_bp_ratio)
         sys.stderr.write("[private_fasta] control: sampling non-private windows over %d "
                          "(haplotype, contig) keys\n" % len(size_pool))
-        ctrl, ctrl_rejected, ctrl_attempted = pass_control_windows(
-            a.gfa, cov, lengths, max_id, size_pool, rng,
-            a.control_max_private_frac, bp_target)
+        ctrl, ctrl_rejected, ctrl_rej_xind, ctrl_attempted = pass_control_windows(
+            a.gfa, cov, icov, lengths, max_id, size_pool, rng,
+            a.control_max_private_frac, a.control_min_cross_frac, bp_target)
         c_bp = sum(w[3] for w in ctrl)
         sys.stderr.write("[private_fasta] control: %d windows, %d bp (private %d bp, "
                          "ratio %.3f)\n"
@@ -504,7 +568,11 @@ def main():
         out.write("control_bp\t%d\n" % sum(c_bps.values()))
         out.write("control_bp_ratio_achieved\t%.4f\n"
                   % ((sum(c_bps.values()) / tot_bp) if tot_bp else 0))
-        out.write("control_windows_rejected\t%d\n" % sum(ctrl_rejected.values()))
+        out.write("control_windows_rejected_private\t%d\n" % sum(ctrl_rejected.values()))
+        out.write("control_windows_rejected_not_cross_individual\t%d\n"
+                  % sum(ctrl_rej_xind.values()))
+        out.write("control_min_cross_frac\t%.3f\n" % a.control_min_cross_frac)
+        out.write("individuals\t%d\n" % len(indivs))
         out.write("control_max_private_frac\t%.3f\n" % a.control_max_private_frac)
         out.write("control_seed\t%d\n" % a.seed)
         out.write("# The control is size-matched NON-PRIVATE windows from the SAME haplotype\n")

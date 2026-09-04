@@ -85,6 +85,11 @@ process PANGENOME_PRIVATE_FASTA {
     def minbp = params.pangenome_private_min_bp ?: 1000
     def ctrl  = (params.pangenome_private_control != false) ? '--control' : ''
     def cfrac = params.pangenome_private_control_max_private_frac ?: 0.05
+    // Control windows must be CROSS-INDIVIDUAL. A node with cov >= 2 is walked by two
+    // HAPLOTYPES, which is satisfied by a window's own sister haplotype -- not the contrast
+    // PRIVATE_MAP performs, since that aligns against other ASSEMBLIES. Measured on cov >= 2
+    // alone, 117,492 of 315,303 control windows had zero other-assembly hits.
+    def cxfrac = params.pangenome_private_control_min_cross_frac ?: 0.95
     def cratio = params.pangenome_private_control_bp_ratio ?: 1.0
     def seed  = params.pangenome_private_control_seed ?: 42
     """
@@ -97,6 +102,7 @@ process PANGENOME_PRIVATE_FASTA {
         --min-bp ${minbp} \\
         ${ctrl} \\
         --control-max-private-frac ${cfrac} \\
+        --control-min-cross-frac ${cxfrac} \\
         --control-bp-ratio ${cratio} \\
         --seed ${seed}
 
