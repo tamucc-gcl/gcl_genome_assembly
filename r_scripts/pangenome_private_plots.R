@@ -76,21 +76,52 @@ num_cols <- function(d, cols) {
   d
 }
 
+# COMMENTS ARE STRIPPED BY HAND, NOT VIA comment.char.
+# `#` is a legitimate character inside PanSN haplotype names -- Sde-CBau_104#1 -- so
+# comment.char = "#" truncates every key at the separator and shifts every subsequent column
+# left. That is what made the per-chromosome figure report "no chr* contigs" from a file with
+# 602 of them. Read the lines, drop the ones that START with #, and parse what is left.
+read_nohash <- function(f, sep = "\\t", header = TRUE) {
+  ln <- readLines(f, warn = FALSE)
+  ln <- ln[!grepl("^\\s*#", ln)]
+  if (!length(ln)) return(NULL)
+  d <- try(read.delim(text = paste(ln, collapse = "\\n"), sep = sep, header = header,
+                      stringsAsFactors = FALSE, check.names = FALSE,
+                      comment.char = "", quote = ""), silent = TRUE)
+  if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
+  d
+}
+
 rd <- function(f, sep = "\t", numeric_cols = character(0)) {
   if (is_missing(f)) return(NULL)
-  d <- try(read.delim(f, sep = sep, header = TRUE, comment.char = "#",
-                      stringsAsFactors = FALSE, check.names = FALSE), silent = TRUE)
-  if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
+  d <- read_nohash(f, sep = sep, header = TRUE)
+  if (is.null(d)) return(NULL)
   if (length(numeric_cols)) d <- num_cols(d, numeric_cols)
   d
 }
 
+# The workflow passes the reference as a bare assembly id (Sde-CMat_203_hap2) while the
+# tables key on the PanSN haplotype (Sde-CMat_203_hap2#0), so an equality test never matched:
+# every is_ref came back FALSE, scale_fill_manual found no shared levels, and the reference
+# was never highlighted. Match on the part before the first '#'.
 ref_hap <- optc("ref", "NONE")
+same_hap <- function(key, ref) {
+  if (is.null(ref) || ref == "NONE") return(rep(FALSE, length(key)))
+  sub("#.*$", "", as.character(key)) == sub("#.*$", "", ref) | as.character(key) == ref
+}
 min_bp  <- optn("min_bp", 1000)
 mb  <- function(x) paste0(formatC(x / 1e6, format = "f", digits = 0, big.mark = ","), " Mb")
 gbp <- function(x) ifelse(x >= 1e9,
                           paste0(formatC(x / 1e9, format = "f", digits = 2), " Gb"),
                           paste0(formatC(x / 1e6, format = "f", digits = 0), " Mb"))
+
+# facet_wrap on a variable with no values aborts with "Faceting variables must have at least
+# one value" from inside ggsave, which is a stack trace rather than a diagnosis. Guard every
+# faceted plot on the variable actually having values.
+has_facet <- function(d, col) {
+  !is.null(d) && nrow(d) > 0 && col %in% names(d) &&
+    length(unique(stats::na.omit(d[[col]]))) > 0
+}
 
 audit <- list()
 note  <- function(k, v) audit[[k]] <<- as.character(v)
@@ -234,12 +265,12 @@ if (is.null(ctg)) {
 # where the reference rank inversion appears, and it is the reason the reference is
 # highlighted when `ref=` is supplied.
 # ======================================================================================
-if (is.null(hap) || length(unique(hap$flavor)) < 2) {
+if (!has_facet(hap, "flavor") || length(unique(hap$flavor)) < 2) {
   skip("private_clip_vs_full",
-       if (is.null(hap)) "no hap_private.tsv" else "only one flavour available")
+       if (is.null(hap)) "no hap_private.tsv" else "fewer than two flavours with rows")
 } else {
   h <- hap
-  h$is_ref <- if (ref_hap == "NONE") FALSE else h$haplotype == ref_hap
+  h$is_ref <- same_hap(h$haplotype, ref_hap)
   # order by full-arm private bp so the panels share a haplotype order
   h <- h[is.finite(h$private_bp), , drop = FALSE]
   o <- if ("full" %in% h$flavor) h[h$flavor == "full", ] else h
@@ -261,8 +292,8 @@ if (is.null(hap) || length(unique(hap$flavor)) < 2) {
 
   for (fl in c("clip", "full")) {
     hh <- h[h$flavor == fl, ]
-    if (nrow(hh) && ref_hap != "NONE" && any(hh$haplotype == ref_hap)) {
-      r <- rank(-hh$pct_of_private)[hh$haplotype == ref_hap]
+    if (nrow(hh) && ref_hap != "NONE" && any(same_hap(hh$haplotype, ref_hap))) {
+      r <- rank(-hh$pct_of_private)[same_hap(hh$haplotype, ref_hap)]
       note(paste0("reference_rank_", fl), sprintf("%d of %d", r, nrow(hh)))
     }
   }
@@ -281,8 +312,8 @@ if (is.null(hap) || length(unique(hap$flavor)) < 2) {
 # is a few hundred bp, so it has no contiguous homologue. Read the private figure against the
 # control's own value, not against 0 or 1.
 # ======================================================================================
-if (is.null(ev)) {
-  skip("private_vs_control", "no private_evidence.csv for either flavour")
+if (!has_facet(ev, "flavor") || !has_facet(ev, "set")) {
+  skip("private_vs_control", "no private_evidence.csv rows with flavour and set")
 } else {
   e <- ev
   e$repeat_like_n <- suppressWarnings(as.numeric(e$repeat_like))
@@ -334,22 +365,34 @@ if (is.null(ev)) {
 #   PRIVATE_CONFIRMED + REPEAT_LIKE   haplotype-specific expansion
 # The off-diagonals are the informative cases and are invisible in either measure alone.
 # ======================================================================================
-if (is.null(xtab)) {
-  skip("private_evidence_xtab", "no private_evidence_xtab.tsv for either flavour")
+if (!has_facet(xtab, "flavor")) {
+  skip("private_evidence_xtab", "no private_evidence_xtab.tsv rows")
 } else {
   x <- xtab[xtab$scope == "CHROM" & xtab$set == "private" &
             is.finite(xtab$n_segments), ]
   if (!nrow(x)) {
     skip("private_evidence_xtab", "no CHROM-scope private rows")
   } else {
+    # the frac computation can empty the frame; re-check before faceting
+
     tot <- aggregate(n_segments ~ key + flavor, data = x, FUN = sum)
     names(tot)[names(tot) == "n_segments"] <- "tot"
     x <- merge(x, tot, by = c("key", "flavor"))
     x$frac <- x$n_segments / x$tot
+    x <- x[is.finite(x$frac), , drop = FALSE]
     ord <- unique(x$key)
     num <- suppressWarnings(as.numeric(sub("^chr", "", ord)))
     x$key <- factor(x$key, levels = ord[order(num, ord)])
 
+  }
+}
+# Re-checked AFTER the frac computation, which can empty the frame. facet_wrap on a variable
+# with no values aborts from inside ggsave with a stack trace, not a diagnosis -- which is how
+# this figure failed on the first real run.
+if (!exists("x") || !has_facet(x, "flavor")) {
+  skip("private_evidence_xtab", "no rows survive the CHROM/private/frac filters")
+} else {
+  {
     p6 <- ggplot(x, aes(key, frac, fill = combined)) +
       geom_col() +
       facet_wrap(~ flavor, ncol = 1) +
@@ -376,8 +419,8 @@ if (is.null(xtab)) {
 # (b) the same bp normalised BY HAPLOTYPE: how much of each assembly's graph content is unique
 #     to it. Unlike (a) this does not depend on the other haplotypes' sizes.
 # ======================================================================================
-if (is.null(hap)) {
-  skip("private_ownership", "no hap_private.tsv for either flavour")
+if (!has_facet(hap, "flavor")) {
+  skip("private_ownership", "no hap_private.tsv rows")
 } else {
   need <- c("haplotype", "private_bp", "hap_bp", "pct_of_private", "pct_of_haplotype")
   if (!all(need %in% names(hap))) {
@@ -388,7 +431,7 @@ if (is.null(hap)) {
     for (cc in need[-1]) hp[[cc]] <- suppressWarnings(as.numeric(hp[[cc]]))
     hp <- hp[is.finite(hp$private_bp), , drop = FALSE]
     hp$name   <- as.character(hp$haplotype)
-    hp$is_ref <- hp$name == ref_hap
+    hp$is_ref <- same_hap(hp$name, ref_hap)
     nh  <- length(unique(hp$name))
     hgt <- max(3.8, 0.42 * nh + 2.4)
     fill_sc <- scale_fill_manual(values = c(`FALSE` = "#7fbf7b", `TRUE` = "#2c7fb8"),

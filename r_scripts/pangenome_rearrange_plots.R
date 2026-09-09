@@ -75,11 +75,26 @@ num_cols <- function(d, cols) {
   d
 }
 
+# COMMENTS ARE STRIPPED BY HAND, NOT VIA comment.char.
+# `#` is a legitimate character inside PanSN haplotype names -- Sde-CBau_104#1 -- so
+# comment.char = "#" truncates every key at the separator and shifts every subsequent column
+# left. That is what made the per-chromosome figure report "no chr* contigs" from a file with
+# 602 of them. Read the lines, drop the ones that START with #, and parse what is left.
+read_nohash <- function(f, sep = "\\t", header = TRUE) {
+  ln <- readLines(f, warn = FALSE)
+  ln <- ln[!grepl("^\\s*#", ln)]
+  if (!length(ln)) return(NULL)
+  d <- try(read.delim(text = paste(ln, collapse = "\\n"), sep = sep, header = header,
+                      stringsAsFactors = FALSE, check.names = FALSE,
+                      comment.char = "", quote = ""), silent = TRUE)
+  if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
+  d
+}
+
 rd <- function(f, sep = "\t", header = TRUE, numeric_cols = character(0)) {
   if (is_missing(f)) return(NULL)
-  d <- try(read.delim(f, sep = sep, header = header, comment.char = "#",
-                      stringsAsFactors = FALSE, check.names = FALSE), silent = TRUE)
-  if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
+  d <- read_nohash(f, sep = sep, header = header)
+  if (is.null(d)) return(NULL)
   if (length(numeric_cols)) d <- num_cols(d, numeric_cols)
   d
 }
