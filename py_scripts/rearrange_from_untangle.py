@@ -60,6 +60,9 @@ import sys
 from collections import defaultdict
 
 FLAG_RE = re.compile(r"(unsupported|chimera_suspect)\(([^)]*)\)")
+# harmonize_names.py writes unplaced scaffolds as `unplaced_<N>`; anything else is a placed
+# chromosome or a composite of placed chromosomes (chr10_17+chr11_12), which counts as placed.
+UNPLACED_RE = re.compile(r"^unplaced(_|$)")
 
 
 def vopen(p):
@@ -248,6 +251,22 @@ def main():
                       % (q, asm, contig, fwd, inv, pct, pct_all, q_dup.get(q, 0),
                          len(refnames.get(q, ())), hc, ho, hf, ";".join(flags) or "."))
 
+    def is_unplaced(q):
+        """True for a query whose contig is an unplaced scaffold rather than a chromosome.
+
+        WHY THIS SPLIT EXISTS. On the real output the chr10 locus at 58,005,273-68,935,373
+        (span 10.93 Mb, fill 0.8945) has 80 carriers, of which 74 are unplaced scaffolds --
+        and EVERY unplaced carrier is flagged, because a small unplaced contig that projects
+        inverted has no forward component to compare against, so pct_inv is ~100% by
+        construction. 2,615 queries carry ORIENTATION_SUSPECT for that reason alone.
+
+        Pooling the two makes any_artifact_flag useless at high carrier counts (it is set for
+        essentially every multi-carrier locus) and buries the chromosome-scale evidence, which
+        is the part that distinguishes biology from assembly noise.
+        """
+        _asm, contig = pansn_to_report(q)
+        return bool(UNPLACED_RE.search(contig or ""))
+
     # ---- candidate loci: the table that should have surfaced chr10 -------------------
     # Group inverted intervals into loci per reference contig, then report which
     # haplotypes carry each locus. Two carriers out of ten with clean sister haplotypes is
@@ -258,6 +277,11 @@ def main():
         for s, e in ivs:
             loci[rn].append((s, e, q))
     with open(op(".rearrangement_candidates.tsv"), "w") as out:
+        out.write("# CHROMOSOME-SCALE and UNPLACED carriers are reported SEPARATELY. An\n")
+        out.write("#   unplaced contig that projects inverted has no forward component to\n")
+        out.write("#   compare against, so it is flagged by construction -- 74 of the 80\n")
+        out.write("#   carriers at the chr10 locus were unplaced, and all 74 were flagged.\n")
+        out.write("#   Pooling them makes any_artifact_flag meaningless above a few carriers.\n")
         out.write("# inverted segments merged into loci per reference contig (gap <= %d).\n"
                   % a.run_merge_gap)
         out.write("# SORTED SO A LOW-CARRIER-COUNT LOCUS SURFACES FIRST -- a locus carried by\n")
@@ -267,8 +291,16 @@ def main():
         out.write("#   a quality signal (0.887 at -e 10kb vs 0.965 at 1Mb on chr10).\n")
         out.write("# any_artifact_flag set means at least one carrier is chimeric, composite,\n")
         out.write("#   or ~fully inverted -- treat the locus as suspect, not as biology.\n")
+        out.write("# SORT: most chromosome-scale carriers first, then largest span. The\n")
+        out.write("#   previous unflagged-first / fewest-carriers order was written when\n")
+        out.write("#   artifacts were assumed to be the noise. On real output the noise is\n")
+        out.write("#   160 single-carrier unplaced projections, and they sorted ABOVE a\n")
+        out.write("#   10.93 Mb locus with six chromosome-scale carriers across three\n")
+        out.write("#   individuals. n_chrom_carriers == 0 means no placed evidence at all.\n")
         out.write("ref_contig\tlocus_start\tlocus_end\tspan_bp\tunion_bp\tfill\t"
-                  "n_carriers\tcarriers\tany_artifact_flag\n")
+                  "n_carriers\tn_chrom_carriers\tn_unplaced_carriers\tn_chrom_individuals\t"
+                  "chrom_carriers\tunplaced_carriers\t"
+                  "chrom_artifact_flag\tany_artifact_flag\n")
         rows = []
         for rn, items in loci.items():
             items.sort()
@@ -296,17 +328,29 @@ def main():
                     if FLAG_RE.search(hf or "") or "composite" in (hc or "") \
                             or pct >= 100.0 * a.artifact_frac:
                         art.append(q)
-                # sort key: unflagged before flagged, then fewest carriers, then largest.
-                # A clean 2-of-N locus is the interesting case; a flagged 1-carrier locus is
-                # an artifact and must not occupy the top of the table.
-                rows.append((1 if art else 0, len(carriers), -span,
-                             rn, gs, ge, span, union, carriers, art))
+                chrom_c = [q for q in carriers if not is_unplaced(q)]
+                unpl_c = [q for q in carriers if is_unplaced(q)]
+                chrom_art = [q for q in art if not is_unplaced(q)]
+                # individuals, not haplotypes: both haplotypes of one individual carrying a
+                # locus is one observation of that allele, not two. The chr10 locus has six
+                # chromosome-scale carriers but only THREE individuals, which is the number
+                # that matters for calling it segregating versus fixed divergence.
+                indivs = {q.split("#")[0].rsplit("_hap", 1)[0] for q in chrom_c}
+                # SORT: chromosome-scale support first (descending), then span. A locus with
+                # no placed carrier at all sinks, which is where the 160 single-carrier
+                # unplaced projections belong.
+                rows.append((-len(chrom_c), -len(indivs), -span,
+                             rn, gs, ge, span, union, carriers,
+                             chrom_c, unpl_c, sorted(indivs), chrom_art, art))
         rows.sort()
-        for _flagged, nc, negspan, rn, gs, ge, span, union, carriers, art in rows:
-            out.write("%s\t%d\t%d\t%d\t%d\t%s\t%d\t%s\t%s\n"
+        for (_nc, _ni, _ns, rn, gs, ge, span, union, carriers,
+             chrom_c, unpl_c, indivs, chrom_art, art) in rows:
+            out.write("%s\t%d\t%d\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n"
                       % (rn, gs, ge, span, union,
                          ("%.4f" % (union / span)) if span else "NA",
-                         nc, ",".join(carriers), ",".join(art) or "."))
+                         len(carriers), len(chrom_c), len(unpl_c), len(indivs),
+                         ",".join(chrom_c) or ".", ",".join(unpl_c) or ".",
+                         ",".join(chrom_art) or ".", ",".join(art) or "."))
 
     with open(op(".duplications.tsv"), "w") as out:
         out.write("# self.cov > 1. THE ONLY duplication signal available: AT traversals show\n")

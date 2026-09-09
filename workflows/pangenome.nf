@@ -64,6 +64,8 @@ include { PANGENOME_PRIVATE_INDEX } from '../modules/pangenome_private_index.nf'
 include { PANGENOME_PRIVATE_MAP   } from '../modules/pangenome_private_map.nf'
 include { PANGENOME_PRIVATE_KMER  } from '../modules/pangenome_private_kmer.nf'
 include { PANGENOME_PRIVATE_JOIN  } from '../modules/pangenome_private_join.nf'
+include { PANGENOME_PRIVATE_PLOTS } from '../modules/pangenome_private_plots.nf'
+include { PANGENOME_REARRANGE_PLOTS } from '../modules/pangenome_rearrange_plots.nf'
 include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
@@ -440,6 +442,28 @@ workflow PANGENOME {
             )
             ch_versions   = ch_versions.mix( PANGENOME_REARRANGE.out.versions )
             ch_candidates = PANGENOME_REARRANGE.out.candidates
+
+            // ---- Layer 1 figures, FLAVOUR-PARALLEL ----------------------------------
+            // Unlike the private figures, these are not overlaid across arms: the full arm
+            // is simply the correct one to read, because clipping cuts paths into subpaths
+            // (556 vs 394 on chr10) and a rearrangement straddling a boundary is lost to
+            // path projection entirely. The clip arm is drawn for comparison.
+            def rp_script = file("${projectDir}/r_scripts/pangenome_rearrange_plots.R",
+                                 checkIfExists: true)
+            PANGENOME_REARRANGE_PLOTS(
+                PANGENOME_REARRANGE.out.candidates
+                    .join( PANGENOME_REARRANGE.out.inversions,  by: [0, 1], remainder: true )
+                    .join( PANGENOME_REARRANGE.out.duplications, by: [0, 1], remainder: true )
+                    .join( PANGENOME_REARRANGE.out.orientation, by: [0, 1], remainder: true )
+                    .join( PANGENOME_REARRANGE.out.audit,       by: [0, 1], remainder: true )
+                    .map { taxid, flavor, cand, inv, dup, ori, aud ->
+                        tuple(taxid, flavor, cand,
+                              inv ?: file('NO_INVERSIONS'),
+                              dup ?: file('NO_DUPLICATIONS'),
+                              ori ?: file('NO_ORIENTATION'),
+                              aud ?: file('NO_UNTANGLE_AUDIT')) },
+                rp_script )
+            ch_versions = ch_versions.mix( PANGENOME_REARRANGE_PLOTS.out.versions )
         }
 
         // openness / growth (panacus on the finished clip GFA; workstream E)
@@ -482,6 +506,17 @@ workflow PANGENOME {
             ch_hap_cov     = PANGENOME_HAP_COVERAGE.out.matrix
                                  .filter { taxid, flavor, f -> flavor == 'clip' }
                                  .map    { taxid, flavor, f -> tuple(taxid, f) }
+            // ch_hap_priv had TWO consumers -- PANGENOME_PLOTS and PANGENOME_REPORT -- and
+            // it is built by .filter{}.map{}, so it is a PLAIN channel, not a process output.
+            // One read consumed it and the other was starved; both joins use
+            // `remainder: true`, so the loser silently got null and skipped its private
+            // section instead of erroring, which is why this never failed visibly. Fourth
+            // instance of that bug class here.
+            //
+            // Batch 4 resolves it by REMOVAL rather than by forking: the private figures move
+            // to PANGENOME_PRIVATE_PLOTS (which reads HAP_COVERAGE's outputs directly for both
+            // arms), so PANGENOME_REPORT is now the ONLY consumer and a single read is correct.
+            // A multiMap here would leave an unconsumed branch, which is its own deadlock risk.
             ch_hap_priv    = PANGENOME_HAP_COVERAGE.out.hap_private
                                  .filter { taxid, flavor, f -> flavor == 'clip' }
                                  .map    { taxid, flavor, f -> tuple(taxid, f) }
@@ -626,16 +661,64 @@ workflow PANGENOME {
                 ch_versions      = ch_versions.mix( PANGENOME_PRIVATE_JOIN.out.versions )
                 ch_priv_evidence = PANGENOME_PRIVATE_JOIN.out.evidence
                 ch_priv_xtab     = PANGENOME_PRIVATE_JOIN.out.xtab
+
+                // ---- private figures, BOTH arms in one task --------------------------
+                // Not flavour-parallel, unlike everything else in this chain. The single
+                // most important thing these figures convey is that the two arms DISAGREE:
+                // clipping removes 704,499,041 bp of which 698,360,436 (99.1%) is private
+                // sequence, so clip understates by 46% AND inverts the reference's apparent
+                // rank -- highest of ten haplotypes on clip (15.08% of private bp), lowest
+                // of ten on full (8.08%), because the reference is the graph backbone and is
+                // never clipped. One arm cannot show that.
+                //
+                // groupTuple WITHOUT size: the flavour count comes from
+                // pangenome_graph_flavors and a species may be built with one arm only. The
+                // channels close, so it emits.
+                def pp_script = file("${projectDir}/r_scripts/pangenome_private_plots.R",
+                                     checkIfExists: true)
+                PANGENOME_PRIVATE_PLOTS(
+                    PANGENOME_HAP_COVERAGE.out.spectrum
+                        .map { taxid, flavor, f -> tuple(taxid, flavor, f) }
+                        .join( PANGENOME_HAP_COVERAGE.out.hap_private, by: [0, 1] )
+                        .join( PANGENOME_HAP_COVERAGE.out.by_contig,   by: [0, 1] )
+                        .join( PANGENOME_PRIVATE_JOIN.out.csv,         by: [0, 1], remainder: true )
+                        .join( PANGENOME_PRIVATE_JOIN.out.xtab,        by: [0, 1], remainder: true )
+                        .map { taxid, flavor, spec, hp, bc, csv, xt ->
+                            tuple(taxid, flavor, spec, hp, bc,
+                                  csv ?: file('NO_EVIDENCE_CSV'),
+                                  xt  ?: file('NO_XTAB')) }
+                        .groupTuple( by: 0 ),
+                    ch_reference_ids.first(),
+                    pp_script )
+                ch_versions = ch_versions.mix( PANGENOME_PRIVATE_PLOTS.out.versions )
             }
 
             // report figures: growth/core + Heaps + band (from the coverage histogram),
             // SV size spectrum + variant-class bar (from the catalog) — workstream D
             def plots_script = file("${projectDir}/r_scripts/pangenome_plots.R", checkIfExists: true)
+            // hap_private is GONE from here: this process is joined with PANGENOME_GROWTH,
+            // which runs panacus on the CLIP GFA, so it is structurally pinned to one
+            // flavour -- and the private figures were therefore being drawn from the arm
+            // that understates private sequence by 46%. They moved to
+            // PANGENOME_PRIVATE_PLOTS, which takes both arms.
+            //
+            // footprint / length_class come from the parent tier of the clip arm, matching
+            // ch_variants and ch_sv_sizes. ref_fai is a PROCESS output and therefore
+            // broadcast, so reading it here as well as at PANGENOME_REPORT is safe.
+            ch_footprint = PANGENOME_CLASSIFY.out.footprint_by_chrom
+                .filter { taxid, flavor, tier, f -> flavor == 'clip' && tier == 'parent' }
+                .map    { taxid, flavor, tier, f -> tuple(taxid, f) }
+            ch_lenclass = PANGENOME_CLASSIFY.out.length_classes
+                .filter { taxid, flavor, tier, f -> flavor == 'clip' && tier == 'parent' }
+                .map    { taxid, flavor, tier, f -> tuple(taxid, f) }
+
             PANGENOME_PLOTS(
                 PANGENOME_GROWTH.out.hist
                     .join( ch_sv_sizes )
                     .join( ch_variants )
-                    .join( ch_hap_priv, remainder: true )
+                    .join( ch_footprint, remainder: true )
+                    .join( ch_lenclass,  remainder: true )
+                    .join( PANGENOME_REF_FASTA.out.ref_fai, remainder: true )
                     // remainder: true is right for hap_priv, which is genuinely optional --
                     // but it also emits UNMATCHED RIGHT-HAND entries when the left side is
                     // empty, as [taxid, null, hap_private] with a single null placeholder
@@ -645,8 +728,11 @@ workflow PANGENOME {
                     // variant catalog must mean "no plots", not "kill the run".
                     .filter { def l = it as List
                               l.size() >= 4 && l[1] != null && l[2] != null && l[3] != null }
-                    .map { taxid, hist, sv, vs, hp ->
-                        tuple(taxid, hist, sv, vs, hp ?: file('NO_HAP_PRIVATE')) },
+                    .map { taxid, hist, sv, vs, fp, lc, fai ->
+                        tuple(taxid, hist, sv, vs,
+                              fp  ?: file('NO_FOOTPRINT'),
+                              lc  ?: file('NO_LENGTH_CLASS'),
+                              fai ?: file('NO_REF_FAI')) },
                 plots_script
             )
             ch_figures    = PANGENOME_PLOTS.out.figures

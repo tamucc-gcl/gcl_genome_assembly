@@ -23,7 +23,15 @@ process PANGENOME_PLOTS {
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), path(hist), path(sv_sizes), path(variant_summary), path(hap_private)
+    // hap_private is GONE: this process is pinned to the clip arm by its join with
+    // PANGENOME_GROWTH (panacus on the clip GFA), and the private figures need both arms.
+    // They live in PANGENOME_PRIVATE_PLOTS now.
+    //
+    // footprint / length_class / ref_fai may be NO_FILE -- the R skips a figure whose table is
+    // missing rather than failing, so a species with CLASSIFY disabled still gets the growth
+    // and coverage figures.
+    tuple val(taxid), path(hist), path(sv_sizes), path(variant_summary),
+          path(footprint), path(length_class), path(ref_fai)
     path(plots_script)
 
     output:
@@ -33,10 +41,24 @@ process PANGENOME_PLOTS {
     script:
     """
     Rscript ${plots_script} ${hist} ${sv_sizes} ${variant_summary} ${taxid} . \\
-        hap_private=${hap_private} \\
+        footprint=${footprint} \\
+        length_class=${length_class} \\
+        fai=${ref_fai} \\
         core=${params.pangenome_tier_core} \\
         softcore=${params.pangenome_tier_softcore} \\
         shell=${params.pangenome_tier_shell}
+
+    # A footprint spanning ONE chromosome means the coordinate frames are still being mixed --
+    # the bug that gave SUBST 89.5 Mb where the correct value is 420.2 Mb. The R reports the
+    # count; surface it here so it appears in the task log rather than only in stderr.
+    if [ -s ${footprint} ]; then
+        n=\$(awk -F'\\t' '!/^#/ && \$1!="chrom"{print \$1}' ${footprint} | sort -u | wc -l)
+        echo "[PLOTS ${taxid}] reference footprint spans \$n chromosome(s)" >&2
+        if [ "\${n:-0}" -le 1 ]; then
+            echo "[PLOTS ${taxid}] WARNING: a single chromosome means the footprint frames" >&2
+            echo "  are mixed. Check classify_variants.py keys ref_iv by (class, chrom)." >&2
+        fi
+    fi
     """
 
     stub:

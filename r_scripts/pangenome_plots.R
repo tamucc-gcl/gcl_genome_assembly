@@ -24,7 +24,9 @@
 #   <label>.growth_curves.png, <label>.coverage_histogram.png,
 #   <label>.sv_size_histogram.png, <label>.variant_summary.png, <label>.growth_fit.tsv
 #   <label>.pangenome_partition.png, <label>.coverage_histogram_tiers.png
-#   <label>.private_by_haplotype.png, <label>.private_fraction_by_haplotype.png
+#   <label>.ref_footprint_by_chrom.png, <label>.length_class_summary.png
+# The two private-by-haplotype figures MOVED to pangenome_private_plots.R, which takes both
+# graph flavours -- this script is pinned to clip by its join with PANGENOME_GROWTH.
 # ======================================================================================
 
 suppressPackageStartupMessages({
@@ -48,7 +50,10 @@ for (a in args[-(1:5)]) if (grepl("=", a, fixed = TRUE)) kv[[sub("=.*$", "", a)]
 optc <- function(k, d) if (!is.null(kv[[k]]) && nzchar(kv[[k]])) kv[[k]] else d
 optn <- function(k, d) { v <- suppressWarnings(as.numeric(optc(k, NA))); if (length(v) == 1 && is.finite(v)) v else d }
 
-hap_private_f <- optc("hap_private", "NONE")
+# hap_private= retired: the private figures moved to pangenome_private_plots.R
+footprint_f    <- optc("footprint",    "NONE")
+length_class_f <- optc("length_class", "NONE")
+fai_f          <- optc("fai",          "NONE")
 ref_hap       <- optc("ref",         "NONE")
 cut_core      <- optn("core",      1.00)
 cut_softcore  <- optn("softcore",  -1)
@@ -355,49 +360,109 @@ if (!is.null(vs) && nrow(vs) > 0 && all(c("primary_class", "n_alleles") %in% nam
 } else message("variant_summary table empty/unreadable; skipping variant bars")
 
 # ======================================================================================
-# 4. private-sequence ownership by haplotype  (from PANGENOME_HAP_COVERAGE)
+# 4. private-sequence figures -- MOVED to pangenome_private_plots.R
+#
+# This script is joined with PANGENOME_GROWTH, which runs panacus on the CLIP GFA, so it is
+# structurally pinned to one flavour. The private figures were therefore being drawn from the
+# arm that understates private sequence by 46% and INVERTS the reference's rank (highest of ten
+# haplotypes on clip at 15.08% of private bp, lowest of ten on full at 8.08%, because the
+# reference is the graph backbone and is never clipped) -- which is exactly what the ownership
+# figure is about.
+#
+# PANGENOME_PRIVATE_PLOTS takes BOTH arms in one task and facets by flavour, so the
+# disagreement is visible. `hap_private=` is retired here.
 # ======================================================================================
-# panacus's h(1) says HOW MUCH sequence is private but not WHOSE it is. gfa_hap_coverage.py
-# resolves the owner per node, so these two plots decompose that single bar.
-if (!is_missing(hap_private_f)) {
-  hp   <- read_tsv_hash(hap_private_f)
-  need <- c("haplotype", "private_bp", "hap_bp", "pct_of_private", "pct_of_haplotype")
-  if (!is.null(hp) && all(need %in% names(hp)) && nrow(hp) > 0) {
-    for (cc in need[-1]) hp[[cc]] <- suppressWarnings(as.numeric(hp[[cc]]))
-    hp$name   <- as.character(hp$haplotype)
-    hp$is_ref <- hp$name == ref_hap
-    nh        <- nrow(hp)
-    hgt       <- max(3.4, 0.42 * nh + 1.5)
-    fill_sc   <- scale_fill_manual(values = c("FALSE" = "#7fbf7b", "TRUE" = "#2c7fb8"),
-                                   labels = c("FALSE" = "haplotype", "TRUE" = "reference"),
-                                   guide  = if (any(hp$is_ref)) "legend" else "none")
 
-    # (a) share of the pangenome's private sequence. Every private segment has exactly one
-    #     owner, so these bars sum to 100% by construction.
-    hp$y1 <- factor(hp$name, levels = hp$name[order(hp$pct_of_private)])
-    even  <- 100 / nh
-    p7 <- ggplot(hp, aes(pct_of_private, y1, fill = is_ref)) +
-      geom_col(width = 0.72) + fill_sc +
-      geom_vline(xintercept = even, linetype = 2, colour = "grey35") +
-      geom_text(aes(label = mb(private_bp)), hjust = -0.12, size = 3.1, colour = "grey20") +
-      scale_x_continuous(expand = expansion(mult = c(0, 0.16))) +
-      labs(title = paste0(label, " \u2014 who owns the private sequence"),
-           subtitle = sprintf("total private %s; dashed line = even share (%.1f%%)",
-                              mb(sum(hp$private_bp, na.rm = TRUE)), even),
-           x = "% of the pangenome's private sequence", y = NULL, fill = NULL)
-    ggsave(op(".private_by_haplotype.png"), p7, width = 8, height = hgt, dpi = 150)
 
-    # (b) the same bp normalised BY HAPLOTYPE: how much of each assembly's graph content is
-    #     unique to it. Unlike (a) this does not depend on the other haplotypes' sizes.
-    hp$y2 <- factor(hp$name, levels = hp$name[order(hp$pct_of_haplotype)])
-    p8 <- ggplot(hp, aes(pct_of_haplotype, y2, fill = is_ref)) +
-      geom_col(width = 0.72) + fill_sc +
-      geom_text(aes(label = sprintf("%s / %s", mb(private_bp), mb(hap_bp))),
-                hjust = -0.08, size = 3.0, colour = "grey20") +
-      scale_x_continuous(expand = expansion(mult = c(0, 0.26))) +
-      labs(title = paste0(label, " \u2014 private fraction of each haplotype"),
-           subtitle = "private bp / this haplotype's total graph bp",
-           x = "% of the haplotype that is private to it", y = NULL, fill = NULL)
-    ggsave(op(".private_fraction_by_haplotype.png"), p8, width = 8, height = hgt, dpi = 150)
-  } else message("hap_private table unusable; skipping private-by-haplotype plots")
-} else message("no hap_private table; skipping private-by-haplotype plots")
+# ======================================================================================
+# 9. Per-chromosome merged reference footprint
+#
+# THE FIGURE THAT WOULD HAVE CAUGHT THE CHROMOSOME-BLIND FOOTPRINT BUG ON SIGHT.
+#
+# Keying reference intervals by variant class alone silently overlaid all fifteen chromosomes
+# onto one coordinate axis, so every merged footprint was bounded by the LONGEST chromosome.
+# It reported SUBST at 89,538,307 bp where the correct value is 420,246,767, and all classes at
+# 90,307,914 where it is 493,058,268 -- numbers that looked plausible because chr1_1 is 94.7 Mb.
+#
+# Plotting per chromosome with each chromosome's own length as a ceiling makes an out-of-frame
+# footprint a visual impossibility rather than a number nobody checks. If `fai=` is supplied
+# the ceiling is drawn; without it the panel is still per-chromosome, which is enough to see a
+# single-chromosome collapse.
+# ======================================================================================
+if (!is_missing(footprint_f)) {
+  fp <- read_tsv_hash(footprint_f)
+  if (!is.null(fp) && nrow(fp) > 0 && "chrom" %in% names(fp)) {
+    bpcol <- intersect(c("merged_ref_footprint_bp", "footprint_bp", "bp"), names(fp))[1]
+    clcol <- intersect(c("primary_class", "class"), names(fp))[1]
+    if (!is.na(bpcol)) {
+      fp[[bpcol]] <- suppressWarnings(as.numeric(fp[[bpcol]]))
+      fp <- fp[is.finite(fp[[bpcol]]), , drop = FALSE]
+      # chr10_1 and chr10_17+chr11_12 pool to chr10
+      fp$chr <- sub("_.*$", "", sub("^.*#", "", as.character(fp$chrom)))
+      u <- unique(fp$chr); nn <- suppressWarnings(as.numeric(sub("^chr", "", u)))
+      fp$chr <- factor(fp$chr, levels = u[order(is.na(nn), nn, u)])
+
+      ceil <- NULL
+      if (!is_missing(fai_f)) {
+        fa <- try(read.delim(fai_f, header = FALSE, sep = "\t",
+                             stringsAsFactors = FALSE), silent = TRUE)
+        if (!inherits(fa, "try-error") && ncol(fa) >= 2) {
+          fa$chr <- sub("_.*$", "", sub("^.*#", "", as.character(fa[[1]])))
+          ceil <- aggregate(list(len = suppressWarnings(as.numeric(fa[[2]]))),
+                            by = list(chr = fa$chr), FUN = sum)
+          ceil <- ceil[ceil$chr %in% levels(fp$chr), , drop = FALSE]
+          ceil$chr <- factor(ceil$chr, levels = levels(fp$chr))
+        }
+      }
+
+      p9 <- ggplot(fp, aes(chr, .data[[bpcol]]))
+      p9 <- if (!is.na(clcol)) p9 + geom_col(aes(fill = .data[[clcol]])) else p9 + geom_col()
+      if (!is.null(ceil) && nrow(ceil))
+        p9 <- p9 + geom_point(data = ceil, aes(chr, len), shape = 95, size = 8,
+                              colour = "firebrick", inherit.aes = FALSE)
+      p9 <- p9 +
+        scale_y_continuous(labels = function(v) mb(v)) +
+        labs(title = paste0(label, " \u2014 merged reference footprint per chromosome"),
+             subtitle = paste0("red dash = chromosome length. A bar exceeding it means the ",
+                               "coordinate frames were mixed \u2014 the bug this figure exists to catch."),
+             x = NULL, y = "merged reference footprint", fill = NULL) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      ggsave(op(".ref_footprint_by_chrom.png"), p9, width = 10, height = 5.5, dpi = 150)
+
+      nchr <- length(unique(fp$chr))
+      message(sprintf("[plots] footprint spans %d chromosome(s)%s", nchr,
+                      if (nchr <= 1) "  -- ONE chromosome means the frames are still mixed" else ""))
+    } else message("footprint table has no bp column; skipping")
+  } else message("footprint table unusable; skipping per-chromosome footprint")
+} else message("no footprint table; skipping per-chromosome footprint")
+
+# ======================================================================================
+# 10. Legacy length-based classes, alongside the topological ones
+#
+# Length classes (SV_INS / SV_DEL / SV_COMPLEX / SV_BLOCKSUB) are what a size comparison of
+# REF and ALT can say without looking at the graph. The topological classes are what AT
+# traversals say. They are NOT the same partition, and the fine tier can only ever produce the
+# length version because vcfwave decomposition destroys AT. Plotting them together keeps that
+# distinction in front of the reader.
+# ======================================================================================
+if (!is_missing(length_class_f)) {
+  lc <- read_tsv_hash(length_class_f)
+  if (!is.null(lc) && nrow(lc) > 0) {
+    ccol <- names(lc)[1]
+    ncol_ <- intersect(c("n_alleles", "n", "count"), names(lc))[1]
+    if (!is.na(ncol_)) {
+      lc[[ncol_]] <- suppressWarnings(as.numeric(lc[[ncol_]]))
+      lc <- lc[is.finite(lc[[ncol_]]) & lc[[ncol_]] > 0, , drop = FALSE]
+      if (nrow(lc)) {
+        p10 <- ggplot(lc, aes(reorder(.data[[ccol]], .data[[ncol_]]), .data[[ncol_]])) +
+          geom_col(fill = "#756bb1") + coord_flip() +
+          scale_y_log10(labels = function(v) formatC(v, format = "d", big.mark = ",")) +
+          labs(title = paste0(label, " \u2014 legacy length-based classes"),
+               subtitle = paste0("what REF/ALT size alone can say, without the graph. NOT the ",
+                                 "same partition as the topological classes."),
+               x = NULL, y = "alleles (log)")
+        ggsave(op(".length_class_summary.png"), p10, width = 8, height = 4.5, dpi = 150)
+      }
+    } else message("length_class table has no count column; skipping")
+  } else message("length_class table unusable; skipping length-class plot")
+} else message("no length_class table; skipping length-class plot")

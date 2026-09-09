@@ -1,7 +1,7 @@
 # Pangenome variant classification + SV/private-sequence rework
 
-**Status:** batches 1 and 2 built and applied. Rebuild running (`CACTUS_PANGENOME`, ~17 h,
-launched with `--vcf full clip`). Batches 3–5 outstanding.
+**Status:** batches 1, 2 and 3 built, applied and verified running end to end on the rebuilt
+graph. Batches 4, 5, 6, 6b and 7 outstanding.
 
 **Origin:** Chris Bird, 2026-08-26 — bp-weighted SV spectra, private-haplotype size spectra,
 independent mapping of private haplotypes, transposon drivers.
@@ -9,6 +9,12 @@ independent mapping of private haplotypes, transposon drivers.
 **Cohort:** 5 individuals × 2 haplotypes = 10 paths. Reference `Sde-CMat_203_hap2`.
 Passengers `Sde-CPla_115_hap1/hap2` retained. Clip graph 1,926,892,905 bp / 151,697,494
 nodes; full graph 2,631,391,946 bp / 153,003,433 nodes.
+
+**The graph was rebuilt after batch 1.** Current clip total is **1,926,884,214 bp**
+(odgi-confirmed), 8,691 bp smaller than the pre-rebuild figure, and per-haplotype private bp
+moved bidirectionally by ≤0.1% — largest gains in `CBau_104#2`, `CTlk_104#2` and
+`CPla_115#1`, the assemblies whose part indices the harmonization patch changed. Every
+pre-rebuild number in §1 is therefore a **baseline for comparison, not a value to reuse.**
 
 ---
 
@@ -276,33 +282,152 @@ still outstanding.
 | 2 | `AT` traversals, parent tier only | SUBST / INS / DEL partition replacing `COMPLEX`/`BLOCKSUB`; `INV_PATH_EXPLICIT` as a named floor |
 | 2b | revcomp + minimap2 on SUBST ≥1 kb | `INV_ALN_RESCUED` + the SUBST homology subdivision |
 | 3 | `AC`/`AN` | AF spectrum, per-individual private variants |
-| — | `gfa_hap_coverage.py` pass 5 | private-segment spectra and BED |
+| 4 | `gfa_hap_coverage.py` pass 5, **both flavours** | private-segment spectra and BED |
+| 4b | `PRIVATE_FASTA` → `MAP` / `KMER` → `JOIN` | per-segment evidence: does the sequence exist elsewhere, and is it repeat-derived |
 
 Exclusive `primary_class` for all totals; non-exclusive labels retained per variant.
 
 **No chromosome scatter for `CLASSIFY` or `INVERSION_RESCUE`** — 23.9M records classify in
 well under an hour single-threaded, and rescue completed as one task. `HAP_COVERAGE` is
 whole-graph because 139 composites span multiple chromosome subgraphs and a private run cut at
-a boundary would corrupt the segment histogram. Net effect: **no `groupTuple` barriers anywhere
-in the new work** except untangle's collection, which deliberately has no `size:` because
-`PANGENOME_UNTANGLE` carries `errorStrategy 'ignore'` and a fixed size would hang forever on a
-failed chromosome.
+a boundary would corrupt the segment histogram.
+
+### Layer 4b: the private-sequence chain, and why it is shaped this way
+
+| process | tasks | scatter |
+|---|---|---|
+| `PRIVATE_FASTA` | 2 | per flavour — GFA read **once**; emits one private and one control FASTA per haplotype |
+| `PRIVATE_INDEX` | 1 | flavour-independent; tagged multi-FASTA of all assemblies + **one-part** minimap2 index |
+| `PRIVATE_MAP` | 20 | per haplotype × flavour; **both sets in one task** |
+| `PRIVATE_KMER` | 20 | per haplotype × flavour; **both sets in one task, control first** |
+| `PRIVATE_JOIN` | 2 | per flavour — joined table, cross-tab, and the R-ready CSV |
+
+**Two independent verdicts, by design.** `PRIVATE_MAP` aligns each segment against the other
+assemblies; `PRIVATE_KMER` counts its k-mers in the sample's own reads. Neither sees the
+other's evidence, so their cross-tabulation is informative rather than two views of one
+measurement:
+
+| combined | reading |
+|---|---|
+| `NOT_PRIVATE` + `REPEAT_LIKE` | present elsewhere AND high copy → graph collapse |
+| `PRIVATE_CONFIRMED` + `UNIQUE_LIKE` | absent elsewhere AND single copy → novel sequence |
+| `NOT_PRIVATE` + `UNIQUE_LIKE` | present elsewhere, single copy → the graph failed to merge homologous sequence; an alignment failure, not a repeat problem |
+| `PRIVATE_CONFIRMED` + `REPEAT_LIKE` | absent elsewhere, high copy WITHIN this sample → haplotype-specific expansion |
+| `NO_ALIGNMENT` + * | aligned nowhere, not even to its own assembly — low-complexity, enumerated from the FASTA rather than the PAF so it is distinguishable from a failed task |
+
+### The control set is the load-bearing idea
+
+Private measurement alone cannot say whether private sequence is repeat-enriched. That needs
+sequence from the **same haplotype**, measured the **same way**, differing only in privateness.
+`PRIVATE_FASTA` therefore emits size-matched **non-private control windows** per
+(haplotype, contig), and every threshold that could be hand-set is derived from them instead.
+
+Three requirements on a control window, each from a measured failure:
+
+1. **No private content** (`max_private_frac = 0.05`). ~14% of a haplotype is private, so
+   unfiltered windows would be ~14% contaminated toward the private value. Rejected rather
+   than masked: masking creates junction k-mers that exist nowhere in the genome.
+2. **Size-matched per (haplotype, contig)**, because multiplicity correlates with length and
+   private sequence is not uniformly distributed across chromosomes. A genome-wide bp match
+   would confound both with privateness.
+3. **Cross-individual** (`min_cross_frac = 0.95`): 95% of bp on nodes walked by ≥2
+   INDIVIDUALS, not merely ≥2 haplotypes. `cov ≥ 2` is satisfied by a window's own sister
+   haplotype, which is not the contrast `PRIVATE_MAP` performs.
+
+### Derived, not guessed
+
+| quantity | source | measured |
+|---|---|---|
+| k-mer single-copy reference | **control** run, k-mer-weighted median of per-segment medians | 22–65× per haplotype, tracking read depth |
+| `min_identity` | **control** p5 of per-segment best identity | 0.634–0.674 across ten haplotypes |
+| `min_frac` | **constant 0.5** — deliberately not derived | see below |
+
+Each of these was a hand-set constant that was wrong:
+
+- k-mer threshold `3.0` as an **absolute** multiplicity, against ~14× single-copy coverage,
+  called everything `REPEAT_LIKE`. It is now a **multiple** of the control's derived level.
+- `min_identity = 0.90` discarded nearly all real homology (control identities run 0.75–0.90),
+  so 70% of control windows reported no homologue anywhere. `0.80` fixed this cohort but was
+  still a number from one clupeid.
+- `min_frac` derived as a control p5 gave **0.0818 → 0.9414** across ten haplotypes of one
+  species — noise in the long left tail of coverage, not biology, and it made the criterion
+  differ per haplotype. Reverted to a constant.
+
+**The distinction that matters:** identity measures cross-haplotype divergence, a species
+property that does not transfer between taxa, so it must be derived. Coverage is a definitional
+choice — how much of a segment must be found elsewhere before it stops counting as private —
+and is the same choice for any taxon. `aligned_frac_merged` is strongly bimodal (segments pile
+near 0.00 or 1.00), so anything from ~0.3 to ~0.7 gives nearly identical verdicts; 0.5 sits in
+the empty middle.
+
+**Every derivation carries its own tripwire.** Computing the identity percentile requires
+counting control segments with no non-self hit, and `max_control_no_hit = 0.5` fails the task
+when that is implausible. Measured 0.000–0.010 once the index was single-part — it is the check
+that would have caught both the split minimap2 index and the 0.90 floor on the first run.
 
 ---
 
 ## 3. Built and applied
 
-**Batch 1.** `harmonize_names.py` four envelope → merged-footprint swaps; `publish_dir_mode =
-'copy'`; `stageInMode = 'copy'` on cactus.
+**Batch 1.** `harmonize_names.py` four envelope → merged-footprint swaps.
 
 **Batch 2.** `cactus_pangenome.nf` (`--vcf full clip` + seven full-graph emits) ·
 `pangenome_variants.nf` (parent tier + tier audit; awk classifier removed) ·
-`pangenome_hap_coverage.nf` + `gfa_hap_coverage.py` (pass 5) · `pangenome_plots.R` (new
-schemas, four figures) · `harmonize_scaffolds.nf` + `main.nf` + `pangenome.nf` (wiring) ·
-`nextflow.config` (params + five labels) · five new modules · three new `py_scripts`.
+`pangenome_hap_coverage.nf` + `gfa_hap_coverage.py` (pass 5) · `pangenome_plots.R` ·
+five new modules · `classify_variants.py`, `rescue_inversions.py`,
+`rearrange_from_untangle.py` · wiring across `main.nf` / `pangenome.nf` /
+`harmonize_scaffolds.nf` / `nextflow.config`.
 
-The harmonization report is keyed by **filename**, not by a tupled emit, so
-`harmonize_species.nf` stays byte-identical and no task hash can move.
+**Batch 3.** `pangenome_hap_coverage.nf` flavour-parallelised · five private modules ·
+`extract_private_fasta.py` (4-pass + control windows), `summarise_private_map.py`,
+`summarise_private_kmer.py`, `join_private_evidence.py` · `main.nf` passes
+`BUILD_MERYL_DB.out.meryl_db` · config params and five resource labels.
+
+### Verified on real data
+
+| claim | evidence |
+|---|---|
+| chromosome-blind footprint fixed | `ref_footprint_by_chrom.tsv` has **15** chromosomes; `merged_ref_footprint_all_classes` 493,058,268 bp vs the buggy 90,307,914; no per-chromosome row exceeds its chromosome |
+| SUBST was the worst-suppressed class | 89.5 Mb → **420.2 Mb** (4.7×), because it has the most intervals spread across all fifteen chromosomes |
+| the reference-bias case, stated cleanly | INS: 246,819,137 novel node bp / 5,366,604 ref footprint. DEL: **exactly 0** novel / 94,471,353 ref. 46× one way, zero the other |
+| `graph_total_bp` matches odgi | 1,926,884,214 exactly, independently derived from S lines |
+| decomposition guard works | fine tier `topology_enabled False`, all four markers detected (`ID=ORIGIN`, `bcftools_normCommand`, `bcftools_normVersion`, `vcfwave`) |
+| the two tiers are what they claim | parent 23,877,797 records at 1.31 alleles each; fine 60,453,457 at exactly 1.0000 |
+| inversion rescue is calibrated | control 27/29 recovered (93.1%), against 30/32 pre-rebuild. `control_path_explicit_tested = 29` matches `classify`'s LV=0 path-explicit count exactly — two code paths, same population |
+| SUBST subdivision reproduces its motivation | `SUBST_HOMOLOGOUS` 153,498 (75.5%) / `PARTIAL` 13,195 / `UNRELATED` 36,403 |
+| compaction fixed the odgi crash | `UNTANGLE` 30/30 exit 0 including all fifteen clip tasks |
+| `REARRANGE` runs both arms | 1,516,080 / 1,515,536 rows kept, 7,687 harmonization rows joined |
+| private extraction is self-consistent | 170,322 segments / 1,371,790,691 bp; `segment_bp == fasta_bp_total`; 0 nodes missing sequence |
+| the k-mer contrast | private `repeat_like` **0.9306** vs control **0.0669** on the full arm |
+| flat across chromosomes | private `repeat_like` 0.92–0.94 on all fifteen; chr8 0.9438 and chr9 0.9198 unremarkable against chr1 0.9424 |
+| measured resources | `PRIVATE_INDEX` peak RSS 28.4 GB (guess was 96 GB), 115 s wall for a one-part index over 10.4 Gb |
+
+### Bug classes that cost the most time — record these as conventions
+
+1. **A plain channel read more than once starves all but one consumer, silently.** Process
+   outputs (`X.out.y`) are broadcast and safe; anything built by `map`/`flatMap`/`combine` is
+   not. Three instances: `ch_cactus_in` (five consumers), `CACTUS_PANGENOME.out.gfa` into
+   `CLASSIFY` (lockstep against a two-item channel → the parent tier never ran), and the
+   `parents_vcf` double read. **The symptom is always a missing task, never an error.**
+2. **For a missing Nextflow task, instrument before theorising.** `.view()` shows items
+   flowing; `count()` only emits on channel close. Together they distinguish empty / flowing
+   but never closing / fine in one run. Five wrong diagnoses preceded two minutes of
+   instrumentation.
+3. **Read the log, not the progress display.** `[-] process > X -` in the terminal summary does
+   **not** mean a process did not run — cached tasks completing during DAG resolution can
+   appear as never-started. `grep "Cached process\|Submitted process" .nextflow.log` is
+   authoritative. This single misreading drove roughly half a day.
+4. **SIGPIPE under `set -o pipefail`.** Any `cmd | head`/`| tail` over a data file is exit 141
+   waiting to happen. Rewrite as a single `awk`. `--version | head -n1` is safe. Documented
+   once in `pangenome_untangle.nf`, then reintroduced into three other modules.
+5. **`$` in a `"""…"""` script block.** Shell needs `\$`; Groovy interpolation does not.
+   Post-condition checks should scan the script block for unescaped `$`.
+6. **Post-condition strings must be fully qualified.** An unqualified `min_frac     = 0.5`
+   matched the unrelated `harmonize_dropoff_min_frac` and blocked a correct patch.
+7. **Destructive commands ship with their variable definitions inline.** An unset `$W` turned
+   a delete loop into 80 refusals; twice.
+8. **Rewrite a file rather than patch it a fourth time.** Three successive anchored patches to
+   `pangenome_private_join.nf` stacked into overlapping copies of the same guard block.
 
 ---
 
@@ -310,18 +435,126 @@ The harmonization report is keyed by **filename**, not by a tupled emit, so
 
 | Batch | Contents |
 |---|---|
-| 3 | `PRIVATE_FASTA`, `PRIVATE_MAP`, `PRIVATE_KMER`. One joined per-segment table. **Motivating question has changed:** the reference excess is resolved as a clipping artifact (§0.3), so the live question is whether chr7/chr8/chr9's elevated private fraction (§0.4) is real divergence or collapsed repeat. |
-| 4 | Private-segment spectrum plots on the SV bins; per-chromosome private table (§0.4); Layer 1 rearrangement figures. |
+| 4 | Private-segment spectrum plots on the SV bins; per-chromosome private table (§0.4); Layer 1 rearrangement figures. Plus two `rearrange_from_untangle.py` fixes the real output exposed — see §4a. |
 | 5 | Report matrix, test × {clip, full}, with explicit "n/a — clip only" for the fine view. |
-| 6 | Pangenome construction: `--lastTrain` (v3.1.4, available now) then `--gref` (needs v3.2.1). See §4b -- two runs, not one, so the scoring change is not confounded with a version bump. |
-| 7 | Swave as a locus-level direction annotation, EXPLORATORY. See §4c -- it merges where we decompose, so the integration is an annotation layer, not a replacement classifier. |
-| later | Whole-graph untangle for translocations. `ref_span` emitting its sort key. GraffiTE post-annotation. `svim-asm` as the non-graph check (`PAIRWISE_ALIGNMENT` already runs all 45 pairs; still needs `-c`, secondaries, and a lower length filter). |
+| 6 | Pangenome construction: `--lastTrain` (v3.1.4, available now) then `--gref` (needs v3.2.1). See §4b — two runs, not one, so the scoring change is not confounded with a version bump. |
+| 6b | **`PRIVATE_ENRICHMENT`**: the GLMM, as its own module so the model can be re-fit without redoing the k-mer lookups. See §4a2. Waiting on the R code. |
+| 7 | Swave as a locus-level direction annotation, EXPLORATORY. See §4c — it merges where we decompose, so the integration is an annotation layer, not a replacement classifier. |
+| later | Whole-graph untangle for translocations. `ref_span` emitting its sort key. GraffiTE post-annotation (the meryl k-mer proxy is a permanent self-contained feature, **not** a placeholder for it). `svim-asm` as the non-graph check. |
 
-**Swave: evaluated on the pre-rebuild graph, not adopted.** It does NOT supersede Layer 2 as
-originally assumed -- it merges loci where we decompose alleles, so it is a candidate
-annotation layer rather than a replacement classifier. See §4c / batch 7.
-**Parked, unevaluated:** `INVPG-annot` (2025 preprint).
+**Parked, unevaluated:** `INVPG-annot` (2025 preprint). PGGE / `peanut`.
 
+---
+
+## 4a. Batch 4 — two fixes the real REARRANGE output exposed
+
+`REARRANGE` ran and its candidate table is dominated by artifacts of how it sorts and pools:
+
+**Unplaced scaffolds swamp the carrier lists.** The chr10 locus at 58,005,273–68,935,373
+(span 10.93 Mb, union 9.78 Mb, fill 0.8945) has **80 carriers, of which 74 are unplaced
+scaffolds** — every one flagged `ORIENTATION_SUSPECT`, because a small unplaced contig
+projecting inverted has no forward component to compare against. 2,615 queries carry that flag,
+which makes `any_artifact_flag` nearly useless at high carrier counts. The table should
+separate chromosome-scale from unplaced carriers rather than pooling them.
+
+**The sort is inverted for the interesting case.** 160 single-carrier loci sort first — all
+unflagged, all small — while the 10.93 Mb locus with six chromosome-scale carriers sorts last.
+Unflagged-first was right when artifacts were assumed to be the noise; the actual noise is
+single-carrier unplaced projections.
+
+**§0.1 needs revising.** On the rebuilt graph the chr10 locus is carried by **six
+chromosome-scale haplotypes across three individuals** (`CBau_104` ×2, `CLim_110` ×2,
+`CTlk_104` ×2), both haplotypes each — not the 2-of-10 heterozygous pattern recorded earlier.
+That is closer to fixed divergence between the reference and those three individuals, with
+`CMat` and `CPla` as the exceptions. The earlier reading came from the pre-patch graph and from
+looking at 43 queries.
+
+---
+
+## 4a2. Batch 6b — `PRIVATE_ENRICHMENT`: the GLMM
+
+`PRIVATE_JOIN` emits `<taxid>.<flavor>.private_evidence.csv`, one row per segment, carrying
+both response forms so a binomial and a continuous model come off the same file:
+
+`haplotype, individual, sample, flavor, chromosome, segment, set, start, end, span_bp,
+log_span, is_private, n_other_assemblies, best_identity, aligned_frac_merged, map_verdict,
+n_kmers_observed, n_kmers_expected, frac_absent, mean_copy, median_copy, max_copy,
+single_copy_ref, copy_ratio, kmer_verdict, repeat_like, combined`
+
+`individual` is derived so the nested random effect works. `log_span` is precomputed.
+
+### The model as specified
+
+```
+repeat_like ~ is_private + log(span_bp) + (1 | haplotype) + (1 | chromosome)
+                                        + (1 | haplotype:chromosome)
+```
+
+- **Binomial as the headline** (`repeat_like` 0/1) for an interpretable odds ratio; **lognormal
+  on `log(median_copy)`** as the effect-size check, since the response spans 14 to 360,000.
+- `log(span_bp)` is **not optional** — longer segments span more repeat classes, and private
+  and control size distributions will not match exactly even after size-matched sampling.
+  Without it the privateness coefficient absorbs length.
+- `(1 | haplotype:chromosome)` is the term that answers the chr8/chr9 question: large variance
+  means the effect is haplotype-specific rather than a property of the chromosome. Given
+  `repeat_like` is flat at 0.92–0.94 across all fifteen, expect this near zero.
+- With 10 haplotypes and 5 individuals there is almost no d.f. to estimate an individual-level
+  variance separately, so `(1 | individual/haplotype)` will likely fail to converge or return
+  zero. Fit `(1 | haplotype)` and note the within-individual correlation, or check empirically
+  whether the two haplotypes of a sample behave alike.
+- ~380,000 rows on the full arm; the binomial will want `nAGQ=0`.
+
+### What could invalidate it
+
+Segments within a chromosome are **not independent** — adjacent private segments often flank
+the same repeat array, so their multiplicities are correlated beyond what the chromosome random
+effect absorbs. Effective sample size is much smaller than nominal and standard errors will be
+too small. Options: cluster-robust variance by locus, or thin to one segment per window. Worth
+reporting rather than quietly emitting a *p*-value that is too good.
+
+Also: this tests **association, not causation**. Repeat-enrichment of private sequence is
+consistent with graph collapse producing spurious private sequence, but equally with genuine
+repeat expansion being genuinely haplotype-specific. `PRIVATE_MAP` separates those — collapse
+means the sequence exists in other assemblies, a real expansion means it does not. The two
+together are the argument; neither alone.
+
+### OPEN QUESTION for the model: graph-node sharing does not imply block alignability
+
+**117,492 of 315,303 control windows have zero other-assembly hits** — 79% of control
+failures — despite being ≥95% cross-individual by graph coverage. The graph says two
+individuals walk those nodes; minimap2 says the sequence is not in their assemblies at ≥65%
+identity over ≥50% of its length. The remaining 29,145 failures have 6–9 hits but sit at
+0.1–0.3 merged coverage. Windows that succeed do so decisively: **162,908 at ≥0.9**.
+
+Both statements can be true simultaneously: a window can be 95% covered by cross-individual
+nodes while every individual node is only a few hundred bp, so the *window* has no contiguous
+homologue even though its parts are shared. That is a real difference between graph-node
+sharing and assembly-level alignability, not a defect in either measure — and it **caps the
+control at ~54% `NOT_PRIVATE`**, which is the honest ceiling this measure can reach.
+
+Three rounds of threshold tuning moved control from 0.19 → 0.5312 → 0.5360; the last change
+bought 0.5%, so this is not a tuning problem. It is a question the CSV can answer directly,
+and it bears on the model:
+
+- Does the zero-hit control population differ from the ≥0.9 population in `span_bp`? If the
+  failures are the short windows, node-level sharing at small scale is the explanation.
+- Is `n_other_assemblies` bimodal *within* the control, and does that structure track
+  chromosome or haplotype?
+- **Should `aligned_frac_merged` enter the model as a covariate rather than only as a
+  threshold?** The bimodality suggests two distinct populations, and collapsing them to a
+  binary `map_verdict` may be discarding the informative axis.
+- If graph sharing and alignability are measuring genuinely different things, the
+  `map_verdict × kmer_verdict` cross-tab has a third dimension and the four-cell reading in
+  §2 is an approximation.
+
+Current contrast, for reference when fitting:
+
+| | mapping `not_private` | k-mer `repeat_like` |
+|---|---|---|
+| private | 0.2372 | 0.9306 |
+| control | 0.5360 | 0.0669 |
+
+The k-mer arm does not depend on cross-assembly alignment and is unaffected by any of this.
 
 ---
 
@@ -528,20 +761,30 @@ both sides before computing a single cross-tab.**
 
 ## 5. Open questions
 
-1. **Does `.full.raw.vcf.gz` appear?** The single naming inference in batch 2. All full-graph
-   emits are `optional: true`, so a wrong guess costs a missing channel, not a failed task.
-2. **Does the chr10 candidate re-derive?** Carrier scaffold was renamed.
-3. **Does clip `hap_private.tsv` still read 812,601,533 / 122,550,615?** A change means
-   harmonization moved the graph more than the null result implied.
-4. **Do output-block additions bust a task hash?** Asserted twice in this project, never
-   verified. Sidestepped rather than answered. Worth testing when a cactus rerun is cheap.
-5. **Are the 288 SUBST alleles ≥500 kb real large-scale divergence?** Not inversions (rescue
-   found zero), mostly homologous (§1). Now framed as a testable hypothesis: 77 distinct loci,
-   13 of them carrying 7 alt alleles each, at 0.9-1.0 forward homology -- consistent with the
-   HOXD70 scoring producing substitutions where indels belong. **Batch 6 C1 tests it.**
-6. **Does `--gref` corrupt the private-sequence analysis?** It adds a `gref_<reference>`
-   sample whose paths are copies of existing sequence, which would raise coverage on every
-   node they touch and un-private the private column. Must be answered before C2 runs.
+### Answered by the rebuild
+
+| question | answer |
+|---|---|
+| Does `.full.raw.vcf.gz` appear? | **Yes** — 4.2 GB raw, 1.6 GB filtered. The naming inference was right, and the full arm has a variant catalog. |
+| Does the chr10 candidate re-derive? | **Yes**, same locus and terminal position, but with **six chromosome-scale carriers across three individuals**, not the 2-of-10 heterozygous pattern originally recorded. See §4a. |
+| Does clip `hap_private.tsv` still read 812,601,533? | **No** — 812,983,199 including `repeat_traversed_bp`, and per-haplotype values moved ±0.1% bidirectionally. Harmonization moved the graph slightly; the pattern (largest gains in the renamed assemblies) is consistent with cause. |
+| Do output-block additions bust a task hash? | **Still unverified.** `CLASSIFY` re-ran when its output block changed, but its script also changed, so it is not a clean test. Worth answering when a cactus rerun is cheap. |
+
+### Live
+
+1. **Are the 288 SUBST alleles ≥500 kb real large-scale divergence?** Not inversions (rescue
+   found zero), mostly homologous. 77 distinct loci, 13 carrying 7 alt alleles each, at 0.9–1.0
+   forward homology — consistent with HOXD70 scoring producing substitutions where indels
+   belong. **Batch 6 C1 tests it.**
+2. **Does `--gref` corrupt the private-sequence analysis?** It adds a `gref_<reference>` sample
+   whose paths are copies of existing sequence, raising coverage on every node they touch and
+   un-privating the private column. Must be answered before C2 runs — and it now also affects
+   the control set, since `min_cross_frac` counts individuals.
+3. **Why does graph-node sharing not imply block alignability?** 117,492 of 315,303
+   cross-individual control windows have zero other-assembly hits, capping the control at ~54%
+   `NOT_PRIVATE`. Framed for the model in §4a2.
+4. **Singleton skew unexplained.** 96% of `SV_BLOCKSUB` private to one of five samples is not
+   what segregating variation looks like.
 
 ---
 
@@ -554,6 +797,41 @@ two failed patches). Delimiter-balance checks must assert the delta is **unchang
 zero: `pangenome_variants.nf` is natively +1 brace / −1 paren because of embedded awk.
 `nextflow.config` **and `main.nf`** are CRLF; every patch detects per file. Delivered via
 `present_files`. Jason applies all edits.
+
+`.bak` backups go to a **`deprecated/` subfolder beside the file** (`modules/deprecated/`,
+`py_scripts/deprecated/`, `workflows/deprecated/`), not alongside it.
+
+Post-condition strings must be **fully qualified**: an unqualified `min_frac     = 0.5` matched
+the unrelated `harmonize_dropoff_min_frac` and blocked a correct patch.
+
+**Rewrite rather than patch a fourth time.** Three successive anchored patches to the same
+region of `pangenome_private_join.nf` stacked into overlapping copies of one guard block, and
+the line-based cleanup then cut through `versions.tsv` and `stub:`.
+
+**Every destructive command ships with its variable definitions inline.** An unset `$W` turned
+a delete loop into 80 refusals, twice. The `case "$d" in "$W"/??/*)` guard did its job both
+times, which is why it stays.
+
+### Nextflow-specific, learned the hard way
+
+- **A plain channel read more than once starves all but one consumer, silently.** Process
+  outputs are broadcast; `map`/`flatMap`/`combine` results are not. Fork with `multiMap`,
+  `.first()`, or an explicit split. **The symptom is a missing task, never an error.**
+- **Lockstep consumption:** a process with two input channels takes one item from each per
+  task. A two-item channel against a one-item channel makes **one** task and silently discards
+  the rest. Pair by key with `combine` + `multiMap` rather than passing a singleton alongside a
+  fanned-out channel.
+- **Instrument before theorising.** `.view()` shows items flowing; `count()` only emits on
+  channel close. Both together distinguish empty / never-closing / fine in one run.
+- **Read `.nextflow.log`, not the progress display.** `[-] process > X -` does not mean a
+  process did not run.
+- **SIGPIPE under `set -o pipefail`:** no `| head` / `| tail` over a data file inside a script
+  block. Single `awk` instead.
+- **Resource directives (`time`, `memory`, `queue`, `errorStrategy`) are outside the task
+  hash** and can be changed freely. Input tuple **shape** changes do re-run the task.
+- **`0` means "derive"** for any threshold that should be data-driven, with a non-zero value
+  overriding, and the derived value written into the audit. Used for
+  `pangenome_private_map_min_identity` and `--single-copy`; keep the convention consistent.
 
 ---
 
@@ -571,3 +849,15 @@ zero: `pangenome_variants.nf` is natively +1 brace / −1 paren because of embed
    harmless either way, but the comment must survive.
 7. **Tool churn.** Swave, `INVPG-annot`, GraffiTE all postdate this design. Keep the
    classification module thin enough to swap.
+8. **The control caps at ~54% `NOT_PRIVATE`,** because graph-node sharing does not imply
+   block alignability (§4a2). Read the private figure against that ceiling, not against 1.0.
+9. **Derived thresholds are circular if the control is contaminated.**
+   `max_private_frac = 0.05` bounds it, but if `control_bp_ratio_achieved` ever falls well
+   below 1.0 with high rejection counts, the derived values shift toward the private
+   distribution and the contrast weakens without failing.
+10. **`meryl-lookup` report-type names have changed between releases.** There is no `-dump`;
+    the module captures `-wig-count -help` into the task log so a future rename is diagnosable
+    from the output rather than from guesswork.
+11. **Two guessed resource figures remain.** `pangenome_private_map` at 64 GB is sized for
+    loading a ~10 Gb `.mmi` and has not been profiled. `PRIVATE_INDEX` is now measured
+    (28.4 GB peak, 32 GB allocated).
