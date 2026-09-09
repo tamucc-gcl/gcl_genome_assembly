@@ -67,11 +67,21 @@ optn <- function(k, d) { v <- suppressWarnings(as.numeric(optc(k, NA))); if (len
 is_missing <- function(x) is.null(x) || is.na(x) || !nzchar(x) ||
   grepl("^(NONE|NO_)", basename(x)) || !file.exists(x) || file.size(x) == 0
 
-rd <- function(f, sep = "\t") {
+# read.delim does NOT guarantee numeric types: with check.names = FALSE, one stray
+# non-numeric token turns a whole column character, and arithmetic then fails at plot time.
+# PANGENOME_REARRANGE_PLOTS died exactly this way ("'x' must be numeric" from cut()), so
+# coerce explicitly on read rather than trusting the type.
+num_cols <- function(d, cols) {
+  for (cc in intersect(cols, names(d))) d[[cc]] <- suppressWarnings(as.numeric(d[[cc]]))
+  d
+}
+
+rd <- function(f, sep = "\t", numeric_cols = character(0)) {
   if (is_missing(f)) return(NULL)
   d <- try(read.delim(f, sep = sep, header = TRUE, comment.char = "#",
                       stringsAsFactors = FALSE, check.names = FALSE), silent = TRUE)
   if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
+  if (length(numeric_cols)) d <- num_cols(d, numeric_cols)
   d
 }
 
@@ -105,12 +115,23 @@ bind_flavours <- function(clip_f, full_f, reader = rd) {
   do.call(rbind, parts)
 }
 
-spec <- bind_flavours(optc("spectrum_clip"), optc("spectrum_full"))
-hap  <- bind_flavours(optc("hap_clip"),      optc("hap_full"))
-ctg  <- bind_flavours(optc("contig_clip"),   optc("contig_full"))
-xtab <- bind_flavours(optc("xtab_clip"),     optc("xtab_full"))
+spec <- bind_flavours(optc("spectrum_clip"), optc("spectrum_full"),
+        reader = function(f) rd(f, numeric_cols = c("n_segments", "segment_bp")))
+hap  <- bind_flavours(optc("hap_clip"), optc("hap_full"),
+        reader = function(f) rd(f, numeric_cols = c("private_bp", "hap_bp",
+                                "pct_of_private", "pct_of_haplotype")))
+ctg  <- bind_flavours(optc("contig_clip"), optc("contig_full"),
+        reader = function(f) rd(f, numeric_cols = c("private_bp", "contig_graph_bp",
+                                "pct_of_contig", "pct_of_hap_private",
+                                "pct_of_pangenome_private")))
+xtab <- bind_flavours(optc("xtab_clip"), optc("xtab_full"),
+        reader = function(f) rd(f, numeric_cols = c("n_segments", "segment_bp")))
 ev   <- bind_flavours(optc("evidence_clip"), optc("evidence_full"),
-                      reader = function(f) rd(f, sep = ","))
+        reader = function(f) rd(f, sep = ",",
+                               numeric_cols = c("span_bp", "is_private", "repeat_like",
+                                                "median_copy", "copy_ratio",
+                                                "aligned_frac_merged",
+                                                "n_other_assemblies")))
 
 note("flavours_spectrum", if (is.null(spec)) 0 else length(unique(spec$flavor)))
 note("flavours_evidence", if (is.null(ev))   0 else length(unique(ev$flavor)))
@@ -133,6 +154,9 @@ if (is.null(spec)) {
   if (!nrow(s)) {
     skip("private_spectrum", "no ALL-scope rows")
   } else {
+    s <- s[is.finite(s$segment_bp) & is.finite(s$n_segments), , drop = FALSE]
+    # scale_y_log10 silently drops n_segments <= 0; do it explicitly and record the count
+    note("spectrum_bins_zero_count", sum(s$n_segments <= 0))
     s$size_bin <- bin_order(s$size_bin)
     note("spectrum_total_bp_clip", sum(s$segment_bp[s$flavor == "clip"]))
     note("spectrum_total_bp_full", sum(s$segment_bp[s$flavor == "full"]))
@@ -177,7 +201,7 @@ if (is.null(ctg)) {
   c2 <- ctg
   # placed chromosomes only: unplaced scaffolds are individually tiny and would swamp the
   # axis with hundreds of categories
-  c2 <- c2[grepl("^chr", c2$contig), ]
+  c2 <- c2[grepl("^chr", c2$contig) & is.finite(c2$pct_of_contig), ]
   if (!nrow(c2)) {
     skip("private_by_chromosome", "no chr* contigs")
   } else {
@@ -217,7 +241,8 @@ if (is.null(hap) || length(unique(hap$flavor)) < 2) {
   h <- hap
   h$is_ref <- if (ref_hap == "NONE") FALSE else h$haplotype == ref_hap
   # order by full-arm private bp so the panels share a haplotype order
-  o <- h[h$flavor == "full", ]
+  h <- h[is.finite(h$private_bp), , drop = FALSE]
+  o <- if ("full" %in% h$flavor) h[h$flavor == "full", ] else h
   h$haplotype <- factor(h$haplotype, levels = o$haplotype[order(o$private_bp)])
 
   p4 <- ggplot(h, aes(private_bp, haplotype, fill = flavor)) +
@@ -312,7 +337,8 @@ if (is.null(ev)) {
 if (is.null(xtab)) {
   skip("private_evidence_xtab", "no private_evidence_xtab.tsv for either flavour")
 } else {
-  x <- xtab[xtab$scope == "CHROM" & xtab$set == "private", ]
+  x <- xtab[xtab$scope == "CHROM" & xtab$set == "private" &
+            is.finite(xtab$n_segments), ]
   if (!nrow(x)) {
     skip("private_evidence_xtab", "no CHROM-scope private rows")
   } else {
@@ -360,6 +386,7 @@ if (is.null(hap)) {
   } else {
     hp <- hap
     for (cc in need[-1]) hp[[cc]] <- suppressWarnings(as.numeric(hp[[cc]]))
+    hp <- hp[is.finite(hp$private_bp), , drop = FALSE]
     hp$name   <- as.character(hp$haplotype)
     hp$is_ref <- hp$name == ref_hap
     nh  <- length(unique(hp$name))

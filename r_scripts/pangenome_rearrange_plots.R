@@ -66,11 +66,21 @@ optn <- function(k, d) { v <- suppressWarnings(as.numeric(optc(k, NA))); if (len
 is_missing <- function(x) is.null(x) || is.na(x) || !nzchar(x) ||
   grepl("^(NONE|NO_)", basename(x)) || !file.exists(x) || file.size(x) == 0
 
-rd <- function(f, sep = "\t", header = TRUE) {
+# read.delim does NOT guarantee numeric types -- with check.names = FALSE and any stray
+# non-numeric token a whole column comes back character, and cut() then fails with
+# "'x' must be numeric". Coerce the columns we do arithmetic on, explicitly and on read,
+# rather than trusting the type.
+num_cols <- function(d, cols) {
+  for (cc in intersect(cols, names(d))) d[[cc]] <- suppressWarnings(as.numeric(d[[cc]]))
+  d
+}
+
+rd <- function(f, sep = "\t", header = TRUE, numeric_cols = character(0)) {
   if (is_missing(f)) return(NULL)
   d <- try(read.delim(f, sep = sep, header = header, comment.char = "#",
                       stringsAsFactors = FALSE, check.names = FALSE), silent = TRUE)
   if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
+  if (length(numeric_cols)) d <- num_cols(d, numeric_cols)
   d
 }
 
@@ -89,9 +99,15 @@ chrom_factor <- function(v) {
   factor(v, levels = u[order(is.na(n), n, u)])
 }
 
-cand <- rd(optc("candidates"))
-dups <- rd(optc("duplications"))
-ori  <- rd(optc("orientation"))
+cand <- rd(optc("candidates"),
+           numeric_cols = c("locus_start", "locus_end", "span_bp", "union_bp", "fill",
+                            "n_carriers", "n_chrom_carriers", "n_unplaced_carriers",
+                            "n_chrom_individuals"))
+dups <- rd(optc("duplications"),
+           numeric_cols = c("ref_start", "ref_end", "self_cov", "query_bp"))
+ori  <- rd(optc("orientation"),
+           numeric_cols = c("fwd_bp", "inv_bp", "pct_inv", "pct_inv_unfiltered",
+                            "dup_bp", "n_ref_targets"))
 aud  <- rd(optc("audit"))
 inv  <- NULL
 if (!is_missing(optc("inversions"))) {
@@ -132,12 +148,20 @@ if (is.null(cand)) {
   skip("rearrange_candidates",
        "table predates the carrier split -- rerun REARRANGE with the current script")
 } else {
-  cd <- cand[cand$span_bp >= min_span, , drop = FALSE]
+  # a log10 y-axis silently discards span_bp <= 0, which produced a
+  # "Removed 505 rows" warning on the first real run. Drop them explicitly and record the
+  # count, so a large number is visible in the audit rather than buried in a warning.
+  cd <- cand[is.finite(cand$span_bp) & cand$span_bp >= min_span, , drop = FALSE]
+  note("candidate_rows_unplottable",
+       sum(!is.finite(cand$span_bp) | cand$span_bp < min_span))
   if (!nrow(cd)) {
     skip("rearrange_candidates", sprintf("no loci >= %d bp", min_span))
   } else {
     cd$chrom  <- chrom_factor(chrom_of(cd$ref_contig))
-    cd$flagged <- cd$chrom_artifact_flag != "." & nzchar(cd$chrom_artifact_flag)
+    cd$flagged <- !is.na(cd$chrom_artifact_flag) &
+                  cd$chrom_artifact_flag != "." & nzchar(cd$chrom_artifact_flag)
+    cd$n_chrom_individuals[!is.finite(cd$n_chrom_individuals)] <- 0
+    cd$n_unplaced_carriers[!is.finite(cd$n_unplaced_carriers)] <- 0
     note("candidate_loci", nrow(cd))
     note("candidate_loci_no_placed_carrier", sum(cd$n_chrom_carriers == 0))
     note("candidate_max_span_bp", max(cd$span_bp))
@@ -169,7 +193,7 @@ if (is.null(inv)) {
 } else {
   iv <- inv
   iv$len <- iv$end - iv$start
-  iv <- iv[iv$len >= min_span, , drop = FALSE]
+  iv <- iv[is.finite(iv$len) & iv$len >= min_span, , drop = FALSE]
   if (!nrow(iv)) {
     skip("inverted_bp_by_chromosome", sprintf("no segments >= %d bp", min_span))
   } else {
@@ -203,7 +227,10 @@ if (is.null(inv)) {
 if (is.null(dups)) {
   skip("duplication_spectrum", "no duplications.tsv")
 } else {
-  dp <- dups[dups$query_bp >= min_span, , drop = FALSE]
+  dp <- dups[is.finite(dups$query_bp) & dups$query_bp >= min_span &
+             is.finite(dups$self_cov), , drop = FALSE]
+  note("duplication_rows_unplottable",
+       sum(!is.finite(dups$query_bp) | !is.finite(dups$self_cov)))
   if (!nrow(dp)) {
     skip("duplication_spectrum", sprintf("no duplications >= %d bp", min_span))
   } else {
@@ -238,10 +265,20 @@ if (is.null(dups)) {
 # are driving the number rather than orientation, which is why ORIENTATION_SUSPECT requires
 # BOTH to be high.
 # ======================================================================================
+# `o` must exist before the branch: the guard below references it, and if `ori` is NULL an
+# unassigned `o` is an "object not found" error rather than a skipped figure.
+o <- NULL
 if (is.null(ori)) {
   skip("orientation_flags", "no query_orientation.tsv")
 } else {
   o <- ori
+  o <- o[is.finite(o$pct_inv) & is.finite(o$pct_inv_unfiltered), , drop = FALSE]
+  if (!nrow(o)) {
+    skip("orientation_flags", "no rows with finite pct_inv")
+    o <- NULL
+  }
+}
+if (!is.null(o) && nrow(o)) {
   o$placed <- ifelse(grepl("^unplaced", o$contig), "unplaced", "placed")
   o$flag <- ifelse(is.na(o$artifact_flag) | o$artifact_flag == "." | !nzchar(o$artifact_flag),
                    "none", o$artifact_flag)
