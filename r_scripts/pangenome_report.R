@@ -28,6 +28,20 @@ p$add_argument("--popstruct",       default = "NO_POPSTRUCT") # sentinel/indicat
 p$add_argument("--progressive",     default = "NO_PROGRESSIVE") # sentinel/indicator; progressive growth PNG (opt-in)
 p$add_argument("--manifest",        default = "NO_MANIFEST")   # pangenome_manifest.tsv (role/file/label)
 p$add_argument("--hap_private",     default = "NO_HAP_PRIVATE") # PANGENOME_HAP_COVERAGE per-haplotype private breakdown
+# ---- the view matrix (batch 5) --------------------------------------------------------
+# representation_audit.tsv per tier. topology_enabled is the field that decides whether the
+# topological classes in this report mean anything: the fine tier is vcfwave-decomposed, so AT
+# is inherited from the parent record while REF/ALT are rewritten, and allele i stops
+# corresponding to traversal i+1.
+p$add_argument("--audit_parent",    default = "NO_AUDIT_PARENT")
+p$add_argument("--audit_fine",      default = "NO_AUDIT_FINE")
+# the FULL arm's private breakdown. The arms disagree by 46% on private bp and invert the
+# reference's rank, so quoting one silently is wrong half the time.
+p$add_argument("--hap_private_full", default = "NO_HAP_PRIVATE_FULL")
+# PANGENOME_PRIVATE_PLOTS audit: reference_rank_clip / reference_rank_full
+p$add_argument("--priv_figures_audit", default = "NO_PRIV_FIGURES")
+p$add_argument("--rearr_audit_clip", default = "NO_REARR_CLIP")
+p$add_argument("--rearr_audit_full", default = "NO_REARR_FULL")
 p$add_argument("--species",         default = "pangenome")
 p$add_argument("--output",          default = "pangenome_report.md")
 p$add_argument("--json",            default = "pangenome_stats.json")
@@ -88,6 +102,106 @@ add <- function(...) md <<- c(md, ...)
 
 nhap <- g(gr, "n_haplotypes", g(qc, "n_alignments", NA))
 add("## Pangenome", "")
+
+# ======================================================================================
+# Which view says what  (batch 5)
+#
+# THREE views exist and they are not interchangeable. Every number elsewhere in this report
+# comes from exactly one of them, and the unavailable cells are a finding rather than an
+# omission -- see the notes under the table.
+# ======================================================================================
+ap_ <- read_kv(args$audit_parent)
+af_ <- read_kv(args$audit_fine)
+hpf <- read_tsv_hash(args$hap_private_full)
+hpc <- read_tsv_hash(args$hap_private)
+pfa <- read_kv(args$priv_figures_audit)
+rac <- read_kv(args$rearr_audit_clip)
+raf <- read_kv(args$rearr_audit_full)
+
+# "n/a" is never bare: each carries the reason, because a blank cell reads as zero.
+NA_FINE_TOPO <- "n/a — AT destroyed by decomposition"
+NA_FINE_TRAV <- "n/a — needs traversals"
+NA_FULL_CAT  <- "n/a — no catalog on this arm"
+NA_CLIP_ONLY <- "n/a — clip only"
+
+have <- function(v) length(v) > 0
+yn   <- function(v, k) { x <- g(v, k, NA); if (is.na(x)) "—" else as.character(x) }
+
+priv_bp <- function(d) if (is.null(d) || !"private_bp" %in% names(d)) "—" else
+  mb(sum(num(d$private_bp), na.rm = TRUE))
+
+rows <- list()
+r <- function(measure, parent, fine, full) rows[[length(rows) + 1]] <<-
+  c(measure, parent, fine, full)
+
+r("Records",
+  if (have(ap_)) comma(g(ap_, "records")) else "—",
+  if (have(af_)) comma(g(af_, "records")) else "—",
+  NA_FULL_CAT)
+r("Alt alleles per record",
+  if (have(ap_)) yn(ap_, "alt_alleles_per_record") else "—",
+  if (have(af_)) yn(af_, "alt_alleles_per_record") else "—",
+  NA_FULL_CAT)
+r("Topology usable (`AT`)",
+  if (have(ap_)) sprintf("**%s**", yn(ap_, "topology_enabled")) else "—",
+  if (have(af_)) sprintf("**%s** — %s", yn(af_, "topology_enabled"),
+                         yn(af_, "decomposition_markers")) else NA_FINE_TOPO,
+  NA_FULL_CAT)
+r("Topological classes (SUBST / INS / DEL / INV)",
+  "yes", NA_FINE_TOPO, NA_FULL_CAT)
+r("Length-based classes", "yes", "yes", NA_FULL_CAT)
+r("Merged reference footprint",
+  if (have(ap_)) mb(g(ap_, "merged_ref_footprint_all_classes")) else "yes",
+  "yes", NA_FULL_CAT)
+r("Pangenome node bp / novel node bp",
+  if (have(ap_)) mb(g(ap_, "novel_node_bp_all_classes")) else "yes",
+  NA_FINE_TRAV, NA_FULL_CAT)
+r("Allele frequency spectrum", "yes", "yes", NA_FULL_CAT)
+r("Inversion rescue (alignment)", "yes", NA_FINE_TOPO, NA_FULL_CAT)
+r("Private sequence (bp)",
+  paste0(priv_bp(hpc), " *(clip, both tiers)*"), "", priv_bp(hpf))
+r("Private segment size spectrum", "yes *(clip)*", "", "yes")
+r("Private per chromosome", "yes *(clip)*", "", "yes")
+r("Private evidence (map × k-mer)", "yes *(clip)*", "", "yes")
+r("Rearrangement / untangle",
+  if (have(rac)) sprintf("%s inverted *(clip)*", mb(g(rac, "inverted_bp_total"))) else "yes *(clip)*",
+  "",
+  if (have(raf)) sprintf("%s inverted", mb(g(raf, "inverted_bp_total"))) else "yes")
+r("Openness / growth / partition", "yes", "", NA_CLIP_ONLY)
+
+add("### Which view says what", "",
+    "Every number below comes from exactly one of three views, and they are **not**",
+    "interchangeable. Unavailable cells carry their reason: a blank would read as zero.", "",
+    "| Measure | clip · parent | clip · fine | full |",
+    "|---|---|---|---|")
+for (rw in rows)
+  add(sprintf("| %s | %s | %s | %s |", rw[1],
+              if (nzchar(rw[2])) rw[2] else "—",
+              if (nzchar(rw[3])) rw[3] else "—",
+              if (nzchar(rw[4])) rw[4] else "—"))
+add("",
+    "- **clip · parent** is the only view where `AT` is interpretable, so it is the only view",
+    "  in which topological classification is valid. Everything called SUBST, INS, DEL or",
+    "  `INV_PATH_EXPLICIT` in this report comes from here.",
+    "- **clip · fine** is `vcfwave`-decomposed. `AT` is inherited from the parent record while",
+    "  REF and ALT are rewritten, so allele *i* stops corresponding to traversal *i+1*. The",
+    "  classifier refuses to compute topology on it rather than trusting the wiring to be",
+    "  right, which is why those cells are unavailable rather than empty.",
+    "- **full** has no variant catalog: `PANGENOME_VARIANTS` and `PANGENOME_CLASSIFY` run on",
+    "  the clip graph. The full arm contributes the private-sequence and rearrangement",
+    "  measures only.", "")
+
+if (have(pfa) && !is.na(g(pfa, "reference_rank_clip", NA))) {
+  add(sprintf(paste0("> **The arms disagree about private sequence, and not by a little.** ",
+                     "Clipping removes 698,360,436 bp of which 99.1%% is private, so the clip ",
+                     "arm understates private content by ~46%%. It also inverts the ",
+                     "reference's rank: **%s** on clip, **%s** on full. The reference is the ",
+                     "graph backbone and is never clipped, so on the clip arm it looks like ",
+                     "the most private haplotype in the cohort and on the full arm the least. ",
+                     "Private-sequence figures in this report are drawn from both arms for ",
+                     "that reason."),
+              g(pfa, "reference_rank_clip"), g(pfa, "reference_rank_full")), "")
+}
 add(sprintf("Minigraph-Cactus pangenome graph for *%s*%s.",
             gsub("_", " ", species),
             if (!is.na(g(gr, "n_haplotypes"))) sprintf(", over %s haplotypes", g(gr, "n_haplotypes")) else ""), "")
@@ -175,6 +289,7 @@ add("### Graph", "",
 if (length(vs) > 0) {
   total <- sum(num(vs[c("SNP","INDEL","SV")]), na.rm = TRUE)
   add("### Variant catalog", "",
+      "*View: clip · parent. Topological classes are valid only here — see the matrix above.*", "",
       "| class | count |", "|---|---:|",
       sprintf("| SNP | %s |", comma(g(vs, "SNP"))),
       sprintf("| Indel | %s |", comma(g(vs, "INDEL"))),
@@ -190,6 +305,7 @@ if (length(vs) > 0) {
 # ---- openness / growth ----------------------------------------------------------------
 if (length(gr) > 0) {
   add("### Openness / growth", "",
+      "*View: clip. panacus runs on the clip GFA; there is no full-arm equivalent.*", "",
       sprintf("Pangenome %s · core %s · accessory %s · private %s. Heaps' \u03b3 = %s (%s).",
               mb(g(gr, "pangenome_bp")), mb(g(gr, "core_bp")), mb(g(gr, "accessory_bp")),
               mb(g(gr, "private_bp")), format(round(num(g(gr, "heaps_gamma")), 3)), g(gr, "openness", "—")),
@@ -229,6 +345,8 @@ if (!is.null(hp_tbl) && all(c("haplotype", "private_bp", "pct_of_private",
   nh_p   <- nrow(hp_tbl)
   shown  <- if (nh_p > 20) head(hp_tbl, 15) else hp_tbl
   add("### Private-sequence ownership", "",
+      "*View: clip. The full arm reports ~46% more private sequence and reverses the",
+      "reference's rank — see the matrix above and the clip-vs-full figure.*", "",
       sprintf(paste("Every private segment is carried by exactly one haplotype, so the shares",
                     "below sum to 100%%. An even split over %d haplotypes would be %.1f%% each;",
                     "large departures mark assemblies contributing unusual amounts of unshared",
@@ -260,6 +378,7 @@ if (!is_missing(args$progressive)) {
 
 # ---- structural variants figure -------------------------------------------------------
 add("### Structural variants", "",
+    "*View: clip · parent.*", "",
     sprintf("![SV size spectrum](%s)", fig("sv_size_histogram.png")), "")
 
 # ---- population structure (PCoA + NJ tree, per haplotype and per individual) ----------

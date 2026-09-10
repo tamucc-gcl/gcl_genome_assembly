@@ -119,6 +119,11 @@ workflow PANGENOME {
     ch_priv_segments = Channel.empty()   // tuple(taxid, flavor, private_segments.bed)
     ch_priv_spectrum = Channel.empty()   // tuple(taxid, flavor, spectrum.tsv)
     ch_priv_evidence = Channel.empty()   // tuple(taxid, flavor, private_evidence.tsv)
+    // batch 5: fed to PANGENOME_REPORT's view matrix. Declared here so the report still
+    // builds when the private or untangle blocks are switched off -- the matrix then shows
+    // those views as unbuilt, which is the informative outcome.
+    ch_priv_fig_audit = Channel.empty()  // tuple(taxid, private_figures_audit.tsv)
+    ch_rearr_audit    = Channel.empty()  // tuple(taxid, flavor, untangle_audit.tsv)
     ch_priv_xtab     = Channel.empty()   // tuple(taxid, flavor, evidence cross-tab)
     ch_viz2d       = Channel.empty()
     ch_qc          = Channel.empty()
@@ -464,6 +469,7 @@ workflow PANGENOME {
                               aud ?: file('NO_UNTANGLE_AUDIT')) },
                 rp_script )
             ch_versions = ch_versions.mix( PANGENOME_REARRANGE_PLOTS.out.versions )
+            ch_rearr_audit = PANGENOME_REARRANGE.out.audit
         }
 
         // openness / growth (panacus on the finished clip GFA; workstream E)
@@ -691,6 +697,7 @@ workflow PANGENOME {
                     ch_reference_ids.first(),
                     pp_script )
                 ch_versions = ch_versions.mix( PANGENOME_PRIVATE_PLOTS.out.versions )
+                ch_priv_fig_audit = PANGENOME_PRIVATE_PLOTS.out.audit
             }
 
             // report figures: growth/core + Heaps + band (from the coverage histogram),
@@ -841,6 +848,35 @@ workflow PANGENOME {
         // that was disabled (the R script skips sentinels).
         if( params.pangenome_report != false ) {
             def report_script = file("${projectDir}/r_scripts/pangenome_report.R", checkIfExists: true)
+            // ---- the "Which view says what" matrix inputs -------------------------
+            // The matrix has to state whether topology was USABLE in each view, which is a
+            // property of the VCF rather than of the counts. representation_audit.tsv is the
+            // only place classify_variants.py records it (topology_enabled, plus the
+            // decomposition_markers that made it refuse), so the report states what the
+            // classifier actually did instead of what the pipeline intended.
+            ch_audit_parent = PANGENOME_CLASSIFY.out.audit
+                .filter { taxid, flavor, tier, f -> flavor == 'clip' && tier == 'parent' }
+                .map    { taxid, flavor, tier, f -> tuple(taxid, f) }
+            ch_audit_fine = PANGENOME_CLASSIFY.out.audit
+                .filter { taxid, flavor, tier, f -> flavor == 'clip' && tier == 'fine' }
+                .map    { taxid, flavor, tier, f -> tuple(taxid, f) }
+
+            // The FULL arm's private breakdown. Taken from the PROCESS output, which is
+            // broadcast -- NOT from ch_hap_priv, which PANGENOME_REPORT already consumes and
+            // which is a plain .filter{}.map{} channel. Reading a plain channel twice is the
+            // bug class that has bitten four times here, and its symptom is a silently
+            // starved consumer rather than an error.
+            ch_hap_priv_full = PANGENOME_HAP_COVERAGE.out.hap_private
+                .filter { taxid, flavor, f -> flavor == 'full' }
+                .map    { taxid, flavor, f -> tuple(taxid, f) }
+
+            ch_rearr_clip = ch_rearr_audit
+                .filter { taxid, flavor, f -> flavor == 'clip' }
+                .map    { taxid, flavor, f -> tuple(taxid, f) }
+            ch_rearr_full = ch_rearr_audit
+                .filter { taxid, flavor, f -> flavor == 'full' }
+                .map    { taxid, flavor, f -> tuple(taxid, f) }
+
             ch_report_in = ch_variants
                 .join( ch_qc,                          remainder: true )
                 .join( ch_growth_fit,                  remainder: true )
@@ -849,7 +885,17 @@ workflow PANGENOME {
                 .join( ch_prog_png,                    remainder: true )
                 .join( PANGENOME_MANIFEST.out.manifest, remainder: true )
                 .join( ch_hap_priv,                     remainder: true )
-                .map { taxid, vs, qc, gf, gs, pca, prog, mf, hp ->
+                .join( ch_audit_parent,                 remainder: true )
+                .join( ch_audit_fine,                   remainder: true )
+                .join( ch_hap_priv_full,                remainder: true )
+                .join( ch_priv_fig_audit,               remainder: true )
+                .join( ch_rearr_clip,                   remainder: true )
+                .join( ch_rearr_full,                   remainder: true )
+                // every fallback is a NO_* sentinel, not a failure: the report must still
+                // build for a species where CLASSIFY or the private analysis was disabled,
+                // and a matrix showing which views were not built beats a dead task.
+                .map { taxid, vs, qc, gf, gs, pca, prog, mf, hp,
+                       ap, af, hpf, pfa, rac, raf ->
                     tuple(taxid,
                           qc ?: file('NO_QC'),
                           gf ?: file('NO_GROWTH'),
@@ -858,7 +904,13 @@ workflow PANGENOME {
                           pca ?: file('NO_POPSTRUCT'),
                           prog ?: file('NO_PROGRESSIVE'),
                           mf ?: file('NO_MANIFEST'),
-                          hp ?: file('NO_HAP_PRIVATE')) }
+                          hp ?: file('NO_HAP_PRIVATE'),
+                          ap ?: file('NO_AUDIT_PARENT'),
+                          af ?: file('NO_AUDIT_FINE'),
+                          hpf ?: file('NO_HAP_PRIVATE_FULL'),
+                          pfa ?: file('NO_PRIV_FIGURES'),
+                          rac ?: file('NO_REARR_CLIP'),
+                          raf ?: file('NO_REARR_FULL')) }
             PANGENOME_REPORT( ch_report_in, report_script )
             ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
             ch_report   = PANGENOME_REPORT.out.report
