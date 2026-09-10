@@ -186,7 +186,7 @@ r("Private per chromosome", "yes *(clip)*", "", "yes")
 r("Private evidence (map × k-mer)", "yes *(clip)*", "", "yes")
 r("Rearrangement / untangle",
   if (have(rac)) sprintf("%s inverted *(clip)*", mb(g(rac, "inverted_bp_total"))) else "yes *(clip)*",
-  "*n/a - a graph property, not a VCF view*",
+  "*n/a — a graph property, not a VCF view*",
   if (have(raf)) sprintf("%s inverted", mb(g(raf, "inverted_bp_total"))) else "yes")
 r("Openness / growth / partition", "yes", "", NA_CLIP_ONLY)
 
@@ -352,8 +352,8 @@ if (length(gr) > 0) {
 # figures, so its presence is a safe proxy for the PNGs existing on disk.
 if (!is.na(g(gr, "tier_core_bp"))) {
   add("### Partition (core / soft-core / shell / cloud)", "",
-      "*View: clip. Cloud is the clip arm private total; the full arm reports ~46% more"
-      , "- see the matrix above.*", "",
+      "*View: clip. Cloud is this arm’s private total — the full arm",
+      "reports ~46% more. See the matrix above.*", "",
       sprintf(paste("Graph sequence binned by how many haplotypes carry it. Cuts are settable",
                     "(`params.pangenome_tier_*`); the realised floors for this cohort are core",
                     "\u2265%s hap, soft-core \u2265%s, shell \u2265%s, out of %s. A tier can be empty",
