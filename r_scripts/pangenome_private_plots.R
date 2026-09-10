@@ -81,11 +81,27 @@ num_cols <- function(d, cols) {
 # comment.char = "#" truncates every key at the separator and shifts every subsequent column
 # left. That is what made the per-chromosome figure report "no chr* contigs" from a file with
 # 602 of them. Read the lines, drop the ones that START with #, and parse what is left.
-read_nohash <- function(f, sep = "\\t", header = TRUE) {
-  ln <- readLines(f, warn = FALSE)
-  ln <- ln[!grepl("^\\s*#", ln)]
-  if (!length(ln)) return(NULL)
-  d <- try(read.delim(text = paste(ln, collapse = "\\n"), sep = sep, header = header,
+read_nohash <- function(f, sep = "\t", header = TRUE) {
+  # Comment lines are ALWAYS at the top of these files (every writer emits them before the
+  # header), so COUNT them and use `skip=`, rather than pulling the file into memory as a
+  # string. The readLines + paste(collapse) version walked the whole file and built one giant
+  # character vector, which took PANGENOME_PRIVATE_PLOTS past its walltime (exit 140) on the
+  # 485k-row evidence CSV.
+  #
+  # comment.char is deliberately "" -- `#` is a legitimate character inside PanSN haplotype
+  # names (Sde-CBau_104#1), and comment.char = "#" truncates every key at the separator and
+  # shifts every subsequent column left. That is what made the per-chromosome figure report
+  # "no chr* contigs" from a file containing 602 of them.
+  n_skip <- 0L
+  con <- file(f, "r")
+  repeat {
+    ln <- readLines(con, n = 1L, warn = FALSE)
+    if (!length(ln)) break
+    if (!grepl("^[[:space:]]*#", ln)) break
+    n_skip <- n_skip + 1L
+  }
+  close(con)
+  d <- try(read.delim(f, sep = sep, header = header, skip = n_skip,
                       stringsAsFactors = FALSE, check.names = FALSE,
                       comment.char = "", quote = ""), silent = TRUE)
   if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
