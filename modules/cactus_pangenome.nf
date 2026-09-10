@@ -71,6 +71,12 @@ process CACTUS_PANGENOME {
 
     script:
     def extra = params.pangenome_cactus_extra ?: ''
+    // batch 6 C1. A NAMED param rather than a line in pangenome_cactus_extra: this is a
+    // controlled experiment whose whole value is that one variable changed, and a free-text
+    // passthrough leaves no record of which run carried it. Named, it appears in the params
+    // dump, can be asserted on, and is echoed into this task's log below -- so a graph can
+    // always be traced back to the scoring it was built with.
+    def lasttrain = params.pangenome_cactus_lasttrain ? '--lastTrain' : ''
     // -gpu image runs KegAlign automatically; --gpu 1 pins it to the single requested GPU
     // and --lastzMemory is the recommended cluster safeguard for the alignment jobs.
     def gpu   = params.pangenome_use_gpu ? '--gpu 1 --lastzMemory 100G' : ''
@@ -110,6 +116,17 @@ process CACTUS_PANGENOME {
     rm -rf js cactus_work out
     mkdir -p cactus_work out
 
+    # Scoring provenance in the graph build's own log. The default derives from HOXD70, which
+    # the cactus docs describe as suited to VERY DIVERGED genomes and warn can produce "long
+    # runs of transitions that really should be gaps" in a pangenome -- and this cohort is ten
+    # haplotypes of one species. Which scoring built a given graph is not recoverable from the
+    # graph afterwards, so it is recorded here.
+    if [ -n "${lasttrain}" ]; then
+        echo "[PANGENOME ${taxid}] alignment scoring: --lastTrain (trained on these inputs)" >&2
+    else
+        echo "[PANGENOME ${taxid}] alignment scoring: cactus default (HOXD70-derived)" >&2
+    fi
+
     cactus-pangenome \\
         ./js \\
         seqfile.txt \\
@@ -127,6 +144,7 @@ process CACTUS_PANGENOME {
         --chrom-og full clip \\
         --maxCores ${task.cpus} \\
         ${gpu} \\
+        ${lasttrain} \\
         ${extra}
 
     # ---- cull construction scratch (pre-join per-chromosome intermediates, superseded by
@@ -134,6 +152,17 @@ process CACTUS_PANGENOME {
     # else cactus produced is kept and published (flattened) via the output block above.
     rm -rf out/chrom-subproblems out/chrom-alignments
     rm -f  out/seqfile.txt
+
+    # UNDER-ALIGNMENT TRIPWIRE. last-train fits its model against the most diverged input, and
+    # within-species haplotypes are barely diverged -- so the fitted model can be tight enough
+    # to under-align, which SHRINKS the graph and INFLATES private sequence. The B-run clip
+    # total is 1,926,884,214 bp; a large drop here means under-alignment, not a better graph.
+    # Printed at build time so it is visible in this task's log rather than three processes
+    # downstream.
+    if [ -s out/${taxid}.og ]; then
+        GT=\$(odgi stats -i out/${taxid}.og -S 2>/dev/null | awk 'NR==2{print \$1}' || true)
+        echo "[PANGENOME ${taxid}] clip graph total: \${GT:-unknown} bp (B run: 1,926,884,214)" >&2
+    fi
 
     CV=\$(cactus --version 2>&1 | awk 'NR==1{print}')
     printf 'process\\ttool\\tversion\\n%s\\tcactus\\t%s\\n' "${task.process}" "\${CV}" > versions.tsv

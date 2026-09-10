@@ -1,7 +1,8 @@
 # Pangenome variant classification + SV/private-sequence rework
 
-**Status:** batches 1, 2 and 3 built, applied and verified running end to end on the rebuilt
-graph. Batches 4, 5, 6, 6b and 7 outstanding.
+**Status:** batches 1–5 built, applied and verified running end to end on the rebuilt graph.
+Every process in the pangenome arm executes and produces output. Batches 6, 6b, 7 and 8
+outstanding.
 
 **Origin:** Chris Bird, 2026-08-26 — bp-weighted SV spectra, private-haplotype size spectra,
 independent mapping of private haplotypes, transposon drivers.
@@ -383,6 +384,18 @@ five new modules · `classify_variants.py`, `rescue_inversions.py`,
 `summarise_private_kmer.py`, `join_private_evidence.py` · `main.nf` passes
 `BUILD_MERYL_DB.out.meryl_db` · config params and five resource labels.
 
+**Batch 4.** `rearrange_from_untangle.py` (carrier split into chromosome-scale vs unplaced,
+re-sorted on chromosome-scale support, `n_chrom_individuals` added) ·
+`PANGENOME_PRIVATE_PLOTS` + `pangenome_private_plots.R` (8 figures, BOTH arms in one task) ·
+`PANGENOME_REARRANGE_PLOTS` + `pangenome_rearrange_plots.R` (5 figures, flavour-parallel) ·
+`pangenome_plots.R` trimmed of the two private figures and extended with
+`ref_footprint_by_chrom` + `length_class_summary` · wiring, and the `ch_hap_priv` double-read
+resolved by REMOVAL rather than by forking.
+
+**Batch 5.** `pangenome_report.R` gains the "Which view says what" matrix and per-section view
+labels · `pangenome_report.nf` inputs 9 → 15 · wiring for the six matrix channels · figure
+resource labels tightened to measured values.
+
 ### Verified on real data
 
 | claim | evidence |
@@ -401,6 +414,12 @@ five new modules · `classify_variants.py`, `rescue_inversions.py`,
 | the k-mer contrast | private `repeat_like` **0.9306** vs control **0.0669** on the full arm |
 | flat across chromosomes | private `repeat_like` 0.92–0.94 on all fifteen; chr8 0.9438 and chr9 0.9198 unremarkable against chr1 0.9424 |
 | measured resources | `PRIVATE_INDEX` peak RSS 28.4 GB (guess was 96 GB), 115 s wall for a one-part index over 10.4 Gb |
+| the reference-rank inversion, as a number | `reference_rank_clip` **1 of 10**, `reference_rank_full` **10 of 10**. Most private haplotype on one arm, least on the other. This is why the private figures had to leave `PANGENOME_PLOTS`, which is pinned to clip |
+| rearrangement is arm-INSENSITIVE | 665,401,148 bp inverted on clip vs 665,572,453 on full — **0.026%**. Two distinct audit files, so the wiring is right. Subpath fragmentation from clipping is real (556 vs 394 on chr10) but costs no measurable inverted sequence |
+| the control is measured, not assumed | derived `min_identity` 0.634–0.674 across ten haplotypes; control no-hit fraction 0.000–0.010; `control_bp_ratio_achieved` 1.009–1.019 |
+| the k-mer contrast survives every threshold change | private `repeat_like` 0.9306 vs control 0.0669, unchanged across three rounds of threshold work, because it does not depend on cross-assembly alignment |
+| 18 figures, zero skips | 8 private + 5 rearrange × 2 arms; `candidate_rows_unplottable` and `duplication_rows_unplottable` both 0 |
+| figure cost, measured | `PRIVATE_PLOTS` 18.5 s / 730.3 MB reading both arms incl. two ~400k-row CSVs; `REARRANGE_PLOTS` 4.7 s / 225.2 MB |
 
 ### Bug classes that cost the most time — record these as conventions
 
@@ -428,6 +447,34 @@ five new modules · `classify_variants.py`, `rescue_inversions.py`,
    a delete loop into 80 refusals; twice.
 8. **Rewrite a file rather than patch it a fourth time.** Three successive anchored patches to
    `pangenome_private_join.nf` stacked into overlapping copies of the same guard block.
+9. **`comment.char = "#"` corrupts PanSN names.** `#` is legitimate inside a haplotype key
+   (`Sde-CBau_104#1`), so `read.delim(comment.char = "#")` truncates every key at the
+   separator and shifts every subsequent column left. It made a per-chromosome figure report
+   "no chr* contigs" from a file containing 602 of them. Strip `#` LINES explicitly and keep
+   `comment.char = ""`. `pangenome_report.R` already documented this; the knowledge existed in
+   the repo and was reintroduced anyway — **twice**, in two new scripts.
+   The mirror-image trap: `read_kv` left `comment.char` at `""` and so treated a leading `#`
+   line as the header, returned `ncol < 2`, and yielded nothing. Both failure modes are the
+   same root cause — comment handling and `#`-in-data cannot be the same mechanism.
+10. **`read.delim` does not guarantee numeric types.** One stray non-numeric token turns a
+    whole column character and `cut()` dies with `'x' must be numeric` at PLOT time, not read
+    time. Coerce the columns you do arithmetic on, explicitly, on read.
+11. **A `log10` scale silently discards values ≤ 0.** ggplot warns ("Removed 505 rows") rather
+    than failing. Filter explicitly and record the count, or a data problem hides as a warning.
+12. **`facet_wrap` on an empty variable aborts from inside `ggsave`** with a stack trace rather
+    than a diagnosis. Guard every faceted plot on the variable actually having values, AFTER
+    all filtering.
+13. **Post-condition FORBIDDEN strings need BLOCK scope, not substring distinctiveness.** Three
+    correct patches were blocked by loose anchors: `min_frac     = 0.5` matched
+    `harmonize_dropoff_min_frac`, `NO_HAP_PRIVATE` matched `PANGENOME_REPORT`'s own legitimate
+    placeholder, and a bare `memory = { ... 16.GB : 48.GB }` matched four labels.
+14. **A spanning anchor fails wholesale on any local divergence.** One anchor covering two
+    config label blocks could not match once one of them had been edited by hand. Per-block
+    edits tolerate that; and a label three patches have touched should be anchored narrowly.
+15. **Assert `count(old) == 1` in scratch edits too, not just in delivered patches.** Four
+    successive edits to `pangenome_private_plots.R` silently no-opped before I noticed, because
+    the scratch `str.replace` calls had no assertion — the exact discipline the delivered
+    patches enforce.
 
 ---
 
@@ -435,18 +482,19 @@ five new modules · `classify_variants.py`, `rescue_inversions.py`,
 
 | Batch | Contents |
 |---|---|
-| 4 | Private-segment spectrum plots on the SV bins; per-chromosome private table (§0.4); Layer 1 rearrangement figures. Plus two `rearrange_from_untangle.py` fixes the real output exposed — see §4a. |
-| 5 | Report matrix, test × {clip, full}, with explicit "n/a — clip only" for the fine view. |
+| ~~4~~ | **DONE** — see §3 and §4a. 18 figures, zero skips. |
+| ~~5~~ | **DONE** — the "Which view says what" matrix, three views × fifteen measures, every unavailable cell carrying its reason. |
 | 6 | Pangenome construction: `--lastTrain` (v3.1.4, available now) then `--gref` (needs v3.2.1). See §4b — two runs, not one, so the scoring change is not confounded with a version bump. |
 | 6b | **`PRIVATE_ENRICHMENT`**: the GLMM, as its own module so the model can be re-fit without redoing the k-mer lookups. See §4a2. Waiting on the R code. |
 | 7 | Swave as a locus-level direction annotation, EXPLORATORY. See §4c — it merges where we decompose, so the integration is an annotation layer, not a replacement classifier. |
+| 8 | **Does the full arm earn its keep?** Evaluate the clip/full differences now that they are measured, and reconsider why the pipeline carries both when most published minigraph-cactus work uses clip alone. See §4d. Deliberately AFTER everything works. |
 | later | Whole-graph untangle for translocations. `ref_span` emitting its sort key. GraffiTE post-annotation (the meryl k-mer proxy is a permanent self-contained feature, **not** a placeholder for it). `svim-asm` as the non-graph check. |
 
 **Parked, unevaluated:** `INVPG-annot` (2025 preprint). PGGE / `peanut`.
 
 ---
 
-## 4a. Batch 4 — two fixes the real REARRANGE output exposed
+## 4a. Batch 4 — DONE. What the real REARRANGE output showed
 
 `REARRANGE` ran and its candidate table is dominated by artifacts of how it sorts and pools:
 
@@ -759,6 +807,76 @@ both sides before computing a single cross-tab.**
 
 ---
 
+## 4d. Batch 8 — does the full arm earn its keep?
+
+Deferred deliberately until the pipeline works end to end, then answered from measurements
+rather than from the assumptions that motivated carrying both arms in the first place.
+
+### What is now measured
+
+| measure | clip vs full |
+|---|---|
+| private sequence bp | **812,983,199 vs 1,511,870,062** — +46% on full, and the reference's rank INVERTS (1 of 10 → 10 of 10) |
+| inverted bp (untangle) | **665,401,148 vs 665,572,453** — 0.026%, arm-insensitive |
+| variant catalog | clip only — `PANGENOME_VARIANTS` and `CLASSIFY` do not run on full |
+| growth / partition | clip only — panacus runs on the clip GFA |
+| graph totals | 1,926,884,214 vs 2,631,391,946 bp |
+
+**So the full arm currently earns its keep on exactly one measure.** And the justification for
+it that appears in several module headers — "clipping cuts paths into subpaths (556 vs 394 on
+chr10) and a rearrangement straddling a boundary is lost to path projection" — is now
+measured FALSE. The fragmentation is real; `odgi untangle` projects each subpath independently
+and recovers the inversions regardless.
+
+### The question that decides it
+
+Is the 46% private difference a FINDING, or an artifact of what clipping is FOR?
+
+Clipping removes sequence that had no reference alignment. If full-arm "private" sequence is
+largely that unaligned material, then:
+
+- the clip figure is the correct one to publish, and the full-arm number is measuring
+  "sequence minigraph-cactus could not place" rather than "sequence unique to a haplotype";
+- the reference-rank inversion has a mundane explanation — the reference is never clipped, so
+  on clip it retains material every other haplotype loses;
+- and the private-sequence result should be framed as a property of the clip graph, with the
+  full arm cited as the bound on what clipping discards rather than as a competing estimate.
+
+If instead the extra 698 Mb is genuine haplotype-specific sequence that merely failed to
+align to THIS reference, the full arm is the honest denominator and the clip figure understates
+a real biological quantity.
+
+### How to tell them apart
+
+The evidence needed already exists in `private_evidence.csv`, both arms:
+
+1. **Do the full-arm-only private segments align to other assemblies?** They are in the
+   evidence table with `map_verdict`. If they are overwhelmingly `PRIVATE_CONFIRMED`, they are
+   genuinely absent elsewhere and clipping is discarding real sequence. If `NOT_PRIVATE`, they
+   exist in other assemblies and only failed to align to the REFERENCE, which is a different
+   claim.
+2. **Are they repeat-like?** `repeat_like` was 0.9306 on the full arm. If the clip-only subset
+   is markedly less repeat-heavy, clipping is preferentially removing repeat.
+3. **The control cap.** Control tops out at ~54% `NOT_PRIVATE` because graph-node sharing does
+   not imply block alignability (§4a2). Whether that ceiling differs between arms bears
+   directly on whether the arms are measuring the same thing at all.
+
+### Publication framing, which is the real deliverable
+
+Most published minigraph-cactus work reports the clip graph exclusively. Two consequences:
+
+- a result quoted from the full arm needs justifying against that convention, not merely
+  stating;
+- and if the answer is "clip is what to report", the pipeline can stop carrying the full arm
+  for most measures — which would remove the flavour-parallel duplication in `UNTANGLE`,
+  `REARRANGE`, `REARRANGE_PLOTS`, `HAP_COVERAGE` and the whole private chain, roughly halving
+  that part of the run.
+
+**Keep both arms until this is settled.** The cost is a few minutes per run and the comparison
+is now documented rather than assumed, which is the only reason the question is answerable.
+
+---
+
 ## 5. Open questions
 
 ### Answered by the rebuild
@@ -833,6 +951,22 @@ times, which is why it stays.
   overriding, and the derived value written into the audit. Used for
   `pangenome_private_map_min_identity` and `--single-copy`; keep the convention consistent.
 
+### R-specific
+
+- **Never `comment.char = "#"`** on any table whose fields can contain `#` — which is every
+  table keyed on a PanSN haplotype name. Strip `#` LINES explicitly, keep `comment.char = ""`,
+  and set `quote = ""` while you are there.
+- **Comment placement is not standardised across the writers.** `classify_variants.py` puts
+  its notes BEFORE the header; the newer scripts put them after. A reader that only tolerates
+  one of those will silently return nothing for the other — which is exactly how the matrix's
+  audit rows came out blank.
+- **Coerce numeric columns on read.** `read.delim` returns character for any column with a
+  stray token, and the failure surfaces at plot time.
+- **Guard every `facet_wrap` and every log scale** after all filtering, not before.
+- **Comment every figure with what it is FOR**, not what it draws. The per-chromosome
+  footprint figure exists because it makes a specific past bug visually impossible; that is
+  worth more in the file than a description of the axes.
+
 ---
 
 ## 7. Risks
@@ -858,6 +992,13 @@ times, which is why it stays.
 10. **`meryl-lookup` report-type names have changed between releases.** There is no `-dump`;
     the module captures `-wig-count -help` into the task log so a future rename is diagnosable
     from the output rather than from guesswork.
-11. **Two guessed resource figures remain.** `pangenome_private_map` at 64 GB is sized for
-    loading a ~10 Gb `.mmi` and has not been profiled. `PRIVATE_INDEX` is now measured
-    (28.4 GB peak, 32 GB allocated).
+11. **One guessed resource figure remains.** `pangenome_private_map` at 64 GB is sized for
+    loading a ~10 Gb `.mmi` and has not been profiled. `PRIVATE_INDEX` (28.4 GB peak),
+    `PRIVATE_PLOTS` (730 MB) and `REARRANGE_PLOTS` (225 MB) are now measured.
+12. **The R scripts are validated statically, not executed.** There is no R in the authoring
+    environment, so bracket balance, dependency lists and use-before-assignment are checked by
+    script and everything else is checked by running it. Expect one round of real errors per
+    new figure script; three of the four bug classes 9–12 were found that way.
+13. **`pangenome_untangle_flavors` still runs both arms** even though inverted bp is
+    arm-insensitive to 0.026%. Kept deliberately so batch 8 can settle the question from
+    evidence, at a cost of ~5 s and a duplicate figure set per run.
