@@ -168,7 +168,8 @@ r("Topological classes (SUBST / INS / DEL / INV)",
 r("Length-based classes", "yes", "yes", NA_FULL_CAT)
 r("Merged reference footprint",
   if (have(ap_)) mb(g(ap_, "merged_ref_footprint_all_classes")) else "yes",
-  "yes", NA_FULL_CAT)
+  if (have(af_)) mb(g(af_, "merged_ref_footprint_all_classes")) else "yes",
+  NA_FULL_CAT)
 r("Pangenome node bp / novel node bp",
   if (have(ap_)) mb(g(ap_, "novel_node_bp_all_classes")) else "yes",
   NA_FINE_TRAV, NA_FULL_CAT)
@@ -185,7 +186,7 @@ r("Private per chromosome", "yes *(clip)*", "", "yes")
 r("Private evidence (map × k-mer)", "yes *(clip)*", "", "yes")
 r("Rearrangement / untangle",
   if (have(rac)) sprintf("%s inverted *(clip)*", mb(g(rac, "inverted_bp_total"))) else "yes *(clip)*",
-  "",
+  "*n/a - a graph property, not a VCF view*",
   if (have(raf)) sprintf("%s inverted", mb(g(raf, "inverted_bp_total"))) else "yes")
 r("Openness / growth / partition", "yes", "", NA_CLIP_ONLY)
 
@@ -210,6 +211,18 @@ add("",
     "- **full** has no variant catalog: `PANGENOME_VARIANTS` and `PANGENOME_CLASSIFY` run on",
     "  the clip graph. The full arm contributes the private-sequence and rearrangement",
     "  measures only.", "")
+
+if (have(rac) && have(raf)) {
+  ic <- num(g(rac, "inverted_bp_total")); ifl <- num(g(raf, "inverted_bp_total"))
+  if (!is.na(ic) && !is.na(ifl) && ic > 0)
+    add(sprintf(paste0("> **Rearrangement, unlike private sequence, is insensitive to ",
+                       "clipping.** %s inverted on clip against %s on full, a %.3f%% ",
+                       "difference. Clipping does fragment paths into subpaths, but ",
+                       "`odgi untangle` projects each subpath independently and recovers ",
+                       "the inversions either way -- measured, not assumed. Contrast the ",
+                       "private-sequence row, where the same two graphs differ by 46%%."),
+                mb(ic), mb(ifl), 100 * abs(ifl - ic) / ic), "")
+}
 
 if (have(pfa) && !is.na(g(pfa, "reference_rank_clip", NA))) {
   add(sprintf(paste0("> **The arms disagree about private sequence, and not by a little.** ",
@@ -339,6 +352,8 @@ if (length(gr) > 0) {
 # figures, so its presence is a safe proxy for the PNGs existing on disk.
 if (!is.na(g(gr, "tier_core_bp"))) {
   add("### Partition (core / soft-core / shell / cloud)", "",
+      "*View: clip. Cloud is the clip arm private total; the full arm reports ~46% more"
+      , "- see the matrix above.*", "",
       sprintf(paste("Graph sequence binned by how many haplotypes carry it. Cuts are settable",
                     "(`params.pangenome_tier_*`); the realised floors for this cohort are core",
                     "\u2265%s hap, soft-core \u2265%s, shell \u2265%s, out of %s. A tier can be empty",
