@@ -110,13 +110,29 @@ add("## Pangenome", "")
 # comes from exactly one of them, and the unavailable cells are a finding rather than an
 # omission -- see the notes under the table.
 # ======================================================================================
-ap_ <- read_kv(args$audit_parent)
-af_ <- read_kv(args$audit_fine)
+# read_kv CANNOT be used on these files. Its read.delim call leaves comment.char at "",
+# so a leading '#' line becomes the header; with no tab in it ncol(d) < 2 and read_kv bails
+# to character(0). representation_audit.tsv opens with three '#' lines before its
+# metric/value header, which is why the Records / Alt alleles / Topology rows came out "—"
+# on the first run.
+#
+# comment.char cannot simply be switched on either: '#' is a legitimate character inside
+# PanSN haplotype names (Sde-CBau_104#1), and read.delim would truncate those mid-field.
+# read_tsv_hash already strips '#' LINES explicitly and keeps comment.char off, so route
+# through it and pivot the two columns here.
+read_kv_hash <- function(path, key = 1, val = 2) {
+  d <- read_tsv_hash(path)
+  if (is.null(d) || ncol(d) < 2) return(character(0))
+  setNames(as.character(d[[val]]), as.character(d[[key]]))
+}
+
+ap_ <- read_kv_hash(args$audit_parent)
+af_ <- read_kv_hash(args$audit_fine)
 hpf <- read_tsv_hash(args$hap_private_full)
 hpc <- read_tsv_hash(args$hap_private)
-pfa <- read_kv(args$priv_figures_audit)
-rac <- read_kv(args$rearr_audit_clip)
-raf <- read_kv(args$rearr_audit_full)
+pfa <- read_kv_hash(args$priv_figures_audit)
+rac <- read_kv_hash(args$rearr_audit_clip)
+raf <- read_kv_hash(args$rearr_audit_full)
 
 # "n/a" is never bare: each carries the reason, because a blank cell reads as zero.
 NA_FINE_TOPO <- "n/a — AT destroyed by decomposition"
@@ -158,8 +174,12 @@ r("Pangenome node bp / novel node bp",
   NA_FINE_TRAV, NA_FULL_CAT)
 r("Allele frequency spectrum", "yes", "yes", NA_FULL_CAT)
 r("Inversion rescue (alignment)", "yes", NA_FINE_TOPO, NA_FULL_CAT)
+# NOT "both tiers": private sequence is a property of the GRAPH, not of a VCF view, so the
+# tier axis does not apply to it at all. It is placed in the parent column only because the
+# table has three columns and clip is one graph.
 r("Private sequence (bp)",
-  paste0(priv_bp(hpc), " *(clip, both tiers)*"), "", priv_bp(hpf))
+  paste0(priv_bp(hpc), " *(clip graph)*"), "*n/a — a graph property, not a VCF view*",
+  priv_bp(hpf))
 r("Private segment size spectrum", "yes *(clip)*", "", "yes")
 r("Private per chromosome", "yes *(clip)*", "", "yes")
 r("Private evidence (map × k-mer)", "yes *(clip)*", "", "yes")
