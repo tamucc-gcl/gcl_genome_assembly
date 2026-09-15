@@ -333,6 +333,14 @@ workflow PANGENOME {
                 }
                 .filter { taxid, f -> f != null }
 
+                        ch_stats_tgz.count().view { "STATS_TGZ_COUNT: $it" }
+            CACTUS_PANGENOME.out.all
+                .map { t, f ->
+                    def fl = (f instanceof List) ? f : [f]
+                    "n=" + fl.size() + " has_tgz=" + fl.any { it.name.endsWith('.stats.tgz') }
+                }
+                .view { "CACTUS_ALL: $it" }
+
             PANGENOME_INPUT_COVERAGE(
                 ch_stats_tgz
                     .join( ch_hr.coverage, remainder: true )
