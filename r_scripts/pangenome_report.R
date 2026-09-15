@@ -42,6 +42,10 @@ p$add_argument("--hap_private_full", default = "NO_HAP_PRIVATE_FULL")
 p$add_argument("--priv_figures_audit", default = "NO_PRIV_FIGURES")
 p$add_argument("--rearr_audit_clip", default = "NO_REARR_CLIP")
 p$add_argument("--rearr_audit_full", default = "NO_REARR_FULL")
+# PANGENOME_INPUT_COVERAGE: how much of each input haplotype reached the graph, and the
+# count of haplotype x chromosome cells far below the cohort median WITHOUT a composite
+# scaffold to explain them -- a different and unwatched failure.
+p$add_argument("--input_cov_audit", default = "NO_INPUT_COVERAGE")
 p$add_argument("--species",         default = "pangenome")
 p$add_argument("--output",          default = "pangenome_report.md")
 p$add_argument("--json",            default = "pangenome_stats.json")
@@ -189,6 +193,47 @@ r("Rearrangement / untangle",
   "*n/a — a graph property, not a VCF view*",
   if (have(raf)) sprintf("%s inverted", mb(g(raf, "inverted_bp_total"))) else "yes")
 r("Openness / growth / partition", "yes", "", NA_CLIP_ONLY)
+
+ica <- read_kv_hash(args$input_cov_audit)
+if (have(ica)) {
+  nlow <- suppressWarnings(as.integer(g(ica, "cells_low", "0")))
+  nexp <- suppressWarnings(as.integer(g(ica, "cells_low_explained_by_composite", "0")))
+  nune <- suppressWarnings(as.integer(g(ica, "cells_low_unexplained", "0")))
+  ncan <- suppressWarnings(as.integer(g(ica, "break_candidates", "0")))
+  ncom <- suppressWarnings(as.integer(g(ica, "composites_total", "0")))
+  add("### Input coverage: what reached the graph", "",
+      "How much of each input haplotype is present in each reference chromosome's graph,",
+      "from cactus's own `sample-stats.tsv`, joined to the harmonization composite flags.",
+      "", "| | |", "|---|---|",
+      sprintf("| chromosome-scale floor | %s bp, derived by `%s` over %s members |",
+              g(ica, "chromosome_scale_floor_bp"), g(ica, "chromosome_set_method"),
+              g(ica, "chromosome_set_n")),
+      sprintf("| haplotype x chromosome cells below %s of the cohort median | **%d** |",
+              g(ica, "low_frac_threshold"), nlow),
+      sprintf("| of those, explained by a composite scaffold | %d |", nexp),
+      sprintf("| of those, **unexplained** | **%d** |", nune),
+      sprintf("| composite scaffolds | %d, of which %d are break candidates |", ncom, ncan),
+      "")
+  if (nexp > 0)
+    add(paste0("> **A chromosome missing from the graph because its scaffold is fused to ",
+               "another.** `cactus-graphmap-split` assigns each contig to a *single* ",
+               "chromosome, so when a scaffold spans two, one chromosome's sequence is ",
+               "dropped. Cactus does not break chimeric contigs, and Inspector cannot see ",
+               "it either -- it reads read-to-contig alignments, and a Hi-C scaffold join ",
+               "is an N-gap with no reads to disagree. See `input_coverage.tsv`."), "")
+  if (nune > 0)
+    add(sprintf(paste0("> **%d cell(s) are far below the cohort median with NO composite ",
+                       "to explain them.** That is a different failure -- a genuinely ",
+                       "absent chromosome, or a chromosome-assignment failure that left no ",
+                       "composite name behind -- and nothing else in this pipeline is ",
+                       "looking for it."), nune), "")
+  if (ncan > 0)
+    add(sprintf(paste0("> **%d break candidate(s).** Nothing has been broken: this is the ",
+                       "evidence round. The primary evidence is the cross-haplotype ",
+                       "concordance vote (`n_f`/`n_s`), the only signal independent of how ",
+                       "the scaffold was built -- Hi-C cannot validate breaking a ",
+                       "Hi-C-made join. See `break_candidates.tsv`."), ncan), "")
+}
 
 add("### Which view says what", "",
     "Every number below comes from exactly one of three views, and they are **not**",

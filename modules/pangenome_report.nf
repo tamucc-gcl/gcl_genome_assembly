@@ -41,7 +41,8 @@ process PANGENOME_REPORT {
           path(graph_stats), path(popstruct), path(progressive), path(manifest),
           path(hap_private),
           path(audit_parent), path(audit_fine), path(hap_private_full),
-          path(priv_figures_audit), path(rearr_audit_clip), path(rearr_audit_full)
+          path(priv_figures_audit), path(rearr_audit_clip), path(rearr_audit_full),
+          path(input_cov_audit)
     path(report_script)
 
     output:
@@ -66,6 +67,7 @@ process PANGENOME_REPORT {
         --priv_figures_audit ${priv_figures_audit} \\
         --rearr_audit_clip ${rearr_audit_clip} \\
         --rearr_audit_full ${rearr_audit_full} \\
+        --input_cov_audit ${input_cov_audit} \\
         --species ${taxid} \\
         --output pangenome_report.md \\
         --json pangenome_stats.json

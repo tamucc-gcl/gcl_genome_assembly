@@ -2,7 +2,7 @@
 
 **Status:** batches 1–5 built, applied and verified running end to end on the rebuilt graph.
 Every process in the pangenome arm executes and produces output. Batches 6, 6b, 7 and 8
-outstanding.
+outstanding. Batch 6 C1 has RUN and is falsified — see §4b; `--lastTrain` is kept.
 
 **Origin:** Chris Bird, 2026-08-26 — bp-weighted SV spectra, private-haplotype size spectra,
 independent mapping of private haplotypes, transposon drivers.
@@ -631,7 +631,60 @@ Run A (pre-batch-1: original harmonization, clip-only VCF, awk classifier) is pr
 `$T/pre_rebuild_baseline` but confounds three changes at once and is a provenance record
 rather than a comparison arm.
 
-### C1 — the `--lastTrain` hypothesis, and what would falsify it
+### C1 — RUN AND FALSIFIED. `--lastTrain` is not the explanation for SUBST.
+
+**Result: the hypothesis is wrong, cleanly, and the pre-registered predictions are what make
+that a usable answer rather than an ambiguous one.**
+
+| prediction | B | C1 | verdict |
+|---|---|---:|---|
+| SUBST falls **substantially** | 1,133,130 | 1,119,141 | **−1.2% — no** |
+| INS rises | 469,002 | 496,889 | +5.9%, right direction, trivial magnitude |
+| DEL rises | 249,032 | 273,134 | +9.7%, right direction, trivial magnitude |
+| megabase bubbles decompose (`alt_alleles_per_record` falls from 1.3114) | 1.3114 | 1.3120 | **rose — no** |
+| `INV_PATH_EXPLICIT` rises from 27 | 27 | 28 | +1, noise |
+| `INV_ALN_RESCUED` falls from 294 | 294 | 298 | **rose — wrong direction** |
+
+**The decisive evidence is the SUBST homology subdivision, not the counts.** If HOXD70 scoring
+were producing substitutions where indels belong, `SUBST_HOMOLOGOUS` — the near-perfectly
+aligned alleles that should have become INS/DEL — would have collapsed specifically. It did
+not:
+
+| | B | C1 | Δ | share |
+|---|---:|---:|---:|---|
+| `SUBST_HOMOLOGOUS` | 153,498 | 150,632 | −1.9% | 75.5% → 76.3% |
+| `SUBST_PARTIAL` | 13,195 | 12,766 | −3.3% | |
+| `SUBST_UNRELATED` | 36,403 | 34,065 | −6.4% | |
+
+A flat 2–6% reduction across every category with the **proportions unchanged**. The 1–5 kb
+unresolved-ratio profile shifts by the same uniform ~3%. Training the matrix made the
+alignment marginally tighter everywhere and changed nothing structural.
+
+**So SUBST at ~1.12M alleles, 76% of it homologous, is a property of the graph decomposition
+or of the assemblies — not of the scoring matrix.** That answers open question 5 in the
+negative.
+
+**The under-alignment risk did not materialise.** Graph total 1,927,069,595 vs 1,926,884,214
+(+0.0096%); clip private 812,774,152 vs 812,642,040 (+0.016%). Essentially the same graph.
+
+**Unexplained and worth noting:** SNP fell 2.45% (17,741,390 → 17,306,442) and INDEL 2.35%
+(11,720,570 → 11,445,277) — 710,241 fewer small variants against only ~38,000 more
+INS/DEL/SUBST, total alleles down 2.15%. Something did change in the alignments; it was not
+the thing predicted.
+
+**DECISION: `--lastTrain` is KEPT** (`pangenome_cactus_lasttrain = true`). INS/DEL typing
+improves slightly, nothing degrades, reverting would cost another 17 h, and C2 then tests
+`--gref` against trained rather than borrowed scoring.
+
+**What C1 changes for C2.** `--gref` targets the reference-bias asymmetry, and C1 establishes
+that the asymmetry is NOT a scoring artifact — which strengthens the case for C2. The
+asymmetry is untouched: `DEL` still has ~273k alleles with **exactly 0 novel node bp** against
+a 94 Mb reference footprint, while `INS` has ~497k alleles with 246 Mb novel and a 5 Mb
+footprint.
+
+---
+
+### C1 — the original hypothesis, and what would falsify it (retained for provenance)
 
 The default scoring is derived from the HOXD70 matrix, which the cactus docs describe as
 appropriate for **very diverged** genomes, noting that for pangenomes it can produce "long
@@ -890,14 +943,30 @@ is now documented rather than assumed, which is the only reason the question is 
 
 ### Live
 
-1. **Are the 288 SUBST alleles ≥500 kb real large-scale divergence?** Not inversions (rescue
-   found zero), mostly homologous. 77 distinct loci, 13 carrying 7 alt alleles each, at 0.9–1.0
-   forward homology — consistent with HOXD70 scoring producing substitutions where indels
-   belong. **Batch 6 C1 tests it.**
-2. **Does `--gref` corrupt the private-sequence analysis?** It adds a `gref_<reference>` sample
-   whose paths are copies of existing sequence, raising coverage on every node they touch and
-   un-privating the private column. Must be answered before C2 runs — and it now also affects
-   the control set, since `min_cross_frac` counts individuals.
+1. ~~**Are the 288 SUBST alleles ≥500 kb a scoring artifact?**~~ **ANSWERED: NO.** Batch 6 C1
+   ran `--lastTrain` as a single-variable change and SUBST fell only 1.2%, with the homology
+   subdivision proportions unchanged (75.5% → 76.3% `SUBST_HOMOLOGOUS`). A scoring cause would
+   have collapsed `SUBST_HOMOLOGOUS` specifically. SUBST is a property of the graph
+   decomposition or of the assemblies. **The follow-on question is which** — decomposition or
+   assembly — and the 13 seven-allele loci are where to look.
+2. **`--gref` WILL corrupt the private-sequence analysis unless excluded first.** This is no
+   longer an open question but a blocking prerequisite for C2, and batch 3 made it bigger.
+
+   `vg paths -u` computes a reference path cover: it finds graph regions the reference does not
+   walk and promotes fragments of HAPLOTYPE paths covering them into synthetic reference paths,
+   forming a new sample `gref_<reference>` with fragments suffixed `_<N>_alt`. Those paths are
+   **copies of sequence already in the graph**, so every node they touch gains a walker.
+
+   | file | what breaks | fix |
+   |---|---|---|
+   | `gfa_hap_coverage.py` | `cov` rises on every covered node, so private sequence (cov == 1) is under-counted and the private column is silently deflated | skip paths whose sample matches `gref_*` in the coverage pass |
+   | `extract_private_fasta.py` | same coverage problem, **plus** `min_cross_frac` counts INDIVIDUALS — `gref_<ref>` reads as an eleventh individual, so windows shared only with it would qualify as cross-individual when they are shared with nothing | exclude in both the coverage pass and `indiv_key` |
+   | `classify_variants.py` | the synthetic sample enters `AC`/`AN`, so the AF spectrum gains a phantom haplotype and every frequency shifts | exclude from the AC/AN denominator |
+   | `pangenome_popstruct.R` | a `gref_*` row in the odgi similarity matrix becomes a phantom tip in the NJ tree and a phantom point in the PCoA | filter before the distance matrix |
+
+   **The exclusion must be a shared, named pattern, not four copies of a regex.** Four
+   independent implementations of "is this a gref path" is exactly the shape that produced the
+   `comment.char` bug twice.
 3. **Why does graph-node sharing not imply block alignability?** 117,492 of 315,303
    cross-individual control windows have zero other-assembly hits, capping the control at ~54%
    `NOT_PRIVATE`. Framed for the model in §4a2.

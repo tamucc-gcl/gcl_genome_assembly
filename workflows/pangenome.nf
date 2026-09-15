@@ -66,6 +66,7 @@ include { PANGENOME_PRIVATE_KMER  } from '../modules/pangenome_private_kmer.nf'
 include { PANGENOME_PRIVATE_JOIN  } from '../modules/pangenome_private_join.nf'
 include { PANGENOME_PRIVATE_PLOTS } from '../modules/pangenome_private_plots.nf'
 include { PANGENOME_REARRANGE_PLOTS } from '../modules/pangenome_rearrange_plots.nf'
+include { PANGENOME_INPUT_COVERAGE } from '../modules/pangenome_input_coverage.nf'
 include { PANGENOME_MANIFEST  } from '../modules/pangenome_manifest.nf'
 include { PANGENOME_GROWTH    } from '../modules/pangenome_growth.nf'
 include { PANGENOME_PLOTS     } from '../modules/pangenome_plots.nf'
@@ -123,6 +124,20 @@ workflow PANGENOME {
     // builds when the private or untangle blocks are switched off -- the matrix then shows
     // those views as unbuilt, which is the informative outcome.
     ch_priv_fig_audit = Channel.empty()  // tuple(taxid, private_figures_audit.tsv)
+    ch_input_cov      = Channel.empty()  // tuple(taxid, input_coverage.tsv)
+    ch_input_cov_aud  = Channel.empty()  // tuple(taxid, input_coverage_audit.tsv)
+
+    // ch_harm_report is a PLAIN channel -- it traces to HARMONIZE_SPECIES.out.report.map{}
+    // -- and it already has one consumer (ch_harm_safe, for PANGENOME_REARRANGE). Reading
+    // it twice starves one of them silently: the bug class that has bitten four times here,
+    // whose symptom is always a missing task rather than an error. Fork once, use the
+    // branches.
+    ch_harm_report
+        .multiMap { taxid, rpt ->
+            rearrange: tuple(taxid, rpt)
+            coverage:  tuple(taxid, rpt)
+        }
+        .set { ch_hr }
     ch_rearr_audit    = Channel.empty()  // tuple(taxid, flavor, untangle_audit.tsv)
     ch_priv_xtab     = Channel.empty()   // tuple(taxid, flavor, evidence cross-tab)
     ch_viz2d       = Channel.empty()
@@ -300,6 +315,39 @@ workflow PANGENOME {
         // decomposition only: parent tier (LV==0) + fine tier (vcfbub -> vcfwave -> norm).
         // Classification moved to PANGENOME_CLASSIFY, which reads the graph's own allele
         // traversals instead of REF/ALT string lengths.
+        // ---- what actually reached the graph, and where a chromosome is missing, why ----
+        // Runs off the stats bundle rather than a dedicated cactus emit: adding an output
+        // declaration to cactus_pangenome.nf risks the 17-hour graph's task hash, and
+        // CACTUS_PANGENOME.out.all is a PROCESS output so a second read is broadcast-safe.
+        //
+        // This is round one of a two-round workflow: it emits break CANDIDATES and cuts
+        // nothing. Review the evidence, write the breakpoints file, and round two applies
+        // it. So it deliberately depends on nothing expensive.
+        if( params.pangenome_input_coverage != false ) {
+            def ic_script = file("${projectDir}/py_scripts/pangenome_input_coverage.py",
+                                 checkIfExists: true)
+            ch_stats_tgz = CACTUS_PANGENOME.out.all
+                .map { taxid, files ->
+                    def fl = (files instanceof List) ? files : [files]
+                    tuple(taxid, fl.find { it.name.endsWith('.stats.tgz') })
+                }
+                .filter { taxid, f -> f != null }
+
+            PANGENOME_INPUT_COVERAGE(
+                ch_stats_tgz
+                    .join( ch_hr.coverage, remainder: true )
+                    .join( PANGENOME_REF_FASTA.out.ref_fai, remainder: true )
+                    // the report and the .fai are both required by the script, so a taxid
+                    // missing either is skipped rather than passed a placeholder that would
+                    // silently produce a coverage table with no explanations in it
+                    .filter { taxid, tgz, rpt, fai -> tgz != null && rpt != null && fai != null }
+                    .map { taxid, tgz, rpt, fai -> tuple(taxid, tgz, rpt, fai) },
+                ic_script )
+            ch_versions      = ch_versions.mix( PANGENOME_INPUT_COVERAGE.out.versions )
+            ch_input_cov     = PANGENOME_INPUT_COVERAGE.out.coverage
+            ch_input_cov_aud = PANGENOME_INPUT_COVERAGE.out.audit
+        }
+
         PANGENOME_VARIANTS( CACTUS_PANGENOME.out.raw_vcf )
         ch_versions = ch_versions.mix( PANGENOME_VARIANTS.out.versions )
 
@@ -426,7 +474,7 @@ workflow PANGENOME {
             ch_harm_safe = ch_untangle
                 .map { label, flavor, f -> label }
                 .unique()
-                .combine( ch_harm_report.map { taxid, rpt -> rpt }.ifEmpty( file('NO_FILE') ) )
+                .combine( ch_hr.rearrange.map { taxid, rpt -> rpt }.ifEmpty( file('NO_FILE') ) )
                 .map { label, rpt -> tuple(label, rpt) }
 
             // groupTuple WITHOUT size: on purpose. The count per flavour is known (one per
@@ -891,11 +939,12 @@ workflow PANGENOME {
                 .join( ch_priv_fig_audit,               remainder: true )
                 .join( ch_rearr_clip,                   remainder: true )
                 .join( ch_rearr_full,                   remainder: true )
+                .join( ch_input_cov_aud,                remainder: true )
                 // every fallback is a NO_* sentinel, not a failure: the report must still
                 // build for a species where CLASSIFY or the private analysis was disabled,
                 // and a matrix showing which views were not built beats a dead task.
                 .map { taxid, vs, qc, gf, gs, pca, prog, mf, hp,
-                       ap, af, hpf, pfa, rac, raf ->
+                       ap, af, hpf, pfa, rac, raf, ica ->
                     tuple(taxid,
                           qc ?: file('NO_QC'),
                           gf ?: file('NO_GROWTH'),
@@ -910,7 +959,8 @@ workflow PANGENOME {
                           hpf ?: file('NO_HAP_PRIVATE_FULL'),
                           pfa ?: file('NO_PRIV_FIGURES'),
                           rac ?: file('NO_REARR_CLIP'),
-                          raf ?: file('NO_REARR_FULL')) }
+                          raf ?: file('NO_REARR_FULL'),
+                          ica ?: file('NO_INPUT_COVERAGE')) }
             PANGENOME_REPORT( ch_report_in, report_script )
             ch_versions = ch_versions.mix( PANGENOME_REPORT.out.versions )
             ch_report   = PANGENOME_REPORT.out.report
@@ -958,6 +1008,8 @@ workflow PANGENOME {
     priv_spectrum = ch_priv_spectrum // private segment size spectrum, BOTH flavours
     priv_evidence = ch_priv_evidence // per-segment mapping + k-mer evidence, BOTH flavours
     priv_xtab     = ch_priv_xtab     // the map x kmer verdict cross-tabulation
+    input_coverage = ch_input_cov    // per-haplotype x chromosome bp reaching the graph
+    input_cov_audit = ch_input_cov_aud
     viz2d        = ch_viz2d         // per-chromosome 2D layout PNGs
     qc           = ch_qc            // graph-intrinsic QC metrics (report)
     multiqc      = ch_mqc           // pangenome MultiQC report (odgi + bcftools)
