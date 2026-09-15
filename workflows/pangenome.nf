@@ -334,30 +334,18 @@ workflow PANGENOME {
                 .filter { taxid, f -> f != null }
 
                         ch_stats_tgz.count().view { "STATS_TGZ_COUNT: $it" }
-            CACTUS_PANGENOME.out.all
-                .map { t, f ->
-                    def fl = (f instanceof List) ? f : [f]
-                    "n=" + fl.size() + " has_tgz=" + fl.any { it.name.endsWith('.stats.tgz') }
-                }
-                .view { "CACTUS_ALL: $it" }
-
-                        ch_hr.coverage.count().view { "HR_COVERAGE_COUNT: $it" }
-            
-            PANGENOME_REF_FASTA.out.ref_fai.count().view { "REF_FAI_COUNT: $it" }
-            ch_stats_tgz
-                .join( ch_hr.coverage, remainder: true )
-                .join( PANGENOME_REF_FASTA.out.ref_fai, remainder: true )
-                .view { "IC_JOINED: $it" }
-
+           
             PANGENOME_INPUT_COVERAGE(
                 ch_stats_tgz
-                    .join( ch_hr.coverage, remainder: true )
                     .join( PANGENOME_REF_FASTA.out.ref_fai, remainder: true )
-                    // the report and the .fai are both required by the script, so a taxid
-                    // missing either is skipped rather than passed a placeholder that would
-                    // silently produce a coverage table with no explanations in it
-                    .filter { taxid, tgz, rpt, fai -> tgz != null && rpt != null && fai != null }
-                    .map { taxid, tgz, rpt, fai -> tuple(taxid, tgz, rpt, fai) },
+                    // ch_hr.coverage is keyed on the numeric TAXID (its key is derived from
+                    // the harmonization report's filename) while every channel in this
+                    // workflow is keyed on the species LABEL. Joining them matches nothing --
+                    // the same mismatch that blocked PANGENOME_REARRANGE. There is one report
+                    // per species, so attach it by cartesian product instead of by key.
+                    .combine( ch_hr.coverage.map { taxid, rpt -> rpt } )
+                    .filter { taxid, tgz, fai, rpt -> tgz != null && fai != null }
+                    .map { taxid, tgz, fai, rpt -> tuple(taxid, tgz, rpt, fai) },
                 ic_script )
             ch_versions      = ch_versions.mix( PANGENOME_INPUT_COVERAGE.out.versions )
             ch_input_cov     = PANGENOME_INPUT_COVERAGE.out.coverage
