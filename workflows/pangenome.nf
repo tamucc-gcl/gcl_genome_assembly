@@ -341,6 +341,14 @@ workflow PANGENOME {
                 }
                 .view { "CACTUS_ALL: $it" }
 
+                        ch_hr.coverage.count().view { "HR_COVERAGE_COUNT: $it" }
+            
+            PANGENOME_REF_FASTA.out.ref_fai.count().view { "REF_FAI_COUNT: $it" }
+            ch_stats_tgz
+                .join( ch_hr.coverage, remainder: true )
+                .join( PANGENOME_REF_FASTA.out.ref_fai, remainder: true )
+                .view { "IC_JOINED: $it" }
+
             PANGENOME_INPUT_COVERAGE(
                 ch_stats_tgz
                     .join( ch_hr.coverage, remainder: true )
