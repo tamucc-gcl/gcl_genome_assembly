@@ -333,8 +333,6 @@ workflow PANGENOME {
                 }
                 .filter { taxid, f -> f != null }
 
-                        ch_stats_tgz.count().view { "STATS_TGZ_COUNT: $it" }
-           
             PANGENOME_INPUT_COVERAGE(
                 ch_stats_tgz
                     .join( PANGENOME_REF_FASTA.out.ref_fai, remainder: true )
