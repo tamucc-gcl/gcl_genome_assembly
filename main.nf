@@ -168,6 +168,7 @@ include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
+include { BREAK_CHIMERAS } from './modules/break_chimeras.nf'
 include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
@@ -952,7 +953,37 @@ workflow {
     HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script)
     ch_versions = ch_versions.mix(HARMONIZE_SCAFFOLDS.out.versions)
 
-    ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
+    // ---- break chimeric scaffolds, if asked -------------------------------------------
+    // Between harmonization and finalization, and that is the only possible place:
+    // harmonization emits a name MAP and FINALIZE_ASSEMBLY applies it, so this is the last
+    // point at which the FASTA is in original coordinates and the composite is one record,
+    // and the first at which the concordance vote exists to justify cutting it.
+    //
+    // OFF by default. Run 1 writes <species>.chimera_candidates.tsv and cuts nothing; you
+    // review it and pass it back, or set 'auto' to cut what the vote already flagged.
+    //
+    // When off the process is not instantiated and the original channel flows straight
+    // through -- no pass-through task and no cache churn.
+    if( params.chimera_break && params.chimera_break.toString() != 'false' ) {
+        ch_break_script = Channel.fromPath("${projectDir}/py_scripts/break_chimeras.py",
+                                          checkIfExists: true)
+        // 'auto' uses the candidates harmonization just wrote; a path uses that file, so an
+        // edited copy is how you choose which scaffolds to cut.
+        ch_cand = ( params.chimera_break.toString() == 'auto' )
+            ? HARMONIZE_SCAFFOLDS.out.chimera_candidates.map { taxid, f -> f }.first()
+            : Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first()
+
+        BREAK_CHIMERAS(
+            HARMONIZE_SCAFFOLDS.out.assemblies
+                .map { meta, fa, nm -> tuple(meta, fa, nm) }
+                .combine( ch_cand ),
+            ch_break_script.first() )
+        ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
+        ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
+    }
+    else {
+        ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
+    }
         .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
 
     ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies

@@ -88,6 +88,7 @@ workflow HARMONIZE_SCAFFOLDS {
         ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
         ch_report = Channel.empty()
         ch_report_by_taxid = Channel.empty()
+        ch_chimera_cand = Channel.empty()
         ch_ref_id = Channel.empty()
         ch_ref_scores = Channel.empty()
     }
@@ -165,6 +166,7 @@ workflow HARMONIZE_SCAFFOLDS {
         // task hash can move. Keep this in the workflow: adding the emit to the process is
         // tidier to read and was the first attempt, but it risks re-running harmonization
         // and everything downstream of it, cactus included.
+        ch_chimera_cand = HARMONIZE_SPECIES.out.chimera_candidates
         ch_report_by_taxid = HARMONIZE_SPECIES.out.report
             .map { f -> tuple(f.name.replaceFirst(/\..*$/, ''), f) }
 
@@ -195,5 +197,6 @@ workflow HARMONIZE_SCAFFOLDS {
     reference_scores = ch_ref_scores
     report         = ch_report
     report_by_taxid = ch_report_by_taxid   // tuple(taxid, report) for per-species joins
+    chimera_candidates = ch_chimera_cand   // tuple(taxid, chimera_candidates.tsv)
     versions       = ch_versions
 }

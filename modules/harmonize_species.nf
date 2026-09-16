@@ -53,6 +53,10 @@ process HARMONIZE_SPECIES {
     path("*.chromosome_graph.tsv"),                      emit: chromosome_graph
     path("*.chromosome_components.tsv"),                 emit: chromosome_components
     path("*.presence_matrix.tsv"),                       emit: presence_matrix
+    // Composite scaffolds with the junction coordinate, the concordance vote and a verdict.
+    // Written on every run whatever the break mode -- it is the evidence a break is
+    // justified by, and a break that is not written down is one nobody can audit.
+    tuple val(taxid), path("*.chimera_candidates.tsv"),  emit: chimera_candidates, optional: true
     path("*.consensus_chromosome_map.tsv"),              emit: consensus_map
     path("versions.tsv"),                                emit: versions
     path("*.minimap2.log"),                              emit: logs, optional: true

@@ -147,9 +147,13 @@ def parse_paf(path, chrom_of):
     Returns:
         ev:   qname -> chr_num -> {bp, tstart, tend, plus, minus, ivals}
     """
+    # qivals: the same alignments in QUERY (scaffold) coordinates. ivals are reference
+    # coordinates and answer "where on the reference does this piece sit"; qivals answer
+    # "where along this scaffold" -- which is the only way to locate a chimeric junction as
+    # a coordinate you can cut at. They were parsed and discarded before.
     ev = defaultdict(lambda: defaultdict(
         lambda: {"bp": 0, "tstart": None, "tend": 0, "plus": 0, "minus": 0,
-                 "ivals": []}))
+                 "ivals": [], "qivals": []}))
     if not path or path == "-" or not os.path.exists(path):
         return ev
     with openf(path) as fh:
@@ -160,6 +164,8 @@ def parse_paf(path, chrom_of):
             if len(c) < 12:
                 continue
             q = c[0]
+            qs = int(c[2])
+            qe = int(c[3])
             strand = c[4]
             t = c[5]
             ts = int(c[7])
@@ -173,6 +179,7 @@ def parse_paf(path, chrom_of):
             e["tstart"] = ts if e["tstart"] is None else min(e["tstart"], ts)
             e["tend"] = max(e["tend"], te)
             e["ivals"].append((ts, te))
+            e["qivals"].append((qs, qe, blk))
             if strand == "-":
                 e["minus"] += blk
             else:
@@ -312,6 +319,88 @@ def piece_footprint(info, k):
     b0 = (info.get("tstart") or {}).get(k, 0) or 0
     b1 = (info.get("tend") or {}).get(k, 0) or 0
     return [(b0, b1)] if b1 > b0 else []
+
+
+def chimera_junction(ev_q, members, bin_bp=1000000):
+    """Where along a scaffold does the dominant reference chromosome change?
+
+    ev_q is ev[qname]: chr_num -> {..., "qivals": [(qs, qe, blk), ...]}. Bin the scaffold and
+    credit each bin to whichever member contributes the most aligned bp in it, then find the
+    longest run of one member followed by the longest run of another.
+
+    BINNED, not per-alignment: a chimeric scaffold has thousands of alignments and a handful
+    of spurious cross-mappings anywhere along it. Asking "which member dominates this megabase"
+    is robust to those; asking "where does the first ref9 alignment start" is not -- on the
+    measured case there are ref9 alignments inside the ref5 half and vice versa.
+
+    Returns (junction_bp, left_member, left_bp, right_member, right_bp, n_switches) or None.
+    n_switches > 1 means the members interdigitate rather than meeting once, which is a
+    FRAGMENTED scaffold rather than a single mis-join -- worth reporting and not worth
+    breaking at one point.
+    """
+    if len(members) < 2:
+        return None
+    span = 0
+    for k in members:
+        for qs, qe, _ in (ev_q.get(k, {}) or {}).get("qivals", []):
+            span = max(span, qe)
+    if span <= 0:
+        return None
+    nbin = max(2, (span + bin_bp - 1) // bin_bp)
+    acc = [dict() for _ in range(nbin)]
+    for k in members:
+        for qs, qe, blk in (ev_q.get(k, {}) or {}).get("qivals", []):
+            if qe <= qs:
+                continue
+            b0, b1 = qs // bin_bp, min(nbin - 1, (qe - 1) // bin_bp)
+            per = blk / float(b1 - b0 + 1)
+            for b in range(b0, b1 + 1):
+                acc[b][k] = acc[b].get(k, 0.0) + per
+
+    # dominant member per bin; bins with no alignment inherit nothing and are skipped
+    dom = []
+    for b in range(nbin):
+        if not acc[b]:
+            dom.append(None)
+        else:
+            dom.append(max(acc[b].items(), key=lambda x: x[1])[0])
+
+    # compress to runs, ignoring gaps
+    runs = []
+    for b, d in enumerate(dom):
+        if d is None:
+            continue
+        if runs and runs[-1][0] == d:
+            runs[-1][2] = b
+        else:
+            runs.append([d, b, b])
+    if len(runs) < 2:
+        return None
+
+    n_switches = len(runs) - 1
+    # the two LONGEST runs of DIFFERENT members are the two arms; the junction is the
+    # boundary between them
+    runs_sorted = sorted(runs, key=lambda r: -(r[2] - r[1] + 1))
+    left = runs_sorted[0]
+    right = None
+    for r in runs_sorted[1:]:
+        if r[0] != left[0]:
+            right = r
+            break
+    if right is None:
+        return None
+    if right[1] < left[1]:
+        left, right = right, left
+    junction = right[1] * bin_bp
+    lbp = sum(acc[b].get(left[0], 0.0) for b in range(left[1], left[2] + 1))
+    rbp = sum(acc[b].get(right[0], 0.0) for b in range(right[1], right[2] + 1))
+    return (junction, left[0], int(lbp), right[0], int(rbp), n_switches)
+
+
+# Accumulated during the naming pass and written once at the end. A module-level list
+# because the naming loop is deep inside main() and threading a return value out of it would
+# touch far more verified code than it is worth.
+chimera_rows = []
 
 
 def footprint_bp(info, k):
@@ -665,6 +754,19 @@ def main():
                          "of the scaffold's total alignment is (0 disables, restoring the "
                          "share-only behaviour that hides small chromosomes joined to "
                          "large ones)")
+    # ---- chimera gate ---------------------------------------------------------------
+    # Only chromosome-scale scaffolds, and only where the vote says the junction is an error.
+    # Sde-CPla_115 has 135 composites of 1-14 Mb: those are a fragmented assembly, not
+    # mis-joined chromosomes, and breaking them achieves nothing because both halves stay
+    # unplaced. The span floor keeps them out.
+    ap.add_argument("--chimera-min-span", type=int, default=20000000,
+                    help="minimum scaffold length to consider (default 20 Mb)")
+    ap.add_argument("--chimera-min-member-bp", type=int, default=5000000,
+                    help="each side of the junction needs this much aligned bp (default 5 Mb)")
+    ap.add_argument("--chimera-max-nf", type=int, default=1,
+                    help="at most this many other haplotypes may carry the junction (1)")
+    ap.add_argument("--chimera-min-ns", type=int, default=3,
+                    help="at least this many must keep the chromosomes separate (3)")
     ap.add_argument("--inflated-aln-tol", type=float, default=1.05,
                     help="flag a placed scaffold when summed block length / scaffold "
                          "length exceeds this (repeat-driven double counting); diagnostic "
@@ -1174,6 +1276,28 @@ def main():
                 else:
                     new, rcls, orient, key = f"unframed_{n}", "unplaced", "fwd", (2, 0, 0)
                     flags.append("no_consensus_chromosome")
+                # ---- chimera candidate, if this is a composite -----------------------
+                # Collected HERE because this is the only point where the composite name,
+                # the member set, the footprints and the concordance vote all exist at once.
+                if rcls == "composite" and len(cons) > 1:
+                    _ev_q = (ev.get(n) or {})
+                    _j = chimera_junction(_ev_q, sorted(cons))
+                    _votes = []
+                    for _x, _y in combinations(cons, 2):
+                        _nf, _ns = concordance(_x, _y)
+                        _votes.append((min(_x, _y), max(_x, _y), _nf, _ns))
+                    chimera_rows.append({
+                        "assembly": a.assembly_id,
+                        "scaffold": n,
+                        "name": new,
+                        "span_bp": int(info.get("length") or 0),
+                        "members": sorted(cons),
+                        "footprints": {k: footprint_bp(info, k) for k in cons},
+                        "junction": _j,
+                        "votes": _votes,
+                        "flags": list(flags),
+                    })
+
                 for x, y in combinations(mem, 2):
                     n_f, n_s = concordance(x, y)
                     if n_f == 0:
@@ -1361,6 +1485,68 @@ def main():
             "the join get a plain chrN_1.\n" % (
                 a.species, len(multi), a.graph_rule,
                 ", ".join("+".join("ref%d" % m for m in g) for g in multi)))
+
+    # ---- chimera candidates -------------------------------------------------------------
+    # Written ALWAYS, whatever the break mode. In `false` it is the reviewable artifact; with
+    # a supplied file it is the record of what detection saw; in `auto` it is what was acted
+    # on. A break that is not written down is a break nobody can audit.
+    cand = os.path.join(a.outdir, f"{a.species}.chimera_candidates.tsv")
+    with open(cand, "w") as fh:
+        fh.write("# Composite scaffolds -- one scaffold spanning two or more reference\n")
+        fh.write("#   chromosomes. CANDIDATES ONLY: nothing here has been broken.\n")
+        fh.write("#\n")
+        fh.write("# verdict is CONCORDANCE-BASED, because the cross-haplotype vote is the only\n")
+        fh.write("#   signal independent of how this scaffold was BUILT. Hi-C cannot be used:\n")
+        fh.write("#   measured on the chr5+chr9 fusion, cross-junction contact was 1.209x\n")
+        fh.write("#   matched distance -- ELEVATED, because the junction sits in subtelomeric\n")
+        fh.write("#   repeat. That is how the mis-join was made, not evidence against breaking.\n")
+        fh.write("#\n")
+        fh.write("# vote n_f/n_s: other haplotypes carrying this junction / keeping the two\n")
+        fh.write("#   chromosomes separate. n_f<=1 with n_s>=3 is a scaffolding error.\n")
+        fh.write("# n_switches: 1 = one clean mis-join, breakable at junction_bp. >1 = the\n")
+        fh.write("#   members interdigitate, so this is a FRAGMENTED scaffold and one cut will\n")
+        fh.write("#   not fix it.\n")
+        fh.write("# junction_bp is a scaffold coordinate, binned at 1 Mb -- accurate enough to\n")
+        fh.write("#   pick a gap to cut at, not a base-resolution breakpoint.\n")
+        fh.write("#\n")
+        fh.write("# TO BREAK: keep the rows you want, set params.chimera_break to this file's\n")
+        fh.write("#   path, and rerun. Edit junction_bp if the evidence says elsewhere.\n")
+        fh.write("assembly\tscaffold\tname\tspan_bp\tmembers\tmember_footprints\t"
+                 "junction_bp\tleft_member\tleft_bp\tright_member\tright_bp\t"
+                 "n_switches\tvote\tverdict\tverdict_reason\tflags\n")
+        for r in sorted(chimera_rows, key=lambda x: (-x["span_bp"], x["scaffold"])):
+            j = r["junction"]
+            worst_nf = min((v[2] for v in r["votes"]), default=99)
+            best_ns = max((v[3] for v in r["votes"]), default=0)
+            fps = r["footprints"]
+            small = min(fps.values()) if fps else 0
+            if r["span_bp"] < a.chimera_min_span:
+                verdict, why = "NOT_A_CANDIDATE", "span<%d" % a.chimera_min_span
+            elif j is None:
+                verdict, why = "REVIEW", "no junction locatable from the PAF"
+            elif j[5] > 1:
+                verdict, why = "REVIEW", "interdigitated (%d switches)" % j[5]
+            elif small < a.chimera_min_member_bp:
+                verdict, why = "NOT_A_CANDIDATE", ("smallest member footprint %d < %d"
+                                                   % (small, a.chimera_min_member_bp))
+            elif worst_nf <= a.chimera_max_nf and best_ns >= a.chimera_min_ns:
+                verdict, why = "BREAK_CANDIDATE", ("vote %df/%ds"
+                                                   % (worst_nf, best_ns))
+            else:
+                verdict, why = "NOT_A_CANDIDATE", ("vote %df/%ds does not indicate an error"
+                                                   % (worst_nf, best_ns))
+            fh.write("%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"
+                     % (r["assembly"], r["scaffold"], r["name"], r["span_bp"],
+                        "+".join("ref%d" % k for k in r["members"]),
+                        ",".join("ref%d:%d" % (k, fps[k]) for k in r["members"]),
+                        j[0] if j else ".", ("ref%d" % j[1]) if j else ".",
+                        j[2] if j else ".", ("ref%d" % j[3]) if j else ".",
+                        j[4] if j else ".", j[5] if j else ".",
+                        ";".join("ref%d+ref%d:%df/%ds" % v for v in r["votes"]) or ".",
+                        verdict, why, ";".join(r["flags"]) or "."))
+    n_break = sum(1 for _l in open(cand) if "\tBREAK_CANDIDATE\t" in _l)
+    sys.stderr.write("[harmonize] chimera candidates: %d composite(s), %d break candidate(s)"
+                     " -> %s\n" % (len(chimera_rows), n_break, os.path.basename(cand)))
 
     rep = os.path.join(a.outdir, f"{a.species}.harmonization_report.tsv")
     with open(rep, "w") as fh:
