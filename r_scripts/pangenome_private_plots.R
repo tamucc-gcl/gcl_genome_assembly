@@ -199,19 +199,17 @@ if (is.null(tier)) {
     tt <- tt[!(as.character(tt$size_bin) %in% c("0-50")), , drop = FALSE]
     tt$frac <- tt$segment_bp / sum(tt$segment_bp)
 
-    p_bot <- ggplot(tt, aes(size_bin, frac, fill = tier)) +
-      geom_col(position = position_dodge(preserve = "single")) +
+    p_bot <- ggplot(tt, aes(size_bin, frac)) +
+      geom_col(fill = "#d73027") +
       scale_y_continuous(labels = function(v) sprintf("%.0f%%", 100 * v)) +
       scale_x_discrete(limits = ord, drop = FALSE) +
-      scale_fill_manual(values = c(core = "#2166ac", `soft-core` = "#67a9cf",
-                                   shell = "#fdae61", private = "#d73027")) +
-      labs(x = "segment size (bp)", y = "share of graph bp", fill = NULL) +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
+      labs(x = "segment size (bp)", y = "share of private bp") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
     if (is.null(svsp)) {
       skip("size_by_sharing_sv_panel", "no SV size_spectrum.tsv; bottom panel only")
       ggsave(op(".size_by_sharing.png"), p_bot +
-               labs(title = paste0(label, " \u2014 where the sequence is")),
+               labs(title = paste0(label, " \u2014 private sequence size distribution")),
              width = 9, height = 5.5, dpi = 150)
     } else {
       # SV classes only. SNP and INDEL would dominate the count but are not what
@@ -234,7 +232,7 @@ if (is.null(tier)) {
              is.finite(svsp$per_allele_bp), , drop = FALSE]
       if (is.null(sv) || !nrow(sv)) {
         ggsave(op(".size_by_sharing.png"), p_bot +
-                 labs(title = paste0(label, " \u2014 where the sequence is")),
+                 labs(title = paste0(label, " \u2014 private sequence size distribution")),
                width = 9, height = 5.5, dpi = 150)
         sv <- NULL
       }
@@ -254,8 +252,8 @@ if (is.null(tier)) {
         geom_col(fill = "grey15") +
         scale_y_continuous(labels = function(v) sprintf("%.0f%%", 100 * v)) +
         scale_x_discrete(limits = ord, drop = FALSE) +
-        labs(title = paste0(label, " \u2014 size distribution: SVs vs graph sharing"),
-             subtitle = "share of each panel's own total, >=50 bp, clip graph",
+        labs(title = paste0(label, " \u2014 size distribution: SVs vs private sequence"),
+             subtitle = "share of own total, >=50 bp, clip graph",
              x = NULL, y = "share of SV bp") +
         theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 
@@ -269,7 +267,7 @@ if (is.null(tier)) {
         note("gridExtra", "absent -- panels written separately")
         ggsave(op(".size_by_sharing_sv.png"), p_top, width = 9, height = 4, dpi = 150)
         ggsave(op(".size_by_sharing.png"),
-               p_bot + labs(title = paste0(label, " \u2014 where the sequence is")),
+               p_bot + labs(title = paste0(label, " \u2014 private sequence size distribution")),
                width = 9, height = 5.5, dpi = 150)
       }
       }
@@ -462,7 +460,7 @@ if (is.null(tcon)) {
       scale_fill_manual(values = c(core = "#2166ac", `soft-core` = "#67a9cf",
                                    shell = "#fdae61", private = "#d73027")) +
       labs(title = paste0(label, " \u2014 chromosome composition by sharing level"),
-           subtitle = "bar height is the chromosome; each node counted once",
+           subtitle = "per-chromosome subgraph: union of all 10 haplotypes",
            x = NULL, y = "graph sequence", fill = NULL) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
     ggsave(op(".tier_by_chromosome.png"), p4b, width = 10, height = 5.5, dpi = 150)
