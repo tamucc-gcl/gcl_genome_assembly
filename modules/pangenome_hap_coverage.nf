@@ -57,6 +57,10 @@ process PANGENOME_HAP_COVERAGE {
     // alone cannot answer "is there a lot of sequence in structural variants" -- that needs
     // the shared tiers on the same axis to compare against.
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.coverage_segment_spectrum.tsv"), emit: tier_spectrum, optional: true
+    // Tier composition per CONTIG. The bar height is the contig's graph bp, so a private
+    // share reads as a fraction of the chromosome -- unlike a per-haplotype total summed
+    // across ten haplotypes, which made chr1 look ~60 Mb private on a 94.7 Mb chromosome.
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.coverage_by_contig.tsv"), emit: tier_contig, optional: true
     path("versions.tsv"),                                       emit: versions
 
     script:
@@ -102,6 +106,7 @@ process PANGENOME_HAP_COVERAGE {
     : > ${taxid}.private_segments.bed
     printf 'scope\\tsize_bin\\tn_segments\\tsegment_bp\\n' > ${taxid}.private_segment_spectrum.tsv
     printf 'scope\\ttier\\tsize_bin\\tn_segments\\tsegment_bp\\n' > ${taxid}.coverage_segment_spectrum.tsv
+    printf 'contig\\ttier\\tbp\\tcontig_total_bp\\tpct_of_contig\\n' > ${taxid}.coverage_by_contig.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }

@@ -752,9 +752,14 @@ workflow PANGENOME {
                                    flavor == 'clip' && tier == 'parent' }
                                .map    { taxid, flavor, tier, f -> tuple(taxid, f) },
                            remainder: true )
-                    .map { taxid, ts, sv ->
+                    .join( PANGENOME_HAP_COVERAGE.out.tier_contig
+                               .filter { taxid, flavor, f -> flavor == 'clip' }
+                               .map    { taxid, flavor, f -> tuple(taxid, f) },
+                           remainder: true )
+                    .map { taxid, ts, sv, tc ->
                         tuple(taxid, ts ?: file('NO_TIER_SPECTRUM'),
-                                     sv ?: file('NO_SV_SPECTRUM')) }
+                                     sv ?: file('NO_SV_SPECTRUM'),
+                                     tc ?: file('NO_TIER_CONTIG')) }
 
                 PANGENOME_PRIVATE_PLOTS(
                     PANGENOME_HAP_COVERAGE.out.spectrum

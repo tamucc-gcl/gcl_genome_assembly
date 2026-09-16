@@ -47,7 +47,7 @@ process PANGENOME_PRIVATE_PLOTS {
     // CLIP ONLY, both of these. The SV catalog exists only on the clip graph, so a
     // full-arm tier spectrum would not be comparable to the SV panel above it -- and the
     // cactus authors recommend the clip graph for most applications.
-    tuple val(ttaxid), path(tier_spectrum), path(sv_spectrum)
+    tuple val(ttaxid), path(tier_spectrum), path(sv_spectrum), path(tier_contig)
     tuple val(rtaxid), val(ref_id)
     path(script)
 
@@ -93,6 +93,7 @@ process PANGENOME_PRIVATE_PLOTS {
         ${opts} \\
         tier_clip=${tier_spectrum} \\
         sv_clip=${sv_spectrum} \\
+        tier_contig_clip=${tier_contig} \\
         ref='${ref_id}' \\
         min_bp=${minbp}
 

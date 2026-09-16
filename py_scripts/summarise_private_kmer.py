@@ -56,6 +56,82 @@ import os
 import sys
 
 
+def single_copy_from_histogram(path, smooth=3):
+    """meryl histogram -> the single-copy k-mer multiplicity.
+
+    Find the error trough (first local minimum) and then the first local maximum after it.
+    Measured on this cohort, that is unambiguous and scales with depth:
+
+        Sde-CPla_115  trough ~5, peak 11    (low depth, ~24x)
+        Sde-CBau_104  trough  5, peak 18
+        Sde-CMat_203  trough ~5, peak 19
+
+    There is NO second hump at 2x the peak in any sample, so this cannot pick the wrong one.
+
+    WHY THIS REPLACES DERIVING THE BASELINE FROM SEQUENCE
+    ----------------------------------------------------
+    The baseline was previously the k-mer-weighted median of the CONTROL's per-segment
+    medians. That was better than deriving it from the private set -- which absorbed the
+    signal being measured and gave 233-436 where single copy is ~18 -- but it was still
+    wrong, and wrong differently on each graph:
+
+        haplotype      clip control ref   full control ref   read histogram
+        CBau_104_1            82                 33                18
+        CBau_104_2            76                 35                18
+
+    Control windows are cross-individual BY CONSTRUCTION, and cross-individual sequence in a
+    pangenome graph is enriched for sequence that aligned well -- which includes COLLAPSED
+    repeat, high-copy by definition. So the control was never a clean single-copy set, and
+    the contamination differs between arms: clip's control sits at ~4.4x single copy, full's
+    at ~1.9x. That is the entire reason the clip contrast looked 4x while full looked 15x.
+
+    The read histogram is a property of the READS. Identical for clip and full, independent
+    of which sequence set it is applied to, and it cannot absorb the signal.
+
+    Returns (single_copy, trough, note) or (0.0, 0, reason).
+    """
+    rows = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                f = line.split()
+                if len(f) >= 2:
+                    try:
+                        rows.append((int(f[0]), int(f[1])))
+                    except ValueError:
+                        continue
+    except OSError as e:
+        return 0.0, 0, "unreadable: %s" % e
+    if len(rows) < 10:
+        return 0.0, 0, "histogram has %d usable rows" % len(rows)
+    rows.sort()
+    freq = [c for _, c in rows]
+    mult = [m for m, _ in rows]
+
+    # smooth: the peak region is flat (16-20 all within 0.2% on CBau_104), so a raw argmax
+    # jitters between adjacent multiplicities run to run
+    sm = []
+    for i in range(len(freq)):
+        lo, hi = max(0, i - smooth), min(len(freq), i + smooth + 1)
+        sm.append(sum(freq[lo:hi]) / (hi - lo))
+
+    # error trough: first index where the smoothed curve stops falling
+    tr = 0
+    for i in range(1, len(sm) - 1):
+        if sm[i] <= sm[i - 1] and sm[i] <= sm[i + 1]:
+            tr = i
+            break
+    # first local maximum after it
+    pk = None
+    for i in range(tr + 1, len(sm) - 1):
+        if sm[i] >= sm[i - 1] and sm[i] >= sm[i + 1]:
+            pk = i
+            break
+    if pk is None:
+        pk = max(range(tr + 1, len(sm)), key=lambda i: sm[i]) if tr + 1 < len(sm) else tr
+    return float(mult[pk]), mult[tr], "trough=%d peak=%d" % (mult[tr], mult[pk])
+
+
 def median(sorted_vals):
     n = len(sorted_vals)
     if n == 0:
@@ -96,6 +172,11 @@ def main():
                          "above which a segment is REPEAT_LIKE (default 3.0). A MULTIPLE, "
                          "not a raw count: measured single-copy depth was ~14x on this "
                          "cohort, so an absolute threshold of 3 would flag everything.")
+    ap.add_argument("--meryl-histogram", default="",
+                    help="output of `meryl histogram <db>`. THE PREFERRED source of the "
+                         "single-copy baseline: it is a property of the reads, identical for "
+                         "clip and full, and cannot absorb the signal being measured the way "
+                         "a sequence-derived baseline does.")
     ap.add_argument("--single-copy", type=float, default=0.0,
                     help="single-copy reference to normalise against. Pass the CONTROL run's "
                          "value when scoring the private set: deriving it from private "
@@ -186,7 +267,37 @@ def main():
                 ref_level = float(val)
                 break
     per_seg_med = [v for v, _ in wq]
-    ref_source = "derived"
+    seq_derived = ref_level
+    ref_source = "sequence_derived_FALLBACK"
+    hist_note = ""
+
+    # ---- PRECEDENCE: read histogram > supplied > sequence-derived --------------------
+    # The sequence-derived value above is a FALLBACK, kept only for the case where no
+    # histogram is available. It is measurably wrong, and wrong differently on each graph:
+    #
+    #   haplotype      clip control   full control   read histogram
+    #   CBau_104_1          82             33              18
+    #   CBau_104_2          76             35              18
+    #
+    # Control windows are cross-individual BY CONSTRUCTION, and cross-individual sequence in
+    # a pangenome graph is enriched for sequence that ALIGNED WELL -- which includes collapsed
+    # repeat, high-copy by definition. So the control was never a clean single-copy set, and
+    # its contamination differs between arms: clip's control sits at ~4.4x single copy, full's
+    # at ~1.9x. That alone is why the clip contrast measured 4x while full measured 15x.
+    #
+    # The read histogram is a property of the READS: identical for clip and full, independent
+    # of which sequence set it is applied to, and structurally unable to absorb the signal it
+    # is being used to measure. Measured peaks across this cohort -- CPla_115 11, CBau_104 18,
+    # CMat_203 19 -- scale with depth, and no sample shows a second hump.
+    if a.meryl_histogram and os.path.isfile(a.meryl_histogram):
+        hv, trough, hist_note = single_copy_from_histogram(a.meryl_histogram)
+        if hv > 0:
+            ref_level = hv
+            ref_source = "read_histogram"
+        else:
+            sys.stderr.write("[private_kmer] WARNING: could not read a single-copy level "
+                             "from %s (%s); falling back\n"
+                             % (a.meryl_histogram, hist_note))
     if a.single_copy > 0:
         ref_level = a.single_copy
         ref_source = "supplied"
@@ -204,6 +315,11 @@ def main():
         out.write("#   collapse, whereas an assembly count would be circular -- collapse is\n")
         out.write("#   one of the things that may be producing spurious private sequence.\n")
         out.write("#\n")
+        out.write("# copy_ratio is COPIES PER HAPLOID GENOME: median_copy divided by the\n")
+        out.write("#   single-copy k-mer multiplicity from the read histogram. So 1.0 means\n")
+        out.write("#   present once, 3.0 means three copies, and the repeat threshold is a\n")
+        out.write("#   real statement about copy number rather than a cut on an arbitrary\n")
+        out.write("#   scale. A homozygous non-repetitive segment sits near 2.0.\n")
         out.write("# copy_ratio is median_copy / single_copy_reference, where the reference is\n")
         out.write("#   the median of per-segment medians for THIS haplotype (%.3f here).\n"
                   % ref_level)
@@ -255,6 +371,15 @@ def main():
         out.write("segments\t%d\n" % len(segs))
         out.write("single_copy_reference\t%.4f\n" % ref_level)
         out.write("single_copy_reference_source\t%s\n" % ref_source)
+        out.write("single_copy_sequence_derived\t%.4f\n" % seq_derived)
+        if hist_note:
+            out.write("single_copy_histogram_note\t%s\n" % hist_note)
+        if seq_derived > 0 and ref_level > 0:
+            out.write("sequence_derived_over_reference\t%.3f\n" % (seq_derived / ref_level))
+        out.write("# single_copy_sequence_derived is the OLD control-derived value, kept for\n")
+        out.write("#   comparison. sequence_derived_over_reference near 1 means the control\n")
+        out.write("#   was clean single-copy sequence; well above 1 means it was contaminated\n")
+        out.write("#   with collapsed repeat, which is what clip's ~4.4x showed.\n")
         out.write("segments_in_reference\t%d\n" % len(per_seg_med))
         out.write("kmers_in_reference\t%d\n" % tot_w)
         out.write("# the reference is the KMER-WEIGHTED median of per-segment medians, so a\n")

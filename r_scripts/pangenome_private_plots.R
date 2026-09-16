@@ -148,6 +148,8 @@ ev   <- bind_flavours(optc("evidence_clip"), optc("evidence_full"),
                                         "median_copy", "copy_ratio",
                                         "aligned_frac_merged", "n_other_assemblies")))
 tier <- rd(optc("tier_clip"), numeric_cols = c("n_segments", "segment_bp"))
+tcon <- rd(optc("tier_contig_clip"),
+           numeric_cols = c("bp", "contig_total_bp", "pct_of_contig"))
 svsp <- rd(optc("sv_clip"),   numeric_cols = c("n_alleles", "per_allele_bp"))
 
 # ======================================================================================
@@ -401,12 +403,59 @@ if (!has_facet(xtab, "flavor")) {
       facet_wrap(~ flavor, ncol = 1, scales = "free_y") +
       scale_y_continuous(labels = gbp) +
       labs(title = paste0(label, " \u2014 private sequence per chromosome, by evidence"),
-           subtitle = paste0("ABSOLUTE bp, not normalised: both the amount and the ",
-                             "composition are readable"),
-           x = NULL, y = "private sequence", fill = NULL) +
+           subtitle = paste0("ABSOLUTE bp SUMMED OVER ALL HAPLOTYPES -- divide by the ",
+                             "haplotype count for a per-genome figure. See the composition ",
+                             "figure for private as a fraction of the chromosome."),
+           x = NULL, y = "private sequence, summed over haplotypes", fill = NULL) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1),
             legend.position = "right", legend.text = element_text(size = 8))
     ggsave(op(".evidence_by_chromosome.png"), p4, width = 10, height = 7, dpi = 150)
+  }
+}
+
+# ======================================================================================
+# FIGURE 4b. Tier composition per chromosome -- private as a FRACTION of the chromosome.
+#
+# The bar height IS the chromosome's graph bp, split by sharing level, so a private share is
+# readable as a slice of the chromosome. The per-chromosome EVIDENCE figure above sums private
+# bp across all ten haplotypes, which made chr1 look like ~60 Mb of private sequence on a
+# 94.7 Mb chromosome -- i.e. as though most of the chromosome sat in one haplotype. It is
+# ~6 Mb per haplotype, about 6%. Same data, and only this framing cannot be misread.
+# ======================================================================================
+if (is.null(tcon)) {
+  skip("tier_by_chromosome", "no coverage_by_contig.tsv for the clip graph")
+} else {
+  tc <- tcon[grepl("^chr", tcon$contig) & is.finite(tcon$bp), , drop = FALSE]
+  if (!nrow(tc)) {
+    skip("tier_by_chromosome", "no chr* contigs")
+  } else {
+    # chr10_1 and chr10_17+chr11_12 both pool to chr10
+    tc$chrom <- sub("_.*$", "", tc$contig)
+    agg <- aggregate(bp ~ chrom + tier, data = tc, FUN = sum)
+    ordc <- unique(agg$chrom); nn <- suppressWarnings(as.numeric(sub("^chr", "", ordc)))
+    agg$chrom <- factor(agg$chrom, levels = ordc[order(is.na(nn), nn, ordc)])
+    lv <- c("core", "soft-core", "shell", "private")
+    agg$tier <- factor(agg$tier, levels = lv[lv %in% unique(agg$tier)])
+
+    tot <- aggregate(bp ~ chrom, data = agg, FUN = sum)
+    pv <- agg[agg$tier == "private", c("chrom", "bp")]
+    names(pv)[2] <- "priv"
+    pv <- merge(tot, pv, by = "chrom", all.x = TRUE)
+    pv$priv[is.na(pv$priv)] <- 0
+    note("private_pct_of_chrom_range",
+         sprintf("%.1f%%-%.1f%%", 100 * min(pv$priv / pv$bp), 100 * max(pv$priv / pv$bp)))
+
+    p4b <- ggplot(agg, aes(chrom, bp, fill = tier)) +
+      geom_col() +
+      scale_y_continuous(labels = gbp) +
+      scale_fill_manual(values = c(core = "#2166ac", `soft-core` = "#67a9cf",
+                                   shell = "#fdae61", private = "#d73027")) +
+      labs(title = paste0(label, " \u2014 chromosome composition by sharing level"),
+           subtitle = paste0("bar height is the chromosome's graph sequence; private is a ",
+                             "SLICE of it, counted once per node rather than per haplotype"),
+           x = NULL, y = "graph sequence", fill = NULL) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
+    ggsave(op(".tier_by_chromosome.png"), p4b, width = 10, height = 5.5, dpi = 150)
   }
 }
 

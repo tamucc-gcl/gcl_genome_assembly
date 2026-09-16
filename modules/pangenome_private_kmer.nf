@@ -85,29 +85,69 @@ process PANGENOME_PRIVATE_KMER {
     # diagnosable from the log rather than from guesswork.
     meryl-lookup -wig-count -help > meryl_lookup_help.txt 2>&1 || true
 
+    # ---- the single-copy baseline, from the READ histogram ---------------------------
+    # This replaces deriving it from the control's own k-mer medians, which was measurably
+    # wrong and wrong DIFFERENTLY on each graph: for Sde-CBau_104_1 the control gave 82 on
+    # clip and 33 on full where the read histogram gives 18. Control windows are
+    # cross-individual by construction, and cross-individual sequence in a pangenome graph is
+    # enriched for sequence that ALIGNED WELL -- which includes collapsed repeat. So the
+    # control carried the very signal it was supposed to provide a baseline for, and its
+    # contamination differed between arms (clip ~4.4x single copy, full ~1.9x). That is the
+    # whole reason the clip contrast measured 4x while full measured 15x.
+    #
+    # The histogram is a property of the reads: identical for clip and full, and structurally
+    # unable to absorb the signal. Cheap -- meryl reads its own index, no sequence scan.
+    meryl histogram ${meryl_db} > meryl_hist.txt 2>meryl_hist.err || {
+        echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] WARNING: meryl histogram failed;" >&2
+        echo "  the sequence-derived fallback will be used and the audit will say so." >&2
+        sed 's/^/    /' meryl_hist.err >&2 || true
+        : > meryl_hist.txt
+    }
+
     # ---- CONTROL first: it derives the single-copy reference --------------------------
     meryl-lookup -wig-count -sequence ${control_fa} -mers ${meryl_db} \\
       | python3 ${script} \\
             --haplotype '${haplotype}' --sample ${sample} --set control \\
             --label ${taxid}.${flavor} --outdir . \\
-            --kmer ${kmer} --repeat-ratio ${rratio}
+            --kmer ${kmer} --repeat-ratio ${rratio} \\
+            --meryl-histogram meryl_hist.txt
 
+    # The control no longer SUPPLIES the baseline -- both sets read it from the same read
+    # histogram -- so the old guard here (does the control have a usable reference?) tested
+    # something nothing depends on. What matters now is that the two sets actually agree.
     CA=${stem}.control.private_kmer_audit.tsv
-    REF=\$(awk -F'\\t' '\$1=="single_copy_reference"{print \$2}' "\$CA")
-    if [ -z "\${REF:-}" ] || awk -v r="\${REF:-0}" 'BEGIN{exit !(r+0 <= 0)}'; then
-        echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] ERROR: the control run produced" >&2
-        echo "  no usable single-copy reference (got '\${REF:-}'). The private set cannot be" >&2
-        echo "  normalised, and normalising it against itself is the bug this replaced." >&2
-        exit 1
-    fi
-    echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] single-copy reference \$REF (control)" >&2
 
-    # ---- PRIVATE, normalised against the CONTROL reference ---------------------------
+    # ---- PRIVATE, same baseline, read from the same histogram ------------------------
     meryl-lookup -wig-count -sequence ${private_fa} -mers ${meryl_db} \\
       | python3 ${script} \\
             --haplotype '${haplotype}' --sample ${sample} --set private \\
             --label ${taxid}.${flavor} --outdir . \\
-            --kmer ${kmer} --repeat-ratio ${rratio} --single-copy "\$REF"
+            --kmer ${kmer} --repeat-ratio ${rratio} \\
+            --meryl-histogram meryl_hist.txt
+
+    # ---- the baseline must be IDENTICAL for both sets --------------------------------
+    # copy_ratio is only comparable between private and control if both were divided by the
+    # same number. They now read it independently from the same histogram, so a mismatch
+    # means the histogram was unreadable for one of them and a fallback engaged -- which
+    # would silently make the contrast meaningless rather than wrong-looking.
+    PREF=\$(awk -F'\\t' '\$1=="single_copy_reference"{print \$2}' \
+             ${stem}.private.private_kmer_audit.tsv)
+    CREF=\$(awk -F'\\t' '\$1=="single_copy_reference"{print \$2}' "\$CA")
+    PSRC=\$(awk -F'\\t' '\$1=="single_copy_reference_source"{print \$2}' \
+             ${stem}.private.private_kmer_audit.tsv)
+    if [ "\${PREF:-x}" != "\${CREF:-y}" ]; then
+        echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] ERROR: the two sets used" >&2
+        echo "  DIFFERENT single-copy baselines (private=\${PREF:-?} control=\${CREF:-?})." >&2
+        echo "  copy_ratio is not comparable between them. Check meryl_hist.txt." >&2
+        exit 1
+    fi
+    echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] single-copy \$PREF from \$PSRC" >&2
+    if [ "\$PSRC" != "read_histogram" ]; then
+        echo "[PRIVATE_KMER ${taxid}:${flavor}:${haplotype}] WARNING: baseline came from" >&2
+        echo "  '\$PSRC', not the read histogram. The sequence-derived fallback is measurably" >&2
+        echo "  contaminated by collapsed repeat -- clip control gave 82 where the reads say" >&2
+        echo "  18 -- so the contrast will be understated." >&2
+    fi
 
     # ---- one table carrying both sets ------------------------------------------------
     # Single awk, NO PIPES. `grep -v '^#' "\$P" | head -1` sends SIGPIPE to grep when head
