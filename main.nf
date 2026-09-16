@@ -964,6 +964,12 @@ workflow {
     //
     // When off the process is not instantiated and the original channel flows straight
     // through -- no pass-through task and no cache churn.
+    // Assigned BEFORE the branch, then overridden inside it. A variable assigned only
+    // inside if/else blocks in a workflow body is not visible after them -- "No such
+    // variable: ch_pre_finalize". The same assign-then-override pattern is used for
+    // ch_hap_priv and ch_hap_cov in workflows/pangenome.nf.
+    ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
+
     if( params.chimera_break && params.chimera_break.toString() != 'false' ) {
         ch_break_script = Channel.fromPath("${projectDir}/py_scripts/break_chimeras.py",
                                           checkIfExists: true)
@@ -980,9 +986,6 @@ workflow {
             ch_break_script.first() )
         ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
         ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
-    }
-    else {
-        ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
     }
         .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
 
