@@ -204,10 +204,30 @@ if (is.null(tier)) {
     } else {
       # SV classes only. SNP and INDEL would dominate the count but are not what
       # "sequence in structural variants" means.
-      sv <- svsp[svsp$primary_class %in%
-                   c("INS", "DEL", "SUBST", "DUP", "INV_DUP", "INV_PATH_EXPLICIT") &
-                 is.finite(svsp$per_allele_bp), , drop = FALSE]
-      agg <- aggregate(per_allele_bp ~ size_bin, data = sv, FUN = sum)
+      # Guard the schema. This wants the PRE-AGGREGATED size_spectrum.tsv
+      # (primary_class / size_bin / n_alleles / per_allele_bp), NOT sv_sizes.tsv, which is
+      # one row per allele -- 31.3M of them. Passing the wrong one gave
+      # "object 'per_allele_bp' not found" from inside aggregate(), which says nothing about
+      # which file was wrong.
+      need <- c("primary_class", "size_bin", "per_allele_bp")
+      if (!all(need %in% names(svsp))) {
+        skip("size_by_sharing_sv_panel",
+             sprintf("sv_clip has columns [%s]; expected size_spectrum.tsv with [%s]",
+                     paste(names(svsp), collapse = ","), paste(need, collapse = ",")))
+        svsp <- NULL
+      }
+      sv <- if (is.null(svsp)) NULL else
+        svsp[svsp$primary_class %in%
+               c("INS", "DEL", "SUBST", "DUP", "INV_DUP", "INV_PATH_EXPLICIT") &
+             is.finite(svsp$per_allele_bp), , drop = FALSE]
+      if (is.null(sv) || !nrow(sv)) {
+        ggsave(op(".size_by_sharing.png"), p_bot +
+                 labs(title = paste0(label, " \u2014 where the sequence is")),
+               width = 9, height = 5.5, dpi = 150)
+        sv <- NULL
+      }
+      agg <- if (is.null(sv)) NULL else aggregate(per_allele_bp ~ size_bin, data = sv, FUN = sum)
+      if (!is.null(agg)) {
       agg$size_bin <- factor(as.character(agg$size_bin), levels = ord)
       note("sv_bp_total", sum(agg$per_allele_bp))
 
@@ -233,6 +253,7 @@ if (is.null(tier)) {
         ggsave(op(".size_by_sharing.png"),
                p_bot + labs(title = paste0(label, " \u2014 where the sequence is")),
                width = 9, height = 5.5, dpi = 150)
+      }
       }
     }
   }
