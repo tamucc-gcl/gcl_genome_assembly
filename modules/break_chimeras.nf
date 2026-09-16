@@ -107,28 +107,28 @@ process BREAK_CHIMERAS {
     # SEQUENCE MUST BE CONSERVED. A split moves bases between records; it must never lose or
     # duplicate one. Compared on total non-header characters, because the record count and the
     # names both change by design.
-    IN=\\$(grep -v '^>' "input/${assembly_fasta.name}" | tr -d '\\\\n' | wc -c)
-    OUT=\\$(grep -v '^>' ${meta.id}.broken.fasta | tr -d '\\\\n' | wc -c)
-    if [ "\\$IN" != "\\$OUT" ]; then
-        echo "[BREAK_CHIMERAS ${meta.id}] ERROR: sequence not conserved -- \\$IN in, \\$OUT out." >&2
+    IN=\$(grep -v '^>' "input/${assembly_fasta.name}" | tr -d '\\n' | wc -c)
+    OUT=\$(grep -v '^>' ${meta.id}.broken.fasta | tr -d '\\n' | wc -c)
+    if [ "\$IN" != "\$OUT" ]; then
+        echo "[BREAK_CHIMERAS ${meta.id}] ERROR: sequence not conserved -- \$IN in, \$OUT out." >&2
         echo "  A split must only move bases between records, never lose or duplicate them." >&2
         exit 1
     fi
-    echo "[BREAK_CHIMERAS ${meta.id}] sequence conserved: \\$IN bp" >&2
+    echo "[BREAK_CHIMERAS ${meta.id}] sequence conserved: \$IN bp" >&2
 
     # Every name in the rewritten map must exist in the rewritten FASTA, or FINALIZE_ASSEMBLY
     # will silently drop records when it extracts by name.
     grep '^>' ${meta.id}.broken.fasta | sed 's/^>//; s/[[:space:]].*//' | sort -u > fa_names.txt
-    awk -F'\\\\t' 'NR>1 && \\$1!~/^#/{print \\$1}' ${meta.id}.broken_name_map.tsv | sort -u > map_names.txt
-    if ! miss=\\$(comm -13 fa_names.txt map_names.txt) || [ -n "\\${miss:-}" ]; then
+    awk -F'\\t' 'NR>1 && \$1!~/^#/{print \$1}' ${meta.id}.broken_name_map.tsv | sort -u > map_names.txt
+    if ! miss=\$(comm -13 fa_names.txt map_names.txt) || [ -n "\${miss:-}" ]; then
         echo "[BREAK_CHIMERAS ${meta.id}] ERROR: name map references records absent from the" >&2
         echo "  FASTA; FINALIZE_ASSEMBLY would drop them:" >&2
-        echo "\\${miss}" | sed 's/^/    /' >&2
+        echo "\${miss}" | sed 's/^/    /' >&2
         exit 1
     fi
 
-    nb=\\$(awk -F'\\\\t' '\\$1=="scaffolds_broken"{print \\$2}' ${meta.id}.chimera_break_audit.tsv)
-    echo "[BREAK_CHIMERAS ${meta.id}] mode=${mode}, broke \\${nb:-0} scaffold(s)" >&2
+    nb=\$(awk -F'\\t' '\$1=="scaffolds_broken"{print \$2}' ${meta.id}.chimera_break_audit.tsv)
+    echo "[BREAK_CHIMERAS ${meta.id}] mode=${mode}, broke \${nb:-0} scaffold(s)" >&2
 
     {
       printf 'process\\ttool\\tversion\\n'
