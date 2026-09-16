@@ -332,6 +332,12 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
 
     segs = []
     tier_spec = {}          # (haplotype, tier, size_bin) -> [n_segments, bp]
+    # keyed on CONTIG as well, so a per-chromosome figure can show private as a slice of a
+    # bar whose height IS the chromosome. Without it the only per-chromosome private figure
+    # summed over ten haplotypes, so chr1 read as ~60 Mb of private sequence on a 94.7 Mb
+    # chromosome and looked like most of the chromosome was in a single haplotype. It is
+    # ~6 Mb per haplotype, about 6%.
+    tier_contig = {}        # (contig, tier) -> bp   (deduplicated, same rule as below)
     core_c, soft_c, shell_c = (tier_cuts or (0.0, 0.0, 0))
     # DEDUPLICATION. Tier runs are walked PER HAPLOTYPE, so without this every haplotype
     # crossing the same core node contributes that node's bp again: core came out at
@@ -423,6 +429,9 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
                     if not tier_seen[i]:
                         tier_seen[i] = 1
                         fresh = L
+                    if fresh:
+                        kc = (cs, tr_now)
+                        tier_contig[kc] = tier_contig.get(kc, 0) + fresh
                     if tr_now == t_tier:
                         t_bp += L
                         t_new += fresh
@@ -454,7 +463,7 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
                 e = tier_spec.setdefault(k2, [0, 0])
                 e[0] += 1
                 e[1] += t_new
-    return segs, repeat_bp, n_oor, tier_spec
+    return segs, repeat_bp, n_oor, tier_spec, tier_contig
 
 
 # Default edges match nextflow.config's pangenome_sv_bins, so the private and tier spectra
@@ -602,7 +611,7 @@ def main():
         # tier cuts come from the same params the report and the partition figure use, so
         # "core" means the same thing in all three places
         tier_cuts = (a.tier_core, a.tier_softcore, a.tier_shell)
-        segs, repeat_bp, n_oor, tier_spec = private_segments(
+        segs, repeat_bp, n_oor, tier_spec, tier_contig = private_segments(
             a.gfa, cov, nlen, groups, n_hap=len(groups), tier_cuts=tier_cuts)
         if n_oor:
             sys.stderr.write("WARNING: %d out-of-range node ids in step lists; each broke a "
@@ -693,6 +702,26 @@ def main():
             for (hs, tr, b) in sorted(tier_spec, key=lambda k: (k[0], k[1], bkey(k[2]))):
                 n, bp = tier_spec[(hs, tr, b)]
                 out.write("%s\t%s\t%s\t%d\t%d\n" % (hs, tr, b, n, bp))
+        # ---- tier composition per contig ---------------------------------------------
+        # The bar height IS the contig's graph bp, split by sharing level -- so private is
+        # visibly a slice of the chromosome rather than a total that exceeds it.
+        with open(op(".coverage_by_contig.tsv"), "w") as out:
+            out.write("# graph bp per CONTIG per sharing tier, DEDUPLICATED: a node's bp is\n")
+            out.write("#   credited once, to the first haplotype whose walk covers it. So the\n")
+            out.write("#   tiers of a contig sum to that contig's graph bp and a private share\n")
+            out.write("#   can be read as a fraction of the chromosome.\n")
+            out.write("# The per-haplotype view is in hap_private_by_contig.tsv; summing that\n")
+            out.write("#   across haplotypes is what made private look larger than the\n")
+            out.write("#   chromosome it sits on.\n")
+            out.write("contig\ttier\tbp\tcontig_total_bp\tpct_of_contig\n")
+            ctot = {}
+            for (cg, tr), bp in tier_contig.items():
+                ctot[cg] = ctot.get(cg, 0) + bp
+            for (cg, tr) in sorted(tier_contig, key=lambda k: (-ctot[k[0]], k[0], k[1])):
+                bp = tier_contig[(cg, tr)]
+                out.write("%s\t%s\t%d\t%d\t%.4f\n"
+                          % (cg, tr, bp, ctot[cg], 100.0 * bp / ctot[cg] if ctot[cg] else 0))
+
         tb = {}
         for (tr, b), bp in agg_bp.items():
             tb[tr] = tb.get(tr, 0) + bp
