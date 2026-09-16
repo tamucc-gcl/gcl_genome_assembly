@@ -734,14 +734,20 @@ workflow PANGENOME {
                                      checkIfExists: true)
                 // The two panels of the figure Chris asked for, both CLIP ONLY: the SV
                 // catalog exists only on the clip graph, so a full-arm tier spectrum would
-                // not be comparable to the SV panel above it. PANGENOME_CLASSIFY.out.sv_sizes
+                // not be comparable to the SV panel above it. PANGENOME_CLASSIFY.out.spectrum
                 // is a PROCESS output, so reading it a second time here is broadcast-safe --
                 // unlike ch_sv_sizes, which is a plain .filter{}.map{} channel and is not
                 // touched again.
                 ch_tier_sv = PANGENOME_HAP_COVERAGE.out.tier_spectrum
                     .filter { taxid, flavor, f -> flavor == 'clip' }
                     .map    { taxid, flavor, f -> tuple(taxid, f) }
-                    .join( PANGENOME_CLASSIFY.out.sv_sizes
+                    // .out.spectrum, NOT .out.sv_sizes. sv_sizes.tsv is one row per
+                    // allele -- 31.3M of them -- while size_spectrum.tsv is the
+                    // pre-aggregated primary_class / size_bin / n_alleles / per_allele_bp
+                    // the figure needs. Passing the wrong one failed with
+                    // "object 'per_allele_bp' not found" from inside aggregate(), and would
+                    // have been slow and pointless even had the columns matched.
+                    .join( PANGENOME_CLASSIFY.out.spectrum
                                .filter { taxid, flavor, tier, f ->
                                    flavor == 'clip' && tier == 'parent' }
                                .map    { taxid, flavor, tier, f -> tuple(taxid, f) },
