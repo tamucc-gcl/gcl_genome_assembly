@@ -324,7 +324,7 @@ def piece_footprint(info, k):
 def chimera_junction(ev_q, members, bin_bp=1000000):
     """Where along a scaffold does the dominant reference chromosome change?
 
-    ev_q is ev[qname]: chr_num -> {..., "qivals": [(qs, qe, blk), ...]}. Bin the scaffold and
+    ev_q is info["qivals"]: chr_num -> [(qs, qe, blk), ...]. Bin the scaffold and
     credit each bin to whichever member contributes the most aligned bp in it, then find the
     longest run of one member followed by the longest run of another.
 
@@ -342,14 +342,14 @@ def chimera_junction(ev_q, members, bin_bp=1000000):
         return None
     span = 0
     for k in members:
-        for qs, qe, _ in (ev_q.get(k, {}) or {}).get("qivals", []):
+        for qs, qe, _ in (ev_q.get(k) or []):
             span = max(span, qe)
     if span <= 0:
         return None
     nbin = max(2, (span + bin_bp - 1) // bin_bp)
     acc = [dict() for _ in range(nbin)]
     for k in members:
-        for qs, qe, blk in (ev_q.get(k, {}) or {}).get("qivals", []):
+        for qs, qe, blk in (ev_q.get(k) or []):
             if qe <= qs:
                 continue
             b0, b1 = qs // bin_bp, min(nbin - 1, (qe - 1) // bin_bp)
@@ -513,6 +513,12 @@ def classify(chr_ev, scaf_len, min_frac, sec_frac, chrom_len=None,
         # test that needs "which territory does this piece actually hold" must use
         # this instead (see apply_containment).
         "ivals": {k: merge_intervals(chr_ev[k].get("ivals") or []) for k in members},
+        # QUERY intervals, deliberately UNMERGED. merge_intervals collapses overlaps and
+        # drops the per-alignment block length, and chimera_junction() weights each bin by
+        # that length to decide which member dominates it. Merged, every alignment would
+        # count the same regardless of size and a few short spurious cross-mappings would
+        # outvote the real arm -- the measured chr5+chr9 scaffold has exactly those.
+        "qivals": {k: list(chr_ev[k].get("qivals") or []) for k in members},
         "orient": orient,
         "aligned_frac": total_bp / scaf_len,
         "cover_frac": sum(cov.get(k, 0) for k in chr_ev) / scaf_len if scaf_len else 0.0,
@@ -1280,8 +1286,10 @@ def main():
                 # Collected HERE because this is the only point where the composite name,
                 # the member set, the footprints and the concordance vote all exist at once.
                 if rcls == "composite" and len(cons) > 1:
-                    _ev_q = (ev.get(n) or {})
-                    _j = chimera_junction(_ev_q, sorted(cons))
+                    # from info -- place[n] -- not from ev, which is local to the
+                    # placement loop and out of scope here. classify() carries qivals across
+                    # the same way it already carries ivals for footprint_bp().
+                    _j = chimera_junction(info.get("qivals") or {}, sorted(cons))
                     _votes = []
                     for _x, _y in combinations(cons, 2):
                         _nf, _ns = concordance(_x, _y)
