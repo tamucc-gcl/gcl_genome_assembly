@@ -333,6 +333,16 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
     segs = []
     tier_spec = {}          # (haplotype, tier, size_bin) -> [n_segments, bp]
     core_c, soft_c, shell_c = (tier_cuts or (0.0, 0.0, 0))
+    # DEDUPLICATION. Tier runs are walked PER HAPLOTYPE, so without this every haplotype
+    # crossing the same core node contributes that node's bp again: core came out at
+    # 3.08 Gb and the three tiers summed to 9.16 Gb against a 1.93 Gb graph, while private
+    # was correct at 813 Mb because private nodes are walked by exactly one haplotype. The
+    # tiers were not comparable, which is the whole point of the figure.
+    #
+    # So bp is credited to the FIRST haplotype whose run covers a node -- the same rule
+    # by_contig already uses for contigs. Segment SIZES stay per-haplotype runs, which is
+    # what makes the size distribution meaningful; only the bp total is deduplicated.
+    tier_seen = bytearray(len(cov_l))
     known = set(groups)
     top = len(cov_l) - 1
     # Marker array, not a per-haplotype reset: store WHICH haplotype last walked each
@@ -385,7 +395,9 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
             run_bp = run_n = 0
             run_start = base
             idx = 0
-            t_tier, t_bp = None, 0
+            # t_bp is the run's LENGTH (used to bin it); t_new is the bp not already
+            # credited to an earlier haplotype (used for the total).
+            t_tier, t_bp, t_new = None, 0, 0
             for i in map(int, fld.translate(tr).split()):
                 if not (0 <= i <= top):
                     n_oor += 1
@@ -407,15 +419,20 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
                         tr_now = "shell"
                     else:
                         tr_now = "private"
+                    fresh = 0
+                    if not tier_seen[i]:
+                        tier_seen[i] = 1
+                        fresh = L
                     if tr_now == t_tier:
                         t_bp += L
+                        t_new += fresh
                     else:
                         if t_tier is not None and t_bp > 0:
                             k2 = (hs, t_tier, seg_bin(t_bp))
                             e = tier_spec.setdefault(k2, [0, 0])
                             e[0] += 1
-                            e[1] += t_bp
-                        t_tier, t_bp = tr_now, L
+                            e[1] += t_new
+                        t_tier, t_bp, t_new = tr_now, L, fresh
                 if cov_l[i] == 1:
                     if seen_hap[i] == h:
                         repeat_bp += L
@@ -436,7 +453,7 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
                 k2 = (hs, t_tier, seg_bin(t_bp))
                 e = tier_spec.setdefault(k2, [0, 0])
                 e[0] += 1
-                e[1] += t_bp
+                e[1] += t_new
     return segs, repeat_bp, n_oor, tier_spec
 
 
@@ -637,6 +654,11 @@ def main():
                       % (a.tier_core, a.tier_softcore))
             out.write("#   shell >= %d, private == 1. Same params as the report.\n"
                       % a.tier_shell)
+            out.write("# segment_bp is DEDUPLICATED: a node's bp is credited to the first\n")
+            out.write("#   haplotype whose run covers it, so the tiers sum to the graph total\n")
+            out.write("#   rather than to graph x haplotypes. n_segments and the size BINS are\n")
+            out.write("#   per-haplotype runs, which is what makes the size distribution\n")
+            out.write("#   meaningful -- only the bp is deduplicated.\n")
             out.write("scope\ttier\tsize_bin\tn_segments\tsegment_bp\n")
             agg_n, agg_bp = {}, {}
             for (hs, tr, b), (n, bp) in tier_spec.items():

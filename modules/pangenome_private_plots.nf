@@ -52,7 +52,11 @@ process PANGENOME_PRIVATE_PLOTS {
     path(script)
 
     output:
-    tuple val(taxid), path("${taxid}.private_*.png"), emit: figures, optional: true
+    // `${taxid}.*.png`, not `${taxid}.private_*.png`. The narrower glob collected only the
+    // figures whose names happen to start with "private_", so size_by_sharing, copy_ratio and
+    // evidence_by_chromosome were WRITTEN by the R and never published -- the R reported six
+    // figures and Nextflow collected three, with no error either side.
+    tuple val(taxid), path("${taxid}.*.png"), emit: figures, optional: true
     tuple val(taxid), path("${taxid}.private_figures_audit.tsv"), emit: audit
     path("versions.tsv"), emit: versions
 
@@ -101,7 +105,9 @@ process PANGENOME_PRIVATE_PLOTS {
         echo "[PRIVATE_PLOTS ${taxid}] figures skipped:" >&2
         grep '^skipped_' "\$A" | sed 's/^/  /' >&2
     fi
-    echo "[PRIVATE_PLOTS ${taxid}] \$(ls -1 ${taxid}.private_*.png 2>/dev/null | wc -l) figures" >&2
+    # Same glob as the output declaration, so the count in the log matches what Nextflow
+    # collects. They disagreed before -- the R reported six figures and this line said three.
+    echo "[PRIVATE_PLOTS ${taxid}] \$(ls -1 ${taxid}.*.png 2>/dev/null | wc -l) figures" >&2
 
     {
       printf 'process\\ttool\\tversion\\n'
