@@ -181,21 +181,31 @@ if (is.null(tier)) {
     tt$tier <- factor(tt$tier, levels = lv[lv %in% unique(tt$tier)])
     allb <- unique(c(as.character(tt$size_bin),
                      if (!is.null(svsp)) as.character(svsp$size_bin) else character(0)))
+    allb <- allb[allb != "0-50"]
     ord <- levels(bin_order(allb))
     tt$size_bin <- factor(as.character(tt$size_bin), levels = ord)
 
     for (l in levels(tt$tier))
       note(paste0("tier_bp.", l), sum(tt$segment_bp[tt$tier == l], na.rm = TRUE))
 
-    p_bot <- ggplot(tt, aes(size_bin, segment_bp, fill = tier)) +
-      geom_col() +
-      scale_y_continuous(labels = gbp) +
+    # DODGED, not stacked. Stacked, a reader cannot compare tiers within a bin -- the whole
+    # question is whether private sequence sits at different sizes than shared sequence, and
+    # that is a comparison between bars, not a total.
+    # BOTH PANELS PROPORTIONAL, and both floored at 50 bp. They were not comparable before:
+    # the SV panel is per-allele bp totalling 2.97 Gb with a 50 bp floor (SNPs and indels
+    # excluded), the tier panel deduplicated graph bp totalling 1.93 Gb with no floor. Chris
+    # asked whether the SHAPES match, so share of own total is the right axis and the ranges
+    # have to agree.
+    tt <- tt[!(as.character(tt$size_bin) %in% c("0-50")), , drop = FALSE]
+    tt$frac <- tt$segment_bp / sum(tt$segment_bp)
+
+    p_bot <- ggplot(tt, aes(size_bin, frac, fill = tier)) +
+      geom_col(position = position_dodge(preserve = "single")) +
+      scale_y_continuous(labels = function(v) sprintf("%.0f%%", 100 * v)) +
       scale_x_discrete(limits = ord, drop = FALSE) +
       scale_fill_manual(values = c(core = "#2166ac", `soft-core` = "#67a9cf",
                                    shell = "#fdae61", private = "#d73027")) +
-      labs(x = "segment size (bp)", y = "graph sequence", fill = NULL,
-           subtitle = paste0("graph bp by segment size and how many haplotypes share it; ",
-                             "a segment is a run of sequence at the same sharing level")) +
+      labs(x = "segment size (bp)", y = "share of graph bp", fill = NULL) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
 
     if (is.null(svsp)) {
@@ -230,17 +240,23 @@ if (is.null(tier)) {
       }
       agg <- if (is.null(sv)) NULL else aggregate(per_allele_bp ~ size_bin, data = sv, FUN = sum)
       if (!is.null(agg)) {
+      agg <- agg[!(as.character(agg$size_bin) %in% c("0-50")), , drop = FALSE]
+      agg$frac <- agg$per_allele_bp / sum(agg$per_allele_bp)
       agg$size_bin <- factor(as.character(agg$size_bin), levels = ord)
       note("sv_bp_total", sum(agg$per_allele_bp))
+      # per_allele_bp sums EVERY alt allele's length, and SUBST is ~60% of the catalog with
+      # up to seven alts at a locus -- so this totals 2.97 Gb against a ~1 Gb reference. The
+      # SHAPE across bins is meaningful; the total is not a genome quantity, unlike the
+      # deduplicated graph bp below it. Recorded so the asymmetry is not read as a result.
+      note("sv_bp_note", "per-allele sum; double-counts multi-allelic loci, unlike the graph bp below")
 
-      p_top <- ggplot(agg, aes(size_bin, per_allele_bp)) +
+      p_top <- ggplot(agg, aes(size_bin, frac)) +
         geom_col(fill = "grey15") +
-        scale_y_continuous(labels = gbp) +
+        scale_y_continuous(labels = function(v) sprintf("%.0f%%", 100 * v)) +
         scale_x_discrete(limits = ord, drop = FALSE) +
-        labs(title = paste0(label, " \u2014 where the sequence is, by size"),
-             subtitle = paste0("top: bp in structural variants. bottom: graph bp by how ",
-                               "many haplotypes share it. Clip graph, same bins."),
-             x = NULL, y = "bp in SVs") +
+        labs(title = paste0(label, " \u2014 size distribution: SVs vs graph sharing"),
+             subtitle = "share of each panel's own total, >=50 bp, clip graph",
+             x = NULL, y = "share of SV bp") +
         theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 
       # stacked without a layout dependency: write both panels and a combined image via
@@ -304,8 +320,7 @@ if (!has_facet(ev, "flavor") || !has_facet(ev, "set")) {
                          labels = function(v) sprintf("%.0f%%", 100 * v)) +
       scale_fill_manual(values = c(private = "#d73027", control = "grey60")) +
       labs(title = paste0(label, " \u2014 private sequence vs a matched control"),
-           subtitle = paste0("share of bp, not of segments. Control = size-matched, ",
-                             "cross-individual, NON-private windows from the same haplotype"),
+           subtitle = "share of bp; control = matched non-private windows",
            x = NULL, y = "share of bp") +
       theme(legend.position = "none")
     ggsave(op(".private_vs_control.png"), p2, width = 8, height = 6, dpi = 150)
@@ -357,9 +372,7 @@ if (is.null(ev) || !"copy_ratio" %in% names(ev)) {
       scale_y_continuous(labels = function(v) sprintf("%.0f%%", 100 * v)) +
       scale_fill_manual(values = c(private = "#d73027", control = "grey60")) +
       labs(title = paste0(label, " \u2014 k-mer copy number, private vs control"),
-           subtitle = paste0("copy ratio = segment median k-mer multiplicity / this ",
-                             "haplotype's single-copy level. Control peaking at 1.0 is the ",
-                             "calibration check."),
+           subtitle = "copies per haploid genome; 2.0 = normal diploid",
            x = "copy ratio (1.0 = single copy)", y = "share of bp", fill = NULL) +
       theme(legend.position = "top")
     ggsave(op(".copy_ratio.png"), p3, width = 9, height = 6, dpi = 150)
@@ -403,9 +416,7 @@ if (!has_facet(xtab, "flavor")) {
       facet_wrap(~ flavor, ncol = 1, scales = "free_y") +
       scale_y_continuous(labels = gbp) +
       labs(title = paste0(label, " \u2014 private sequence per chromosome, by evidence"),
-           subtitle = paste0("ABSOLUTE bp SUMMED OVER ALL HAPLOTYPES -- divide by the ",
-                             "haplotype count for a per-genome figure. See the composition ",
-                             "figure for private as a fraction of the chromosome."),
+           subtitle = "bp summed over all 10 haplotypes",
            x = NULL, y = "private sequence, summed over haplotypes", fill = NULL) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1),
             legend.position = "right", legend.text = element_text(size = 8))
@@ -451,8 +462,7 @@ if (is.null(tcon)) {
       scale_fill_manual(values = c(core = "#2166ac", `soft-core` = "#67a9cf",
                                    shell = "#fdae61", private = "#d73027")) +
       labs(title = paste0(label, " \u2014 chromosome composition by sharing level"),
-           subtitle = paste0("bar height is the chromosome's graph sequence; private is a ",
-                             "SLICE of it, counted once per node rather than per haplotype"),
+           subtitle = "bar height is the chromosome; each node counted once",
            x = NULL, y = "graph sequence", fill = NULL) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
     ggsave(op(".tier_by_chromosome.png"), p4b, width = 10, height = 5.5, dpi = 150)
@@ -478,7 +488,7 @@ if (is.null(ctg)) {
       geom_boxplot(outlier.size = 0.6, position = position_dodge(width = 0.75)) +
       scale_colour_manual(values = c(clip = "grey40", full = "#2c7fb8")) +
       labs(title = paste0(label, " \u2014 private fraction per chromosome"),
-           subtitle = "one point per haplotype x chromosome piece",
+           subtitle = "one point per haplotype",
            x = NULL, y = "private share of the chromosome (%)", colour = "graph") +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
     ggsave(op(".private_by_chromosome.png"), p5, width = 9, height = 5, dpi = 150)
@@ -505,8 +515,7 @@ if (!has_facet(hap, "flavor")) {
                       labels = c(`FALSE` = "haplotype", `TRUE` = "reference"),
                       guide = if (any(h$is_ref)) "legend" else "none") +
     labs(title = paste0(label, " \u2014 private sequence per haplotype"),
-         subtitle = paste0("The reference is the graph backbone and is never clipped, so ",
-                           "its RANK differs between the two graphs."),
+         subtitle = "the reference is never clipped, so its rank differs by graph",
          x = "private sequence", y = NULL, fill = NULL) +
     theme(legend.position = "top")
   ggsave(op(".private_clip_vs_full.png"), p6, width = 11,
