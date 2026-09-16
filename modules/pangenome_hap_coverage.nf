@@ -53,6 +53,10 @@ process PANGENOME_HAP_COVERAGE {
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_segments.tsv"),         emit: segments,  optional: true
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_segments.bed"),         emit: segments_bed, optional: true
     tuple val(taxid), val(flavor), path("${taxid}.${flavor}.private_segment_spectrum.tsv"), emit: spectrum,  optional: true
+    // The same size spectrum for EVERY sharing tier, not only private. The private spectrum
+    // alone cannot answer "is there a lot of sequence in structural variants" -- that needs
+    // the shared tiers on the same axis to compare against.
+    tuple val(taxid), val(flavor), path("${taxid}.${flavor}.coverage_segment_spectrum.tsv"), emit: tier_spectrum, optional: true
     path("versions.tsv"),                                       emit: versions
 
     script:
@@ -60,6 +64,11 @@ process PANGENOME_HAP_COVERAGE {
     // unfiltered regardless, so raising this bounds row count without hiding sequence --
     // which matters because 33.5M of the 33.7M segments are under 1 kb.
     def minpriv = params.pangenome_private_min_bp ?: 1000
+    // the SAME cuts the report and the partition figure use, so "core" means one thing
+    // everywhere rather than three slightly different things
+    def tcore  = params.pangenome_tier_core     ?: 1.00
+    def tsoft  = params.pangenome_tier_softcore ?: -1
+    def tshell = params.pangenome_tier_shell    ?: 2
     """
     set -euo pipefail
 
@@ -68,6 +77,9 @@ process PANGENOME_HAP_COVERAGE {
         --gfa ${gfa} \\
         --label ${taxid}.${flavor} \\
         --min-private-bp ${minpriv} \\
+        --tier-core ${tcore} \\
+        --tier-softcore ${tsoft} \\
+        --tier-shell ${tshell} \\
         --outdir .
 
     {
@@ -86,6 +98,7 @@ process PANGENOME_HAP_COVERAGE {
     printf 'haplotype\\tcontig\\tseg_index\\tn_nodes\\tseg_bp\\tstart\\tend\\n' > ${taxid}.private_segments.tsv
     : > ${taxid}.private_segments.bed
     printf 'scope\\tsize_bin\\tn_segments\\tsegment_bp\\n' > ${taxid}.private_segment_spectrum.tsv
+    printf 'scope\\ttier\\tsize_bin\\tn_segments\\tsegment_bp\\n' > ${taxid}.coverage_segment_spectrum.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }

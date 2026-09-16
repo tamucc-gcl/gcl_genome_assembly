@@ -173,6 +173,10 @@ def main():
     per_bin = defaultdict(Counter)
     per_hap = defaultdict(Counter)
     bp_combo = Counter()
+    # bp for the broken-out scopes as well, not just ALL
+    bp_chrom = defaultdict(Counter)
+    bp_bin = defaultdict(Counter)
+    bp_hap = defaultdict(Counter)
 
     with open(os.path.join(a.outdir, "%s.private_evidence.tsv" % a.label), "w") as out:
         out.write("# one row per private segment, both evidence streams joined.\n")
@@ -194,9 +198,14 @@ def main():
             combos[(st, comb)] += 1
             bp_combo[(st, comb)] += r.get("segment_bp", 0)
             chrom = str(r.get("contig", ".")).split("_")[0]
+            sb = sbin(r.get("segment_bp", 0))
+            bpv = r.get("segment_bp", 0) or 0
             per_chrom[chrom][(st, comb)] += 1
-            per_bin[sbin(r.get("segment_bp", 0))][(st, comb)] += 1
+            per_bin[sb][(st, comb)] += 1
             per_hap[r["haplotype"]][(st, comb)] += 1
+            bp_chrom[chrom][(st, comb)] += bpv
+            bp_bin[sb][(st, comb)] += bpv
+            bp_hap[r["haplotype"]][(st, comb)] += bpv
             out.write("\t".join(str(r.get(c, ".")) for c in cols) + "\n")
 
     # ---- flat CSV for R --------------------------------------------------------------
@@ -267,14 +276,17 @@ def main():
             out.write("ALL\t.\t%s\t%s\t%d\t%d\n" % (st, c, n, bp_combo[(st, c)]))
         for chrom in sorted(per_chrom):
             for (st, c), n in sorted(per_chrom[chrom].items(), key=lambda x: -x[1]):
-                out.write("CHROM\t%s\t%s\t%s\t%d\t.\n" % (chrom, st, c, n))
+                out.write("CHROM\t%s\t%s\t%s\t%d\t%d\n"
+                          % (chrom, st, c, n, bp_chrom[chrom][(st, c)]))
         for b in sorted(per_bin, key=lambda s: edges.index(
                 int(s.split("-")[0].lstrip(">="))) if s.split("-")[0].lstrip(">=").isdigit() else 99):
             for (st, c), n in sorted(per_bin[b].items(), key=lambda x: -x[1]):
-                out.write("SIZE_BIN\t%s\t%s\t%s\t%d\t.\n" % (b, st, c, n))
+                out.write("SIZE_BIN\t%s\t%s\t%s\t%d\t%d\n"
+                          % (b, st, c, n, bp_bin[b][(st, c)]))
         for h in sorted(per_hap):
             for (st, c), n in sorted(per_hap[h].items(), key=lambda x: -x[1]):
-                out.write("HAPLOTYPE\t%s\t%s\t%s\t%d\t.\n" % (h, st, c, n))
+                out.write("HAPLOTYPE\t%s\t%s\t%s\t%d\t%d\n"
+                          % (h, st, c, n, bp_hap[h][(st, c)]))
 
     with open(os.path.join(a.outdir, "%s.private_evidence_audit.tsv" % a.label), "w") as out:
         out.write("metric\tvalue\n")

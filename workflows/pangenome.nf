@@ -732,6 +732,24 @@ workflow PANGENOME {
                 // channels close, so it emits.
                 def pp_script = file("${projectDir}/r_scripts/pangenome_private_plots.R",
                                      checkIfExists: true)
+                // The two panels of the figure Chris asked for, both CLIP ONLY: the SV
+                // catalog exists only on the clip graph, so a full-arm tier spectrum would
+                // not be comparable to the SV panel above it. PANGENOME_CLASSIFY.out.sv_sizes
+                // is a PROCESS output, so reading it a second time here is broadcast-safe --
+                // unlike ch_sv_sizes, which is a plain .filter{}.map{} channel and is not
+                // touched again.
+                ch_tier_sv = PANGENOME_HAP_COVERAGE.out.tier_spectrum
+                    .filter { taxid, flavor, f -> flavor == 'clip' }
+                    .map    { taxid, flavor, f -> tuple(taxid, f) }
+                    .join( PANGENOME_CLASSIFY.out.sv_sizes
+                               .filter { taxid, flavor, tier, f ->
+                                   flavor == 'clip' && tier == 'parent' }
+                               .map    { taxid, flavor, tier, f -> tuple(taxid, f) },
+                           remainder: true )
+                    .map { taxid, ts, sv ->
+                        tuple(taxid, ts ?: file('NO_TIER_SPECTRUM'),
+                                     sv ?: file('NO_SV_SPECTRUM')) }
+
                 PANGENOME_PRIVATE_PLOTS(
                     PANGENOME_HAP_COVERAGE.out.spectrum
                         .map { taxid, flavor, f -> tuple(taxid, flavor, f) }
@@ -744,6 +762,7 @@ workflow PANGENOME {
                                   csv ?: file('NO_EVIDENCE_CSV'),
                                   xt  ?: file('NO_XTAB')) }
                         .groupTuple( by: 0 ),
+                    ch_tier_sv.first(),
                     ch_reference_ids.first(),
                     pp_script )
                 ch_versions = ch_versions.mix( PANGENOME_PRIVATE_PLOTS.out.versions )

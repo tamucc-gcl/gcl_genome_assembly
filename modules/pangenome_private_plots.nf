@@ -44,6 +44,10 @@ process PANGENOME_PRIVATE_PLOTS {
     input:
     tuple val(taxid), val(flavors), path(spectra), path(hap_privates),
           path(by_contigs), path(evidence_csvs), path(xtabs)
+    // CLIP ONLY, both of these. The SV catalog exists only on the clip graph, so a
+    // full-arm tier spectrum would not be comparable to the SV panel above it -- and the
+    // cactus authors recommend the clip graph for most applications.
+    tuple val(ttaxid), path(tier_spectrum), path(sv_spectrum)
     tuple val(rtaxid), val(ref_id)
     path(script)
 
@@ -83,6 +87,8 @@ process PANGENOME_PRIVATE_PLOTS {
     Rscript ${script} \\
         ${taxid} . \\
         ${opts} \\
+        tier_clip=${tier_spectrum} \\
+        sv_clip=${sv_spectrum} \\
         ref='${ref_id}' \\
         min_bp=${minbp}
 

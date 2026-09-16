@@ -108,7 +108,7 @@ def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropo
     n = len(ordered)
     total = sum(L for _, L in ordered) or 1
     meta = {"method": method, "n_chrom": 0, "cut_ratio": None,
-            "genome_fraction": 0.0, "flags": []}
+            "genome_fraction": 0.0, "flags": [], "note": ""}
 
     def threshold_set():
         return [(nm, L) for nm, L in ordered if L >= min_scaffold_bp]
@@ -149,6 +149,23 @@ def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropo
 
     meta["n_chrom"] = len(cs)
     meta["genome_fraction"] = sum(L for _, L in cs) / total
+
+    # ALREADY A CHROMOSOME SET. If every input sequence was kept and it accounts for the
+    # whole input, the selection had already been made upstream -- which is the normal case
+    # here, because PANGENOME_REF_FASTA emits exactly the chromosomes harmonization chose.
+    # Reporting `threshold_fallback` + `no_sharp_dropoff` in that situation describes the
+    # absence of a cliff in a list that was cut AT the cliff, and sends the next reader
+    # looking for a problem that does not exist.
+    #
+    # The floor is unaffected: on this cohort the pangenome reference is 15 sequences from
+    # 94.7 Mb to 40.7 Mb, and the full assembly is 119 sequences down to 17 kb with a
+    # 40,715,871 -> 25,221 cliff (ratio 1,614). Both routes give 40,715,871.
+    if len(cs) == len(ordered) and meta["genome_fraction"] >= 0.9999:
+        meta["method"] = "pre_selected"
+        meta["flags"] = [f for f in meta["flags"] if f != "no_sharp_dropoff"]
+        meta["note"] = ("input .fai is already a chromosome set (%d of %d sequences kept, "
+                        "genome fraction %.4f) -- the floor is the smallest member"
+                        % (len(cs), len(ordered), meta["genome_fraction"]))
     return cs, meta
 
 
@@ -212,6 +229,8 @@ def main():
     sys.stderr.write("[input_coverage] chromosome set: %d members by %s, floor %d bp, "
                      "genome fraction %.3f\n"
                      % (meta["n_chrom"], meta["method"], floor_bp, meta["genome_fraction"]))
+    if meta.get("note"):
+        sys.stderr.write("[input_coverage]   %s\n" % meta["note"])
 
     # ---- coverage: bp of each haplotype in each chromosome's graph -------------------
     rows = []
@@ -372,8 +391,12 @@ def main():
         out.write("chromosome_set_n\t%d\n" % meta["n_chrom"])
         out.write("chromosome_scale_floor_bp\t%d\n" % floor_bp)
         out.write("chromosome_set_genome_fraction\t%.4f\n" % meta["genome_fraction"])
-        if meta["cut_ratio"] is not None:
+        # cut_ratio is meaningless once the set was pre-selected: it describes the
+        # sharpest boundary WITHIN a list that is entirely chromosomes.
+        if meta["cut_ratio"] is not None and meta["method"] != "pre_selected":
             out.write("chromosome_set_cut_ratio\t%.3f\n" % meta["cut_ratio"])
+        if meta.get("note"):
+            out.write("chromosome_set_note\t%s\n" % meta["note"])
         for f in meta["flags"]:
             out.write("chromosome_set_flag\t%s\n" % f)
         out.write("low_frac_threshold\t%.3f\n" % a.low_frac)

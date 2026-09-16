@@ -276,8 +276,36 @@ def by_contig(gfa, cov, nlen, groups):
 # and the result would be silently wrong rather than an error. This script runs WHOLE-GRAPH
 # per flavour for that reason, and also because 139 composite scaffolds span more than one
 # chromosome subgraph, which would fragment private runs at subgraph boundaries.
-def private_segments(gfa, cov, nlen, groups):
-    """Maximal runs of consecutive private (cov == 1) nodes along each haplotype walk.
+def tier_of(c, n_hap, core, softcore, shell):
+    """Coverage count -> sharing tier, using the same cuts the report uses.
+
+    core      >= core * n_hap            (default 1.00, i.e. all haplotypes)
+    soft-core >= softcore * n_hap        (default -1 = disabled, folded into core)
+    shell     >= shell                   (default 2)
+    private   == 1
+    """
+    if c <= 1:
+        return "private"
+    if core > 0 and c >= core * n_hap:
+        return "core"
+    if softcore > 0 and c >= softcore * n_hap:
+        return "soft-core"
+    if c >= shell:
+        return "shell"
+    return "private"
+
+
+def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
+    """Maximal runs of consecutive private (cov == 1) nodes along each haplotype walk,
+    and -- when tier_cuts is given -- maximal runs in EVERY sharing tier alongside them.
+
+    The tier runs ride along in the SAME walk rather than in a second pass: the walk is the
+    expensive part (805M steps on this graph) and duplicating it to compute a second run
+    length would double the cost for no reason. They are also TIER runs, not exact-coverage
+    runs -- a run broken wherever the coverage count changes at all would chop core sequence
+    apart at every node dipping from 10 haplotypes to 9, making every tier look fragmented
+    for an artifactual reason. Breaking only when the TIER changes gives blocks that answer
+    "how long are the shared stretches versus the private ones".
 
     Modelled on by_contig, which is the verified template for iterating P/W step lists, but
     it accumulates a POSITION along the walk instead of a bp total, so runs can be emitted
@@ -303,6 +331,8 @@ def private_segments(gfa, cov, nlen, groups):
     nlen_a.frombytes(nlen.astype(np.int64).tobytes())
 
     segs = []
+    tier_spec = {}          # (haplotype, tier, size_bin) -> [n_segments, bp]
+    core_c, soft_c, shell_c = (tier_cuts or (0.0, 0.0, 0))
     known = set(groups)
     top = len(cov_l) - 1
     # Marker array, not a per-haplotype reset: store WHICH haplotype last walked each
@@ -355,6 +385,7 @@ def private_segments(gfa, cov, nlen, groups):
             run_bp = run_n = 0
             run_start = base
             idx = 0
+            t_tier, t_bp = None, 0
             for i in map(int, fld.translate(tr).split()):
                 if not (0 <= i <= top):
                     n_oor += 1
@@ -364,6 +395,27 @@ def private_segments(gfa, cov, nlen, groups):
                         run_bp = run_n = 0
                     continue
                 L = nlen_a[i]
+                if tier_cuts is not None:
+                    c = cov_l[i]
+                    if c <= 1:
+                        tr_now = "private"
+                    elif core_c > 0 and c >= core_c * n_hap:
+                        tr_now = "core"
+                    elif soft_c > 0 and c >= soft_c * n_hap:
+                        tr_now = "soft-core"
+                    elif c >= shell_c:
+                        tr_now = "shell"
+                    else:
+                        tr_now = "private"
+                    if tr_now == t_tier:
+                        t_bp += L
+                    else:
+                        if t_tier is not None and t_bp > 0:
+                            k2 = (hs, t_tier, seg_bin(t_bp))
+                            e = tier_spec.setdefault(k2, [0, 0])
+                            e[0] += 1
+                            e[1] += t_bp
+                        t_tier, t_bp = tr_now, L
                 if cov_l[i] == 1:
                     if seen_hap[i] == h:
                         repeat_bp += L
@@ -380,7 +432,12 @@ def private_segments(gfa, cov, nlen, groups):
                 pos += L
             if run_n:
                 segs.append((hs, cs, idx, run_n, run_bp, run_start, run_start + run_bp))
-    return segs, repeat_bp, n_oor
+            if tier_cuts is not None and t_tier is not None and t_bp > 0:
+                k2 = (hs, t_tier, seg_bin(t_bp))
+                e = tier_spec.setdefault(k2, [0, 0])
+                e[0] += 1
+                e[1] += t_bp
+    return segs, repeat_bp, n_oor, tier_spec
 
 
 SEG_BINS = [0, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, float("inf")]
@@ -403,6 +460,10 @@ def main():
                     help="omit contigs below this private bp from the per-contig table (default 0 = all)")
     ap.add_argument("--min-node-len", type=int, default=0,
                     help="ignore nodes shorter than this (default 0 = keep all)")
+    # same defaults as nextflow.config's pangenome_tier_* so "core" means one thing
+    ap.add_argument("--tier-core", type=float, default=1.00)
+    ap.add_argument("--tier-softcore", type=float, default=-1.0)
+    ap.add_argument("--tier-shell", type=int, default=2)
     ap.add_argument("--min-private-bp", type=int, default=1000,
                     help="size floor for the private-segment TABLE and BED (default 1000). "
                          "The spectrum and totals are reported unfiltered as well, so the "
@@ -500,7 +561,11 @@ def main():
 
     # 5. private segments: the size spectrum, and coordinates for everything downstream --
     if not a.no_private_segments:
-        segs, repeat_bp, n_oor = private_segments(a.gfa, cov, nlen, groups)
+        # tier cuts come from the same params the report and the partition figure use, so
+        # "core" means the same thing in all three places
+        tier_cuts = (a.tier_core, a.tier_softcore, a.tier_shell)
+        segs, repeat_bp, n_oor, tier_spec = private_segments(
+            a.gfa, cov, nlen, groups, n_hap=len(groups), tier_cuts=tier_cuts)
         if n_oor:
             sys.stderr.write("WARNING: %d out-of-range node ids in step lists; each broke a "
                              "private run\n" % n_oor)
@@ -557,6 +622,39 @@ def main():
                 out.write("ALL\t%s\t%d\t%d\n" % (b, spec_n[b], spec_bp[b]))
             for (hs, b), n in sorted(per_hap_n.items()):
                 out.write("%s\t%s\t%d\t%d\n" % (hs, b, n, per_hap_bp[(hs, b)]))
+
+        # ---- the same spectrum for EVERY sharing tier --------------------------------
+        # The private spectrum on its own cannot answer "is there a lot of sequence in
+        # structural variants" -- that needs the shared tiers on the same axis for
+        # comparison. Tier runs, so a block is broken only where its SHARING changes.
+        with open(op(".coverage_segment_spectrum.tsv"), "w") as out:
+            out.write("# Segment size spectrum per SHARING TIER, same bin edges as the SV\n")
+            out.write("#   and private spectra. A segment is a maximal run of consecutive\n")
+            out.write("#   nodes in the SAME tier along one haplotype's walk -- broken where\n")
+            out.write("#   the tier changes, NOT where the coverage count changes, so core\n")
+            out.write("#   sequence is not chopped apart at every node dipping 10 -> 9.\n")
+            out.write("# tier cuts: core >= %.2f x n_hap, soft-core >= %.2f x n_hap,\n"
+                      % (a.tier_core, a.tier_softcore))
+            out.write("#   shell >= %d, private == 1. Same params as the report.\n"
+                      % a.tier_shell)
+            out.write("scope\ttier\tsize_bin\tn_segments\tsegment_bp\n")
+            agg_n, agg_bp = {}, {}
+            for (hs, tr, b), (n, bp) in tier_spec.items():
+                agg_n[(tr, b)] = agg_n.get((tr, b), 0) + n
+                agg_bp[(tr, b)] = agg_bp.get((tr, b), 0) + bp
+            def bkey(x):
+                s = x.split("-")[0].lstrip(">=")
+                return SEG_BINS.index(int(s)) if s.isdigit() else 99
+            for (tr, b) in sorted(agg_n, key=lambda k: (k[0], bkey(k[1]))):
+                out.write("ALL\t%s\t%s\t%d\t%d\n" % (tr, b, agg_n[(tr, b)], agg_bp[(tr, b)]))
+            for (hs, tr, b) in sorted(tier_spec, key=lambda k: (k[0], k[1], bkey(k[2]))):
+                n, bp = tier_spec[(hs, tr, b)]
+                out.write("%s\t%s\t%s\t%d\t%d\n" % (hs, tr, b, n, bp))
+        tb = {}
+        for (tr, b), bp in agg_bp.items():
+            tb[tr] = tb.get(tr, 0) + bp
+        sys.stderr.write("[gfa_hap_coverage] tier segment bp: %s\n"
+                         % ", ".join("%s=%d" % (k, v) for k, v in sorted(tb.items())))
 
         sys.stderr.write("[gfa_hap_coverage] private segments: %d all (%d bp), "
                          "%d >=%dbp (%d bp)\n"

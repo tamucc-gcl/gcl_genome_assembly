@@ -3,47 +3,40 @@
 # pangenome_private_plots.R
 # Repo location: r_scripts/pangenome_private_plots.R
 #
-# The private-sequence figure set. Takes BOTH graph flavours in one invocation, because the
-# single most important thing these figures have to convey is that the two arms disagree:
-# clipping removes 704,499,041 bp of which 698,360,436 -- 99.1% -- is private sequence, so the
-# clip arm understates private content by 46% AND inverts the reference's apparent rank
-# (highest of ten haplotypes on clip at 15.08%, lowest of ten on full at 8.08%, because the
-# reference is the graph backbone and is never clipped). A figure drawn from one arm alone
-# cannot show that.
+# The private-sequence figure set, answering Chris Bird's requests (2026-08-26, 2026-09):
+#
+#   "for the SV histogram, it would be interesting to make an alternative version with
+#    coarse bins on the x axis and the y axis representing number of bp in SV, rather than
+#    number of SV"
+#   "a similar plot for private haplotypes would also be informative"
+#   "It might be a good idea to independently map the private haplotypes against the other
+#    assemblies"
+#   "The private haplotypes could also be driven by transposons"
+#
+# EVERYTHING IS bp-WEIGHTED. That is the whole point of the request, and it matters: 98.9%
+# of private segments are under 100 bp and carry 4% of the private sequence, so a
+# count-weighted figure is a spike at the left edge that answers a different question.
 #
 # Usage:
 #   Rscript pangenome_private_plots.R <label> <outdir> \
-#       spectrum_clip=<tsv> spectrum_full=<tsv> \
-#       hap_clip=<tsv>      hap_full=<tsv> \
-#       contig_clip=<tsv>   contig_full=<tsv> \
-#       evidence_clip=<csv> evidence_full=<csv> \
-#       xtab_clip=<tsv>     xtab_full=<tsv> \
-#       [ref=<sample#hap>] [bins=<csv of edges>] [min_bp=1000]
+#       spectrum_clip= spectrum_full= tier_clip= sv_clip= \
+#       hap_clip= hap_full= contig_clip= contig_full= \
+#       evidence_clip= evidence_full= xtab_clip= xtab_full= \
+#       [ref=] [bins=] [min_bp=1000]
 #
-# Every input is optional and signalled missing the same way as pangenome_plots.R -- a NONE /
-# NO_* basename, an absent file, or a zero-byte file. A figure whose inputs are missing is
-# skipped with a message rather than failing the task.
+# Every input is optional: a missing table skips its figure with a recorded reason rather
+# than failing the task.
 #
-# INPUT SCHEMAS (verified against real output, not assumed)
-#   private_segment_spectrum.tsv  scope  size_bin  n_segments  segment_bp
-#                                 scope is ALL or a haplotype key
-#   hap_private.tsv               haplotype  sample  hap  private_bp  hap_bp
-#                                 pct_of_private  pct_of_haplotype
-#   hap_private_by_contig.tsv     haplotype  contig  private_bp  contig_graph_bp
-#                                 pct_of_contig  pct_of_hap_private  pct_of_pangenome_private
-#   private_evidence.csv          27 columns; see PANGENOME_PRIVATE_JOIN
-#   private_evidence_xtab.tsv     scope  key  set  combined  n_segments  segment_bp
-#
-# Outputs (in outdir):
-#   <label>.private_spectrum_bp.png            <label>.private_spectrum_count.png
-#   <label>.private_by_chromosome.png          <label>.private_clip_vs_full.png
-#   <label>.private_vs_control.png             <label>.private_evidence_xtab.png
-#   <label>.private_by_haplotype.png           <label>.private_fraction_by_haplotype.png
-#   <label>.private_figures_audit.tsv
-#
-# The last two MOVED here from pangenome_plots.R, which is pinned to the clip arm by its join
-# with PANGENOME_GROWTH -- so they were being drawn from the arm that understates private
-# sequence by 46% and inverts the reference's rank, which is what one of them is about.
+# INPUT SCHEMAS, verified against real output
+#   private_segment_spectrum.tsv    scope size_bin n_segments segment_bp
+#   coverage_segment_spectrum.tsv   scope tier size_bin n_segments segment_bp
+#   size_spectrum.tsv               primary_class size_bin n_alleles per_allele_bp
+#   hap_private.tsv                 haplotype sample hap private_bp hap_bp
+#                                   pct_of_private pct_of_haplotype
+#   hap_private_by_contig.tsv       haplotype contig private_bp contig_graph_bp
+#                                   pct_of_contig pct_of_hap_private pct_of_pangenome_private
+#   private_evidence.csv            27 columns; see PANGENOME_PRIVATE_JOIN
+#   private_evidence_xtab.tsv       scope key set combined n_segments segment_bp
 # ======================================================================================
 
 suppressPackageStartupMessages({
@@ -61,37 +54,17 @@ kv <- list()
 for (a in args[-(1:2)]) if (grepl("=", a, fixed = TRUE))
   kv[[sub("=.*$", "", a)]] <- sub("^[^=]*=", "", a)
 optc <- function(k, d = "NONE") if (!is.null(kv[[k]]) && nzchar(kv[[k]])) kv[[k]] else d
-optn <- function(k, d) { v <- suppressWarnings(as.numeric(optc(k, NA))); if (length(v) == 1 && is.finite(v)) v else d }
+optn <- function(k, d) { v <- suppressWarnings(as.numeric(optc(k, NA)))
+                         if (length(v) == 1 && is.finite(v)) v else d }
 
-# NO_* / NONE are how the pipeline signals "this sub-analysis did not run"
 is_missing <- function(x) is.null(x) || is.na(x) || !nzchar(x) ||
   grepl("^(NONE|NO_)", basename(x)) || !file.exists(x) || file.size(x) == 0
 
-# read.delim does NOT guarantee numeric types: with check.names = FALSE, one stray
-# non-numeric token turns a whole column character, and arithmetic then fails at plot time.
-# PANGENOME_REARRANGE_PLOTS died exactly this way ("'x' must be numeric" from cut()), so
-# coerce explicitly on read rather than trusting the type.
-num_cols <- function(d, cols) {
-  for (cc in intersect(cols, names(d))) d[[cc]] <- suppressWarnings(as.numeric(d[[cc]]))
-  d
-}
-
-# COMMENTS ARE STRIPPED BY HAND, NOT VIA comment.char.
-# `#` is a legitimate character inside PanSN haplotype names -- Sde-CBau_104#1 -- so
-# comment.char = "#" truncates every key at the separator and shifts every subsequent column
-# left. That is what made the per-chromosome figure report "no chr* contigs" from a file with
-# 602 of them. Read the lines, drop the ones that START with #, and parse what is left.
-read_nohash <- function(f, sep = "\t", header = TRUE) {
-  # Comment lines are ALWAYS at the top of these files (every writer emits them before the
-  # header), so COUNT them and use `skip=`, rather than pulling the file into memory as a
-  # string. The readLines + paste(collapse) version walked the whole file and built one giant
-  # character vector, which took PANGENOME_PRIVATE_PLOTS past its walltime (exit 140) on the
-  # 485k-row evidence CSV.
-  #
-  # comment.char is deliberately "" -- `#` is a legitimate character inside PanSN haplotype
-  # names (Sde-CBau_104#1), and comment.char = "#" truncates every key at the separator and
-  # shifts every subsequent column left. That is what made the per-chromosome figure report
-  # "no chr* contigs" from a file containing 602 of them.
+# Comment lines are counted and skipped, NOT handled with comment.char. '#' is a legitimate
+# character inside a PanSN haplotype name (Sde-CBau_104#1), and comment.char = "#" truncates
+# every key at the separator and shifts every subsequent column left -- which made a
+# per-chromosome figure report "no chr* contigs" from a file holding 602 of them.
+read_nohash <- function(f, sep = "\t") {
   n_skip <- 0L
   con <- file(f, "r")
   repeat {
@@ -101,58 +74,55 @@ read_nohash <- function(f, sep = "\t", header = TRUE) {
     n_skip <- n_skip + 1L
   }
   close(con)
-  d <- try(read.delim(f, sep = sep, header = header, skip = n_skip,
+  d <- try(read.delim(f, sep = sep, header = TRUE, skip = n_skip,
                       stringsAsFactors = FALSE, check.names = FALSE,
                       comment.char = "", quote = ""), silent = TRUE)
   if (inherits(d, "try-error") || is.null(d) || !nrow(d)) return(NULL)
   d
 }
 
+# read.delim does not guarantee numeric types: one stray token turns a column character and
+# the failure surfaces at plot time, not read time.
+num_cols <- function(d, cols) {
+  for (cc in intersect(cols, names(d))) d[[cc]] <- suppressWarnings(as.numeric(d[[cc]]))
+  d
+}
 rd <- function(f, sep = "\t", numeric_cols = character(0)) {
   if (is_missing(f)) return(NULL)
-  d <- read_nohash(f, sep = sep, header = TRUE)
+  d <- read_nohash(f, sep = sep)
   if (is.null(d)) return(NULL)
   if (length(numeric_cols)) d <- num_cols(d, numeric_cols)
   d
 }
 
-# The workflow passes the reference as a bare assembly id (Sde-CMat_203_hap2) while the
-# tables key on the PanSN haplotype (Sde-CMat_203_hap2#0), so an equality test never matched:
-# every is_ref came back FALSE, scale_fill_manual found no shared levels, and the reference
-# was never highlighted. Match on the part before the first '#'.
 ref_hap <- optc("ref", "NONE")
+min_bp  <- optn("min_bp", 1000)
 same_hap <- function(key, ref) {
   if (is.null(ref) || ref == "NONE") return(rep(FALSE, length(key)))
   sub("#.*$", "", as.character(key)) == sub("#.*$", "", ref) | as.character(key) == ref
 }
-min_bp  <- optn("min_bp", 1000)
-mb  <- function(x) paste0(formatC(x / 1e6, format = "f", digits = 0, big.mark = ","), " Mb")
-gbp <- function(x) ifelse(x >= 1e9,
-                          paste0(formatC(x / 1e9, format = "f", digits = 2), " Gb"),
-                          paste0(formatC(x / 1e6, format = "f", digits = 0), " Mb"))
 
-# facet_wrap on a variable with no values aborts with "Faceting variables must have at least
-# one value" from inside ggsave, which is a stack trace rather than a diagnosis. Guard every
-# faceted plot on the variable actually having values.
-has_facet <- function(d, col) {
-  !is.null(d) && nrow(d) > 0 && col %in% names(d) &&
-    length(unique(stats::na.omit(d[[col]]))) > 0
-}
+gbp <- function(x) ifelse(is.na(x), "NA",
+                   ifelse(x >= 1e9, sprintf("%.2f Gb", x / 1e9),
+                   ifelse(x >= 1e6, sprintf("%.0f Mb", x / 1e6),
+                          sprintf("%.0f kb", x / 1e3))))
+mb <- function(x) sprintf("%.1f Mb", x / 1e6)
 
 audit <- list()
 note  <- function(k, v) audit[[k]] <<- as.character(v)
 skip  <- function(fig, why) { message(sprintf("[private_plots] SKIP %s -- %s", fig, why))
                               note(paste0("skipped_", fig), why) }
+has_facet <- function(d, col) !is.null(d) && nrow(d) > 0 && col %in% names(d) &&
+  length(unique(stats::na.omit(d[[col]]))) > 0
 
-# size_bin arrives as a string like "1000-5000" or ">=1000000"; order it numerically by its
-# lower edge rather than alphabetically, or 100-500 sorts before 0-100.
+# size_bin is a string like "1000-5000" or ">=1000000"; order by its lower edge or 100-500
+# sorts before 0-100
 bin_order <- function(x) {
   lo <- suppressWarnings(as.numeric(sub("^>=", "", sub("-.*$", "", x))))
   factor(x, levels = unique(x[order(lo)]))
 }
 
-# ---- both flavours, long ------------------------------------------------------------
-bind_flavours <- function(clip_f, full_f, reader = rd) {
+bind_flavours <- function(clip_f, full_f, reader) {
   parts <- list()
   for (fl in c("clip", "full")) {
     d <- reader(if (fl == "clip") clip_f else full_f)
@@ -163,334 +133,329 @@ bind_flavours <- function(clip_f, full_f, reader = rd) {
 }
 
 spec <- bind_flavours(optc("spectrum_clip"), optc("spectrum_full"),
-        reader = function(f) rd(f, numeric_cols = c("n_segments", "segment_bp")))
+        function(f) rd(f, numeric_cols = c("n_segments", "segment_bp")))
 hap  <- bind_flavours(optc("hap_clip"), optc("hap_full"),
-        reader = function(f) rd(f, numeric_cols = c("private_bp", "hap_bp",
+        function(f) rd(f, numeric_cols = c("private_bp", "hap_bp",
                                 "pct_of_private", "pct_of_haplotype")))
 ctg  <- bind_flavours(optc("contig_clip"), optc("contig_full"),
-        reader = function(f) rd(f, numeric_cols = c("private_bp", "contig_graph_bp",
-                                "pct_of_contig", "pct_of_hap_private",
-                                "pct_of_pangenome_private")))
+        function(f) rd(f, numeric_cols = c("private_bp", "contig_graph_bp",
+                                "pct_of_contig")))
 xtab <- bind_flavours(optc("xtab_clip"), optc("xtab_full"),
-        reader = function(f) rd(f, numeric_cols = c("n_segments", "segment_bp")))
+        function(f) rd(f, numeric_cols = c("n_segments", "segment_bp")))
 ev   <- bind_flavours(optc("evidence_clip"), optc("evidence_full"),
-        reader = function(f) rd(f, sep = ",",
-                               numeric_cols = c("span_bp", "is_private", "repeat_like",
-                                                "median_copy", "copy_ratio",
-                                                "aligned_frac_merged",
-                                                "n_other_assemblies")))
-
-note("flavours_spectrum", if (is.null(spec)) 0 else length(unique(spec$flavor)))
-note("flavours_evidence", if (is.null(ev))   0 else length(unique(ev$flavor)))
+        function(f) rd(f, sep = ",",
+                       numeric_cols = c("span_bp", "is_private", "repeat_like",
+                                        "median_copy", "copy_ratio",
+                                        "aligned_frac_merged", "n_other_assemblies")))
+tier <- rd(optc("tier_clip"), numeric_cols = c("n_segments", "segment_bp"))
+svsp <- rd(optc("sv_clip"),   numeric_cols = c("n_alleles", "per_allele_bp"))
 
 # ======================================================================================
-# 1-2. The private-segment size spectrum, bp-weighted AND by count
+# FIGURE 1 (was 2). Where the sequence is, by segment size AND by how shared it is.
 #
-# THE bp-WEIGHTED ONE IS THE DELIVERABLE. 99.0% of private segments are under 100 bp and
-# carry 7% of the sequence, while the 1-50 kb range holds 601 Mb -- 74% of all private
-# sequence -- in 0.5% of segments. A count histogram is a single spike at the left edge and
-# says nothing. Both are drawn so that point is explicit rather than implied.
+# THIS IS THE DIRECT ANSWER to "can we make a private haplotype size histogram? I'd expect
+# it to be similar to the SV". Two panels on one x axis:
 #
-# Bin edges are pangenome_sv_bins, SHARED with the SV size spectrum, which is what makes
-# "is the private-haplotype spectrum shaped like the SV spectrum?" readable off one axis.
+#   top     SV bp per size bin, black -- the histogram that already existed, re-weighted
+#           from count to bp as asked
+#   bottom  graph bp per size bin, split by SHARING TIER (core / soft-core / shell /
+#           private), so the private distribution can be read against the shared ones
+#
+# CLIP ONLY, deliberately. The SV catalog exists only on the clip graph, so a full-arm
+# bottom panel would not be comparable to the top one -- and the cactus authors recommend
+# the clip graph for most applications. The full arm's extra private sequence is also
+# inflated by an artifact: a 111 Mb scaffold in Sde-CTlk_104_hap1 fuses chr5 and chr9, and
+# cactus assigns each contig to ONE chromosome, so ~73 Mb of unaligned chr9 sits in chr5's
+# subgraph at coverage 1. Clipping removes exactly that class of sequence.
 # ======================================================================================
-if (is.null(spec)) {
-  skip("private_spectrum", "no private_segment_spectrum.tsv for either flavour")
+if (is.null(tier)) {
+  skip("size_by_sharing", "no coverage_segment_spectrum.tsv for the clip graph")
 } else {
-  s <- spec[spec$scope == "ALL", ]
-  if (!nrow(s)) {
-    skip("private_spectrum", "no ALL-scope rows")
+  tt <- tier[tier$scope == "ALL" & is.finite(tier$segment_bp), , drop = FALSE]
+  if (!nrow(tt)) {
+    skip("size_by_sharing", "no ALL-scope rows in the tier spectrum")
   } else {
-    s <- s[is.finite(s$segment_bp) & is.finite(s$n_segments), , drop = FALSE]
-    # scale_y_log10 silently drops n_segments <= 0; do it explicitly and record the count
-    note("spectrum_bins_zero_count", sum(s$n_segments <= 0))
-    s$size_bin <- bin_order(s$size_bin)
-    note("spectrum_total_bp_clip", sum(s$segment_bp[s$flavor == "clip"]))
-    note("spectrum_total_bp_full", sum(s$segment_bp[s$flavor == "full"]))
+    lv <- c("core", "soft-core", "shell", "private")
+    tt$tier <- factor(tt$tier, levels = lv[lv %in% unique(tt$tier)])
+    allb <- unique(c(as.character(tt$size_bin),
+                     if (!is.null(svsp)) as.character(svsp$size_bin) else character(0)))
+    ord <- levels(bin_order(allb))
+    tt$size_bin <- factor(as.character(tt$size_bin), levels = ord)
 
-    p1 <- ggplot(s, aes(size_bin, segment_bp, fill = flavor)) +
-      geom_col(position = position_dodge(preserve = "single")) +
-      scale_y_continuous(labels = function(v) gbp(v)) +
-      scale_fill_manual(values = c(clip = "grey55", full = "#2c7fb8")) +
-      labs(title = paste0(label, " — private sequence by segment size (bp-weighted)"),
-           subtitle = paste0("clipping removes 99.1% private sequence, so the clip arm ",
-                             "understates by ~46%; floor ", min_bp, " bp for downstream sets"),
-           x = "segment size (bp)", y = "private sequence", fill = "graph") +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1),
-            legend.position = "top")
-    ggsave(op(".private_spectrum_bp.png"), p1, width = 9, height = 5, dpi = 150)
+    for (l in levels(tt$tier))
+      note(paste0("tier_bp.", l), sum(tt$segment_bp[tt$tier == l], na.rm = TRUE))
 
-    p2 <- ggplot(s, aes(size_bin, n_segments, fill = flavor)) +
-      geom_col(position = position_dodge(preserve = "single")) +
-      scale_y_log10(labels = function(v) formatC(v, format = "d", big.mark = ",")) +
-      scale_fill_manual(values = c(clip = "grey55", full = "#2c7fb8")) +
-      labs(title = paste0(label, " — private segments by size (COUNT, log scale)"),
-           subtitle = paste0("shown for contrast: 99.0% of segments are <100 bp and carry ",
-                             "7% of the sequence. Counts answer a different question."),
-           x = "segment size (bp)", y = "segments (log)", fill = "graph") +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1),
-            legend.position = "top")
-    ggsave(op(".private_spectrum_count.png"), p2, width = 9, height = 5, dpi = 150)
-  }
-}
-
-# ======================================================================================
-# 3. Private fraction per chromosome
-#
-# The live question: chr8 and chr9 carry an elevated private fraction against a floor across
-# the other chromosomes, consistently across all ten haplotypes and both flavours. Plotting
-# pct_of_contig (private bp / contig graph bp) rather than raw bp is what makes it a fraction
-# question rather than a chromosome-length question.
-# ======================================================================================
-if (is.null(ctg)) {
-  skip("private_by_chromosome", "no hap_private_by_contig.tsv for either flavour")
-} else {
-  c2 <- ctg
-  # placed chromosomes only: unplaced scaffolds are individually tiny and would swamp the
-  # axis with hundreds of categories
-  c2 <- c2[grepl("^chr", c2$contig) & is.finite(c2$pct_of_contig), ]
-  if (!nrow(c2)) {
-    skip("private_by_chromosome", "no chr* contigs")
-  } else {
-    # chr10_1 / chr10_17+chr11_12 -> chr10, so pieces of one chromosome pool
-    c2$chrom <- sub("_.*$", "", c2$contig)
-    ord <- unique(c2$chrom)
-    num <- suppressWarnings(as.numeric(sub("^chr", "", ord)))
-    c2$chrom <- factor(c2$chrom, levels = ord[order(num, ord)])
-
-    p3 <- ggplot(c2, aes(chrom, pct_of_contig, colour = flavor)) +
-      geom_boxplot(outlier.size = 0.6, position = position_dodge(width = 0.75)) +
-      scale_colour_manual(values = c(clip = "grey40", full = "#2c7fb8")) +
-      labs(title = paste0(label, " — private fraction per chromosome"),
-           subtitle = "one point per haplotype x chromosome piece; private bp / contig graph bp",
-           x = NULL, y = "private fraction of contig (%)", colour = "graph") +
+    p_bot <- ggplot(tt, aes(size_bin, segment_bp, fill = tier)) +
+      geom_col() +
+      scale_y_continuous(labels = gbp) +
+      scale_x_discrete(limits = ord, drop = FALSE) +
+      scale_fill_manual(values = c(core = "#2166ac", `soft-core` = "#67a9cf",
+                                   shell = "#fdae61", private = "#d73027")) +
+      labs(x = "segment size (bp)", y = "graph sequence", fill = NULL,
+           subtitle = paste0("graph bp by segment size and how many haplotypes share it; ",
+                             "a segment is a run of sequence at the same sharing level")) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
-    ggsave(op(".private_by_chromosome.png"), p3, width = 9, height = 5, dpi = 150)
 
-    agg <- aggregate(pct_of_contig ~ chrom + flavor, data = c2, FUN = median)
-    note("chrom_median_spread_full",
-         sprintf("%.2f-%.2f", min(agg$pct_of_contig[agg$flavor == "full"]),
-                 max(agg$pct_of_contig[agg$flavor == "full"])))
-  }
-}
+    if (is.null(svsp)) {
+      skip("size_by_sharing_sv_panel", "no SV size_spectrum.tsv; bottom panel only")
+      ggsave(op(".size_by_sharing.png"), p_bot +
+               labs(title = paste0(label, " \u2014 where the sequence is")),
+             width = 9, height = 5.5, dpi = 150)
+    } else {
+      # SV classes only. SNP and INDEL would dominate the count but are not what
+      # "sequence in structural variants" means.
+      sv <- svsp[svsp$primary_class %in%
+                   c("INS", "DEL", "SUBST", "DUP", "INV_DUP", "INV_PATH_EXPLICIT") &
+                 is.finite(svsp$per_allele_bp), , drop = FALSE]
+      agg <- aggregate(per_allele_bp ~ size_bin, data = sv, FUN = sum)
+      agg$size_bin <- factor(as.character(agg$size_bin), levels = ord)
+      note("sv_bp_total", sum(agg$per_allele_bp))
 
-# ======================================================================================
-# 4. Clip vs full, per haplotype -- the figure that shows the arms disagree
-#
-# Two panels: absolute private bp, and share of the cohort's private sequence. The second is
-# where the reference rank inversion appears, and it is the reason the reference is
-# highlighted when `ref=` is supplied.
-# ======================================================================================
-if (!has_facet(hap, "flavor") || length(unique(hap$flavor)) < 2) {
-  skip("private_clip_vs_full",
-       if (is.null(hap)) "no hap_private.tsv" else "fewer than two flavours with rows")
-} else {
-  h <- hap
-  h$is_ref <- same_hap(h$haplotype, ref_hap)
-  # order by full-arm private bp so the panels share a haplotype order
-  h <- h[is.finite(h$private_bp), , drop = FALSE]
-  o <- if ("full" %in% h$flavor) h[h$flavor == "full", ] else h
-  h$haplotype <- factor(h$haplotype, levels = o$haplotype[order(o$private_bp)])
+      p_top <- ggplot(agg, aes(size_bin, per_allele_bp)) +
+        geom_col(fill = "grey15") +
+        scale_y_continuous(labels = gbp) +
+        scale_x_discrete(limits = ord, drop = FALSE) +
+        labs(title = paste0(label, " \u2014 where the sequence is, by size"),
+             subtitle = paste0("top: bp in structural variants. bottom: graph bp by how ",
+                               "many haplotypes share it. Clip graph, same bins."),
+             x = NULL, y = "bp in SVs") +
+        theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 
-  p4 <- ggplot(h, aes(private_bp, haplotype, fill = flavor)) +
-    geom_col(position = position_dodge(preserve = "single")) +
-    geom_point(data = h[h$is_ref, ], aes(x = private_bp, y = haplotype),
-               shape = 8, size = 2, colour = "firebrick", inherit.aes = FALSE) +
-    scale_x_continuous(labels = function(v) gbp(v)) +
-    scale_fill_manual(values = c(clip = "grey55", full = "#2c7fb8")) +
-    labs(title = paste0(label, " — private sequence per haplotype, clip vs full"),
-         subtitle = paste0("star = reference. Clipping never touches the reference path, ",
-                           "which is why its RANK differs between arms."),
-         x = "private sequence", y = NULL, fill = "graph") +
-    theme(legend.position = "top")
-  ggsave(op(".private_clip_vs_full.png"), p4, width = 9,
-         height = max(4, 0.42 * length(unique(h$haplotype)) + 2.2), dpi = 150)
-
-  for (fl in c("clip", "full")) {
-    hh <- h[h$flavor == fl, ]
-    if (nrow(hh) && ref_hap != "NONE" && any(same_hap(hh$haplotype, ref_hap))) {
-      r <- rank(-hh$pct_of_private)[same_hap(hh$haplotype, ref_hap)]
-      note(paste0("reference_rank_", fl), sprintf("%d of %d", r, nrow(hh)))
+      # stacked without a layout dependency: write both panels and a combined image via
+      # gridExtra only if it is available, else two files
+      okg <- requireNamespace("gridExtra", quietly = TRUE)
+      if (okg) {
+        g <- gridExtra::arrangeGrob(p_top, p_bot, ncol = 1, heights = c(1, 1.6))
+        ggsave(op(".size_by_sharing.png"), g, width = 9, height = 8.5, dpi = 150)
+      } else {
+        note("gridExtra", "absent -- panels written separately")
+        ggsave(op(".size_by_sharing_sv.png"), p_top, width = 9, height = 4, dpi = 150)
+        ggsave(op(".size_by_sharing.png"),
+               p_bot + labs(title = paste0(label, " \u2014 where the sequence is")),
+               width = 9, height = 5.5, dpi = 150)
+      }
     }
   }
 }
 
 # ======================================================================================
-# 5. Private vs control -- the contrast the control set exists for
+# FIGURE 2. Private vs its matched control, in bp.
 #
-# Two independent measures side by side: k-mer repeat_like (copy number in the sample's own
-# reads, relative to the control's single-copy level) and map NOT_PRIVATE (does the sequence
-# align to another assembly). The control is size-matched, cross-individual, non-private
-# sequence from the SAME haplotype, so any difference is attributable to privateness.
+# bp-WEIGHTED, not segment-weighted. The two agree closely here (65.0% of segments vs
+# 62.6% of bp for PRIVATE_CONFIRMED+REPEAT_LIKE), and that agreement is itself worth
+# showing -- it says the result is not an artifact of counting many tiny segments.
 #
-# NOTE the control's mapping ceiling. Cross-individual sharing in the graph does not imply
-# block alignability: a window can be 95% covered by cross-individual nodes while every node
-# is a few hundred bp, so it has no contiguous homologue. Read the private figure against the
-# control's own value, not against 0 or 1.
+# The control is size-matched, cross-individual, NON-private windows from the same
+# haplotype, run through the identical pipeline. Without it neither measure means anything:
+# "private" as the graph defines it (a node walked by one haplotype) is not the claim that
+# the sequence exists nowhere else.
 # ======================================================================================
 if (!has_facet(ev, "flavor") || !has_facet(ev, "set")) {
   skip("private_vs_control", "no private_evidence.csv rows with flavour and set")
 } else {
-  e <- ev
-  e$repeat_like_n <- suppressWarnings(as.numeric(e$repeat_like))
   rows <- list()
-  for (fl in unique(e$flavor)) for (st in unique(e$set)) {
-    sub <- e[e$flavor == fl & e$set == st, ]
-    if (!nrow(sub)) next
-    rl <- sub$repeat_like_n[is.finite(sub$repeat_like_n)]
+  for (fl in unique(ev$flavor)) for (st in unique(ev$set)) {
+    s <- ev[ev$flavor == fl & ev$set == st, , drop = FALSE]
+    if (!nrow(s)) next
+    tb <- sum(s$span_bp, na.rm = TRUE)
+    if (!is.finite(tb) || tb <= 0) next
+    rl <- is.finite(s$repeat_like) & s$repeat_like == 1
+    np <- s$map_verdict == "NOT_PRIVATE"
     rows[[length(rows) + 1]] <- data.frame(
-      flavor = fl, set = st, n = nrow(sub),
-      measure = "k-mer REPEAT_LIKE",
-      value = if (length(rl)) mean(rl) else NA_real_, stringsAsFactors = FALSE)
+      flavor = fl, set = st, bp = tb, measure = "repeat-like (k-mer copy number)",
+      value = sum(s$span_bp[rl], na.rm = TRUE) / tb, stringsAsFactors = FALSE)
     rows[[length(rows) + 1]] <- data.frame(
-      flavor = fl, set = st, n = nrow(sub),
-      measure = "map NOT_PRIVATE",
-      value = mean(sub$map_verdict == "NOT_PRIVATE"), stringsAsFactors = FALSE)
+      flavor = fl, set = st, bp = tb, measure = "aligns to another assembly",
+      value = sum(s$span_bp[np], na.rm = TRUE) / tb, stringsAsFactors = FALSE)
   }
   cmp <- do.call(rbind, rows)
   if (is.null(cmp) || !nrow(cmp)) {
-    skip("private_vs_control", "no private/control rows")
+    skip("private_vs_control", "no private/control rows with usable bp")
   } else {
-    p5 <- ggplot(cmp, aes(set, value, fill = set)) +
+    p2 <- ggplot(cmp, aes(set, value, fill = set)) +
       geom_col(width = 0.65) +
-      geom_text(aes(label = sprintf("%.3f\n(n=%s)", value, formatC(n, big.mark = ","))),
+      geom_text(aes(label = sprintf("%.1f%%\n(%s)", 100 * value, gbp(bp))),
                 vjust = -0.15, size = 3) +
       facet_grid(measure ~ flavor) +
-      scale_y_continuous(limits = c(0, 1.15), breaks = seq(0, 1, 0.25)) +
-      scale_fill_manual(values = c(private = "#d95f0e", control = "grey60")) +
-      labs(title = paste0(label, " — private vs matched non-private control"),
-           subtitle = paste0("control = size-matched, cross-individual, non-private windows ",
-                             "from the SAME haplotype, measured identically"),
-           x = NULL, y = "fraction of segments") +
+      scale_y_continuous(limits = c(0, 1.2), breaks = seq(0, 1, 0.25),
+                         labels = function(v) sprintf("%.0f%%", 100 * v)) +
+      scale_fill_manual(values = c(private = "#d73027", control = "grey60")) +
+      labs(title = paste0(label, " \u2014 private sequence vs a matched control"),
+           subtitle = paste0("share of bp, not of segments. Control = size-matched, ",
+                             "cross-individual, NON-private windows from the same haplotype"),
+           x = NULL, y = "share of bp") +
       theme(legend.position = "none")
-    ggsave(op(".private_vs_control.png"), p5, width = 8, height = 6, dpi = 150)
-
+    ggsave(op(".private_vs_control.png"), p2, width = 8, height = 6, dpi = 150)
     for (i in seq_len(nrow(cmp)))
-      note(sprintf("%s_%s_%s", gsub("[^a-z]", "", tolower(cmp$measure[i])),
+      note(sprintf("%s.%s.%s", gsub("[^a-z]", "", tolower(cmp$measure[i])),
                    cmp$flavor[i], cmp$set[i]), sprintf("%.4f", cmp$value[i]))
   }
 }
 
 # ======================================================================================
-# 6. The map x kmer verdict cross-tabulation, per chromosome
+# FIGURE 3. Copy-number distribution, private vs control.
 #
-# The four combinations each mean something specific and only the cross-tab shows them:
-#   NOT_PRIVATE       + REPEAT_LIKE   present elsewhere AND high copy -> graph collapse
-#   PRIVATE_CONFIRMED + UNIQUE_LIKE   absent elsewhere AND single copy -> novel sequence
-#   NOT_PRIVATE       + UNIQUE_LIKE   the graph failed to merge homologous sequence
-#   PRIVATE_CONFIRMED + REPEAT_LIKE   haplotype-specific expansion
-# The off-diagonals are the informative cases and are invisible in either measure alone.
+# THE STRONGEST EVIDENCE FOR THE TRANSPOSON ANSWER, and better than any single threshold
+# statistic. Measured on the clip graph:
+#
+#   copy ratio    control   private
+#   0.5-1.5        43.7%      2.8%     <- control peaks at SINGLE COPY
+#   10-100         11.8%     45.4%
+#   >=100           3.9%     31.6%
+#
+# The control peaking at 1.0 is the calibration verified independently: the single-copy
+# reference is derived from the control itself, so if it were set too low the control would
+# shift with it. It does not. And private sequence sits at 10-100x and beyond -- satellite
+# and high-copy TE territory, which is exactly the sequence that fails to align between
+# haplotypes. Two distributions that barely overlap.
+#
+# copy_ratio = the segment's median k-mer multiplicity in its own sample's reads, divided
+# by that haplotype's single-copy level. 1.0 means present once in the genome.
 # ======================================================================================
-if (!has_facet(xtab, "flavor")) {
-  skip("private_evidence_xtab", "no private_evidence_xtab.tsv rows")
+if (is.null(ev) || !"copy_ratio" %in% names(ev)) {
+  skip("copy_ratio", "no copy_ratio column in the evidence table")
 } else {
-  x <- xtab[xtab$scope == "CHROM" & xtab$set == "private" &
-            is.finite(xtab$n_segments), ]
-  if (!nrow(x)) {
-    skip("private_evidence_xtab", "no CHROM-scope private rows")
+  cr <- ev[is.finite(ev$copy_ratio) & ev$copy_ratio > 0, , drop = FALSE]
+  if (!nrow(cr)) {
+    skip("copy_ratio", "no rows with a usable copy_ratio")
   } else {
-    # the frac computation can empty the frame; re-check before faceting
+    brk <- c(0, 0.5, 1.5, 3, 10, 100, Inf)
+    lab <- c("<0.5", "0.5-1.5", "1.5-3", "3-10", "10-100", ">=100")
+    cr$bin <- cut(cr$copy_ratio, breaks = brk, labels = lab, right = FALSE)
+    agg <- aggregate(span_bp ~ bin + set + flavor, data = cr, FUN = sum)
+    tot <- aggregate(span_bp ~ set + flavor, data = cr, FUN = sum)
+    names(tot)[names(tot) == "span_bp"] <- "tot"
+    agg <- merge(agg, tot, by = c("set", "flavor"))
+    agg$frac <- agg$span_bp / agg$tot
 
-    tot <- aggregate(n_segments ~ key + flavor, data = x, FUN = sum)
-    names(tot)[names(tot) == "n_segments"] <- "tot"
-    x <- merge(x, tot, by = c("key", "flavor"))
-    x$frac <- x$n_segments / x$tot
-    x <- x[is.finite(x$frac), , drop = FALSE]
-    ord <- unique(x$key)
-    num <- suppressWarnings(as.numeric(sub("^chr", "", ord)))
-    x$key <- factor(x$key, levels = ord[order(num, ord)])
-
-  }
-}
-# Re-checked AFTER the frac computation, which can empty the frame. facet_wrap on a variable
-# with no values aborts from inside ggsave with a stack trace, not a diagnosis -- which is how
-# this figure failed on the first real run.
-if (!exists("x") || !has_facet(x, "flavor")) {
-  skip("private_evidence_xtab", "no rows survive the CHROM/private/frac filters")
-} else {
-  {
-    p6 <- ggplot(x, aes(key, frac, fill = combined)) +
-      geom_col() +
+    p3 <- ggplot(agg, aes(bin, frac, fill = set)) +
+      geom_col(position = position_dodge(preserve = "single")) +
       facet_wrap(~ flavor, ncol = 1) +
       scale_y_continuous(labels = function(v) sprintf("%.0f%%", 100 * v)) +
-      labs(title = paste0(label, " — private-segment evidence by chromosome"),
-           subtitle = "map verdict x k-mer verdict; off-diagonals are the informative cases",
-           x = NULL, y = "share of private segments", fill = NULL) +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1),
-            legend.position = "right", legend.text = element_text(size = 8))
-    ggsave(op(".private_evidence_xtab.png"), p6, width = 10, height = 7, dpi = 150)
+      scale_fill_manual(values = c(private = "#d73027", control = "grey60")) +
+      labs(title = paste0(label, " \u2014 k-mer copy number, private vs control"),
+           subtitle = paste0("copy ratio = segment median k-mer multiplicity / this ",
+                             "haplotype's single-copy level. Control peaking at 1.0 is the ",
+                             "calibration check."),
+           x = "copy ratio (1.0 = single copy)", y = "share of bp", fill = NULL) +
+      theme(legend.position = "top")
+    ggsave(op(".copy_ratio.png"), p3, width = 9, height = 6, dpi = 150)
+
+    for (i in seq_len(nrow(agg)))
+      if (agg$flavor[i] == "clip")
+        note(sprintf("copyratio.%s.%s", agg$set[i], gsub("[^0-9a-z.]", "", agg$bin[i])),
+             sprintf("%.4f", agg$frac[i]))
   }
 }
 
 # ======================================================================================
-# 7-8. Private ownership and private fraction per haplotype
+# FIGURE 4. Evidence cross-tabulation per chromosome, in ABSOLUTE bp.
 #
-# MOVED HERE FROM pangenome_plots.R, which is pinned to the clip arm because it is joined with
-# PANGENOME_GROWTH (panacus on the clip GFA). These two figures were therefore being drawn from
-# the arm that understates private sequence by 46% and inverts the reference's rank -- which is
-# precisely what figure (a) is about. Faceted by flavour so the inversion is visible.
+# NOT normalised to 100% per chromosome. The normalised version could not be read for how
+# much private sequence a chromosome HAS -- a chromosome 5% private and one 25% private
+# looked identical, and the 65% blue band invited reading as "65% of the chromosome" when
+# it is 65% of the private subset. Absolute bp makes both the composition and the amount
+# visible on one axis.
 #
-# (a) share of the cohort's private sequence. Every private segment has exactly one owner, so
-#     the bars sum to 100% by construction, and the even-share line is the null.
-# (b) the same bp normalised BY HAPLOTYPE: how much of each assembly's graph content is unique
-#     to it. Unlike (a) this does not depend on the other haplotypes' sizes.
+# The four combinations each mean something:
+#   NOT_PRIVATE + REPEAT_LIKE        present elsewhere AND high copy -> graph collapse
+#   PRIVATE_CONFIRMED + UNIQUE_LIKE  absent elsewhere AND single copy -> novel sequence
+#   NOT_PRIVATE + UNIQUE_LIKE        the graph failed to merge homologous sequence
+#   PRIVATE_CONFIRMED + REPEAT_LIKE  haplotype-specific high-copy array
+# ======================================================================================
+if (!has_facet(xtab, "flavor")) {
+  skip("evidence_by_chromosome", "no private_evidence_xtab.tsv rows")
+} else {
+  x <- xtab[xtab$scope == "CHROM" & xtab$set == "private" &
+            is.finite(xtab$segment_bp) & xtab$segment_bp > 0, , drop = FALSE]
+  if (!nrow(x)) {
+    skip("evidence_by_chromosome",
+         "no CHROM-scope private rows with bp -- the xtab writes bp only for ALL scope")
+  } else {
+    ord <- unique(x$key)
+    num <- suppressWarnings(as.numeric(sub("^chr", "", ord)))
+    x$key <- factor(x$key, levels = ord[order(is.na(num), num, ord)])
+    p4 <- ggplot(x, aes(key, segment_bp, fill = combined)) +
+      geom_col() +
+      facet_wrap(~ flavor, ncol = 1, scales = "free_y") +
+      scale_y_continuous(labels = gbp) +
+      labs(title = paste0(label, " \u2014 private sequence per chromosome, by evidence"),
+           subtitle = paste0("ABSOLUTE bp, not normalised: both the amount and the ",
+                             "composition are readable"),
+           x = NULL, y = "private sequence", fill = NULL) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1),
+            legend.position = "right", legend.text = element_text(size = 8))
+    ggsave(op(".evidence_by_chromosome.png"), p4, width = 10, height = 7, dpi = 150)
+  }
+}
+
+# ======================================================================================
+# FIGURE 5. Private fraction per chromosome.
+#
+# pct_of_contig, so it is a FRACTION question rather than a chromosome-length question.
+# ======================================================================================
+if (is.null(ctg)) {
+  skip("private_by_chromosome", "no hap_private_by_contig.tsv")
+} else {
+  c2 <- ctg[grepl("^chr", ctg$contig) & is.finite(ctg$pct_of_contig), , drop = FALSE]
+  if (!nrow(c2)) {
+    skip("private_by_chromosome", "no chr* contigs")
+  } else {
+    c2$chrom <- sub("_.*$", "", c2$contig)
+    ord <- unique(c2$chrom); num <- suppressWarnings(as.numeric(sub("^chr", "", ord)))
+    c2$chrom <- factor(c2$chrom, levels = ord[order(is.na(num), num, ord)])
+    p5 <- ggplot(c2, aes(chrom, pct_of_contig, colour = flavor)) +
+      geom_boxplot(outlier.size = 0.6, position = position_dodge(width = 0.75)) +
+      scale_colour_manual(values = c(clip = "grey40", full = "#2c7fb8")) +
+      labs(title = paste0(label, " \u2014 private fraction per chromosome"),
+           subtitle = "one point per haplotype x chromosome piece",
+           x = NULL, y = "private share of the chromosome (%)", colour = "graph") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top")
+    ggsave(op(".private_by_chromosome.png"), p5, width = 9, height = 5, dpi = 150)
+  }
+}
+
+# ======================================================================================
+# FIGURE 6-7. Ownership, and the clip-vs-full disagreement.
 # ======================================================================================
 if (!has_facet(hap, "flavor")) {
   skip("private_ownership", "no hap_private.tsv rows")
 } else {
-  need <- c("haplotype", "private_bp", "hap_bp", "pct_of_private", "pct_of_haplotype")
-  if (!all(need %in% names(hap))) {
-    skip("private_ownership", paste("missing columns:",
-         paste(setdiff(need, names(hap)), collapse = ",")))
-  } else {
-    hp <- hap
-    for (cc in need[-1]) hp[[cc]] <- suppressWarnings(as.numeric(hp[[cc]]))
-    hp <- hp[is.finite(hp$private_bp), , drop = FALSE]
-    hp$name   <- as.character(hp$haplotype)
-    hp$is_ref <- same_hap(hp$name, ref_hap)
-    nh  <- length(unique(hp$name))
-    hgt <- max(3.8, 0.42 * nh + 2.4)
-    fill_sc <- scale_fill_manual(values = c(`FALSE` = "#7fbf7b", `TRUE` = "#2c7fb8"),
-                                 labels = c(`FALSE` = "haplotype", `TRUE` = "reference"),
-                                 guide  = if (any(hp$is_ref)) "legend" else "none")
-    # shared haplotype order from the full arm, so the two facets are comparable
-    ordsrc <- if ("full" %in% hp$flavor) hp[hp$flavor == "full", ] else hp
-    even   <- 100 / nh
+  h <- hap[is.finite(hap$private_bp), , drop = FALSE]
+  h$is_ref <- same_hap(h$haplotype, ref_hap)
+  o <- if ("full" %in% h$flavor) h[h$flavor == "full", ] else h
+  h$haplotype <- factor(h$haplotype, levels = o$haplotype[order(o$private_bp)])
+  nh <- length(unique(as.character(h$haplotype)))
 
-    hp$y1 <- factor(hp$name, levels = ordsrc$name[order(ordsrc$pct_of_private)])
-    p7 <- ggplot(hp, aes(pct_of_private, y1, fill = is_ref)) +
-      geom_col(width = 0.72) + fill_sc +
-      geom_vline(xintercept = even, linetype = 2, colour = "grey35") +
-      geom_text(aes(label = mb(private_bp)), hjust = -0.12, size = 2.9, colour = "grey20") +
-      facet_wrap(~ flavor, ncol = 2) +
-      scale_x_continuous(expand = expansion(mult = c(0, 0.22))) +
-      labs(title = paste0(label, " \u2014 who owns the private sequence"),
-           subtitle = sprintf("dashed line = even share (%.1f%%). The reference is the graph backbone and is never clipped, so its RANK differs between arms.", even),
-           x = "% of the cohort's private sequence", y = NULL, fill = NULL)
-    ggsave(op(".private_by_haplotype.png"), p7, width = 11, height = hgt, dpi = 150)
+  p6 <- ggplot(h, aes(private_bp, haplotype, fill = is_ref)) +
+    geom_col(position = position_dodge(preserve = "single")) +
+    facet_wrap(~ flavor, ncol = 2) +
+    scale_x_continuous(labels = gbp) +
+    scale_fill_manual(values = c(`FALSE` = "#7fbf7b", `TRUE` = "#2c7fb8"),
+                      labels = c(`FALSE` = "haplotype", `TRUE` = "reference"),
+                      guide = if (any(h$is_ref)) "legend" else "none") +
+    labs(title = paste0(label, " \u2014 private sequence per haplotype"),
+         subtitle = paste0("The reference is the graph backbone and is never clipped, so ",
+                           "its RANK differs between the two graphs."),
+         x = "private sequence", y = NULL, fill = NULL) +
+    theme(legend.position = "top")
+  ggsave(op(".private_clip_vs_full.png"), p6, width = 11,
+         height = max(4, 0.42 * nh + 2.4), dpi = 150)
 
-    hp$y2 <- factor(hp$name, levels = ordsrc$name[order(ordsrc$pct_of_haplotype)])
-    p8 <- ggplot(hp, aes(pct_of_haplotype, y2, fill = is_ref)) +
-      geom_col(width = 0.72) + fill_sc +
-      geom_text(aes(label = sprintf("%s / %s", mb(private_bp), mb(hap_bp))),
-                hjust = -0.08, size = 2.7, colour = "grey20") +
-      facet_wrap(~ flavor, ncol = 2) +
-      scale_x_continuous(expand = expansion(mult = c(0, 0.34))) +
-      labs(title = paste0(label, " \u2014 private fraction of each haplotype"),
-           subtitle = "private bp / this haplotype's total graph bp",
-           x = "% of the haplotype that is private to it", y = NULL, fill = NULL)
-    ggsave(op(".private_fraction_by_haplotype.png"), p8, width = 11, height = hgt, dpi = 150)
+  for (fl in unique(h$flavor)) {
+    hh <- h[h$flavor == fl, ]
+    if (nrow(hh) && ref_hap != "NONE" && any(same_hap(hh$haplotype, ref_hap)))
+      note(paste0("reference_rank_", fl),
+           sprintf("%d of %d", rank(-hh$private_bp)[same_hap(hh$haplotype, ref_hap)], nrow(hh)))
   }
 }
 
 # ---- audit ---------------------------------------------------------------------------
-note("label", label)
-note("min_bp", min_bp)
-note("reference", ref_hap)
+note("label", label); note("min_bp", min_bp); note("reference", ref_hap)
 ad <- data.frame(metric = names(audit), value = unlist(audit, use.names = FALSE),
                  stringsAsFactors = FALSE)
 write.table(ad[order(ad$metric), ], op(".private_figures_audit.tsv"),
             sep = "\t", quote = FALSE, row.names = FALSE)
-message(sprintf("[private_plots] %s: %d audit metrics, %d figures written",
+message(sprintf("[private_plots] %s: %d metrics, %d figures",
                 label, nrow(ad),
                 length(list.files(outdir, pattern = paste0("^", label, "\\..*\\.png$")))))
