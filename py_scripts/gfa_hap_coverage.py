@@ -457,7 +457,11 @@ def private_segments(gfa, cov, nlen, groups, n_hap=0, tier_cuts=None):
     return segs, repeat_bp, n_oor, tier_spec
 
 
-SEG_BINS = [0, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, float("inf")]
+# Default edges match nextflow.config's pangenome_sv_bins, so the private and tier spectra
+# land on the SAME bins as the SV spectrum. They did not before: this was hardcoded starting
+# at 0-100 while the SV bins start 0-50 / 50-100, so the shared-axis figure had three bins
+# where two belonged and two of them were always empty. --bins overrides.
+SEG_BINS = [0, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, float("inf")]
 
 
 def seg_bin(x):
@@ -478,6 +482,11 @@ def main():
     ap.add_argument("--min-node-len", type=int, default=0,
                     help="ignore nodes shorter than this (default 0 = keep all)")
     # same defaults as nextflow.config's pangenome_tier_* so "core" means one thing
+    ap.add_argument("--bins", default="",
+                    help="comma-separated size-bin edges. Pass pangenome_sv_bins so the "
+                         "private and tier spectra share an axis with the SV spectrum -- "
+                         "the point of the comparison. Empty = the built-in default, which "
+                         "already matches the config default.")
     ap.add_argument("--tier-core", type=float, default=1.00)
     ap.add_argument("--tier-softcore", type=float, default=-1.0)
     ap.add_argument("--tier-shell", type=int, default=2)
@@ -490,6 +499,18 @@ def main():
     a = ap.parse_args()
 
     os.makedirs(a.outdir, exist_ok=True)
+
+    if a.bins.strip():
+        try:
+            edges = sorted({int(x) for x in a.bins.split(",") if x.strip()})
+        except ValueError:
+            sys.exit("ERROR: --bins must be comma-separated integers, got %r" % a.bins)
+        if not edges:
+            sys.exit("ERROR: --bins parsed to nothing")
+        global SEG_BINS
+        SEG_BINS = ([0] if edges[0] != 0 else []) + edges + [float("inf")]
+        sys.stderr.write("[gfa_hap_coverage] size bins: %s\n"
+                         % ",".join(str(x) for x in SEG_BINS[:-1]))
     op = lambda suf: os.path.join(a.outdir, a.label + suf)
 
     nlen, n_seg, bad, groups = first_pass(a.gfa)

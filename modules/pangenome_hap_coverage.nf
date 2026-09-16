@@ -66,6 +66,8 @@ process PANGENOME_HAP_COVERAGE {
     def minpriv = params.pangenome_private_min_bp ?: 1000
     // the SAME cuts the report and the partition figure use, so "core" means one thing
     // everywhere rather than three slightly different things
+    // the SAME edges the SV spectrum uses, so the shared-axis figure actually shares an axis
+    def bins   = params.pangenome_sv_bins ?: '50,100,500,1000,5000,10000,50000,100000,500000,1000000'
     def tcore  = params.pangenome_tier_core     ?: 1.00
     def tsoft  = params.pangenome_tier_softcore ?: -1
     def tshell = params.pangenome_tier_shell    ?: 2
@@ -77,6 +79,7 @@ process PANGENOME_HAP_COVERAGE {
         --gfa ${gfa} \\
         --label ${taxid}.${flavor} \\
         --min-private-bp ${minpriv} \\
+        --bins '${bins}' \\
         --tier-core ${tcore} \\
         --tier-softcore ${tsoft} \\
         --tier-shell ${tshell} \\
