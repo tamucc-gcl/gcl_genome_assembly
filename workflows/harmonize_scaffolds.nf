@@ -170,12 +170,6 @@ workflow HARMONIZE_SCAFFOLDS {
         // and everything downstream of it, cactus included.
         ch_chimera_cand = HARMONIZE_SPECIES.out.chimera_candidates
 
-        // the reference's own name map, picked out of the per-id set that already exists
-        ch_ref_name_map = HARMONIZE_SPECIES.out.reference_id
-            .map { taxid, ridf -> tuple(taxid, ridf.text.trim()) }
-            .combine( ch_name_map_by_id )
-            .filter { taxid, rid, nm_id, nm -> nm_id == rid }
-            .map { taxid, rid, nm_id, nm -> tuple(taxid, nm) }
 
         // and the reference alignments, re-keyed by assembly id the same way
         ch_ref_paf_by_id = HARMONIZE_SPECIES.out.ref_pafs
@@ -197,6 +191,20 @@ workflow HARMONIZE_SCAFFOLDS {
         ch_lr_out = ch_lr_by_id
             .join( ch_name_map_by_id, remainder: true )
             .map { id, meta, fa, nm -> tuple(meta, fa, nm ?: file('NO_HARMONIZE')) }
+
+        // The reference's own name map, picked out of the per-id set built just above.
+        // PLACED HERE because it consumes ch_name_map_by_id: a workflow body is ordinary
+        // Groovy, so a name must be assigned before it is read. Anchoring this next to the
+        // other chimera channels -- which is where it belongs conceptually -- put it 18 lines
+        // before its dependency and produced "No such variable: ch_name_map_by_id".
+        //
+        // It translates PAF targets (reference scaffold names) into CONSENSUS chromosomes.
+        // Every assembly needs the same one, so it is keyed per species.
+        ch_ref_name_map = HARMONIZE_SPECIES.out.reference_id
+            .map { taxid, ridf -> tuple(taxid, ridf.text.trim()) }
+            .combine( ch_name_map_by_id )
+            .filter { taxid, rid, nm_id, nm -> nm_id == rid }
+            .map { taxid, rid, nm_id, nm -> tuple(taxid, nm) }
 
         // short-read always sentinel
         ch_sr_out = ch_split.sr.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
