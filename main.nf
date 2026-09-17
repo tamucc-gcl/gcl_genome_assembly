@@ -1241,10 +1241,16 @@ workflow {
         }
     }
 
-    ch_final_busco       = QC_PHASE.out.final_busco
-    ch_qc_metrics        = QC_PHASE.out.metrics
-    ch_qc_plots          = QC_PHASE.out.plots
-    ch_qc_report_html    = QC_PHASE.out.report_html
+    // Guarded where they stand rather than by extending the QC_PHASE block: the span
+    // between them contains the scaffold decontamination report branch, which is not a QC
+    // artifact and must not become conditional on qc_mode. The Channel.empty() defaults
+    // above stand when QC is off.
+    if (qc_on) {
+        ch_final_busco       = QC_PHASE.out.final_busco
+        ch_qc_metrics        = QC_PHASE.out.metrics
+        ch_qc_plots          = QC_PHASE.out.plots
+        ch_qc_report_html    = QC_PHASE.out.report_html
+    }
 
     /*
     ========================================================================================
@@ -1253,7 +1259,7 @@ workflow {
     */
     // Join gap-filled assemblies with their BUSCO results
     // BUSCO output from ASSEMBLY_QC_TELOCLIP is per-haplotype
-    ch_final_busco_table = QC_PHASE.out.final_busco_table
+    if (qc_on) ch_final_busco_table = QC_PHASE.out.final_busco_table
 
     ch_finalized_assembly
         .join(ch_final_busco_table)
