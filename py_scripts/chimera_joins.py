@@ -247,8 +247,13 @@ def main():
     if not cand:
         sys.stderr.write("[chimera_joins] %s: no candidate scaffolds; nothing to test\n"
                          % a.assembly)
-    # scaffold -> harmonized name used as the PAF query
+    # EVERY candidate row is tested, whatever its verdict -- detection reports, the gate
+    # decides. Sde-CPla_115_hap1 yields 79 chimeric joins across ~80 scaffolds, and that is a
+    # real assembly-quality finding worth surfacing rather than suppressing at detection. But
+    # the verdict and span travel with each row so BREAK_CHIMERAS can act without re-deriving
+    # them.
     scafs = {r["scaffold"]: r.get("name", r["scaffold"]) for r in cand}
+    meta = {r["scaffold"]: r for r in cand}
     qnames = set(scafs.values())
 
     c1 = parse_agp_components(a.round1)
@@ -258,7 +263,9 @@ def main():
 
     cols = ["assembly", "scaffold", "name", "cut_bp", "left_chrom", "right_chrom",
             "left_component", "right_component", "n_components", "n_transitions",
-            "agp_join_bp", "agp_join_distance", "agp_source", "gap_len", "callable", "reason"]
+            "agp_join_bp", "agp_join_distance", "agp_source", "gap_len", "callable", "reason",
+            # carried from the candidates file so BREAK_CHIMERAS gates without re-deriving
+            "span_bp", "vote", "candidate_verdict"]
     n_call = 0
     with open(a.out, "w") as out:
         out.write("# Joins that separate two DIFFERENT reference chromosomes.\n")
@@ -268,8 +275,15 @@ def main():
         out.write("# callable=no with a large agp_join_distance means the chromosome changes\n")
         out.write("#   INSIDE a contig: a contig-level mis-assembly, not a scaffolding one.\n")
         out.write("#   That cannot be cut at a gap and belongs to Inspector.\n")
-        out.write("# THIS IS NOT A DECISION. The cross-haplotype concordance vote in\n")
-        out.write("#   chimera_candidates.tsv is the gate; this says WHICH join and WHERE.\n")
+        out.write("# THIS IS NOT A DECISION. candidate_verdict, carried from\n")
+        out.write("#   chimera_candidates.tsv, is the gate; this says WHICH join and WHERE.\n")
+        out.write("# Only BREAK_CANDIDATE rows are cut. A REVIEW verdict means the vote could\n")
+        out.write("#   not separate an artifact from real biology -- in particular a\n")
+        out.write("#   POLYMORPHIC fusion, where the sister haplotype also carries the\n")
+        out.write("#   junction. Those are never broken automatically.\n")
+        out.write("# Every candidate is reported regardless of verdict: Sde-CPla_115_hap1 has\n")
+        out.write("#   79 chimeric joins across ~80 scaffolds, which is an assembly-quality\n")
+        out.write("#   finding in its own right and should not be hidden by the span floor.\n")
         out.write("\t".join(cols) + "\n")
 
         for scaf, qname in sorted(scafs.items()):
@@ -309,11 +323,23 @@ def main():
                            agp_join_distance=(bd if best is not None else "."),
                            agp_source=(best["lift"] if best else "."),
                            gap_len=(best["gap_len"] if best else "."),
-                           callable=callable_, reason=(reason or "."))
+                           callable=callable_, reason=(reason or "."),
+                           span_bp=meta[scaf].get("span_bp", "."),
+                           vote=meta[scaf].get("vote", "."),
+                           candidate_verdict=meta[scaf].get("verdict", "."))
                 out.write("\t".join(str(rec[c]) for c in cols) + "\n")
 
+    by_verdict = {}
+    for r in read_rows(a.out):
+        if r.get("callable") == "yes":
+            k = r.get("candidate_verdict", "?")
+            by_verdict[k] = by_verdict.get(k, 0) + 1
     sys.stderr.write("[chimera_joins] %s: %d callable chimeric join(s) -> %s\n"
                      % (a.assembly, n_call, os.path.basename(a.out)))
+    if by_verdict:
+        sys.stderr.write("[chimera_joins] %s: by candidate verdict -- %s\n"
+                         % (a.assembly, ", ".join("%s=%d" % kv
+                                                  for kv in sorted(by_verdict.items()))))
 
 
 if __name__ == "__main__":

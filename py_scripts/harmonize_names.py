@@ -1072,6 +1072,26 @@ def main():
         n_s = sum(1 for r in conc_pool if x in present_chr[r] and y in present_chr[r])
         return n_f, n_s
 
+    def concordance_split(x, y, rid):
+        """The same vote, partitioned by whether the voter is `rid`'s SISTER haplotype.
+
+        n_f alone cannot tell an artifact from a POLYMORPHIC fusion: a real fusion in one
+        individual scores n_f = 1 (its sister) and n_s = 8, which is exactly an artifact's
+        signature. WHICH haplotype carries it is the discriminator, because each haplotype is
+        scaffolded independently -- so the same mis-join appearing in both haplotypes of one
+        individual is unlikely, while a real fusion in that individual should appear in both.
+
+        Returns (n_f_sister, n_f_other, n_s).
+        """
+        pair = frozenset((x, y))
+        me = individual_of(rid)
+        n_f_sis = sum(1 for r in conc_pool
+                      if r != rid and individual_of(r) == me and pair in fused_pairs[r])
+        n_f_oth = sum(1 for r in conc_pool
+                      if individual_of(r) != me and pair in fused_pairs[r])
+        n_s = sum(1 for r in conc_pool if x in present_chr[r] and y in present_chr[r])
+        return n_f_sis, n_f_oth, n_s
+
     # ---- assign per-chromosome part indices, names, order ----
     # ---- CONSENSUS NAMING FRAME ---------------------------------------------------------
     # The reference is now an ALIGNMENT COORDINATE SYSTEM ONLY. Scaffold names come from the
@@ -1300,7 +1320,8 @@ def main():
                     _votes = []
                     for _x, _y in combinations(cons, 2):
                         _nf, _ns = concordance(_x, _y)
-                        _votes.append((min(_x, _y), max(_x, _y), _nf, _ns))
+                        _sis, _oth, _ = concordance_split(_x, _y, rid)
+                        _votes.append((min(_x, _y), max(_x, _y), _nf, _ns, _sis, _oth))
                     chimera_rows.append({
                         # `rid` from the enclosing `for rid in by_id:` -- this script runs
                         # ONCE for the whole species group off a manifest, so there is no
@@ -1519,8 +1540,16 @@ def main():
         fh.write("#   matched distance -- ELEVATED, because the junction sits in subtelomeric\n")
         fh.write("#   repeat. That is how the mis-join was made, not evidence against breaking.\n")
         fh.write("#\n")
-        fh.write("# vote n_f/n_s: other haplotypes carrying this junction / keeping the two\n")
-        fh.write("#   chromosomes separate. n_f<=1 with n_s>=3 is a scaffolding error.\n")
+        fh.write("# vote n_f/n_s(sisN,othN): haplotypes carrying this junction / keeping\n")
+        fh.write("#   the two chromosomes separate, then the carriers split into this\n")
+        fh.write("#   individual's SISTER haplotype and OTHER individuals.\n")
+        fh.write("# The split matters: n_f=1,n_s=8 is produced BOTH by an artifact and by a\n")
+        fh.write("#   POLYMORPHIC fusion present in one individual. Which haplotype carries\n")
+        fh.write("#   it separates them -- each haplotype is scaffolded independently, so the\n")
+        fh.write("#   same mis-join in both is unlikely, while real biology should appear in\n")
+        fh.write("#   both. oth>0 = real, sis>0 = REVIEW, both 0 = artifact.\n")
+        fh.write("# INVERSIONS cannot be affected: an inversion is intra-chromosomal, so it\n")
+        fh.write("#   produces no chromosome transition and this detector never fires on one.\n")
         fh.write("# n_switches: 1 = one clean mis-join, breakable at junction_bp. >1 = the\n")
         fh.write("#   members interdigitate, so this is a FRAGMENTED scaffold and one cut will\n")
         fh.write("#   not fix it.\n")
@@ -1536,6 +1565,8 @@ def main():
             j = r["junction"]
             worst_nf = min((v[2] for v in r["votes"]), default=99)
             best_ns = max((v[3] for v in r["votes"]), default=0)
+            max_sis = max((v[4] for v in r["votes"]), default=0)
+            max_oth = max((v[5] for v in r["votes"]), default=0)
             fps = r["footprints"]
             small = min(fps.values()) if fps else 0
             if r["span_bp"] < a.chimera_min_span:
@@ -1553,8 +1584,20 @@ def main():
             elif small < a.chimera_min_member_bp:
                 verdict, why = "NOT_A_CANDIDATE", ("smallest member footprint %d < %d"
                                                    % (small, a.chimera_min_member_bp))
+            elif max_oth > 0:
+                # other INDIVIDUALS carry this junction, so it is real rather than an
+                # artifact of this assembly -- possibly a fixed fusion.
+                verdict, why = "NOT_A_CANDIDATE", ("%d other individual(s) carry this "
+                                                   "junction" % max_oth)
+            elif max_sis > 0:
+                # the sister haplotype carries it and no other individual does. Either a
+                # polymorphic fusion in this individual, or the same mis-scaffolding in both
+                # haplotypes. Indistinguishable from the vote alone, so never auto-break.
+                verdict, why = "REVIEW", ("sister haplotype also carries this junction "
+                                          "(%df sister / %df other) -- possible polymorphic "
+                                          "fusion" % (max_sis, max_oth))
             elif worst_nf <= a.chimera_max_nf and best_ns >= a.chimera_min_ns:
-                verdict, why = "BREAK_CANDIDATE", ("vote %df/%ds"
+                verdict, why = "BREAK_CANDIDATE", ("vote %df/%ds, sister clean"
                                                    % (worst_nf, best_ns))
             else:
                 verdict, why = "NOT_A_CANDIDATE", ("vote %df/%ds does not indicate an error"
@@ -1566,7 +1609,8 @@ def main():
                         j[0] if j else ".", ("ref%d" % j[1]) if j else ".",
                         j[2] if j else ".", ("ref%d" % j[3]) if j else ".",
                         j[4] if j else ".", j[5] if j else ".",
-                        ";".join("ref%d+ref%d:%df/%ds" % v for v in r["votes"]) or ".",
+                        ";".join("ref%d+ref%d:%df/%ds(sis%d,oth%d)" % v
+                                 for v in r["votes"]) or ".",
                         verdict, why, ";".join(r["flags"]) or "."))
     n_break = sum(1 for _l in open(cand) if "\tBREAK_CANDIDATE\t" in _l)
     sys.stderr.write("[harmonize] chimera candidates: %d composite(s), %d break candidate(s)"
