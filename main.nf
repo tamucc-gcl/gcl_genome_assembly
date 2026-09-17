@@ -1047,7 +1047,8 @@ workflow {
     */
     // 1. Contact Maps for Final Assemblies
     //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
-    if (params.run_final_contact_maps) {
+    ch_final_contact_maps = Channel.empty()
+    if (post_on && params.run_final_contact_maps) {
         FINAL_HIC_MAPS(
             ch_finalized_assembly,
             TRIM_HIC.out.trimmed_reads,
@@ -1056,6 +1057,7 @@ workflow {
         )
         ch_all_bam_metrics   = ch_all_bam_metrics.mix(FINAL_HIC_MAPS.out.bam_metrics)
         ch_all_pairs_metrics = ch_all_pairs_metrics.mix(FINAL_HIC_MAPS.out.pairs_metrics)
+        ch_final_contact_maps = FINAL_HIC_MAPS.out.contact_maps
     }
 
     // String-id view of the finalized per-hap assemblies for the leaf viz/QUAST steps.
@@ -1117,6 +1119,8 @@ workflow {
         QC Raw Hi-C Reads
     ========================================================================================
     */
+    // Read QC. `qc_mode = 'none'` means none, including the input read reports.
+    if (qc_on) {
     HIC_QC_RAW(
         ch_input.filter { meta, reads -> meta.hic }
                 .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
@@ -1153,6 +1157,10 @@ workflow {
     ch_versions = ch_versions.mix(SHORTREAD_QC_RAW.out.versions)
     if (params.run_shortread_trim) {
         SHORTREAD_QC_TRIMMED(TRIM_SHORTREAD.out.trimmed_reads, "trimmed")
+    }
+    }
+    else {
+        log.info "[INFO] qc_mode = 'none': skipping input read QC"
     }
     
     /*
@@ -1295,15 +1303,17 @@ workflow {
         }
         .set { ch_coverage_book_input }
 
-    COVERAGE_BOOK(ch_coverage_book_input, ch_coverage_book_script)
+    if (post_on) COVERAGE_BOOK(ch_coverage_book_input, ch_coverage_book_script)
 
     // =========================================================================
     //  SUMMARY REPORT  (manifest assembly + report -> workflows/reporting.nf)
     // =========================================================================
+    // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
+    if (qc_on && post_on) {
     REPORTING(
         ch_finalized_assembly,
         ch_snail_final,
-        params.run_final_contact_maps ? FINAL_HIC_MAPS.out.contact_maps : Channel.empty(),
+        ch_final_contact_maps,
         ch_viz_dotplot,
         ch_viz_riparian,
         ch_viz_tidk,
@@ -1326,6 +1336,10 @@ workflow {
         ch_versions,
         ch_summary_report_script
     )
+    }
+    else {
+        log.info "[INFO] skipping REPORTING: it needs both QC and the post-assembly outputs"
+    }
 }
 /*
 ========================================================================================
