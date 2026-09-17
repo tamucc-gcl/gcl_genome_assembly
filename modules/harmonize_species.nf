@@ -60,6 +60,12 @@ process HARMONIZE_SPECIES {
     path("*.consensus_chromosome_map.tsv"),              emit: consensus_map
     path("versions.tsv"),                                emit: versions
     path("*.minimap2.log"),                              emit: logs, optional: true
+    // The reference alignments, already computed above and previously discarded.
+    // chimera_joins.py needs them to assign a reference chromosome to each AGP component,
+    // and PAIRWISE_ALIGNMENT's copies are behind run_post_assembly so they are absent on a
+    // detection-only run. The reference itself has none -- it is not aligned against
+    // itself -- hence optional.
+    tuple val(taxid), path("*.ref.paf.gz"),              emit: ref_pafs, optional: true
 
     script:
     def preset       = params.harmonize_minimap2_preset ?: 'asm5'
@@ -176,6 +182,19 @@ process HARMONIZE_SPECIES {
         --species "${taxid}" \\
         ${hargs} \\
         --outdir .
+
+    # ------------------------------------------------------------------
+    # keep the reference alignments: chimera_joins.py assigns a reference chromosome to each
+    # AGP component from them, and PAIRWISE_ALIGNMENT's copies sit behind
+    # run_post_assembly. Renamed so the emit glob cannot also catch a stray *.paf, and
+    # gzipped because an asm5 PAF of a 1 Gb genome is hundreds of MB x9 assemblies.
+    # ------------------------------------------------------------------
+    for id in "\${ids[@]}"; do
+        [ "\$id" = "\${REF}" ] && continue
+        if [ -s "\${id}.paf" ]; then
+            gzip -c "\${id}.paf" > "\${id}.ref.paf.gz"
+        fi
+    done
 
     # ------------------------------------------------------------------
     # versions (awk drains input -> no SIGPIPE under pipefail; no `head`)

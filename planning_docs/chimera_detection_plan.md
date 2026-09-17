@@ -54,41 +54,62 @@ harmonization renames anything, so detection belongs at the source.
 
 ---
 
-## 2. The evidence hierarchy, and why it is ordered this way
+## 2. The evidence hierarchy
 
 | signal | role | why |
 |---|---|---|
 | **cross-haplotype concordance** | **the gate** | the only signal independent of how the scaffold was BUILT |
-| interstitial telomeres | corroborates | independent of Hi-C; diagnostic of end-to-end fusion specifically |
-| Hi-C cross-contact depletion | locates precisely | more precise than the PAF, but it is the signal that MADE the join |
-| N-gap proximity | picks the cut point | cutting in a gap loses nothing; cutting in sequence severs real bases |
+| **AGP joins** | **where, exactly** | records the join scaffolding made, with a 100 bp gap at it |
+| **PAF per component** | **which join** | most joins are same-chromosome and drop out here |
+| interstitial telomeres | corroborates | independent of Hi-C; diagnostic of end-to-end fusion |
+| Hi-C cross-contact | confirms | it made the join, so it cannot justify breaking it |
 
-**Telomere ABSENCE must never veto a break.** A mid-arm fusion leaves none — `chr6_3+chr12_1`
-is exactly that case.
+**Telomere ABSENCE must never veto a break.** A mid-arm fusion leaves none.
 
-### The Hi-C circularity, and a measurement error worth recording
+### The AGP replaced inference as the locator, and inference was closer than I claimed
 
-Hi-C made the join, so it cannot independently justify breaking it. That argument stands on
-its own.
+Positions were first estimated by binning the reference PAF at 1 Mb and finding where the
+dominant chromosome changed. Against the AGP:
 
-But the empirical support originally given for it was **wrong**. The first measurement of
-cross-junction contact on `chr5_1+chr9_1` returned **1.209** — elevated — and was explained as
-subtelomeric repeat attracting spurious contacts. Three things were wrong with it:
+| scaffold | PAF binning | Hi-C minimum | AGP join (truth) |
+|---|---|---|---|
+| `chr5_1+chr9_1` | 37.0 Mb (−144 kb) | 37.4 Mb (+256 kb) | **37,144,322** |
+| `chr6_3+chr12_1` | 43.0 Mb (−695 kb) | 44.4 Mb (+705 kb) | **43,694,678** |
 
-1. the junction was taken as 35 Mb, estimated from 5 Mb PAF bins; the real minimum is 37.4 Mb,
-   so contact was measured 2.4 Mb inside the chr9 arm
-2. the null excluded ±6 Mb around that wrong centre
-3. windows near either end averaged truncated blocks (`max(0, a-w)`), which also produced a
-   spurious minimum at 2.0 Mb on the other scaffold
+Both inference methods were within ~0.7 Mb. Neither was exact, and both land in *sequence*
+rather than in the 100 bp gap the join actually is — so they cannot be cut at. The AGP gives
+the position; inference cannot.
 
-Corrected — right position, full windows only — it is **0.748**. The junction is *depleted*.
+**But the AGP alone is not enough either.** `scaffold_3` has 173 joins and one is chimeric;
+`Sde-CPla_115_hap1` has 919 across the assembly. Breaking at every join would undo
+scaffolding. The PAF says *which* join separates two chromosomes, the concordance vote says
+whether to act, and the AGP says where.
 
-**Lesson: a surprising measurement was explained rather than re-checked.** The explanation was
-plausible enough to stop the investigation, and a whole design decision was built on an
-artifact. Requiring full windows and scanning for the minimum rather than assuming its
-position are both now non-negotiable.
+### A wrong turn worth recording
 
-Hi-C is still not the gate — but it is informative, and it was informative all along.
+For one round I argued the junction was the **round-2** join at 41,919,050 — 4.77 Mb from the
+truth — and built an explanation about repeat-rich regions misleading the PAF to account for a
+discrepancy I had manufactured. Every component from 37.14 to 41.92 Mb is chr9, so that join
+is chr9→chr9 and not chimeric at all.
+
+Two things caused it. I took the largest/most-recent join as the relevant one instead of
+testing every join, and I explained a surprising 4.5 Mb gap rather than checking it. The same
+failure mode as the Hi-C measurement below. Hence `chimera_joins.py` tests **every** join.
+
+### The Hi-C measurement error
+
+The first measurement of cross-junction contact on `chr5_1+chr9_1` returned **1.209** —
+elevated — and was explained as subtelomeric repeat attracting spurious contacts. Three things
+were wrong: the junction was taken as 35 Mb from 5 Mb PAF bins, the null excluded ±6 Mb around
+that wrong centre, and windows near either end averaged truncated blocks.
+
+Corrected — scanned position, full windows only — it is **0.748**, and `chr6_3+chr12_1` is
+**0.740**. Both depleted.
+
+The circularity argument survives on its own: Hi-C made the join, so depleted contact across a
+junction it created is not independent evidence. But the empirical support was an artifact, and
+a design decision was built on it. **Full windows only, and scan for the minimum rather than
+assuming its position.**
 
 ---
 
@@ -105,14 +126,19 @@ Hi-C is still not the gate — but it is informative, and it was informative all
 | `patch_harmonize_chimera_gate.py` | replaces the `n_switches` gate with an arm-coverage test |
 | `break_chimeras.py` + `.nf` + wiring | the split and name-map rewrite, gated, between harmonize and finalize |
 | the four `patch_main_*_gates.py` | `qc_mode 'none'` and `run_post_assembly` |
+| `patch_harmonize_sister_vote.py` | splits the vote into sister / other-individual carriers |
+| `patch_harmonize_header_fix.py` | corrects two header claims the AGP work superseded |
+| `agp_joins.py` | both AGPs chained -> every join, exact, in final coordinates |
+| `chimera_joins.py` | components + PAF -> which joins separate two chromosomes |
+| `break_chimeras.py` (reworked) | N cuts -> N+1 pieces, repeated chromosomes named distinctly |
+| `chimera_evidence.py` | written; Hi-C path untested, not wired |
 
-### `chimera_junction()`
+### `chimera_junction()` — SUPERSEDED
 
-Bins the scaffold at 1 Mb, credits each bin to whichever member contributes the most aligned
-bp, compresses to runs, and takes the two longest runs of DIFFERENT members. Binned rather
-than per-alignment because a chimeric scaffold has thousands of alignments and spurious
-cross-mappings anywhere along it — the measured chr5+chr9 scaffold has ref9 alignments inside
-the ref5 arm and vice versa.
+The original 1 Mb binning estimator. Replaced by `agp_joins.py` + `chimera_joins.py`, which
+take the position from the AGP rather than estimating it. Retained in `harmonize_names.py`
+because its output (`junction_bp`) is a useful cross-check: measured against the AGP it was
+−144 kb and +695 kb on the two candidates.
 
 ### The gate
 
@@ -163,92 +189,150 @@ chromosome, and splitting one leaves two unplaced halves.
 | | `CTlk_104_hap1` chr5_1+chr9_1 | `CTlk_104_hap2` chr6_3+chr12_1 |
 |---|---|---|
 | scaffold | `scaffold_1`, 111,642,300 bp | `scaffold_3`, 76,662,708 bp |
-| footprints | ref5 36,036,670 / ref9 73,589,204 | ref12 50,749,347 / ref6 38,365,629 |
-| concordance | **1f/7s** | **1f/7s** |
-| `inflated_aln` | 1.15 | 1.17 |
-| arms / span | 1.10 | 1.16 |
-| PAF junction | 37.0 Mb | 43.0 Mb |
-| **Hi-C minimum** | **37.4 Mb, ratio 0.748** | **44.4 Mb, ratio 0.740** |
-| Hi-C contiguity | five lowest windows consecutive, 37.2–37.6 Mb | three of five lowest, 44.2–44.5 Mb |
-| interstitial telomere | **arrays both orientations 37.6–43.7 Mb**, peak rev=148 at 43.67 | none: junction 6–16 against background 4–8 |
-| terminal telomere | neither end | **fwd=353 at 0.01 Mb**, nothing at 76.66 |
-| nearest N-gap | 37.286 Mb (−114 kb) | **44.408 Mb (+8 kb)** |
-| reading | **end-to-end fusion**, three signals agreeing | **mid-arm join**, two signals; intact chr12 arm from its own telomere joined to a truncated chr6 |
-| **cut at** | **37,400,000** (or the gap at 37.286) | **44,408,000** — the gap |
+| components | 213 | 174 |
+| AGP joins on it | 212 | 173 |
+| **chimeric transitions** | **1** | **1** |
+| **cut at** | **37,144,322** | **43,694,678** |
+| both round-1 joins, lifted | `round1_via_round2` | `round1_via_round2_rev` |
+| concordance | **1f/7s**, `sis0,oth0` | **1f/7s**, `sis0,oth0` |
+| transition | chr5 → chr9 | chr12 → chr6 |
+| Hi-C at the junction | 0.748, five lowest windows consecutive | 0.740, three of five |
+| interstitial telomere | arrays both orientations 37.6–43.7 Mb, peak 148 | none; junction 6–16 vs background 4–8 |
+| terminal telomere | neither end | fwd=353 at 0.01 Mb, nothing at 76.66 |
+| reading | end-to-end fusion, three signals | mid-arm join, two signals |
 
-Both are scaffolding errors, not biology. The decisive argument is that **the two haplotypes
-of one individual fuse DIFFERENT chromosome pairs** — hap1 chr5+chr9, hap2 chr2+chr3 and
-chr6+chr12. A real karyotypic fusion would be shared or at least heterozygous for the same
-pair. Six of ten haplotypes have no composites at all and the reference has fifteen clean
+Both are scaffolding errors. The decisive argument remains that **the two haplotypes of one
+individual fuse different chromosome pairs** — hap1 chr5+chr9, hap2 chr2+chr3, chr6+chr12,
+chr7+chr11. Six of ten haplotypes have no composites and the reference has fifteen clean
 chromosomes.
+
+### Joins that are NOT chimeric, and why that matters
+
+| join | verdict |
+|---|---|
+| `hap1` round-2 at 41,919,050 | chr9 → chr9. I argued for cutting here; it is 4.77 Mb from the truth. |
+| `hap2` round-2 at 2,974,101 | chr12 → chr12 |
+| `hap2` round-2 at 46,454,171 | chr6 → chr6. Also argued for; also wrong. |
+
+All three would have been cut by an AGP-only rule. This is why `chimera_joins.py` tests every
+join against the PAF rather than trusting the AGP alone.
+
+### `Sde-CPla_115_hap1`: 79 callable chimeric joins
+
+Across ~80 scaffolds, on an assembly with 919 joins total. Every one excluded by the 20 Mb
+span floor, so none is a `BREAK_CANDIDATE` — but the transitions look real, and 79 chimeric
+scaffolds is an assembly-quality finding in its own right. Detection reports it; the gate
+declines to act. Breaking them would take ~80 scaffolds to ~160 pieces of 0.3–3 Mb, which is
+dismantling an assembly rather than repairing one.
+
+`hap2`'s other two composites also transition — `scaffold_18` chr3→chr2 at 9,749,995 (16.2 Mb)
+and `scaffold_22` chr11→chr7 at 2,152,658 (7.1 Mb) — and are excluded by the same floor.
 
 ---
 
-## 5. `CHIMERA_EVIDENCE` — to build
-
-### The coordinate problem, and the solution
-
-Evidence must be generated from **pre-split** sequence — the split has not happened yet and
-the evidence is what justifies it. But there is no usable contact map at detection time:
-
-- `QC_PHASE` (which builds the scaffold-stage maps) is at main.nf ~1160; `HARMONIZE_SCAFFOLDS`
-  is at ~953
-- `ch_hic_pairs_scaffold_round2_space` exists earlier and is in round-2 scaffold coordinates,
-  but `GAP_FILLING` (−45 to −47 kb) and especially `TELOCLIP_EXTEND` (**+3.7 to +5.0 Mb**) run
-  after. Teloclip prepends to scaffold ends, which shifts every internal coordinate.
-- the `_final` mcool is produced by `FINAL_HIC_MAPS`, downstream of harmonization
-
-**Solution: per-candidate mini-reference re-mapping.** The old BAM is used only to SELECT
-reads by scaffold name, not for coordinates — and names are preserved through gap filling and
-teloclip (`>scaffold_1` identical at yahs, gap_filling and teloclip). Re-mapping to the
-current sequence makes coordinates correct by construction.
+## 5. The detection chain as built
 
 ```
-for each BREAK_CANDIDATE (assembly, scaffold):
-  1. samtools faidx <post-teloclip asm> <scaffold>       -> mini reference (~100 Mb)
-  2. samtools view <scaffold-stage Hi-C BAM> <scaffold>  -> reads that hit it
-                                                            (name-based; positions ignored)
-  3. -> fastq -> align to the mini reference
-  4. pairtools parse/sort/dedup -> cooler cload -> 100 kb cool
-  5. full-window cross-contact scan
+agp_joins.py       both AGPs, chained -> every join, exact, in final coordinates
+chimera_joins.py   components + PAF -> which joins separate two chromosomes
+harmonize_names.py the concordance vote -> whether to act        (the gate)
+break_chimeras.py  N cuts -> N+1 pieces, name map rewritten
+chimera_evidence.py Hi-C + telomere confirmation per join         (to wire)
 ```
 
-Cheap because it is scoped to candidates: 2 scaffolds rather than 10 assemblies, ~100 Mb
-reference rather than 1 Gb, ~1/10 of the reads. And it generalises — no assumption about what
-ran between scaffolding and harmonization.
+### `agp_joins.py`
 
-### Per candidate, emit
+Chaining both rounds is **required, not thorough**: round 1 makes 1,830–1,891 joins per
+haplotype here against round 2's 32–54, and *both real junctions are round-1 joins*. Without
+lifting them ~97% of the search space is invisible.
 
-1. **Hi-C profile** — minimum position, ratio to the scaffold median, and **how many of the
-   five lowest windows are contiguous with it**. That last is what made `chr5/chr9`
-   convincing: five consecutive windows is a boundary, one isolated window is noise. FULL
-   WINDOWS ONLY — truncated edges produced a spurious minimum at 2.0 Mb.
-2. **Refined `cut_bp`** — the Hi-C minimum, with the PAF estimate kept alongside. Both
-   scaffolds needed 0.4–1.4 Mb of refinement.
-3. **PAF/Hi-C agreement** — `REVIEW` if they disagree by more than **2 Mb**. Not zero
-   tolerance: the PAF junction comes from 1 Mb bins, so ±1 bin is expected, and the measured
-   disagreements were 0.4 and 1.4 Mb.
-4. **N-gap snap** — search ±500 kb of the minimum for a gap ≥100 bp; cut at its midpoint and
-   record `snapped_to_gap=<pos>`, else record `no_gap_within_500kb`. A reviewer must be able
-   to tell whether the cut severed sequence.
-5. **Telomere profile** — max interstitial within ±2 Mb against the scaffold background, plus
-   **terminal** signal at both ends. The terminal reading is what distinguished "intact chr12
-   arm plus truncated chr6" from "neither end is a real chromosome end".
-6. **One figure** — the contact matrix at 100 kb with the PAF estimate, Hi-C minimum, chosen
-   cut and the telomere track marked. That single image is what a reviewer actually needs.
+Three cases the naive lift gets wrong, all present in real data:
 
-### Gating, mode by mode
+- **subrange** — `scaffold_6` enters as 4,306,001–47,785,970, so round 2 broke it and used the
+  middle. A round-1 position outside the used range has to be dropped, not mapped.
+- **reverse orientation** — `scaffold_6` again. The offset is measured from the far end, AND
+  `left_cid`/`right_cid` must be swapped, because reverse-complementing puts the round-1 left
+  neighbour at the higher final coordinate. Caught by a neighbour-consistency check: before
+  the fix one contig was listed as both the left of one join and the right of the next.
+- **absent** — a round-1 scaffold that never entered round 2.
 
-`auto` cannot see telomere or Hi-C evidence if the enrichment runs after the cut — so in
-`auto` the enrichment runs **before** `BREAK_CHIMERAS` within the same run, off the
-mini-reference maps, and the refined verdict is what `auto` acts on.
+Validated: 1,945 joins on `Sde-CTlk_104_hap2`, **0 neighbour mismatches** across
+`scaffold_3`'s 173 joins, 0 dropped.
 
-On a run where a file was supplied, the enrichment is the record of what justified it.
+### `chimera_joins.py`
 
-**`CHIMERA_EVIDENCE` must be gated on not-yet-broken assemblies.** Run against post-split
-sequence it would look for an interstitial array on a scaffold that no longer exists, find the
-array at the end of one piece and the start of another — which is what a correct break
-produces — and that is no longer evidence the break was justified.
+Components, not windows. The AGP partitions a scaffold into components at contig granularity,
+and a contig cannot straddle a scaffolding join by construction — a fixed window around a join
+can and does.
+
+Three rules that look like details and are not:
+
+- **`unplaced` is not a chromosome.** It is the reference's own unassigned sequence, so it says
+  nothing about which chromosome a component belongs to. Counting it as one produced a spurious
+  out-and-back transition pair on an 86 kb component, taking `hap1` from 1 transition to 3.
+  Only `^chr` targets vote. Measured, `unplaced` is the only non-chr target: 0.2 Mb per
+  assembly.
+- **Unassigned components are filled from neighbours.** `h2tg000137l_1` aligns over 0.83 Mb of
+  its 4.85 Mb span and components near a junction have less — unfilled, every repeat-rich
+  contig reads as a transition.
+- **A component needs 100 kb aligned AND a 2× dominance margin** before it votes, so one split
+  near-evenly between two chromosomes abstains rather than choosing arbitrarily.
+
+A transition more than 250 kb from any AGP join is reported `callable=no`: the chromosome
+changes **inside a contig**, which is a contig-level mis-assembly, cannot be cut at a gap, and
+belongs to Inspector.
+
+### The polymorphic-fusion safeguard
+
+`n_f/n_s` separates an artifact from a **fixed** fusion — real biology would be carried by most
+haplotypes. It cannot separate an artifact from a **polymorphic** fusion: present in one
+individual, that scores `n_f=1, n_s=8`, identical to an artifact.
+
+The discriminator is *which* haplotype carries it, because each haplotype is scaffolded
+independently:
+
+| | verdict |
+|---|---|
+| `n_f_other > 0` | `NOT_A_CANDIDATE` — real, possibly fixed |
+| `n_f_sister > 0, n_f_other = 0` | **`REVIEW`** — possible polymorphic fusion, never auto-broken |
+| both 0 | `BREAK_CANDIDATE`, "sister clean" |
+
+Measured: both candidates are `sis0,oth0`. Supporting evidence — the two haplotypes of
+`Sde-CTlk_104` fuse **different** chromosome pairs (hap1 chr5+chr9; hap2 chr2+chr3, chr6+chr12,
+chr7+chr11), which a real fusion would not do.
+
+**Inversions cannot be affected at all.** An inversion is intra-chromosomal, so it produces no
+chromosome transition and this detector never fires on one. That is structural, not a threshold.
+
+### `break_chimeras.py`
+
+N joins → N+1 pieces. Cuts are validated as a **set** — `min_piece_bp` against adjacent cuts,
+not the scaffold ends — and a single too-short piece rejects the whole scaffold, because a
+partial break leaves a known chimera half-fixed and harder to reason about than an untouched
+one.
+
+Repeated chromosomes get distinct names: `scaffold_3` is chr6 / chr12 / chr6, so the pieces
+become `chr6_3`, `chr12_1`, `chr6_3_2`.
+
+### `chimera_evidence.py` — written, not wired
+
+Hi-C and telomere **confirmation** of a known cut, no longer localisation. Per join: the
+cross-contact profile with full windows only, `n_low_contiguous` (the longest run among the
+five lowest — five consecutive is a boundary, one isolated window is noise), interstitial and
+terminal telomere signal from tidk, and one figure.
+
+Coordinates are the open problem. There is no usable contact map at detection time —
+`QC_PHASE` is downstream of harmonization, `ch_hic_pairs_scaffold_round2_space` predates
+`GAP_FILLING` (−45 kb) and `TELOCLIP_EXTEND` (**+3.7 to +5.0 Mb**), and the `_final` mcool comes
+after. The plan is per-candidate **mini-reference re-mapping**: select reads by scaffold name
+from the scaffold-stage BAM (names survive gap filling and teloclip — `>scaffold_1` identical
+at all three stages), re-map to a single-scaffold reference, `pairtools` → `cooler cload`.
+Scoped to candidates it is minutes, not hours.
+
+**tidk is the source of record for telomeres**, run on the mini reference. Reimplementing the
+count was rejected: two sources for one number means no way to adjudicate a disagreement, and
+tidk normalises the canonical repeat. Note tidk reports the window END, converted to START on
+read.
 
 ---
 
@@ -320,8 +404,22 @@ both conditions harmonization already enforces for the concordance vote to exist
    previous edit produces always reports `old=0`. Merge them.
 6. **A post-condition that scans for a token will match the patch's own comments.** Strip
    comment tails before checking.
-7. **Explaining a surprising measurement instead of re-checking it.** §2. Cost a design
-   decision built on an artifact.
+7. **Explaining a surprising measurement instead of re-checking it.** §2. Twice: the Hi-C
+   1.209 (wrong position, truncated windows) and the 4.77 Mb AGP discrepancy (wrong join).
+   Both times the explanation was plausible enough to stop the investigation.
+8. **Taking the largest or most recent candidate as the relevant one.** The round-2 join was
+   assumed to be the junction because it was the one I had just read. Testing every join costs
+   nothing and would have caught it immediately.
+9. **A statistic that is nondeterministic under ties.** `np.argsort` defaults to quicksort, so
+   with a flat low region *which* window counted as the minimum varied between runs on
+   identical data. Fixed by `kind="stable"` plus taking the longest run rather than the run
+   through whichever tie led.
+10. **Reverse-complement coordinate mapping.** Both the position (measured from the far end)
+    and the left/right labels (swapped) change. Caught by a neighbour-consistency check --
+    one contig appearing as both the left of one join and the right of the next -- not by
+    reading the code.
+11. **`str.index()` on a list to find position.** It returns the FIRST occurrence, so with
+    duplicate values it silently pointed at the wrong element.
 
 ---
 
@@ -339,3 +437,13 @@ both conditions harmonization already enforces for the concordance vote to exist
 4. **After breaking, does chr9 gain core sequence?** The falsifiable prediction: chr9 core
    goes from ~0, `CTlk_104_hap1` graph content rises from 822 Mb, and the full arm's ≥1 Mb
    private bin shrinks.
+5. **Should the span floor apply to detection or only to the gate?** Currently only the gate,
+   which is why `Sde-CPla_115_hap1`'s 79 joins are reported. That seems right — suppressing
+   them at detection would hide a real finding — but it means the output is dominated by rows
+   nothing will act on.
+6. **Is the 250 kb `callable` window right?** A transition further than that from any join is
+   called contig-internal. Neither real candidate came close to the limit (51 bp and within a
+   component boundary), so the threshold is untested against a genuine contig-level chimera.
+7. **`chimera_evidence.py`'s Hi-C path is unexecuted.** No cooler in the authoring
+   environment, so the mini-reference re-mapping, the cool build and the figure have never
+   run. Expect one round of real errors, as with every R script in this project.

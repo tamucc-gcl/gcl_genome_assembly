@@ -89,6 +89,8 @@ workflow HARMONIZE_SCAFFOLDS {
         ch_report = Channel.empty()
         ch_report_by_taxid = Channel.empty()
         ch_chimera_cand = Channel.empty()
+        ch_ref_name_map = Channel.empty()
+        ch_ref_paf_by_id = Channel.empty()
         ch_ref_id = Channel.empty()
         ch_ref_scores = Channel.empty()
     }
@@ -167,6 +169,19 @@ workflow HARMONIZE_SCAFFOLDS {
         // tidier to read and was the first attempt, but it risks re-running harmonization
         // and everything downstream of it, cactus included.
         ch_chimera_cand = HARMONIZE_SPECIES.out.chimera_candidates
+
+        // the reference's own name map, picked out of the per-id set that already exists
+        ch_ref_name_map = HARMONIZE_SPECIES.out.reference_id
+            .map { taxid, ridf -> tuple(taxid, ridf.text.trim()) }
+            .combine( ch_name_map_by_id )
+            .filter { taxid, rid, nm_id, nm -> nm_id == rid }
+            .map { taxid, rid, nm_id, nm -> tuple(taxid, nm) }
+
+        // and the reference alignments, re-keyed by assembly id the same way
+        ch_ref_paf_by_id = HARMONIZE_SPECIES.out.ref_pafs
+            .transpose()
+            .map { taxid, pf ->
+                tuple(pf.name.replaceFirst(/\.ref\.paf\.gz$/, ''), pf) }
         ch_report_by_taxid = HARMONIZE_SPECIES.out.report
             .map { f -> tuple(f.name.replaceFirst(/\..*$/, ''), f) }
 
@@ -198,5 +213,9 @@ workflow HARMONIZE_SCAFFOLDS {
     report         = ch_report
     report_by_taxid = ch_report_by_taxid   // tuple(taxid, report) for per-species joins
     chimera_candidates = ch_chimera_cand   // tuple(taxid, chimera_candidates.tsv)
+    // The REFERENCE's name map: translates PAF targets (reference scaffold names) into
+    // CONSENSUS chromosomes. Every assembly needs the same one, so it is per species.
+    ref_name_map   = ch_ref_name_map       // tuple(taxid, reference name_map)
+    ref_pafs_by_id = ch_ref_paf_by_id      // tuple(assembly_id, ref.paf.gz)
     versions       = ch_versions
 }

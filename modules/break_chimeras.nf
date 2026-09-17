@@ -62,6 +62,10 @@ process BREAK_CHIMERAS {
                pattern: "*.chimera_break_audit.tsv"
 
     input:
+    // `candidates` is now CHIMERA_JOINS's called-joins table, not harmonization's candidates
+    // file: it carries cut_bp taken from the AGP and ONE ROW PER CHIMERIC JOIN, so a scaffold
+    // with two of them produces three pieces. It also carries candidate_verdict, so auto mode
+    // gates without re-deriving the concordance vote.
     tuple val(meta), path(assembly_fasta, stageAs: 'input/*'), path(name_map), path(candidates)
     path(script)
 

@@ -169,6 +169,7 @@ include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
 include { BREAK_CHIMERAS } from './modules/break_chimeras.nf'
+include { CHIMERA_JOINS } from './modules/chimera_joins.nf'
 include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
@@ -784,6 +785,10 @@ workflow {
         Can be explicitly disabled via --run_scaffold_round2 false
     ========================================================================================
     */
+    // Defaulted BEFORE the branch: assigned only inside it, this would not be
+    // visible to CHIMERA_JOINS further down.
+    ch_scaffold_round2_agp = Channel.empty()
+
     if (params.run_scaffold_round2) {
         
         log.info "[INFO] Running second round of scaffolding (scaffold correction or decontamination was performed)"
@@ -852,6 +857,7 @@ workflow {
 
         SCAFFOLD_HIC_ROUND2(ch_second_scaffolding_input)
         ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds   // per-hap (meta, fasta)
+        ch_scaffold_round2_agp    = SCAFFOLD_HIC_ROUND2.out.agp
 
         // checkpoint: scaffold_round2_space (relabel scaffold1->scaffold2 via round2 AGP; no remap)
         FILTER_HIC_BAM_SCAFFOLD.out.pairs
@@ -977,13 +983,53 @@ workflow {
     // ch_hap_priv and ch_hap_cov in workflows/pangenome.nf.
     ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
 
+    // ---- which joins are chimeric, and exactly where ---------------------------------
+    // Detection runs whenever harmonization did, independently of chimera_break: the
+    // candidates and the called joins are the evidence a break is justified by, and they are
+    // worth having even on a run that cuts nothing.
+    ch_chimeric_joins = Channel.empty()
+    if( params.chimera_detect != false ) {
+        ch_agp_script = Channel.fromPath("${projectDir}/py_scripts/agp_joins.py",
+                                        checkIfExists: true)
+        ch_cj_script  = Channel.fromPath("${projectDir}/py_scripts/chimera_joins.py",
+                                        checkIfExists: true)
+
+        // round 2 is conditional, so this join tolerates its absence: without a round-2 AGP
+        // the round-1 objects are final, which agp_joins.py handles natively.
+        ch_r1_agp = SCAFFOLD_HIC_ROUND1.out.agp.map { meta, agp -> tuple(meta.id, agp) }
+        ch_r2_agp = ch_scaffold_round2_agp.map { meta, agp -> tuple(meta.id, agp) }
+
+        CHIMERA_JOINS(
+            ch_r1_agp
+                .join( ch_r2_agp, remainder: true )
+                .join( HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id, remainder: true )
+                .filter { id, r1, r2, paf -> r1 != null }
+                .map { id, r1, r2, paf ->
+                    tuple(id, r1, r2 ?: file('NO_ROUND2'), paf ?: file('NO_PAF')) }
+                // the candidates file and the reference name map are per SPECIES, so they
+                // attach by cartesian product rather than by key
+                .combine( HARMONIZE_SCAFFOLDS.out.chimera_candidates
+                              .map { taxid, f -> tuple(taxid, f) } )
+                .combine( HARMONIZE_SCAFFOLDS.out.ref_name_map.map { taxid, f -> f } )
+                .map { id, r1, r2, paf, taxid, cand, rnm ->
+                    tuple(taxid, id, r1, r2, paf, cand, rnm) },
+            ch_agp_script.first(),
+            ch_cj_script.first() )
+        ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
+        ch_chimeric_joins = CHIMERA_JOINS.out.called
+    }
+
     if( params.chimera_break && params.chimera_break.toString() != 'false' ) {
         ch_break_script = Channel.fromPath("${projectDir}/py_scripts/break_chimeras.py",
                                           checkIfExists: true)
-        // 'auto' uses the candidates harmonization just wrote; a path uses that file, so an
-        // edited copy is how you choose which scaffolds to cut.
+        // 'auto' uses the joins CHIMERA_JOINS just called; a path uses that file, so an
+        // edited copy is how you choose which scaffolds to cut. Either way the input is the
+        // CALLED JOINS table, not the candidates: it carries cut_bp from the AGP and one row
+        // per chimeric join, so a scaffold with N of them yields N+1 pieces.
         ch_cand = ( params.chimera_break.toString() == 'auto' )
-            ? HARMONIZE_SCAFFOLDS.out.chimera_candidates.map { taxid, f -> f }.first()
+            ? ch_chimeric_joins.map { taxid, id, f -> f }.collectFile(name: 'called.tsv',
+                                                                      keepHeader: true,
+                                                                      skip: 1)
             : Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first()
 
         BREAK_CHIMERAS(

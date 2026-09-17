@@ -101,7 +101,12 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--fasta", required=True)
     p.add_argument("--name-map", required=True)
-    p.add_argument("--candidates", required=True)
+    p.add_argument("--candidates", required=True,
+                   help="chimera_joins.py output: one row per CHIMERIC JOIN, with cut_bp "
+                        "taken from the AGP. A scaffold may have several -- "
+                        "Sde-CTlk_104_hap2 scaffold_3 has three components and one chimeric "
+                        "join of its two, and Sde-CPla_115_hap1 scaffold_1 has four -- so "
+                        "N joins produce N+1 pieces, not two.")
     p.add_argument("--assembly", required=True)
     p.add_argument("--out-fasta", required=True)
     p.add_argument("--out-name-map", required=True)
@@ -119,42 +124,73 @@ def main():
     cands = [r for r in read_rows(a.candidates)
              if r.get("assembly") == a.assembly]
     if a.mode == "auto":
-        cands = [r for r in cands if r.get("verdict") == "BREAK_CANDIDATE"]
+        # candidate_verdict is harmonization's, carried through chimera_joins.py. REVIEW
+        # rows are excluded deliberately: that verdict means the vote could not separate an
+        # artifact from real biology -- in particular a polymorphic fusion whose sister
+        # haplotype also carries the junction -- and those must never be cut unattended.
+        cands = [r for r in cands
+                 if r.get("candidate_verdict", r.get("verdict")) == "BREAK_CANDIDATE"]
 
     # index the name map by old_name so a split row can be replaced in place
     by_old = {r["old_name"]: r for r in nm}
 
-    actions = []
+    # N joins per scaffold, not one. Grouped, sorted, and validated as a SET: a cut is only
+    # legal relative to its neighbours, so each piece has to clear min_piece_bp against the
+    # adjacent cuts rather than against the scaffold ends.
+    actions, per_scaf = [], {}
     for r in cands:
         sc = r.get("scaffold", "")
         if sc not in by_old:
             actions.append((sc, "SKIP", "not in the name map"))
             continue
+        if r.get("callable", "yes") == "no":
+            actions.append((sc, "SKIP", "chimera_joins marked it not callable: %s"
+                            % r.get("reason", "?")))
+            continue
         try:
-            j = int(float(r.get("junction_bp", "") or 0))
-            span = int(float(r.get("span_bp", "") or 0))
+            cut = int(float(r.get("cut_bp", "") or 0))
         except ValueError:
-            actions.append((sc, "SKIP", "junction_bp or span_bp unparseable"))
+            actions.append((sc, "SKIP", "cut_bp unparseable"))
             continue
-        if j <= 0 or j >= span:
-            actions.append((sc, "SKIP", "junction %d outside 0..%d" % (j, span)))
-            continue
-        if j < a.min_piece_bp or (span - j) < a.min_piece_bp:
-            actions.append((sc, "SKIP", "a piece would be < %d bp" % a.min_piece_bp))
-            continue
-        lm, rm = r.get("left_member", ""), r.get("right_member", "")
-        if not (lm.startswith("ref") and rm.startswith("ref")):
-            actions.append((sc, "SKIP", "left/right member missing"))
-            continue
-        # the composite name carries the part indices harmonization assigned; take each
-        # half's name from the token whose chromosome matches that side
-        toks = (by_old[sc].get("new_name") or "").split("+")
-        want_l, want_r = "chr%s_" % lm[3:], "chr%s_" % rm[3:]
-        nl = next((t for t in toks if t.startswith(want_l)), want_l + "1")
-        nr = next((t for t in toks if t.startswith(want_r)), want_r + "1")
-        actions.append((sc, "BREAK", "%d|%s,%s" % (j, nl, nr)))
+        per_scaf.setdefault(sc, []).append((cut, r.get("left_chrom", ""),
+                                            r.get("right_chrom", "")))
 
-    breaks = {s: v.split("|") for s, k, v in actions if k == "BREAK"}
+    breaks = {}
+    for sc, rows in per_scaf.items():
+        span = 0
+        try:
+            span = int(float(by_old[sc].get("length") or 0))
+        except ValueError:
+            pass
+        rows.sort()
+        cuts = [c for c, _, _ in rows]
+        if any(c <= 0 or (span and c >= span) for c in cuts):
+            actions.append((sc, "SKIP", "a cut falls outside 0..%d" % span))
+            continue
+        # piece lengths between consecutive cuts, including both ends
+        bounds = [0] + cuts + ([span] if span else [])
+        lens = [b - a2_ for a2_, b in zip(bounds, bounds[1:])]
+        if span and any(L < a.min_piece_bp for L in lens):
+            actions.append((sc, "SKIP", "cutting at %s would leave a piece < %d bp (%s)"
+                            % (",".join(map(str, cuts)), a.min_piece_bp,
+                               ",".join(map(str, lens)))))
+            continue
+
+        # a name per piece, from the chromosome on that side of each cut. The composite name
+        # carries harmonization's part indices; where a chromosome appears more than once
+        # among the pieces -- scaffold_3 is chr6 / chr12 / chr6 -- the repeats get distinct
+        # suffixes so two records cannot claim the same name.
+        toks = (by_old[sc].get("new_name") or "").split("+")
+        chroms = [rows[0][1]] + [r[2] for r in rows]
+        names, seen = [], {}
+        for ch in chroms:
+            want = "chr%s_" % ch.replace("chr", "")
+            base = next((t for t in toks if t.startswith(want)), want + "1")
+            seen[base] = seen.get(base, 0) + 1
+            names.append(base if seen[base] == 1 else "%s_%d" % (base, seen[base]))
+        breaks[sc] = (cuts, names)
+        actions.append((sc, "BREAK", "%s -> %s" % (",".join(map(str, cuts)),
+                                                   ",".join(names))))
     if not breaks:
         sys.stderr.write("[break_chimeras] %s: nothing to break (%d candidate rows)\n"
                          % (a.assembly, len(cands)))
@@ -168,11 +204,12 @@ def main():
             if name not in seqs:
                 continue
             if name in breaks:
-                j = int(breaks[name][0])
+                cuts, _ = breaks[name]
                 s = seqs[name]
-                # 0-based, open-ended, matching the _sub_X_Y convention
-                out.write(">%s_sub_0_%d\n%s\n" % (name, j, wrap(s[:j])))
-                out.write(">%s_sub_%d_%d\n%s\n" % (name, j, len(s), wrap(s[j:])))
+                # 0-based, open-ended, matching cactus's _sub_X_Y convention
+                bounds = [0] + list(cuts) + [len(s)]
+                for lo, hi in zip(bounds, bounds[1:]):
+                    out.write(">%s_sub_%d_%d\n%s\n" % (name, lo, hi, wrap(s[lo:hi])))
                 n_break += 1
             else:
                 out.write(">%s\n%s\n" % (name, wrap(seqs[name])))
@@ -190,19 +227,19 @@ def main():
         for r in nm:
             nmold = r["old_name"]
             if nmold in breaks:
-                j, names = breaks[nmold]
-                nl, nr = names.split(",")
+                cuts, names = breaks[nmold]
                 span = int(float(r.get("length") or 0))
-                for newname, piece, lo, hi in ((nl, "_sub_0_%s" % j, 0, int(j)),
-                                               (nr, "_sub_%s_%d" % (j, span), int(j), span)):
+                bounds = [0] + list(cuts) + [span]
+                for newname, lo, hi in zip(names, bounds, bounds[1:]):
                     d = dict(r)
-                    d["old_name"] = nmold + piece
+                    d["old_name"] = "%s_sub_%d_%d" % (nmold, lo, hi)
                     d["new_name"] = newname
                     d["length"] = str(hi - lo)
                     d["class"] = "chromosome"
                     fl = [x for x in (r.get("flags") or "").split(";")
                           if x and x not in ("-",)]
-                    fl.append("chimera_broken(from=%s,at=%s)" % (nmold, j))
+                    fl.append("chimera_broken(from=%s,at=%s,piece=%d_%d)"
+                              % (nmold, ",".join(map(str, cuts)), lo, hi))
                     d["flags"] = ";".join(fl)
                     out.write("\t".join(str(d.get(k, "")) for k in hdr) + "\n")
             else:
@@ -219,6 +256,9 @@ def main():
             out.write("mode\t%s\n" % a.mode)
             out.write("candidate_rows\t%d\n" % len(cands))
             out.write("scaffolds_broken\t%d\n" % n_break)
+            out.write("pieces_produced\t%d\n"
+                      % sum(len(c) + 1 for c, _ in breaks.values()))
+            out.write("cuts_total\t%d\n" % sum(len(c) for c, _ in breaks.values()))
             out.write("min_piece_bp\t%d\n" % a.min_piece_bp)
             for sc, kind, why in actions:
                 out.write("action.%s\t%s:%s\n" % (sc, kind, why))

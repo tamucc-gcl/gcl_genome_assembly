@@ -147,14 +147,51 @@ def final_components(c1, c2, obj):
 
 
 # --------------------------------------------------------------------------------------
-def paf_by_query(paf, wanted, min_block):
-    """query -> [(qstart, qend, chrom, block), ...] for the queries we care about.
+def read_ref_name_map(path):
+    """The REFERENCE's own harmonized_name_map.tsv -> {reference scaffold: consensus chrN}.
 
-    Only `^chr` targets are kept. `unplaced` is the reference's own unassigned sequence and
-    carries no chromosome information; counting it as a chromosome created a spurious
-    transition pair. Measured: it is the only non-chr target, 0.2 Mb per assembly.
+    THIS TRANSLATION IS THE POINT, and omitting it was a real error rather than a detail.
+    Harmonization maintains two namespaces: refN is a reference-frame PIECE, chrN a CONSENSUS
+    chromosome built from the join graph's connected components across voters. A consensus
+    chromosome can span several reference pieces when the voters agree those pieces belong
+    together -- so a scaffold aligning to ref5 on one side and ref12 on the other is
+    CORRECTLY JOINING TWO PIECES OF chr5, not chimeric. Assigning components to reference
+    pieces would call that a chimera and destroy real assembly work.
+    (Measured on this cohort every consensus chromosome is exactly one reference piece, so
+    the translation is currently the identity -- but it is not on a fragmented reference,
+    which is the case the consensus frame exists to handle.)
+
+    It also matters mechanically. The PAF source determines the target names:
+      harmonization's own PAFs align the INPUT fastas, so targets are `scaffold_N`
+      PAIRWISE_ALIGNMENT's PAFs align FINALIZED assemblies, so targets are `chr5_1`
+    Only the first is guaranteed to exist on a detection-only run, and a `^chr` test on its
+    targets matches nothing -- silently, because zero transitions is a legitimate result.
+
+    A target absent from the map, or mapping to `unplaced*`, is unassigned: unplaced sequence
+    is the reference's own unassigned material and says nothing about which chromosome a
+    component belongs to.
     """
     out = {}
+    for r in read_rows(path):
+        old, new = r.get("old_name", ""), r.get("new_name", "")
+        if not old or not new or new.startswith("unplaced"):
+            continue
+        if "+" in new:
+            # a composite IN THE REFERENCE spans two chromosomes, so it cannot name one
+            continue
+        out[old] = new.rsplit("_", 1)[0] if "_" in new else new
+    return out
+
+
+def paf_by_query(paf, wanted, min_block, ref_map):
+    """query -> [(qstart, qend, consensus_chrom, block), ...].
+
+    Targets are translated through the reference name map, so this works for either PAF
+    source and yields consensus chromosomes either way. An untranslatable target is dropped
+    rather than guessed at.
+    """
+    out = {}
+    n_seen, n_kept = 0, 0
     with opener(paf) as fh:
         for line in fh:
             f = line.rstrip("\n").split("\t")
@@ -170,10 +207,23 @@ def paf_by_query(paf, wanted, min_block):
                 qs, qe = int(f[2]), int(f[3])
             except ValueError:
                 continue
-            t = f[5].split("#")[-1]
-            if not t.startswith("chr"):
-                continue
-            out.setdefault(q, []).append((qs, qe, t.split("_")[0], blk))
+            n_seen += 1
+            tgt = f[5].split("#")[-1]
+            ch = ref_map.get(tgt)
+            if ch is None:
+                # already a consensus name? PAIRWISE_ALIGNMENT PAFs look like chr5_1
+                if tgt.startswith("chr"):
+                    ch = tgt.rsplit("_", 1)[0] if "_" in tgt else tgt
+                else:
+                    continue
+            n_kept += 1
+            out.setdefault(q, []).append((qs, qe, ch, blk))
+    if n_seen and not n_kept:
+        sys.exit("ERROR: %d PAF records matched the candidate scaffolds but NONE had a "
+                 "translatable target. The reference name map probably does not match this "
+                 "PAF's target namespace -- harmonization's PAFs use `scaffold_N`, "
+                 "PAIRWISE_ALIGNMENT's use `chr5_1`. Failing rather than reporting zero "
+                 "transitions, which would look like a clean result." % n_seen)
     return out
 
 
@@ -228,6 +278,11 @@ def main():
                    help="chimera_candidates.tsv: supplies which scaffolds to test and the "
                         "harmonized name the PAF uses as its query")
     p.add_argument("--out", required=True)
+    p.add_argument("--ref-name-map", required=True,
+                   help="the REFERENCE's harmonized_name_map.tsv. Translates PAF targets to "
+                        "CONSENSUS chromosomes, which is what a transition must be measured "
+                        "in: a consensus chromosome can span several reference pieces, and a "
+                        "scaffold joining two pieces of one chromosome is not chimeric.")
     p.add_argument("--min-block", type=int, default=2000,
                    help="ignore PAF records below this block length (default 2 kb)")
     p.add_argument("--component-min-bp", type=int, default=100000,
@@ -258,9 +313,16 @@ def main():
 
     c1 = parse_agp_components(a.round1)
     c2 = parse_agp_components(a.round2) if a.round2 and os.path.isfile(a.round2) else None
-    aln = paf_by_query(a.paf, qnames, a.min_block)
+    ref_map = read_ref_name_map(a.ref_name_map)
+    if not ref_map:
+        sys.exit("ERROR: no usable rows in %s -- without the reference name map, PAF targets "
+                 "cannot be resolved to consensus chromosomes." % a.ref_name_map)
+    sys.stderr.write("[chimera_joins] reference name map: %d scaffolds -> %d consensus "
+                     "chromosomes\n" % (len(ref_map), len(set(ref_map.values()))))
+    aln = paf_by_query(a.paf, qnames, a.min_block, ref_map)
     joins = [r for r in read_rows(a.joins) if r.get("assembly") == a.assembly]
 
+    n_unassigned = 0
     cols = ["assembly", "scaffold", "name", "cut_bp", "left_chrom", "right_chrom",
             "left_component", "right_component", "n_components", "n_transitions",
             "agp_join_bp", "agp_join_distance", "agp_source", "gap_len", "callable", "reason",
@@ -293,6 +355,16 @@ def main():
                                  % (a.assembly, scaf))
                 continue
             rows = assign(comps, aln.get(qname, []), a.component_min_bp, a.component_margin)
+            if not any(r["called"] != "." for r in rows):
+                # zero transitions is a legitimate result, so an unassignable scaffold must
+                # not be reported as one -- it would read as "no chimeras found".
+                sys.stderr.write("[chimera_joins] %s %s (%s): WARNING no component could be "
+                                 "assigned a chromosome from %d alignment(s). Either the PAF "
+                                 "query name is wrong or every component is below "
+                                 "--component-min-bp.\n"
+                                 % (a.assembly, scaf, qname, len(aln.get(qname, []))))
+                n_unassigned += 1
+                continue
             tr = transitions(rows)
             sj = sorted([j for j in joins if j.get("final_object") == scaf],
                         key=lambda x: int(x["final_cut"]))
@@ -334,6 +406,9 @@ def main():
         if r.get("callable") == "yes":
             k = r.get("candidate_verdict", "?")
             by_verdict[k] = by_verdict.get(k, 0) + 1
+    if n_unassigned:
+        sys.stderr.write("[chimera_joins] %s: %d scaffold(s) had NO assignable component -- "
+                         "those were not tested, not cleared\n" % (a.assembly, n_unassigned))
     sys.stderr.write("[chimera_joins] %s: %d callable chimeric join(s) -> %s\n"
                      % (a.assembly, n_call, os.path.basename(a.out)))
     if by_verdict:
