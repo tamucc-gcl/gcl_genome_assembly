@@ -1269,7 +1269,14 @@ workflow {
         .set { ch_snail_plot_final_input }
 
     // QC-dependent: it joins ch_final_busco_table, which only exists when QC_PHASE ran.
-    if (qc_on) SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
+    // Its output is read by REPORTING, so it needs the same defaulted-channel treatment as
+    // the other gated processes: reading a gated process output directly is what produced
+    // the "Access to .out is undefined" failure three times in a row here.
+    ch_snail_final = Channel.empty()
+    if (qc_on) {
+        SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
+        ch_snail_final = SNAIL_PLOT_FINAL.out.snail
+    }
     /*
     ========================================================================================
         COVERAGE BOOK - HiFi coverage visualization for final assemblies
@@ -1295,7 +1302,7 @@ workflow {
     // =========================================================================
     REPORTING(
         ch_finalized_assembly,
-        SNAIL_PLOT_FINAL.out.snail,
+        ch_snail_final,
         params.run_final_contact_maps ? FINAL_HIC_MAPS.out.contact_maps : Channel.empty(),
         ch_viz_dotplot,
         ch_viz_riparian,
