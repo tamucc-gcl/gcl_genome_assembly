@@ -1295,7 +1295,10 @@ def main():
                         _nf, _ns = concordance(_x, _y)
                         _votes.append((min(_x, _y), max(_x, _y), _nf, _ns))
                     chimera_rows.append({
-                        "assembly": a.assembly_id,
+                        # `rid` from the enclosing `for rid in by_id:` -- this script runs
+                        # ONCE for the whole species group off a manifest, so there is no
+                        # per-assembly argument to read.
+                        "assembly": rid,
                         "scaffold": n,
                         "name": new,
                         "span_bp": int(info.get("length") or 0),
