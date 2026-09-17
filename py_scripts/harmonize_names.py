@@ -769,6 +769,13 @@ def main():
                     help="minimum scaffold length to consider (default 20 Mb)")
     ap.add_argument("--chimera-min-member-bp", type=int, default=5000000,
                     help="each side of the junction needs this much aligned bp (default 5 Mb)")
+    ap.add_argument("--chimera-min-arm-frac", type=float, default=0.80,
+                    help="the two longest runs of different reference chromosomes must "
+                         "account for at least this fraction of the scaffold, or it is "
+                         "fragmented rather than mis-joined once (default 0.80). Replaces a "
+                         "gate on the switch COUNT, which a single spurious 200 kb alignment "
+                         "was enough to trip. Aligned bp can exceed the span where "
+                         "alignments overlap, so this ratio is not bounded at 1.")
     ap.add_argument("--chimera-max-nf", type=int, default=1,
                     help="at most this many other haplotypes may carry the junction (1)")
     ap.add_argument("--chimera-min-ns", type=int, default=3,
@@ -1535,8 +1542,14 @@ def main():
                 verdict, why = "NOT_A_CANDIDATE", "span<%d" % a.chimera_min_span
             elif j is None:
                 verdict, why = "REVIEW", "no junction locatable from the PAF"
-            elif j[5] > 1:
-                verdict, why = "REVIEW", "interdigitated (%d switches)" % j[5]
+            elif (j[2] + j[4]) < a.chimera_min_arm_frac * r["span_bp"]:
+                # The two longest runs of different members do not explain the scaffold, so
+                # it is genuinely fragmented and one cut will not fix it. NOT gated on
+                # n_switches: that counts runs of any size, so a 200 kb spurious alignment
+                # at the start of a 111.6 Mb scaffold made it look interdigitated when the
+                # transition is clean. chimera_junction() already picks the two longest runs.
+                verdict, why = "REVIEW", ("two arms cover %.2f of the span (%d switches)"
+                                          % ((j[2] + j[4]) / float(r["span_bp"] or 1), j[5]))
             elif small < a.chimera_min_member_bp:
                 verdict, why = "NOT_A_CANDIDATE", ("smallest member footprint %d < %d"
                                                    % (small, a.chimera_min_member_bp))
