@@ -189,6 +189,13 @@ ch_harmonize_script       = file("${projectDir}/py_scripts/harmonize_names.py", 
 
 workflow {
     
+    // ---- run-scope gates, defined once before any use ----
+    def qc_mode     = params.qc_mode ?: 'all_stages'
+    def qc_on       = ( qc_mode != 'none' )
+    def run_all_qc  = qc_on && ( qc_mode != 'final_only' )
+    def post_on     = ( params.run_post_assembly != false )
+    def chimera_on  = params.chimera_break && params.chimera_break.toString() != 'false'
+
     // Parse sample sheet -> per-sample tuple(meta, reads)
     ch_input = parseSampleSheet(params.sample_sheet)
 
@@ -1070,10 +1077,27 @@ workflow {
         Generates all pairwise alignments for dotplot visualization grid
     ========================================================================================
     */
-    FINAL_VIZ(ch_final_by_id, ch_final_by_id_telo, ch_dotplot_script, ch_riparian_script)
-    ch_versions            = ch_versions.mix(FINAL_VIZ.out.versions)
-    ch_pairwise_summary    = FINAL_VIZ.out.pairwise_summary
-    ch_telomere_for_report = FINAL_VIZ.out.telomere_summary
+    // Defaulted BEFORE the branch: a variable assigned only inside an if-block is not
+    // visible after it in a workflow body. That is the "No such variable" failure the
+    // chimera wiring hit, and these two are read by REPORTING further down.
+    ch_pairwise_summary    = Channel.empty()
+    ch_telomere_for_report = Channel.empty()
+    ch_viz_dotplot         = Channel.empty()
+    ch_viz_riparian        = Channel.empty()
+    ch_viz_tidk            = Channel.empty()
+
+    if (post_on) {
+        FINAL_VIZ(ch_final_by_id, ch_final_by_id_telo, ch_dotplot_script, ch_riparian_script)
+        ch_versions            = ch_versions.mix(FINAL_VIZ.out.versions)
+        ch_pairwise_summary    = FINAL_VIZ.out.pairwise_summary
+        ch_telomere_for_report = FINAL_VIZ.out.telomere_summary
+        ch_viz_dotplot         = FINAL_VIZ.out.dotplot
+        ch_viz_riparian        = FINAL_VIZ.out.riparian
+        ch_viz_tidk            = FINAL_VIZ.out.tidk_plot
+    }
+    else {
+        log.info "[INFO] run_post_assembly = false: skipping FINAL_VIZ"
+    }
 
     // 6. NCBI output files for GenBank submission (if enabled)
     
@@ -1137,9 +1161,6 @@ workflow {
     ========================================================================================
     */
 
-    // QC stage selector: 'all_stages' (default) runs QC at every checkpoint;
-    // 'final_only' runs QC on the final assembly only.
-    def run_all_qc = ( (params.qc_mode ?: 'all_stages') != 'final_only' )
     // Stage every checkpoint's per-hap assembly into one labeled channel for QC_PHASE.
     // Guards below decide which stages are QC'd (lifted from the old per-call ifs); 'final' is unconditional.
     ch_staged_assemblies = Channel.empty()
@@ -1155,8 +1176,18 @@ workflow {
     if (run_all_qc && params.run_scaffold_round2) ch_staged_assemblies = ch_staged_assemblies.mix( ch_final_scaffolds_round2.map { m, f -> tuple(m, 'scaffold_round2', f) } )
     if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( GAP_FILLING.out.filled_assembly.map { m, f -> tuple(m, 'gap_filled', f) } )
     if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( TELOCLIP_EXTEND.out.extended_assembly.map { m, f -> tuple(m, 'teloclip', f) } )
-    ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
+    if (run_all_qc && chimera_on) ch_staged_assemblies = ch_staged_assemblies.mix( BREAK_CHIMERAS.out.assemblies.map { m, f, nm -> tuple(m, 'chimera_broken', f) } )
+    if (qc_on) ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
 
+    // Everything derived from QC_PHASE goes with it: ch_final_busco, ch_final_busco_table,
+    // SNAIL_PLOT_FINAL (which joins the BUSCO full table) and REPORTING's metrics/plots.
+    ch_final_busco       = Channel.empty()
+    ch_final_busco_table = Channel.empty()
+    ch_qc_metrics        = Channel.empty()
+    ch_qc_plots          = Channel.empty()
+    ch_qc_report_html    = Channel.empty()
+
+    if (qc_on) {
     QC_PHASE(
         ch_staged_assemblies,
         ch_qc_reads,
@@ -1168,6 +1199,10 @@ workflow {
         ch_assembly_report_script
     )
     ch_versions = ch_versions.mix(QC_PHASE.out.versions)
+    }
+    else {
+        log.info "[INFO] qc_mode = 'none': skipping QC_PHASE and everything derived from it"
+    }
 
     /*
     ========================================================================================
@@ -1206,7 +1241,10 @@ workflow {
         }
     }
 
-    ch_final_busco = QC_PHASE.out.final_busco
+    ch_final_busco       = QC_PHASE.out.final_busco
+    ch_qc_metrics        = QC_PHASE.out.metrics
+    ch_qc_plots          = QC_PHASE.out.plots
+    ch_qc_report_html    = QC_PHASE.out.report_html
 
     /*
     ========================================================================================
@@ -1224,7 +1262,8 @@ workflow {
         }
         .set { ch_snail_plot_final_input }
 
-    SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
+    // QC-dependent: it joins ch_final_busco_table, which only exists when QC_PHASE ran.
+    if (qc_on) SNAIL_PLOT_FINAL(ch_snail_plot_final_input)
     /*
     ========================================================================================
         COVERAGE BOOK - HiFi coverage visualization for final assemblies
@@ -1252,12 +1291,12 @@ workflow {
         ch_finalized_assembly,
         SNAIL_PLOT_FINAL.out.snail,
         params.run_final_contact_maps ? FINAL_HIC_MAPS.out.contact_maps : Channel.empty(),
-        FINAL_VIZ.out.dotplot,
-        FINAL_VIZ.out.riparian,
-        FINAL_VIZ.out.tidk_plot,
-        QC_PHASE.out.metrics,
-        QC_PHASE.out.plots,
-        QC_PHASE.out.report_html,
+        ch_viz_dotplot,
+        ch_viz_riparian,
+        ch_viz_tidk,
+        ch_qc_metrics,
+        ch_qc_plots,
+        ch_qc_report_html,
         ORGANELLE.out.annotation,
         ORGANELLE.out.stats,
         ORGANELLE.out.circular_map,
