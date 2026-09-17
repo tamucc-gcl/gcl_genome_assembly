@@ -242,6 +242,20 @@ def main():
                 k["final_object"] = obj
                 k["final_cut"] = pos
                 k["lift"] = "round1_via_round2%s" % ("_rev" if orient == "-" else "")
+                if orient == "-":
+                    # SWAP. left/right are recorded in ROUND-1 order, but a reverse-oriented
+                    # component is reverse-complemented into the object, so the round-1 left
+                    # neighbour ends up at the HIGHER final coordinate. Visible in the real
+                    # output: consecutive _rev joins listed h2tg001770l as the left of one and
+                    # the right of the next, which cannot both hold.
+                    #
+                    # This is load-bearing rather than cosmetic: the next step asks which
+                    # reference chromosome lies left versus right of each join, and unswapped
+                    # labels invert that answer for every join inside a reverse component --
+                    # 100+ of them on the Sde-CTlk_104_hap2 candidate alone.
+                    for lo, hi in (("left_cid", "right_cid"), ("left_bp", "right_bp"),
+                                   ("left_orient", "right_orient")):
+                        k[lo], k[hi] = k[hi], k[lo]
                 rows.append(k)
                 n_lift += 1
         sys.stderr.write("[agp_joins] %s: lifted %d round1 joins (%d dropped -- the round-1 "
@@ -283,8 +297,10 @@ def main():
         out.write("#   nearest gap of gap_len in the current assembly. Measured offsets on\n")
         out.write("#   the known candidates: -9 kb, +0 kb, -0 kb.\n")
         out.write("# lift: native = a round-2 join. round1_via_round2 = carried through, and\n")
-        out.write("#   _rev means the round-1 scaffold entered reversed, so the offset was\n")
-        out.write("#   measured from the far end.\n")
+        out.write("#   _rev means the round-1 scaffold entered reversed: the offset was\n")
+        out.write("#   measured from the far end AND left_cid/right_cid were swapped, because\n")
+        out.write("#   reverse-complementing puts the round-1 left neighbour at the higher\n")
+        out.write("#   final coordinate. left_cid is always the lower-coordinate side.\n")
         out.write("\t".join(cols) + "\n")
         for r in sorted(kept, key=lambda x: (x["final_object"], x["final_cut"])):
             r["assembly"] = a.assembly
