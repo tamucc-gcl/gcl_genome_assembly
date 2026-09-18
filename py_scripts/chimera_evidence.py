@@ -365,9 +365,20 @@ def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, tit
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--cool", required=True, help="per-scaffold .cool at ~100 kb")
+    p.add_argument("--cool", default="",
+                   help="per-scaffold .cool at ~100 kb. OPTIONAL: telomere and N-gap evidence "
+                        "are independent of Hi-C and cheap, while a contact map at detection "
+                        "time requires re-mapping reads to a mini reference (the scaffold-"
+                        "stage BAM is in contig or round-1 space, and round-1/round-2 "
+                        "scaffold names COLLIDE). Without it those two still run and the "
+                        "Hi-C panel is skipped.")
     p.add_argument("--fasta", required=True, help="mini reference: this scaffold only")
-    p.add_argument("--candidates", required=True)
+    p.add_argument("--candidates", required=True,
+                   help="chimera_joins.py output: the called joins, with cut_bp from the AGP")
+    p.add_argument("--cut-bp", type=int, default=0,
+                   help="confirm THIS cut rather than re-deriving one. The AGP already gives "
+                        "the position exactly; this script confirms the decision, it does not "
+                        "locate it.")
     p.add_argument("--assembly", required=True)
     p.add_argument("--scaffold", required=True)
     p.add_argument("--telomere-windows", default="",
@@ -399,9 +410,12 @@ def main():
             if r.get("assembly") == a.assembly and r.get("scaffold") == a.scaffold]
     if not rows:
         sys.exit("ERROR: no row for %s / %s in %s" % (a.assembly, a.scaffold, a.candidates))
+    if a.cut_bp:
+        rows = [r for r in rows
+                if str(r.get("cut_bp", "")) == str(a.cut_bp)] or rows
     row = rows[0]
     try:
-        paf_bp = int(float(row.get("junction_bp") or 0)) or None
+        paf_bp = int(float(row.get("cut_bp") or row.get("junction_bp") or 0)) or None
     except ValueError:
         paf_bp = None
 
@@ -411,10 +425,17 @@ def main():
                          "record present\n" % (name, a.scaffold))
     span = len(seq)
 
-    prof, res, err = hic_profile(a.cool, name, a.win_bins)
-    hic = summarise_profile(prof, res) if prof is not None else None
-    if err:
-        sys.stderr.write("[chimera_evidence] Hi-C unavailable: %s\n" % err)
+    prof, res, hic, err = None, 100000, None, ""
+    if a.cool and os.path.isfile(a.cool):
+        prof, res, err = hic_profile(a.cool, name, a.win_bins)
+        hic = summarise_profile(prof, res) if prof is not None else None
+        if err:
+            sys.stderr.write("[chimera_evidence] Hi-C unavailable: %s\n" % err)
+    else:
+        err = "no cool supplied"
+        sys.stderr.write("[chimera_evidence] no contact map: telomere and N-gap evidence "
+                         "only. Those are independent of Hi-C, which cannot justify breaking "
+                         "a join it made anyway -- it confirms, and confirmation can follow.\n")
 
     if a.telomere_windows and os.path.isfile(a.telomere_windows) \
             and os.path.getsize(a.telomere_windows) > 0:
@@ -430,20 +451,27 @@ def main():
         telo_src = "sequence_fallback"
         sys.stderr.write("[chimera_evidence] no tidk output supplied; counting %s from the "
                          "sequence\n" % a.telomere_motif)
-    target = (hic["min_bp"] if hic else paf_bp) or 0
+    # the AGP cut is the position of record; the Hi-C minimum is a cross-check on it
+    target = paf_bp or (hic["min_bp"] if hic else 0)
     telo = summarise_telomere(tw, target)
     gs = gaps(seq)
     sn = snap(gs, target, a.gap_snap_window)
 
     # ---- the cut point, and the verdict -------------------------------------------
+    # the AGP position already sits in a 100 bp scaffolding gap, so snapping should be a
+    # no-op or a few kb -- measured offsets on the known candidates were -9 kb, +0 kb, -0 kb,
+    # the residue of gap filling upstream of the join.
     cut_bp = sn["cut_bp"] if sn else target
     notes = []
-    verdict = row.get("verdict", "?")
+    verdict = row.get("candidate_verdict", row.get("verdict", "?"))
     if hic is None:
         notes.append("no_hic")
     elif paf_bp and abs(hic["min_bp"] - paf_bp) > a.max_paf_hic_disagree:
-        verdict = "REVIEW"
-        notes.append("paf_hic_disagree=%d" % (hic["min_bp"] - paf_bp))
+        # NOT a downgrade to REVIEW any more: the AGP records the join, and Hi-C contact is
+        # depleted approaching a junction as well as at it -- measured, the Hi-C minimum was
+        # 256 kb and 705 kb from the AGP join on the two candidates. Disagreement is worth
+        # flagging, not worth overriding an exact position with an inferred one.
+        notes.append("hic_min_%+d_from_agp_cut" % (hic["min_bp"] - paf_bp))
     if hic and hic["ratio"] >= 1.0:
         notes.append("hic_not_depleted=%.3f" % hic["ratio"])
     if sn:

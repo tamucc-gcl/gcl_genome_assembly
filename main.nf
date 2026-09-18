@@ -170,6 +170,7 @@ include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
 include { BREAK_CHIMERAS } from './modules/break_chimeras.nf'
 include { CHIMERA_JOINS } from './modules/chimera_joins.nf'
+include { CHIMERA_EVIDENCE } from './modules/chimera_evidence.nf'
 include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
@@ -1017,6 +1018,48 @@ workflow {
             ch_cj_script.first() )
         ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
         ch_chimeric_joins = CHIMERA_JOINS.out.called
+
+        // ---- independent confirmation of each called join ----------------------------
+        // Telomere and N-gap evidence, plus a Hi-C cross-contact profile built by
+        // TRANSLATING the published contig-space pairs into scaffold coordinates -- no
+        // re-alignment, and no dependence on a contact map that does not exist yet at this
+        // point in the DAG.
+        //
+        // Runs on a NON-BREAKING run by design: the evidence is what justifies a cut, so it
+        // must exist before one is made. After a break it would look for an interstitial
+        // array on a scaffold that no longer exists.
+        if( params.chimera_evidence != false ) {
+            ch_ce_hic_script = Channel.fromPath("${projectDir}/py_scripts/chimera_hic_pairs.py",
+                                               checkIfExists: true)
+            ch_ce_script     = Channel.fromPath("${projectDir}/py_scripts/chimera_evidence.py",
+                                               checkIfExists: true)
+
+            // the contig-stage pairs: deduplicated UU pairs in contig coordinates
+            ch_contig_pairs = FILTER_HIC_BAM.out.pairs
+                .filter { meta, stage, pairs_gz -> stage == 'contig' }
+                .map    { meta, stage, pairs_gz -> tuple(meta.id, pairs_gz) }
+
+            CHIMERA_EVIDENCE(
+                CHIMERA_JOINS.out.called
+                    .map { taxid, id, called -> tuple(id, taxid, called) }
+                    .join( HARMONIZE_SCAFFOLDS.out.assemblies
+                               .map { meta, fa, nm -> tuple(meta.id, fa) } )
+                    .join( SCAFFOLD_HIC_ROUND1.out.agp.map { meta, agp -> tuple(meta.id, agp) } )
+                    .join( ch_scaffold_round2_agp.map { meta, agp -> tuple(meta.id, agp) },
+                           remainder: true )
+                    .join( ch_contig_pairs, remainder: true )
+                    .filter { id, taxid, called, fa, r1, r2, pairs -> called != null && fa != null }
+                    .map { id, taxid, called, fa, r1, r2, pairs ->
+                        tuple(taxid, id, fa, called, r1,
+                              r2 ?: file('NO_ROUND2'), pairs ?: file('NO_PAIRS')) }
+                    // the motif is per species, so it attaches by key
+                    .combine( ch_telo_by_taxid, by: 0 )
+                    .map { taxid, id, fa, called, r1, r2, pairs, motif ->
+                        tuple(taxid, id, fa, called, r1, r2, pairs, motif) },
+                ch_ce_hic_script.first(),
+                ch_ce_script.first() )
+            ch_versions = ch_versions.mix(CHIMERA_EVIDENCE.out.versions)
+        }
     }
 
     if( params.chimera_break && params.chimera_break.toString() != 'false' ) {
