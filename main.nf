@@ -982,7 +982,14 @@ workflow {
     // inside if/else blocks in a workflow body is not visible after them -- "No such
     // variable: ch_pre_finalize". The same assign-then-override pattern is used for
     // ch_hap_priv and ch_hap_cov in workflows/pangenome.nf.
+    //
+    // The FULL statement: the .mix() carries the short-read-only branch, which has no
+    // harmonization name map. An earlier anchor matched only the first line of this and
+    // inserted the chimera block between the two, orphaning the .mix() -- which Groovy
+    // accepts as a no-op expression, so nothing failed until an output of the never-invoked
+    // BREAK_CHIMERAS was read further down.
     ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
+        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
 
     // ---- which joins are chimeric, and exactly where ---------------------------------
     // Detection runs whenever harmonization did, independently of chimera_break: the
@@ -1083,7 +1090,6 @@ workflow {
         ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
         ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
     }
-        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
 
     ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies
         .map { meta, fa, nm -> nm }
