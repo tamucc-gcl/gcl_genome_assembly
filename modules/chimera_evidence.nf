@@ -50,7 +50,11 @@ process CHIMERA_EVIDENCE {
     publishDir "${params.outdir}/assembly/chimeras/evidence", mode: params.publish_dir_mode
 
     input:
-    tuple val(taxid), val(asm_id), path(assembly_fasta, stageAs: 'asm/*'), path(called_joins),
+    // No stageAs: every output here is ${asm_id}.*.chimera_evidence.*, so the input FASTA
+    // cannot collide with one. (break_chimeras.nf needs it because its output IS a FASTA.)
+    // With `stageAs: 'asm/*'` the .name property already carries the prefix, so prefixing it
+    // again by hand produced a doubled path and samtools faidx failed.
+    tuple val(taxid), val(asm_id), path(assembly_fasta), path(called_joins),
           path(round1_agp), path(round2_agp), path(contig_pairs), val(telomere_motif)
     path(hic_script)
     path(evidence_script)
@@ -109,14 +113,14 @@ process CHIMERA_EVIDENCE {
         echo "  justifies, so their absence weakens nothing about the decision." >&2
     fi
 
-    samtools faidx "asm/${assembly_fasta.name}"
+    samtools faidx ${assembly_fasta}
 
     while read -r SC; do
         [ -n "\$SC" ] || continue
         SAFE=\$(echo "\$SC" | tr '+' '_')
 
         # ---- mini reference: this scaffold alone ----------------------------------
-        samtools faidx "asm/${assembly_fasta.name}" "\$SC" > "\${SAFE}.mini.fa"
+        samtools faidx ${assembly_fasta} "\$SC" > "\${SAFE}.mini.fa"
         if [ ! -s "\${SAFE}.mini.fa" ]; then
             echo "[CHIMERA_EVIDENCE ${asm_id}] WARNING \$SC not in the assembly; skipping" >&2
             continue
