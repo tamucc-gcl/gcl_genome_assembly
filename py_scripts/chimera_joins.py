@@ -309,7 +309,18 @@ def main():
     # them.
     scafs = {r["scaffold"]: r.get("name", r["scaffold"]) for r in cand}
     meta = {r["scaffold"]: r for r in cand}
-    qnames = set(scafs.values())
+    # BOTH namespaces are accepted, because the PAF source decides which appears:
+    #   harmonization's PAFs align the INPUT fastas  -> query `scaffold_1`, target `scaffold_5`
+    #   PAIRWISE_ALIGNMENT aligns FINALIZED assemblies -> query `chr5_1+chr9_1`, target `chr5_1`
+    # The targets were already translated through the reference name map; the QUERIES were
+    # not, so a harmonization PAF matched nothing and every scaffold came back "no assignable
+    # component" -- correctly reported as not tested, but for the wrong reason.
+    qnames = set(scafs.keys()) | set(scafs.values())
+    # and back to the scaffold, whichever name the PAF used
+    q_to_scaf = {}
+    for s, n in scafs.items():
+        q_to_scaf[s] = s
+        q_to_scaf[n] = s
 
     c1 = parse_agp_components(a.round1)
     c2 = parse_agp_components(a.round2) if a.round2 and os.path.isfile(a.round2) else None
@@ -320,6 +331,12 @@ def main():
     sys.stderr.write("[chimera_joins] reference name map: %d scaffolds -> %d consensus "
                      "chromosomes\n" % (len(ref_map), len(set(ref_map.values()))))
     aln = paf_by_query(a.paf, qnames, a.min_block, ref_map)
+    if cand and not aln:
+        sys.exit("ERROR: the PAF has no records for ANY of the %d candidate scaffolds. "
+                 "Tried both namespaces: %s ... and %s ... . The PAF's query names are in a "
+                 "third namespace, or it is the wrong PAF for this assembly. Failing rather "
+                 "than reporting every scaffold as untested."
+                 % (len(scafs), sorted(scafs.keys())[:3], sorted(scafs.values())[:3]))
     joins = [r for r in read_rows(a.joins) if r.get("assembly") == a.assembly]
 
     n_unassigned = 0
@@ -354,15 +371,17 @@ def main():
                 sys.stderr.write("[chimera_joins] %s %s: no components in the AGP\n"
                                  % (a.assembly, scaf))
                 continue
-            rows = assign(comps, aln.get(qname, []), a.component_min_bp, a.component_margin)
+            # the PAF may key on either name; take whichever it used
+            al = aln.get(scaf) or aln.get(qname) or []
+            rows = assign(comps, al, a.component_min_bp, a.component_margin)
             if not any(r["called"] != "." for r in rows):
                 # zero transitions is a legitimate result, so an unassignable scaffold must
                 # not be reported as one -- it would read as "no chimeras found".
                 sys.stderr.write("[chimera_joins] %s %s (%s): WARNING no component could be "
                                  "assigned a chromosome from %d alignment(s). Either the PAF "
-                                 "query name is wrong or every component is below "
+                                 "has no records for %r or %r, or every component is below "
                                  "--component-min-bp.\n"
-                                 % (a.assembly, scaf, qname, len(aln.get(qname, []))))
+                                 % (a.assembly, scaf, qname, len(al), scaf, qname))
                 n_unassigned += 1
                 continue
             tr = transitions(rows)
