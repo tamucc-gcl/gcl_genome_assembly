@@ -62,10 +62,10 @@ process BREAK_CHIMERAS {
                pattern: "*.chimera_break_audit.tsv"
 
     input:
-    // `candidates` is now CHIMERA_JOINS's called-joins table, not harmonization's candidates
-    // file: it carries cut_bp taken from the AGP and ONE ROW PER CHIMERIC JOIN, so a scaffold
-    // with two of them produces three pieces. It also carries candidate_verdict, so auto mode
-    // gates without re-deriving the concordance vote.
+    // stageAs IS required here: the output is ${meta.id}.broken.fasta, so an input named
+    // <id>.teloclip_extended.fasta could otherwise collide with it. But `.name` already
+    // includes the staged prefix -- writing "input/${assembly_fasta.name}" produced
+    // input/input/... Use the path object directly.
     tuple val(meta), path(assembly_fasta, stageAs: 'input/*'), path(name_map), path(candidates)
     path(script)
 
@@ -87,7 +87,7 @@ process BREAK_CHIMERAS {
     # assemblies by construction, the same condition harmonization needs.
     if [ "${name_map.name}" = "NO_HARMONIZE" ] || [ ! -s "${candidates.name}" ]; then
         echo "[BREAK_CHIMERAS ${meta.id}] no name map or no candidates; passing through" >&2
-        cp "input/${assembly_fasta.name}" ${meta.id}.broken.fasta
+        cp ${assembly_fasta} ${meta.id}.broken.fasta
         cp "${name_map.name}" ${meta.id}.broken_name_map.tsv 2>/dev/null \\
             || printf 'old_name\\tnew_name\\torient\\torder\\tlength\\tclass\\tref_span\\tflags\\n' \\
                > ${meta.id}.broken_name_map.tsv
@@ -98,7 +98,7 @@ process BREAK_CHIMERAS {
     fi
 
     python3 ${script} \\
-        --fasta "input/${assembly_fasta.name}" \\
+        --fasta ${assembly_fasta} \\
         --name-map ${name_map} \\
         --candidates ${candidates} \\
         --assembly ${meta.id} \\
@@ -111,7 +111,7 @@ process BREAK_CHIMERAS {
     # SEQUENCE MUST BE CONSERVED. A split moves bases between records; it must never lose or
     # duplicate one. Compared on total non-header characters, because the record count and the
     # names both change by design.
-    IN=\$(grep -v '^>' "input/${assembly_fasta.name}" | tr -d '\\n' | wc -c)
+    IN=\$(grep -v '^>' ${assembly_fasta} | tr -d '\\n' | wc -c)
     OUT=\$(grep -v '^>' ${meta.id}.broken.fasta | tr -d '\\n' | wc -c)
     if [ "\$IN" != "\$OUT" ]; then
         echo "[BREAK_CHIMERAS ${meta.id}] ERROR: sequence not conserved -- \$IN in, \$OUT out." >&2
@@ -142,7 +142,7 @@ process BREAK_CHIMERAS {
 
     stub:
     """
-    cp "input/${assembly_fasta.name}" ${meta.id}.broken.fasta
+    cp ${assembly_fasta} ${meta.id}.broken.fasta
     printf 'old_name\\tnew_name\\torient\\torder\\tlength\\tclass\\tref_span\\tflags\\n' \\
       > ${meta.id}.broken_name_map.tsv
     printf 'metric\\tvalue\\nscaffolds_broken\\t0\\n' > ${meta.id}.chimera_break_audit.tsv
