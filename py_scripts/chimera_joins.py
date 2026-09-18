@@ -243,7 +243,40 @@ def assign(comps, aln, min_bp, margin):
         if top and t0 >= min_bp and (len(top) == 1 or t0 >= margin * t1):
             called = top[0][0]
         rows.append(dict(lo=lo, hi=hi, cid=cid, orient=orient, called=called,
-                         top_bp=t0, second_bp=t1))
+                         top_bp=t0, second_bp=t1, per=per))
+
+    # ---- BLOCK assignment before filling -------------------------------------------
+    # The per-component threshold is right for a repeat-rich contig in the middle of a
+    # chromosome, but wrong for a RUN of small components that collectively carry plenty of
+    # alignment. Sde-CTlk_104_hap2 scaffold_3 begins with scaffold_36: 3.0 Mb of contigs none
+    # of which clears 100 kb alone, but 1,311 kb aligned to a DIFFERENT reference scaffold
+    # than the rest. Filled from its neighbour it read as the same chromosome and its junction
+    # -- an independently Hi-C-supported one, cross-contact 0.534, MORE depleted than the cut
+    # that was found -- disappeared.
+    #
+    # So consecutive unassigned components are pooled and the POOL is tested against the same
+    # threshold. That keeps the per-component guard everywhere it matters and stops a run of
+    # small pieces being absorbed into whatever happens to border it.
+    i = 0
+    while i < len(rows):
+        if rows[i]["called"] != ".":
+            i += 1
+            continue
+        j = i
+        while j < len(rows) and rows[j]["called"] == ".":
+            j += 1
+        blk = rows[i:j]
+        per = {}
+        for r in blk:
+            for ch, bp in (r.get("per") or {}).items():
+                per[ch] = per.get(ch, 0) + bp
+        top = sorted(per.items(), key=lambda x: -x[1])
+        if top and top[0][1] >= min_bp and (len(top) == 1 or top[0][1] >= margin * top[1][1]):
+            for r in blk:
+                r["called"] = top[0][0]
+                r["block_called"] = "%s(%d bp over %d components)" % (top[0][0], top[0][1],
+                                                                     len(blk))
+        i = j
 
     known = [i for i, r in enumerate(rows) if r["called"] != "."]
     for i, r in enumerate(rows):
