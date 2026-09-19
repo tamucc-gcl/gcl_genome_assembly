@@ -12,8 +12,13 @@
     'chr'+<=3 chars, so it misses chr10_1..; we set them explicitly), and runs cactus.
 
     Toil runs single-machine inside the container. The jobstore must not pre-exist and the
-    workDir must be on fast scratch -- both live in the task dir, which this pipeline
-    already places on /scratch (process.scratch), and are discarded after the task.
+    workDir and jobstore both live in the task dir. This label sets scratch = false, so
+    that is on /work rather than node-local /scratch: odgi_squeeze needs >110 GB on top of
+    a job store that reaches 337 GB, and the 447 GB node disk is not enough. Measured
+    twice, both failures at odgi_squeeze with ENOSPC, the second with the node to itself.
+    /work is NFS at ~1.1 GB/s, so the cost falls on the conversion phase; the alignment
+    phase is compute-bound and barely notices. Both directories are removed explicitly at
+    the end of a successful run, since nothing discards the task dir now.
 
     Input : tuple(taxid, ref_name, names, fastas)
     Output: gbz / gfa / vcf / odgi(.og) / full graph dir  + versions
@@ -112,12 +117,12 @@ process CACTUS_PANGENOME {
     fi
     echo "[PANGENOME ${taxid}] reference=${ref_name}; refContigs=\${REFCONTIGS}"
 
-    # ---- run cactus (jobstore must not exist; workDir + jobstore on scratch task dir) ----
+    # ---- run cactus (jobstore must not exist; workDir + jobstore in the task dir) ----
     rm -rf js cactus_work out
     mkdir -p cactus_work out
 
     # Scoring provenance in the graph build's own log. The default derives from HOXD70, which
-    # the cactus docs describe as suited to VERY DIVERGED genomes and warn can produce "long
+    # the cactus docs describe as suited to VERY DIVERGED genomes and warn can produce "long"
     # runs of transitions that really should be gaps" in a pangenome -- and this cohort is ten
     # haplotypes of one species. Which scoring built a given graph is not recoverable from the
     # graph afterwards, so it is recorded here.
