@@ -152,6 +152,7 @@ process CACTUS_PANGENOME {
     # else cactus produced is kept and published (flattened) via the output block above.
     rm -rf out/chrom-subproblems out/chrom-alignments
     rm -f  out/seqfile.txt
+    rm -rf cactus_work js
 
     # UNDER-ALIGNMENT TRIPWIRE. last-train fits its model against the most diverged input, and
     # within-species haplotypes are barely diverged -- so the fitted model can be tight enough

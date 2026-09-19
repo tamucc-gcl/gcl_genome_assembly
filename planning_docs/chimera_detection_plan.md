@@ -133,6 +133,66 @@ assuming its position.**
 | `break_chimeras.py` (reworked) | N cuts -> N+1 pieces, repeated chromosomes named distinctly |
 | `chimera_evidence.py` | written; Hi-C path untested, not wired |
 
+### RUN AND APPLIED
+
+`chimera_break = 'auto'`, one cut per candidate, confirmed by the audits:
+
+| assembly | mode | broke | cuts | pieces |
+|---|---|---|---|---|
+| `Sde-CTlk_104_hap1` | auto | 1 | 1 | 2 |
+| `Sde-CTlk_104_hap2` | auto | 1 | 1 | 2 |
+| the other eight | auto | 0 | 0 | 0 |
+
+And the finalized assembly proves the whole chain landed: `Sde-CTlk_104_hap1` now has
+**separate `chr5_1` and `chr9_1` records** where it previously had one `chr5_1+chr9_1`
+composite. `chr9_1` existing at all in that assembly is what was impossible before.
+
+Evidence at the applied cuts:
+
+| | `hap1` | `hap2` |
+|---|---|---|
+| cut | **37,144,208** | **43,694,648** |
+| gap snap offset | −114 bp | −30 bp |
+| Hi-C ratio at the cut | **0.167** | 0.740 |
+| low windows contiguous | 5 | 2 |
+| interstitial telomere | **12×** background, both orientations | 7× |
+| telomere source | tidk | tidk |
+
+`hap1`'s 0.167 is contact at a sixth of the scaffold median. Both cuts land within 114 bp of a
+real 100 bp scaffolding gap, so neither severs sequence.
+
+### The Hi-C pairs translation, validated on real data
+
+`chimera_hic_pairs.py` on `Sde-CTlk_104_hap2`: 94,610,761 pairs read, 3,365,110 written for
+`scaffold_3`, 1,601,553 re-canonicalised to the upper triangle, and **0 distance mismatches
+across 2,717,813 intra-contig pairs**.
+
+That last number is the validation that mattered. Orientation composition across two AGP
+rounds could not be self-checked statically -- §8 records why -- and 2.7 million pairs
+preserving their distances exactly is a stronger test than any fixture. The 1.6M swaps
+confirm the re-canonicalisation was load-bearing: without it roughly half the contacts would
+have sat on the wrong side of the diagonal, in a matrix that loads without complaint.
+
+### A false alarm worth recording
+
+Midway through, the evidence module flagged a Hi-C minimum at 2.0 Mb on `hap2 scaffold_3` --
+ratio 0.534, MORE depleted than the cut at 0.740 -- and the region aligned to reference
+`scaffold_12` rather than `scaffold_6`. I concluded a second chimeric junction had been
+missed and built a block-assignment fix for it.
+
+Reference `scaffold_12` is **`chr12_1`**. The same chromosome as the rest of that arm, so the
+join at 2,974,101 is chr12→chr12 and `chimera_joins.py` was right with one transition all
+along. I had inferred "different chromosome" from a different reference SCAFFOLD name --
+exactly the reference-piece-versus-consensus-chromosome confusion the translation work in §5
+exists to prevent, made by the person who wrote it.
+
+The block-assignment change is harmless and verified not to create false transitions, so it
+stays: it would genuinely help a fragmented terminal component. It just was not needed here.
+
+**The 2 Mb depletion is still a real finding.** Contact is depleted across a join WITHIN
+chr12, so `scaffold_36 | scaffold_6` looks like a genuine mis-join in order or orientation.
+This arm detects inter-chromosomal fusions by construction and cannot see that class.
+
 ### `chimera_junction()` — SUPERSEDED
 
 The original 1 Mb binning estimator. Replaced by `agp_joins.py` + `chimera_joins.py`, which
@@ -444,6 +504,36 @@ both conditions harmonization already enforces for the concordance vote to exist
 6. **Is the 250 kb `callable` window right?** A transition further than that from any join is
    called contig-internal. Neither real candidate came close to the limit (51 bp and within a
    component boundary), so the threshold is untested against a genuine contig-level chimera.
-7. **`chimera_evidence.py`'s Hi-C path is unexecuted.** No cooler in the authoring
-   environment, so the mini-reference re-mapping, the cool build and the figure have never
-   run. Expect one round of real errors, as with every R script in this project.
+7. ~~`chimera_evidence.py`'s Hi-C path is unexecuted.~~ RESOLVED: ran, and the pairs
+   translation validated on 2.7M pairs. `tidk search` and `cooler cload pairs` both worked as
+   written.
+8. **The `chimera_broken` QC checkpoint does not instantiate.** DEFERRED, chased far enough
+   to scope. Gate and scope verified correct at main.nf line 1282, `run_all_qc` demonstrably
+   true (other stages stage), `BREAK_CHIMERAS` ran 10 tasks, and `chimera_broken` appears
+   ZERO times in the run log.
+
+   Most likely `BREAK_CHIMERAS.out.assemblies` read twice -- once into `ch_pre_finalize` for
+   FINALIZE_ASSEMBLY at 1091, once for the QC stage at 1282 -- with the first consumer
+   exhausting it. Process outputs are normally broadcast, so this needs verifying rather than
+   assuming; if confirmed, the fix is a `multiMap` fork, which is the same remedy the
+   channel-read-twice pattern has needed five times in this project.
+
+   Costs only the before/after contiguity row in the QC table. Everything it would show is
+   already in the break audits, so it does not block. Best diagnosed with
+   `--qc_mode all_stages --run_pangenome false`, where the channel behaviour is visible in
+   minutes.
+9. **The assembly QC report and plots do not mention chimera detection or breaking.**
+   `generate_summary_report.R` / `compile_qc.R` / the assembly report have no section for it,
+   so a reader of the published report cannot tell that two scaffolds were cut, where, or on
+   what evidence. Needs:
+   - a summary table: candidates found, break candidates, cuts applied, per assembly
+   - the per-cut evidence row (cut position, Hi-C ratio, telomere ratio, gap offset)
+   - the per-candidate figure surfaced rather than left in the chimeras directory
+   - the `chimera_broken` contiguity checkpoint once item 8 is fixed, since before/after
+     scaffold N50 is the most legible summary of what a break did
+
+   Scope it with batch 9 (output consolidation): both are about what the report tells a
+   reader, and both are cheap once the outputs stop changing.
+10. **The broken name maps are not published.** `BREAK_CHIMERAS` emits them but `publishDir`
+   has a pattern only for the audit, so the provenance of each renamed piece --
+   `scaffold_1_sub_0_37144208 -> chr5_1` -- lives only in a work directory. One-line fix.
