@@ -117,12 +117,12 @@ process CACTUS_PANGENOME {
     fi
     echo "[PANGENOME ${taxid}] reference=${ref_name}; refContigs=\${REFCONTIGS}"
 
-    # ---- run cactus (jobstore must not exist; workDir + jobstore in the task dir) ----
+    # ---- run cactus (jobstore must not exist; workDir + jobstore on scratch task dir) ----
     rm -rf js cactus_work out
     mkdir -p cactus_work out
 
     # Scoring provenance in the graph build's own log. The default derives from HOXD70, which
-    # the cactus docs describe as suited to VERY DIVERGED genomes and warn can produce "long"
+    # the cactus docs describe as suited to VERY DIVERGED genomes and warn can produce "long
     # runs of transitions that really should be gaps" in a pangenome -- and this cohort is ten
     # haplotypes of one species. Which scoring built a given graph is not recoverable from the
     # graph afterwards, so it is recorded here.
@@ -157,7 +157,6 @@ process CACTUS_PANGENOME {
     # else cactus produced is kept and published (flattened) via the output block above.
     rm -rf out/chrom-subproblems out/chrom-alignments
     rm -f  out/seqfile.txt
-    rm -rf cactus_work js
 
     # UNDER-ALIGNMENT TRIPWIRE. last-train fits its model against the most diverged input, and
     # within-species haplotypes are barely diverged -- so the fitted model can be tight enough
