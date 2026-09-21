@@ -28,6 +28,21 @@ figure: core requires all ten haplotypes, and one has no chr9.
 
 **Nothing else in the pipeline catches this class of error.**
 
+### RESOLVED
+
+| | before | after the break |
+|---|---|---|
+| chr9 in `Sde-CTlk_104#1` | 1,281,066 bp, **1.9%** of median | **69,095,920 bp, 100.8%** |
+| chr9 core (all ten haplotypes) | ~0 | **17,551,310 bp, 14.0%** |
+| chr9 subgraph | 118.7 Mb | 125.4 Mb |
+| `Sde-CTlk_104#1` graph content | 822 Mb, lowest in cohort | **925.2 Mb**, mid-pack |
+| clip graph total | 1,926,884,214 bp | **1,939,208,633 bp** (+12.3 Mb) |
+| `cells_low` | 1 | **0** — every chromosome reads `ok` |
+
+The graph GREW by 12.3 Mb, which is the under-alignment tripwire passing: sequence that could
+not be placed before is now aligned and contributing, rather than the graph shrinking because
+the aligner was given less to work with.
+
 | tool | why it misses it |
 |---|---|
 | cactus | does not break chimeric contigs; assigns each to one chromosome and clips the rest |
@@ -480,6 +495,22 @@ both conditions harmonization already enforces for the concordance vote to exist
     reading the code.
 11. **`str.index()` on a list to find position.** It returns the FIRST occurrence, so with
     duplicate values it silently pointed at the wrong element.
+12. **A COMMENT inside a `script:` block is part of the task hash.** Two comment-only edits to
+    `cactus_pangenome.nf` -- one of them a correction I suggested -- busted the cache and
+    started a 17-hour rebuild of a graph that was already built. The rule was already recorded
+    in this project and I handed over the change without applying it.
+
+    Documentation about a process belongs in the module's HEADER docstring or in the
+    `nextflow.config` label, neither of which hashes. Never touch anything between the `"""`
+    markers of an expensive process for documentation reasons.
+
+    Recovery: diff the module's script block against the cached task's `.command.sh` and
+    remove every literal difference. Interpolations (`${taxid}` and the like) and shell
+    escaping differ legitimately.
+13. **Asserting what a cached task contained instead of reading it.** I claimed the successful
+    cactus run did not include the cleanup line and reasoned a whole trade-off from it. The
+    diff showed the opposite -- it DID have it, and the work directory listing had already
+    said so (no `js`, no `cactus_work`).
 
 ---
 
@@ -494,9 +525,16 @@ both conditions harmonization already enforces for the concordance vote to exist
    Whether it belongs in the cohort is a separate question from chimera breaking.
 3. **`CTlk_104_hap2`'s other two composites** — `chr2_1+chr3_2` and one more — are below the
    span floor. Worth confirming they are fragments rather than under-detected mis-joins.
-4. **After breaking, does chr9 gain core sequence?** The falsifiable prediction: chr9 core
-   goes from ~0, `CTlk_104_hap1` graph content rises from 822 Mb, and the full arm's ≥1 Mb
-   private bin shrinks.
+4. ~~After breaking, does chr9 gain core sequence?~~ **RESOLVED, all three predictions
+   held.** chr9 core ~0 -> 17.55 Mb; `CTlk_104#1` 822 -> 925.2 Mb; and chr9 itself 1.9% ->
+   100.8% of the cohort median. See §0.
+
+   Two residual low fracs on that haplotype -- `chr11` at 0.759 and `chr6` at 0.812 -- carry
+   NO composite flag, so they are not chimeras. Genuine assembly gaps or divergent regions,
+   and a different problem.
+
+   The composite names (`chr5_1+chr9_1`) persist as annotations on the now-correct rows.
+   That is provenance, not a live flag: status `ok`, frac 1.008.
 5. **Should the span floor apply to detection or only to the gate?** Currently only the gate,
    which is why `Sde-CPla_115_hap1`'s 79 joins are reported. That seems right — suppressing
    them at detection would hide a real finding — but it means the output is dominated by rows
@@ -534,6 +572,22 @@ both conditions harmonization already enforces for the concordance vote to exist
 
    Scope it with batch 9 (output consolidation): both are about what the report tells a
    reader, and both are cheap once the outputs stop changing.
-10. **The broken name maps are not published.** `BREAK_CHIMERAS` emits them but `publishDir`
+10. **Node-local scratch is not big enough for two pangenome processes.** `CACTUS_PANGENOME`
+   failed twice at `odgi_squeeze` with ENOSPC on a 447 GB node disk -- the second time with
+   the node entirely to itself, which ruled out the contention theory. The toil job store
+   reaches 337 GB and squeeze needs >110 GB on top of it. `PANGENOME_VARIANTS` then failed
+   the same way: vcfwave decomposes 30.8M block records from a 39 GB VCF into 64 uncompressed
+   chunks.
+
+   Fix: `scratch = false` on both labels, putting the task dir on `/work` (NFS, measured
+   ~1.1 GB/s, `rsize/wsize=32768`). Every OTHER pangenome process runs fine on scratch with
+   the same 112 GB graph -- including `stepindex`, `untangle` and `rearrange`, which was
+   checked rather than assumed.
+
+   Consequence: with `scratch = false` nothing discards the task dir, so `cactus_pangenome.nf`
+   removes `js` and `cactus_work` explicitly at the end of a successful run. Deliberately not
+   added to `pangenome_variants.nf` yet -- it is untested, and a failed run's chunks are worth
+   keeping.
+11. **The broken name maps are not published.** `BREAK_CHIMERAS` emits them but `publishDir`
    has a pattern only for the audit, so the provenance of each renamed piece --
    `scaffold_1_sub_0_37144208 -> chr5_1` -- lives only in a work directory. One-line fix.

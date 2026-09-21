@@ -24,6 +24,7 @@
     Stage keys (must match how the caller tags `staged_assemblies`):
       initial, organelle_filtered, purged, redundans, contig_corrected, contig_decontam,
       scaffold, scaffold_corrected, scaffold_decontam, scaffold_round2, gap_filled,
+      chimera_broken,
       teloclip, final
 ========================================================================================
 */
@@ -42,6 +43,7 @@ include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_DECONTAM  } from './assembly_qc.nf
 include { ASSEMBLY_QC as ASSEMBLY_QC_SCAFFOLD_ROUND2    } from './assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_GAP_FILLED         } from './assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_TELOCLIP           } from './assembly_qc.nf'
+include { ASSEMBLY_QC as ASSEMBLY_QC_CHIMERA_BROKEN     } from './assembly_qc.nf'
 include { ASSEMBLY_QC as ASSEMBLY_QC_FINAL              } from './assembly_qc.nf'
 include { COMPILE_FINAL_QC } from '../modules/compile_final_qc.nf'
 include { ASSEMBLY_REPORT  } from '../modules/assemblyReport.nf'
@@ -74,9 +76,25 @@ workflow QC_PHASE {
             scaffold_round2:    it[1] == 'scaffold_round2'
             gap_filled:         it[1] == 'gap_filled'
             teloclip:           it[1] == 'teloclip'
+            chimera_broken:     it[1] == 'chimera_broken'
             finalstage:         it[1] == 'final'
+            // CATCH-ALL. `branch` silently discards anything matching no selector, which is
+            // exactly how `chimera_broken` was mixed in by main.nf, arrived here, and
+            // vanished without an error through an entire breaking run. A stage added
+            // upstream must not be able to disappear quietly.
+            unrouted:           true
         }
         .set { st }
+
+    st.unrouted
+        .map { m, s, f -> s }
+        .unique()
+        .collect()
+        .subscribe { stages ->
+            log.warn "[QC_PHASE] stage(s) mixed in by the caller but NOT ROUTED here, so no "  +
+                     "QC ran for them: ${stages.join(', ')}. Add a branch selector and an "    +
+                     "ASSEMBLY_QC alias in workflows/qc_phase.nf."
+        }
 
     ch_all_assembly_summaries = Channel.empty()
 
@@ -116,6 +134,10 @@ workflow QC_PHASE {
     ASSEMBLY_QC_TELOCLIP(          st.teloclip.map           { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'teloclip_extended')
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
 
+    // Between teloclip and final: the QC table then shows contiguity immediately before and
+    // immediately after a break, which is the most legible summary of what the cut did.
+    ASSEMBLY_QC_CHIMERA_BROKEN(    st.chimera_broken.map     { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'chimera_broken')
+    ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CHIMERA_BROKEN.out.assembly_summary)
     ASSEMBLY_QC_FINAL(             st.finalstage.map         { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'final')
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
 
