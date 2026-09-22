@@ -168,9 +168,7 @@ include { COVERAGE_BOOK } from './modules/coverage_book.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
-include { BREAK_CHIMERAS } from './modules/break_chimeras.nf'
-include { CHIMERA_JOINS } from './modules/chimera_joins.nf'
-include { CHIMERA_EVIDENCE } from './modules/chimera_evidence.nf'
+include { CHIMERA } from './workflows/chimera.nf'
 include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 
 // ── helper scripts declared as inputs so edits invalidate the cache ──
@@ -973,123 +971,30 @@ workflow {
     // point at which the FASTA is in original coordinates and the composite is one record,
     // and the first at which the concordance vote exists to justify cutting it.
     //
-    // OFF by default. Run 1 writes <species>.chimera_candidates.tsv and cuts nothing; you
-    // review it and pass it back, or set 'auto' to cut what the vote already flagged.
+    // ---- chimeric scaffold detection, confirmation and repair ------------------------
+    // Lifted into workflows/chimera.nf: main.nf exceeded Groovy's 65,535-character
+    // compiled-unit limit. The bodies moved verbatim, so task hashes are unaffected.
     //
-    // When off the process is not instantiated and the original channel flows straight
-    // through -- no pass-through task and no cache churn.
-    // Assigned BEFORE the branch, then overridden inside it. A variable assigned only
-    // inside if/else blocks in a workflow body is not visible after them -- "No such
-    // variable: ch_pre_finalize". The same assign-then-override pattern is used for
-    // ch_hap_priv and ch_hap_cov in workflows/pangenome.nf.
-    //
-    // The FULL statement: the .mix() carries the short-read-only branch, which has no
-    // harmonization name map. An earlier anchor matched only the first line of this and
-    // inserted the chimera block between the two, orphaning the .mix() -- which Groovy
-    // accepts as a no-op expression, so nothing failed until an output of the never-invoked
-    // BREAK_CHIMERAS was read further down.
-    ch_pre_finalize = HARMONIZE_SCAFFOLDS.out.assemblies
-        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
+    // Detection runs whenever harmonization did, independently of chimera_break -- the
+    // candidates and called joins are the evidence a cut is justified by, and they are worth
+    // having on a run that cuts nothing. Breaking is gated separately inside.
+    CHIMERA(
+        HARMONIZE_SCAFFOLDS.out.assemblies,
+        ch_shortread_finished,
+        SCAFFOLD_HIC_ROUND1.out.agp,
+        ch_scaffold_round2_agp,
+        HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id,
+        HARMONIZE_SCAFFOLDS.out.chimera_candidates,
+        HARMONIZE_SCAFFOLDS.out.ref_name_map,
+        FILTER_HIC_BAM.out.pairs,
+        ch_telo_by_taxid )
+    ch_versions = ch_versions.mix(CHIMERA.out.versions)
 
-    // ---- which joins are chimeric, and exactly where ---------------------------------
-    // Detection runs whenever harmonization did, independently of chimera_break: the
-    // candidates and the called joins are the evidence a break is justified by, and they are
-    // worth having even on a run that cuts nothing.
-    ch_chimeric_joins = Channel.empty()
-    if( params.chimera_detect != false ) {
-        ch_agp_script = Channel.fromPath("${projectDir}/py_scripts/agp_joins.py",
-                                        checkIfExists: true)
-        ch_cj_script  = Channel.fromPath("${projectDir}/py_scripts/chimera_joins.py",
-                                        checkIfExists: true)
-
-        // round 2 is conditional, so this join tolerates its absence: without a round-2 AGP
-        // the round-1 objects are final, which agp_joins.py handles natively.
-        ch_r1_agp = SCAFFOLD_HIC_ROUND1.out.agp.map { meta, agp -> tuple(meta.id, agp) }
-        ch_r2_agp = ch_scaffold_round2_agp.map { meta, agp -> tuple(meta.id, agp) }
-
-        CHIMERA_JOINS(
-            ch_r1_agp
-                .join( ch_r2_agp, remainder: true )
-                .join( HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id, remainder: true )
-                .filter { id, r1, r2, paf -> r1 != null }
-                .map { id, r1, r2, paf ->
-                    tuple(id, r1, r2 ?: file('NO_ROUND2'), paf ?: file('NO_PAF')) }
-                // the candidates file and the reference name map are per SPECIES, so they
-                // attach by cartesian product rather than by key
-                .combine( HARMONIZE_SCAFFOLDS.out.chimera_candidates
-                              .map { taxid, f -> tuple(taxid, f) } )
-                .combine( HARMONIZE_SCAFFOLDS.out.ref_name_map.map { taxid, f -> f } )
-                .map { id, r1, r2, paf, taxid, cand, rnm ->
-                    tuple(taxid, id, r1, r2, paf, cand, rnm) },
-            ch_agp_script.first(),
-            ch_cj_script.first() )
-        ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
-        ch_chimeric_joins = CHIMERA_JOINS.out.called
-
-        // ---- independent confirmation of each called join ----------------------------
-        // Telomere and N-gap evidence, plus a Hi-C cross-contact profile built by
-        // TRANSLATING the published contig-space pairs into scaffold coordinates -- no
-        // re-alignment, and no dependence on a contact map that does not exist yet at this
-        // point in the DAG.
-        //
-        // Runs on a NON-BREAKING run by design: the evidence is what justifies a cut, so it
-        // must exist before one is made. After a break it would look for an interstitial
-        // array on a scaffold that no longer exists.
-        if( params.chimera_evidence != false ) {
-            ch_ce_hic_script = Channel.fromPath("${projectDir}/py_scripts/chimera_hic_pairs.py",
-                                               checkIfExists: true)
-            ch_ce_script     = Channel.fromPath("${projectDir}/py_scripts/chimera_evidence.py",
-                                               checkIfExists: true)
-
-            // the contig-stage pairs: deduplicated UU pairs in contig coordinates
-            ch_contig_pairs = FILTER_HIC_BAM.out.pairs
-                .filter { meta, stage, pairs_gz -> stage == 'contig' }
-                .map    { meta, stage, pairs_gz -> tuple(meta.id, pairs_gz) }
-
-            CHIMERA_EVIDENCE(
-                CHIMERA_JOINS.out.called
-                    .map { taxid, id, called -> tuple(id, taxid, called) }
-                    .join( HARMONIZE_SCAFFOLDS.out.assemblies
-                               .map { meta, fa, nm -> tuple(meta.id, fa) } )
-                    .join( SCAFFOLD_HIC_ROUND1.out.agp.map { meta, agp -> tuple(meta.id, agp) } )
-                    .join( ch_scaffold_round2_agp.map { meta, agp -> tuple(meta.id, agp) },
-                           remainder: true )
-                    .join( ch_contig_pairs, remainder: true )
-                    .filter { id, taxid, called, fa, r1, r2, pairs -> called != null && fa != null }
-                    .map { id, taxid, called, fa, r1, r2, pairs ->
-                        tuple(taxid, id, fa, called, r1,
-                              r2 ?: file('NO_ROUND2'), pairs ?: file('NO_PAIRS')) }
-                    // the motif is per species, so it attaches by key
-                    .combine( ch_telo_by_taxid, by: 0 )
-                    .map { taxid, id, fa, called, r1, r2, pairs, motif ->
-                        tuple(taxid, id, fa, called, r1, r2, pairs, motif) },
-                ch_ce_hic_script.first(),
-                ch_ce_script.first() )
-            ch_versions = ch_versions.mix(CHIMERA_EVIDENCE.out.versions)
-        }
-    }
-
-    if( params.chimera_break && params.chimera_break.toString() != 'false' ) {
-        ch_break_script = Channel.fromPath("${projectDir}/py_scripts/break_chimeras.py",
-                                          checkIfExists: true)
-        // 'auto' uses the joins CHIMERA_JOINS just called; a path uses that file, so an
-        // edited copy is how you choose which scaffolds to cut. Either way the input is the
-        // CALLED JOINS table, not the candidates: it carries cut_bp from the AGP and one row
-        // per chimeric join, so a scaffold with N of them yields N+1 pieces.
-        ch_cand = ( params.chimera_break.toString() == 'auto' )
-            ? ch_chimeric_joins.map { taxid, id, f -> f }.collectFile(name: 'called.tsv',
-                                                                      keepHeader: true,
-                                                                      skip: 1)
-            : Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first()
-
-        BREAK_CHIMERAS(
-            HARMONIZE_SCAFFOLDS.out.assemblies
-                .map { meta, fa, nm -> tuple(meta, fa, nm) }
-                .combine( ch_cand ),
-            ch_break_script.first() )
-        ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
-        ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
-    }
+    // ch_pre_finalize is emitted rather than assigned here: its default carries the
+    // short-read-only branch (no harmonization name map), and separating that default from
+    // the BREAK_CHIMERAS override is what previously dropped those assemblies silently.
+    ch_pre_finalize   = CHIMERA.out.pre_finalize
+    ch_chimeric_joins = CHIMERA.out.called
 
     ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies
         .map { meta, fa, nm -> nm }
@@ -1404,41 +1309,11 @@ workflow {
     //  SUMMARY REPORT  (manifest assembly + report -> workflows/reporting.nf)
     // =========================================================================
     // ---- chimera tables for the report ---------------------------------------------
-    // Defaulted to sentinels BEFORE any branch: assigned only inside one, they would not be
-    // visible at the REPORTING call, which is the "No such variable" failure this workflow
-    // body has hit repeatedly.
-    ch_chimera_candidates_rpt = Channel.value(file('NO_CHIMERA_CANDIDATES'))
-    ch_chimera_joins_rpt      = Channel.value(file('NO_CHIMERA_JOINS'))
-    ch_chimera_evidence_rpt   = Channel.value(file('NO_CHIMERA_EVIDENCE'))
-    ch_chimera_figures_rpt    = Channel.value(file('NO_CHIMERA_FIGURES'))
-
-    if (params.chimera_detect != false) {
-        ch_chimera_candidates_rpt = HARMONIZE_SCAFFOLDS.out.chimera_candidates
-            .map { taxid, f -> f }
-            .first()
-        // one table per assembly -> one table for the report. keepHeader because every file
-        // carries the same header row.
-        ch_chimera_joins_rpt = ch_chimeric_joins
-            .map { taxid, id, f -> f }
-            .collectFile(name: 'all_chimeric_joins.tsv', keepHeader: true, skip: 1)
-            .ifEmpty(file('NO_CHIMERA_JOINS'))
-    }
-    if (params.chimera_detect != false && params.chimera_evidence != false) {
-        // each evidence file is ONE cut in metric/value long form, so they go as a list and
-        // the R side widens and stacks them
-        ch_chimera_evidence_rpt = CHIMERA_EVIDENCE.out.evidence
-            .map { taxid, id, files -> files }
-            .flatten()
-            .collect()
-            .ifEmpty([file('NO_CHIMERA_EVIDENCE')])
-        // the figures travel as their own channel: the R side cannot derive them from the
-        // evidence paths, because those stage as bare filenames with no sibling .png present
-        ch_chimera_figures_rpt = CHIMERA_EVIDENCE.out.figures
-            .map { taxid, id, files -> files }
-            .flatten()
-            .collect()
-            .ifEmpty([file('NO_CHIMERA_FIGURES')])
-    }
+    // Built inside CHIMERA, which owns the channels they come from.
+    ch_chimera_candidates_rpt = CHIMERA.out.candidates_for_rpt
+    ch_chimera_joins_rpt      = CHIMERA.out.joins_for_rpt
+    ch_chimera_evidence_rpt   = CHIMERA.out.evidence_for_rpt
+    ch_chimera_figures_rpt    = CHIMERA.out.figures_for_rpt
 
     // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
     if (qc_on && post_on) {
