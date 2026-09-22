@@ -129,14 +129,20 @@ all_assembly_stages <- unique(assembly_qc$qc_label)
 last_assembly_stage <- 'final'
 message(sprintf("  Final assembly stage: %s", last_assembly_stage))
 
+# MUST cover every qc_label QC_PHASE passes, in pipeline order. An absent label is dropped
+# by the filter below -- which is how `scaffold_decontam` was missing from every QC report
+# this pipeline has produced, despite DECONTAMINATE_ASSEMBLY_SCAFFOLD running and being QC'd.
+# The check after the filter now reports anything unrecognised instead of discarding quietly.
 stage_levels <- c('contig', 'contig_organelle_filtered', 'contig_purged',
                   'contig_corrected', 'contig_decontam',
-                  'scaffold', 'scaffold_corrected', 'scaffold_round2',
-                  'gap_filled', 'teloclip_extended', 'final')
+                  'scaffold', 'scaffold_corrected', 'scaffold_decontam', 'scaffold_round2',
+                  'gap_filled', 'teloclip_extended', 'chimera_broken', 'final')
 
 stage_labels <- c('ctg.base', 'ctg.org', 'ctg.purged', 'ctg.cor', 'ctg.deco',
-                  'scaf.base', 'scaf.cor', 'scaf2',
-                  'gap_fill', 'teloclip', 'final')
+                  'scaf.base', 'scaf.cor', 'scaf.deco', 'scaf2',
+                  'gap_fill', 'teloclip', 'chim.brk', 'final')
+
+stopifnot(length(stage_levels) == length(stage_labels))
 
 # --- 3. Process assembly QC ---
 fixed_assembly <- assembly_qc %>%
@@ -147,10 +153,27 @@ fixed_assembly <- assembly_qc %>%
            fct_drop(),
          analysis = case_when(str_detect(analysis, 'merqury') ~ 'merqury',
                               TRUE ~ analysis)) %>%
-  filter(!is.na(stage)) %>%   # Drop any unrecognised qc_labels
+  filter(!is.na(stage)) %>%   # Drop any unrecognised qc_labels -- reported just below
 
   arrange(stage) %>%
   select(-source_file)
+
+# Any qc_label QC_PHASE produced that stage_levels does not cover was just dropped. Report it
+# rather than leaving a stage missing from the report with no indication -- the failure mode
+# that hid `scaffold_decontam` indefinitely.
+.unknown_stages <- setdiff(unique(assembly_qc$qc_label), stage_levels)
+if (length(.unknown_stages) > 0) {
+  warning(sprintf(paste0("compile_qc: %d qc_label(s) are not in stage_levels and were ",
+                         "DROPPED from the report: %s. Add them to stage_levels and ",
+                         "stage_labels in compile_qc.R."),
+                  length(.unknown_stages), paste(.unknown_stages, collapse = ", ")),
+          call. = FALSE, immediate. = TRUE)
+}
+.missing_stages <- setdiff(stage_levels, unique(assembly_qc$qc_label))
+if (length(.missing_stages) > 0) {
+  message(sprintf("  stages in stage_levels with no QC rows this run: %s",
+                  paste(.missing_stages, collapse = ", ")))
+}
 
 # --- Helper: resolve Hi-C checkpoint to assembly stage label ---
 # The factor levels are now the LABELS (ctg.base, ctg.cor, scaf.base, etc.),
