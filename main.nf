@@ -1184,7 +1184,7 @@ workflow {
     if (run_all_qc && params.run_scaffold_round2) ch_staged_assemblies = ch_staged_assemblies.mix( ch_final_scaffolds_round2.map { m, f -> tuple(m, 'scaffold_round2', f) } )
     if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( GAP_FILLING.out.filled_assembly.map { m, f -> tuple(m, 'gap_filled', f) } )
     if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( TELOCLIP_EXTEND.out.extended_assembly.map { m, f -> tuple(m, 'teloclip', f) } )
-    if (run_all_qc && chimera_on) ch_staged_assemblies = ch_staged_assemblies.mix( BREAK_CHIMERAS.out.assemblies.map { m, f, nm -> tuple(m, 'chimera_broken', f) } )
+    if (run_all_qc && chimera_on) ch_staged_assemblies = ch_staged_assemblies.mix( CHIMERA.out.broken.map { m, f, nm -> tuple(m, 'chimera_broken', f) } )
     if (qc_on) ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
 
     // Everything derived from QC_PHASE goes with it: ch_final_busco, ch_final_busco_table,

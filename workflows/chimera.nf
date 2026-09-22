@@ -52,6 +52,10 @@ workflow CHIMERA {
 
     main:
     ch_versions = Channel.empty()
+    // The broken assemblies on their own, separate from pre_finalize (which mixes them with
+    // the untouched and short-read-only ones). main.nf stages THIS as the 'chimera_broken'
+    // QC checkpoint, so contiguity before and after a cut is comparable in the QC table.
+    ch_broken   = Channel.empty()
 
     // OFF by default. Run 1 writes <species>.chimera_candidates.tsv and cuts nothing; you
     // review it and pass it back, or set 'auto' to cut what the vote already flagged.
@@ -168,6 +172,7 @@ workflow CHIMERA {
                 .combine( ch_cand ),
             ch_break_script.first() )
         ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
+        ch_broken       = BREAK_CHIMERAS.out.assemblies
         ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
     }
 
@@ -214,6 +219,7 @@ workflow CHIMERA {
 
     emit:
     pre_finalize        = ch_pre_finalize          // tuple(meta, fasta, name_map)
+    broken              = ch_broken                // ONLY the cut assemblies, for QC_PHASE
     called              = ch_chimeric_joins        // tuple(taxid, id, chimeric_joins.tsv)
     candidates_for_rpt  = ch_chimera_candidates_rpt
     joins_for_rpt       = ch_chimera_joins_rpt
