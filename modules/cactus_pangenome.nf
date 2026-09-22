@@ -67,6 +67,19 @@ process CACTUS_PANGENOME {
     // already includes the .full.og files; these give each flavour its own named channel so
     // consumers stop having to filter on the filename.
     tuple val(taxid), path("out/${taxid}.chroms/*.full.og"), emit: chrom_og_full, optional: true
+    // ---- graph-reference handles (--gref) ---------------------------------------------
+    // ADDITIONAL outputs: the clip graph is untouched, so nothing downstream changes. All
+    // optional, matching this block's convention that a naming assumption must not fail a
+    // multi-hour task.
+    //
+    // The VCF emit is a GLOB because --grefL embeds its value in the filename:
+    // `.gref.vcf.gz` without it, `.gref95.vcf.gz` with 0.95. A fixed name would silently
+    // emit nothing the moment that param is set.
+    tuple val(taxid), path("out/${taxid}.gref.gbz"),        emit: gref_gbz,   optional: true
+    tuple val(taxid), path("out/${taxid}.gref.gfa.gz"),     emit: gref_gfa,   optional: true
+    tuple val(taxid), path("out/${taxid}.gref.hapl"),       emit: gref_hapl,  optional: true
+    tuple val(taxid), path("out/${taxid}.gref*.vcf.gz"),    emit: gref_vcf,   optional: true
+    tuple val(taxid), path("out/${taxid}.gref*.vcf.gz.tbi"), emit: gref_vcf_tbi, optional: true
     // catch-all: keeps + publishes everything cactus produced EXCEPT the construction scratch
     // removed in-script (full graphs, HAL, GAF/PAF, SV graph, raw VCF, stats bundle, ...).
     // '**' so future cactus outputs are retained automatically (general-purpose).
@@ -81,6 +94,17 @@ process CACTUS_PANGENOME {
     // passthrough leaves no record of which run carried it. Named, it appears in the params
     // dump, can be asserted on, and is echoed into this task's log below -- so a graph can
     // always be traced back to the scoring it was built with.
+    // --gref adds .gref.* outputs and leaves the clip graph alone. Source type defaults to
+    // 'clip', the tool author's default and the flavour the rest of this pipeline analyses.
+    def gref  = ( params.pangenome_gref ?: false )
+                  ? "--gref ${params.pangenome_gref_source ?: 'clip'}" : ''
+    // --grefL passes -L to vg deconstruct: cluster traversals whose handle Jaccard
+    // coefficient is >= F. Allele MERGING, not nesting. Off by default so both VCFs
+    // decompose identically and --gref is the only difference between the two arms.
+    def grefl = ( (params.pangenome_gref ?: false) && params.pangenome_grefl )
+                  ? "--grefL ${params.pangenome_grefl}" : ''
+    def grefmin = ( (params.pangenome_gref ?: false) && params.pangenome_gref_min_len )
+                  ? "--minGrefLen ${params.pangenome_gref_min_len}" : ''
     def lasttrain = params.pangenome_cactus_lasttrain ? '--lastTrain' : ''
     // -gpu image runs KegAlign automatically; --gpu 1 pins it to the single requested GPU
     // and --lastzMemory is the recommended cluster safeguard for the alignment jobs.
@@ -117,7 +141,12 @@ process CACTUS_PANGENOME {
     fi
     echo "[PANGENOME ${taxid}] reference=${ref_name}; refContigs=\${REFCONTIGS}"
 
-    # ---- run cactus (jobstore must not exist; workDir + jobstore on scratch task dir) ----
+    # ---- run cactus (jobstore must not exist; workDir + jobstore in the task dir) ----
+    # This label sets scratch = false, so the task dir is on /work: odgi_squeeze needs >110 GB
+    # on top of a job store reaching 337 GB and the 447 GB node disk is not enough. Measured
+    # twice, both failures at odgi_squeeze with ENOSPC, the second with the node to itself.
+    # Both directories are removed explicitly at the end of a successful run, since nothing
+    # discards the task dir now.
     rm -rf js cactus_work out
     mkdir -p cactus_work out
 
@@ -130,6 +159,14 @@ process CACTUS_PANGENOME {
         echo "[PANGENOME ${taxid}] alignment scoring: --lastTrain (trained on these inputs)" >&2
     else
         echo "[PANGENOME ${taxid}] alignment scoring: cactus default (HOXD70-derived)" >&2
+    fi
+    if [ -n "${gref}" ]; then
+        echo "[PANGENOME ${taxid}] graph reference: ${gref} ${grefmin} ${grefl}" >&2
+        echo "  .gref.* outputs are ADDITIONAL; the clip graph is unchanged, so no" >&2
+        echo "  haplotype analysis needs gref_* exclusion. Confirm after the run:" >&2
+        echo "    vg paths -L -x ${taxid}.gbz | sed 's/#.*//' | sort -u   -> ten samples" >&2
+    else
+        echo "[PANGENOME ${taxid}] graph reference: disabled" >&2
     fi
 
     cactus-pangenome \\
@@ -150,6 +187,9 @@ process CACTUS_PANGENOME {
         --maxCores ${task.cpus} \\
         ${gpu} \\
         ${lasttrain} \\
+        ${gref} \\
+        ${grefmin} \\
+        ${grefl} \\
         ${extra}
 
     # ---- cull construction scratch (pre-join per-chromosome intermediates, superseded by
