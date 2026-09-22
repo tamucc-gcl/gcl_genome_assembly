@@ -86,6 +86,7 @@ workflow REPORTING {
     ch_chimera_candidates          //  HARMONIZE_SCAFFOLDS.out.chimera_candidates | NO_*
     ch_chimera_joins               //  concatenated CHIMERA_JOINS.out.called | NO_*
     ch_chimera_evidence            //  CHIMERA_EVIDENCE.out.evidence (list) | NO_*
+    ch_chimera_figures             //  CHIMERA_EVIDENCE.out.figures (list)  | NO_*
     ch_versions                    //  accumulated versions channel (already fully mixed in main)
     ch_summary_report_script       //  file: r_scripts/generate_summary_report.R
 
@@ -325,6 +326,7 @@ workflow REPORTING {
         ch_chimera_candidates,
         ch_chimera_joins,
         ch_chimera_evidence,
+        ch_chimera_figures,
         COLLECT_SOFTWARE_VERSIONS.out.versions,
         ch_summary_report_script
     )

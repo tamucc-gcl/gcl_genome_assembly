@@ -43,6 +43,7 @@ process SUMMARY_REPORT {
     path(chimera_candidates)    // <taxid>.chimera_candidates.tsv or NO_CHIMERA_CANDIDATES
     path(chimera_joins)         // concatenated *.chimeric_joins.tsv or NO_CHIMERA_JOINS
     path(chimera_evidence)      // per-cut *.chimera_evidence.tsv (list) or NO_CHIMERA_EVIDENCE
+    path(chimera_figures)       // per-cut *.chimera_evidence.png (list) or NO_CHIMERA_FIGURES
     path(software_versions)
     path(summary_report_script) // R script to generate the summary report
 
@@ -81,7 +82,8 @@ process SUMMARY_REPORT {
         --name_map ${name_map} \\
         --chimera_candidates ${chimera_candidates} \\
         --chimera_joins ${chimera_joins} \\
-        --chimera_evidence "${chimera_evidence instanceof List ? chimera_evidence.join(',') : chimera_evidence}" \\
+        --chimera_evidence "${chimera_evidence instanceof List ? chimera_evidence.join(',') : chimera_evidence}" \
+        --chimera_figures "${chimera_figures instanceof List ? chimera_figures.join(',') : chimera_figures}" \\
         --versions ${software_versions} \\
         --output assembly_report.md
     """

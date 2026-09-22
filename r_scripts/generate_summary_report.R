@@ -56,6 +56,9 @@ parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Con
 parser$add_argument("--chimera_candidates", default = "NO_CHIMERA_CANDIDATES", help = "<taxid>.chimera_candidates.tsv: composite scaffolds and the cross-haplotype vote (or NO_CHIMERA_CANDIDATES)")
 parser$add_argument("--chimera_joins",      default = "NO_CHIMERA_JOINS",      help = "Collected *.chimeric_joins.tsv: which AGP joins separate two chromosomes (or NO_CHIMERA_JOINS)")
 parser$add_argument("--chimera_evidence",   default = "NO_CHIMERA_EVIDENCE",   help = "Collected *.chimera_evidence.tsv: per-cut Hi-C, telomere and N-gap evidence (or NO_CHIMERA_EVIDENCE)")
+# Passed explicitly rather than derived from the evidence paths: the evidence TSVs stage as
+# bare filenames, so a sibling .png computed from them does not exist in the task directory.
+parser$add_argument("--chimera_figures",    default = "NO_CHIMERA_FIGURES",    help = "Collected *.chimera_evidence.png, one per cut (or NO_CHIMERA_FIGURES)")
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
 parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pangenome report fragment markdown (or NO_PANGENOME)")
@@ -63,10 +66,6 @@ parser$add_argument("--name_map", default = "NO_NAMEMAP", help = "Harmonization 
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
-
-has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
-                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
-
 # =====================================================================================
 #  Section numbering registry
 # =====================================================================================
@@ -131,6 +130,8 @@ sec_ref <- function(key) {
   else sprintf("[section %d](#%d-%s)", n, n, .sec_slug(.sec_title[[key]]))
 }
 
+has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
+                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
 # =============================================================================
 # Helpers
@@ -1616,8 +1617,18 @@ if (has_chimera && has_chimera_data) {
                   "contact across it is corroboration, not independent proof."), "")
 
     # ---- 7c: the figures ----
-    figs <- str_replace(chim_evid$.evidence_file, "\\.tsv$", ".png")
-    figs <- figs[file.exists(figs)]
+    # From the explicit argument. Deriving them from the evidence paths does not work: those
+    # stage as bare filenames and their .png siblings are not in the task directory, so
+    # file.exists() was silently false and the subsection never appeared.
+    figs <- character()
+    if (!str_detect(basename(args$chimera_figures), "NO_CHIMERA_FIGURES")) {
+      figs <- if (dir.exists(args$chimera_figures)) {
+        list.files(args$chimera_figures, pattern = "\\.png$", full.names = TRUE)
+      } else {
+        Filter(nzchar, str_split(args$chimera_figures, "[,[:space:]]+")[[1]])
+      }
+      figs <- figs[file.exists(figs) & file.size(figs) > 0]
+    }
     if (length(figs) > 0) {
       md <- c(md, sprintf("### %d%s. Per-Cut Evidence Figures", sec_n("chimera"), "c"), "")
       for (f in figs) {

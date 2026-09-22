@@ -125,6 +125,29 @@ def hic_profile(cool_path, scaffold, win_bins=20):
     return prof, res, ""
 
 
+def ratio_at(prof, res, pos):
+    """Cross-contact at a GIVEN position, relative to the scaffold median.
+
+    Reported alongside the minimum because they are not the same thing and conflating them
+    misreports the cut. On Sde-CTlk_104_hap2 the scaffold minimum is 0.534 at 2.0 Mb -- a
+    same-chromosome join inside chr12 -- while contact at the actual cut (43,694,648) is
+    0.740. The report table pairs a cut position with its ratio, so that ratio has to be
+    measured at the cut.
+    """
+    if prof is None or not len(prof):
+        return None
+    ok = np.isfinite(prof)
+    if not ok.any():
+        return None
+    med = float(np.nanmedian(prof[ok]))
+    b = int(round(pos / float(res)))
+    if b < 0 or b >= len(prof) or not np.isfinite(prof[b]):
+        return {"bin": b, "value": float("nan"), "median": med, "ratio": float("nan"),
+                "note": "position outside the full-window range"}
+    return {"bin": b, "value": float(prof[b]), "median": med,
+            "ratio": (float(prof[b]) / med) if med else float("nan"), "note": ""}
+
+
 def summarise_profile(prof, res, n_low=5):
     """Minimum position, its ratio to the median, and how many of the n_low lowest windows
     are CONTIGUOUS with the minimum.
@@ -481,12 +504,24 @@ def main():
     if telo and telo["both_orientations"] and telo["junction_over_background"] >= 3:
         notes.append("interstitial_telomere=%dx" % round(telo["junction_over_background"]))
 
+    # contact at the CHOSEN CUT, which is what the report's per-cut row needs
+    hic_cut = ratio_at(prof, res, cut_bp) if prof is not None else None
+    if hic_cut and np.isfinite(hic_cut["ratio"]):
+        if hic and abs(hic_cut["ratio"] - hic["ratio"]) > 0.05:
+            notes.append("hic_at_cut=%.3f_vs_min=%.3f" % (hic_cut["ratio"], hic["ratio"]))
+        if hic_cut["ratio"] >= 1.0:
+            notes.append("hic_at_cut_not_depleted=%.3f" % hic_cut["ratio"])
+
     with open(op(".chimera_evidence.tsv"), "w") as out:
         out.write("# Independent evidence for one candidate. The concordance vote in the\n")
         out.write("#   candidates file remains the GATE -- it is the only signal independent\n")
         out.write("#   of how this scaffold was built. Hi-C made the join, so it is used here\n")
         out.write("#   to LOCATE the junction, not to justify breaking it.\n")
-        out.write("# hic_ratio < 1 means contact ACROSS the junction is below the scaffold\n")
+        out.write("# hic_ratio is measured AT THE CUT; hic_min_ratio is the scaffold-wide\n")
+        out.write("#   minimum, which can be elsewhere. On one candidate here the minimum is\n")
+        out.write("#   0.534 at a SAME-chromosome join 41 Mb away while the cut itself is\n")
+        out.write("#   0.740, so the two must not be conflated in a per-cut table.\n")
+        out.write("# Either below 1 means contact across that position is under the scaffold\n")
         out.write("#   median at matched distance -- the data never supported the join.\n")
         out.write("# hic_n_low_contiguous is the discriminating statistic: five consecutive\n")
         out.write("#   low windows is a boundary, one isolated low window is noise.\n")
@@ -501,8 +536,18 @@ def main():
             out.write("%s\t%s\n" % (k, v))
         if hic:
             out.write("hic_resolution_bp\t%d\n" % res)
-            for k in ("min_bp", "min_value", "median", "ratio", "n_low_contiguous"):
-                out.write("hic_%s\t%s\n" % (k, hic[k]))
+            # hic_ratio is measured AT THE CUT. hic_min_ratio is the scaffold minimum, which
+            # may sit elsewhere entirely -- reporting the minimum as "the" ratio pairs a cut
+            # position with a measurement taken somewhere else.
+            if hic_cut:
+                out.write("hic_ratio\t%s\n" % hic_cut["ratio"])
+                out.write("hic_value_at_cut\t%s\n" % hic_cut["value"])
+                if hic_cut["note"]:
+                    out.write("hic_at_cut_note\t%s\n" % hic_cut["note"])
+            for k, lab in (("min_bp", "min_bp"), ("min_value", "min_value"),
+                           ("median", "median"), ("ratio", "min_ratio"),
+                           ("n_low_contiguous", "n_low_contiguous")):
+                out.write("hic_%s\t%s\n" % (lab, hic[k]))
             out.write("hic_low_windows_bp\t%s\n"
                       % ",".join(str(x) for x in hic["low_bp"]))
         else:

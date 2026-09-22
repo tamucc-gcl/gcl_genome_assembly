@@ -1410,6 +1410,7 @@ workflow {
     ch_chimera_candidates_rpt = Channel.value(file('NO_CHIMERA_CANDIDATES'))
     ch_chimera_joins_rpt      = Channel.value(file('NO_CHIMERA_JOINS'))
     ch_chimera_evidence_rpt   = Channel.value(file('NO_CHIMERA_EVIDENCE'))
+    ch_chimera_figures_rpt    = Channel.value(file('NO_CHIMERA_FIGURES'))
 
     if (params.chimera_detect != false) {
         ch_chimera_candidates_rpt = HARMONIZE_SCAFFOLDS.out.chimera_candidates
@@ -1430,6 +1431,13 @@ workflow {
             .flatten()
             .collect()
             .ifEmpty([file('NO_CHIMERA_EVIDENCE')])
+        // the figures travel as their own channel: the R side cannot derive them from the
+        // evidence paths, because those stage as bare filenames with no sibling .png present
+        ch_chimera_figures_rpt = CHIMERA_EVIDENCE.out.figures
+            .map { taxid, id, files -> files }
+            .flatten()
+            .collect()
+            .ifEmpty([file('NO_CHIMERA_FIGURES')])
     }
 
     // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
@@ -1460,6 +1468,7 @@ workflow {
         ch_chimera_candidates_rpt,
         ch_chimera_joins_rpt,
         ch_chimera_evidence_rpt,
+        ch_chimera_figures_rpt,
         ch_versions,
         ch_summary_report_script
     )
