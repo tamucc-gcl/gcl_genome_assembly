@@ -63,6 +63,10 @@ parser$add_argument("--name_map", default = "NO_NAMEMAP", help = "Harmonization 
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
+
+has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
+                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
+
 # =====================================================================================
 #  Section numbering registry
 # =====================================================================================
@@ -127,8 +131,6 @@ sec_ref <- function(key) {
   else sprintf("[section %d](#%d-%s)", n, n, .sec_slug(.sec_title[[key]]))
 }
 
-has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
-                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
 # =============================================================================
 # Helpers
