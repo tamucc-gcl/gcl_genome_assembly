@@ -1403,6 +1403,35 @@ workflow {
     // =========================================================================
     //  SUMMARY REPORT  (manifest assembly + report -> workflows/reporting.nf)
     // =========================================================================
+    // ---- chimera tables for the report ---------------------------------------------
+    // Defaulted to sentinels BEFORE any branch: assigned only inside one, they would not be
+    // visible at the REPORTING call, which is the "No such variable" failure this workflow
+    // body has hit repeatedly.
+    ch_chimera_candidates_rpt = Channel.value(file('NO_CHIMERA_CANDIDATES'))
+    ch_chimera_joins_rpt      = Channel.value(file('NO_CHIMERA_JOINS'))
+    ch_chimera_evidence_rpt   = Channel.value(file('NO_CHIMERA_EVIDENCE'))
+
+    if (params.chimera_detect != false) {
+        ch_chimera_candidates_rpt = HARMONIZE_SCAFFOLDS.out.chimera_candidates
+            .map { taxid, f -> f }
+            .first()
+        // one table per assembly -> one table for the report. keepHeader because every file
+        // carries the same header row.
+        ch_chimera_joins_rpt = ch_chimeric_joins
+            .map { taxid, id, f -> f }
+            .collectFile(name: 'all_chimeric_joins.tsv', keepHeader: true, skip: 1)
+            .ifEmpty(file('NO_CHIMERA_JOINS'))
+    }
+    if (params.chimera_detect != false && params.chimera_evidence != false) {
+        // each evidence file is ONE cut in metric/value long form, so they go as a list and
+        // the R side widens and stacks them
+        ch_chimera_evidence_rpt = CHIMERA_EVIDENCE.out.evidence
+            .map { taxid, id, files -> files }
+            .flatten()
+            .collect()
+            .ifEmpty([file('NO_CHIMERA_EVIDENCE')])
+    }
+
     // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
     if (qc_on && post_on) {
     REPORTING(
@@ -1428,6 +1457,9 @@ workflow {
         ch_teloclip_stats_for_report,
         ch_pangenome_report_for_report,
         ch_name_map_for_report,
+        ch_chimera_candidates_rpt,
+        ch_chimera_joins_rpt,
+        ch_chimera_evidence_rpt,
         ch_versions,
         ch_summary_report_script
     )

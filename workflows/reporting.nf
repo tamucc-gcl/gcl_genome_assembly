@@ -83,6 +83,9 @@ workflow REPORTING {
     ch_teloclip_stats_for_report   //  COLLECT_TELOCLIP_STATS.out.stats | NO_TELOCLIP
     ch_pangenome_report            //  PANGENOME.out.report | NO_PANGENOME
     ch_name_map                    //  COLLECT_NAME_MAPS.out.map | NO_NAMEMAP
+    ch_chimera_candidates          //  HARMONIZE_SCAFFOLDS.out.chimera_candidates | NO_*
+    ch_chimera_joins               //  concatenated CHIMERA_JOINS.out.called | NO_*
+    ch_chimera_evidence            //  CHIMERA_EVIDENCE.out.evidence (list) | NO_*
     ch_versions                    //  accumulated versions channel (already fully mixed in main)
     ch_summary_report_script       //  file: r_scripts/generate_summary_report.R
 
@@ -319,6 +322,9 @@ workflow REPORTING {
         ch_run_info_tsv,
         ch_pangenome_report,
         ch_name_map,
+        ch_chimera_candidates,
+        ch_chimera_joins,
+        ch_chimera_evidence,
         COLLECT_SOFTWARE_VERSIONS.out.versions,
         ch_summary_report_script
     )
