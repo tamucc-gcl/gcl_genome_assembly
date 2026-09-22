@@ -276,6 +276,10 @@ trans_cis_plot <- full_qc_data %>%
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
         axis.text = element_text(size = 8),
+        # Thirteen stages do not fit horizontally -- the labels collide into an unreadable
+        # run of overlapping text. hjust = 1 / vjust = 1 anchors each label's right end under
+        # its tick so the rotation reads correctly.
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
         legend.key = element_blank())
@@ -309,6 +313,10 @@ contigs_plot <- full_qc_data %>%
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
         axis.text = element_text(size = 8),
+        # Thirteen stages do not fit horizontally -- the labels collide into an unreadable
+        # run of overlapping text. hjust = 1 / vjust = 1 anchors each label's right end under
+        # its tick so the rotation reads correctly.
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
         legend.key = element_blank(),
@@ -343,6 +351,10 @@ size_plot <- full_qc_data %>%
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
         axis.text = element_text(size = 8),
+        # Thirteen stages do not fit horizontally -- the labels collide into an unreadable
+        # run of overlapping text. hjust = 1 / vjust = 1 anchors each label's right end under
+        # its tick so the rotation reads correctly.
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
         legend.key = element_blank(),
@@ -377,6 +389,10 @@ misc_quast_plots <- full_qc_data %>%
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
         axis.text = element_text(size = 8),
+        # Thirteen stages do not fit horizontally -- the labels collide into an unreadable
+        # run of overlapping text. hjust = 1 / vjust = 1 anchors each label's right end under
+        # its tick so the rotation reads correctly.
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
         legend.key = element_blank(),
@@ -416,6 +432,10 @@ busco_plot <- full_qc_data %>%
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
         axis.text = element_text(size = 8),
+        # Thirteen stages do not fit horizontally -- the labels collide into an unreadable
+        # run of overlapping text. hjust = 1 / vjust = 1 anchors each label's right end under
+        # its tick so the rotation reads correctly.
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
         legend.key = element_blank(),
@@ -447,6 +467,10 @@ kmer_plot <- full_qc_data %>%
   theme_classic() +
   theme(panel.background = element_rect(colour = 'black', fill = NA),
         axis.text = element_text(size = 8),
+        # Thirteen stages do not fit horizontally -- the labels collide into an unreadable
+        # run of overlapping text. hjust = 1 / vjust = 1 anchors each label's right end under
+        # its tick so the rotation reads correctly.
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1, size = 8),
         axis.title = element_text(size = 12, face = "bold"),
         plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
         legend.key = element_blank(),

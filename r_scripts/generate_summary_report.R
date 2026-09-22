@@ -51,6 +51,11 @@ parser$add_argument("--flag_largest_upper", default = 1.5, type = "double", help
 parser$add_argument("--flag_cohort_mad", default = 3, type = "double", help = "Status flag: warn if log10(auN pieces) exceeds the (taxid, tier) cohort median by this many MADs; needs >= 4 samples in the group (0 = off)")
 parser$add_argument("--expected_chrom_count", default = 0, type = "double", help = "Expected chromosome count for the contiguity gate; 0 = derive from the harmonization name map")
 parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Configured BUSCO fallback lineage (params.busco_lineage), for provenance flagging")
+# Chimeric scaffold detection. All optional, NO_* sentinels per this file's convention, so
+# the report builds unchanged on a run with chimera_detect off.
+parser$add_argument("--chimera_candidates", default = "NO_CHIMERA_CANDIDATES", help = "<taxid>.chimera_candidates.tsv: composite scaffolds and the cross-haplotype vote (or NO_CHIMERA_CANDIDATES)")
+parser$add_argument("--chimera_joins",      default = "NO_CHIMERA_JOINS",      help = "Collected *.chimeric_joins.tsv: which AGP joins separate two chromosomes (or NO_CHIMERA_JOINS)")
+parser$add_argument("--chimera_evidence",   default = "NO_CHIMERA_EVIDENCE",   help = "Collected *.chimera_evidence.tsv: per-cut Hi-C, telomere and N-gap evidence (or NO_CHIMERA_EVIDENCE)")
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
 parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pangenome report fragment markdown (or NO_PANGENOME)")
@@ -58,6 +63,70 @@ parser$add_argument("--name_map", default = "NO_NAMEMAP", help = "Harmonization 
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
 args <- parser$parse_args()
+# =====================================================================================
+#  Section numbering registry
+# =====================================================================================
+# Numbers are COMPUTED from which sections are present, never written by hand. Before this,
+# eleven sites carried a literal number and two of them were already conditional on
+# has_pangenome -- so inserting an optional section meant editing every downstream number in
+# both the headings and the table of contents, with a branch per combination. It also meant
+# the ToC could disagree with the body: it listed "7. Pairwise Alignment Summary"
+# unconditionally while the section itself was guarded, leaving a dead entry on any run
+# without pairwise alignments.
+#
+# To add a section: one line here, then use sec_head() / sec_toc() where it is emitted.
+# Chimeric scaffold detection ran if it produced either a candidates table or a called-joins
+# table. Computed here, before the registry, because the registry needs it to number sections.
+has_chimera <- any(vapply(c(args$chimera_candidates, args$chimera_joins), function(p) {
+  !grepl("^NO_", basename(p)) && file.exists(p) && file.size(p) > 0
+}, logical(1)))
+
+has_pairwise <- !grepl("NO_PAIRWISE", basename(args$pairwise_summary)) &&
+                file.exists(args$pairwise_summary) &&
+                file.size(args$pairwise_summary) > 0
+
+sec_defs <- list(
+  list(key = "assemblies", title = "Final Genome Assemblies",             present = TRUE),
+  list(key = "qc",         title = "Assembly QC Summary",                 present = TRUE),
+  list(key = "visual",     title = "Visual Summary",                      present = TRUE),
+  list(key = "stages",     title = "Assembly QC Across Pipeline Stages",  present = TRUE),
+  list(key = "mito",       title = "Mitochondrial Genome",                present = TRUE),
+  list(key = "telomere",   title = "Telomere Detection",                  present = TRUE),
+  list(key = "chimera",    title = "Chimeric Scaffold Detection",        present = has_chimera),
+  list(key = "pairwise",   title = "Pairwise Alignment Summary",          present = has_pairwise),
+  list(key = "pangenome",  title = "Pangenome",                           present = has_pangenome),
+  list(key = "methods",    title = "Methods and Citations",               present = TRUE)
+)
+
+.sec_present <- Filter(function(s) isTRUE(s$present), sec_defs)
+.sec_num     <- setNames(as.list(seq_along(.sec_present)),
+                         vapply(.sec_present, function(s) s$key, character(1)))
+.sec_title   <- setNames(as.list(vapply(.sec_present, function(s) s$title, character(1))),
+                         vapply(.sec_present, function(s) s$key, character(1)))
+
+# A key that is absent returns NA rather than erroring, so a guarded section that asks for its
+# own number while switched off degrades quietly instead of aborting the whole report.
+sec_n <- function(key) if (is.null(.sec_num[[key]])) NA_integer_ else .sec_num[[key]]
+
+# GitHub-style anchor: lowercase, non-alphanumerics to hyphens. Derived from the title so a
+# heading and its link cannot drift apart.
+.sec_slug <- function(title) gsub("(^-|-$)", "", gsub("[^a-z0-9]+", "-", tolower(title)))
+
+sec_head <- function(key) {
+  n <- sec_n(key)
+  if (is.na(n)) "" else sprintf("## %d. %s", n, .sec_title[[key]])
+}
+sec_toc <- function(key) {
+  n <- sec_n(key)
+  if (is.na(n)) NULL
+  else sprintf("%d. [%s](#%d-%s)", n, .sec_title[[key]], n, .sec_slug(.sec_title[[key]]))
+}
+sec_ref <- function(key) {
+  n <- sec_n(key)
+  if (is.na(n)) "an earlier section"
+  else sprintf("[section %d](#%d-%s)", n, n, .sec_slug(.sec_title[[key]]))
+}
+
 has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
                  file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
@@ -180,10 +249,17 @@ if (!is.null(ri) && nrow(ri) > 0) {
 
 stages_line <- character()
 if (!is.null(qc_data) && nrow(qc_data) > 0 && "stage" %in% names(qc_data)) {
-  ord <- c("ctg.base","ctg.mito","ctg.purged","ctg.cor","ctg.deco",
-           "scaf.r1","scaf.r2","gap_fill","teloclip","final")
-  st  <- unique(qc_data$stage)
-  st  <- c(intersect(ord, st), sort(setdiff(st, ord)))
+  # Order comes from the FACTOR LEVELS compile_qc.R already set to pipeline order -- not from
+  # a list maintained here. The previous hardcoded `ord` still named ctg.mito, scaf.r1 and
+  # scaf.r2, labels that no longer exist, so every stage missing from it fell through to
+  # sort(setdiff(...)) and was appended alphabetically: `final -> chim.brk -> ctg.org ->
+  # scaf.base`. The plots were right because they use these same levels; only this line was
+  # wrong, because it kept its own copy.
+  st <- if (is.factor(qc_data$stage)) {
+    intersect(levels(qc_data$stage), as.character(unique(qc_data$stage)))
+  } else {
+    unique(as.character(qc_data$stage))
+  }
   if (length(st) > 0) stages_line <- sprintf("- **QC stages present:** %s", paste(st, collapse = " → "))
 }
 
@@ -204,16 +280,9 @@ md <- c(md,
         "",
         "## Table of Contents",
         "",
-        "1. [Final Genome Assemblies](#1-final-genome-assemblies)",
-        "2. [Assembly QC Summary](#2-assembly-qc-summary)",
-        "3. [Visual Summary](#3-visual-summary)",
-        "4. [Assembly QC Across Pipeline Stages](#4-assembly-qc-across-pipeline-stages)",
-        "5. [Mitochondrial Genome](#5-mitochondrial-genome)",
-        "6. [Telomere Detection](#6-telomere-detection)",
-        "7. [Pairwise Alignment Summary](#7-pairwise-alignment-summary)",
-        if (has_pangenome) "8. [Pangenome](#8-pangenome)" else NULL,
-        if (has_pangenome) "9. [Methods and Citations](#9-methods-and-citations)"
-                      else "8. [Methods and Citations](#8-methods-and-citations)",
+        # one entry per PRESENT section, numbered by the registry -- absent ones return
+        # NULL and drop out, so the ToC can no longer list a section the body omits
+        unlist(lapply(vapply(sec_defs, function(s) s$key, character(1)), sec_toc)),
         "",
         "---",
         ""
@@ -223,7 +292,7 @@ md <- c(md,
 # Section 1: Final Genome Assemblies + key resource links
 # =============================================================================
 md <- c(md,
-        "## 1. Final Genome Assemblies",
+        sec_head("assemblies"),
         "",
         "Final gap-filled, chromosome-level assemblies produced by the [gcl_genome_assembly](https://github.com/tamucc-gcl/gcl_genome_assembly) pipeline.",
         ""
@@ -316,7 +385,7 @@ if (!is.null(tax_tbl) || !is.null(size_tbl) || !is.null(gs_tbl)) {
 # =============================================================================
 # Section 2: Assembly QC Summary — per-haplotype, not averaged
 # =============================================================================
-md <- c(md, "## 2. Assembly QC Summary", "")
+md <- c(md, sec_head("qc"), "")
 
 if (!is.null(qc_data) && nrow(qc_data) > 0) {
   
@@ -885,7 +954,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
 # Section 3: Visual Summary — per-sample table with hap1/hap2 columns
 # =============================================================================
 md <- c(md,
-        "## 3. Visual Summary",
+        sec_head("visual"),
         "",
         "Each row shows one sample with snail plots, contact maps, the within-sample",
         "haplotype-vs-haplotype dotplot, and riparian (ribbon) synteny plot.",
@@ -1064,7 +1133,7 @@ n_stages <- if (!is.null(qc_data) && nrow(qc_data) > 0 && "stage" %in% names(qc_
               n_distinct(qc_data$stage) else 0L
 
 if (!is.null(qc_data) && nrow(qc_data) > 0) {
-  md <- c(md, "## 4. Assembly QC Across Pipeline Stages", "")
+  md <- c(md, sec_head("stages"), "")
 
   if (n_stages > 1) {
     plot_lines <- character()
@@ -1149,7 +1218,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       paste("*Only the final QC stage is present, so per-stage trend plots and",
             "cross-stage comparisons aren't shown — they populate automatically once",
             "earlier stages are recorded (purge_dups, scaffolding, gap-filling, etc.).",
-            "Full final-assembly metrics are in [section 2](#2-assembly-qc-summary).*"),
+            sprintf("Full final-assembly metrics are in %s.*", sec_ref("qc"))),
       "")
   }
 }
@@ -1161,7 +1230,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
 # into a single HTML table with one row per sample.
 # =============================================================================
 
-md <- c(md, "## 5. Mitochondrial Genome", "")
+md <- c(md, sec_head("mito"), "")
 
 mito_stats <- NULL
 if (!grepl("NO_MITO_STATS", args$mito_stats, fixed = TRUE) &&
@@ -1240,7 +1309,7 @@ if (is.null(mito_stats) || nrow(mito_stats) == 0) {
 #   c) tidk density SVG plots per haplotype (from manifest)
 # =============================================================================
 
-md <- c(md, "## 6. Telomere Detection", "")
+md <- c(md, sec_head("telomere"), "")
 
 # ---- 6a: Teloclip extension summary ----
 teloclip_path <- args$teloclip_stats
@@ -1445,13 +1514,135 @@ if (has_telo) {
 # =============================================================================
 # Section 7: Pairwise Alignment Summary (collapsible)
 # =============================================================================
+# =====================================================================================
+#  7. Chimeric Scaffold Detection
+# =====================================================================================
+# A scaffold spanning two reference chromosomes is a scaffolding error: Hi-C proximity joined
+# sequence from two chromosomes into one scaffold. It matters beyond contiguity because
+# downstream pangenome construction assigns each contig to a SINGLE chromosome, so the smaller
+# arm is silently absent from every graph.
+read_tsv_safe <- function(p, sentinel) {
+  if (str_detect(basename(p), sentinel) || !file.exists(p) || file.size(p) == 0)
+    return(NULL)
+  out <- try(suppressWarnings(read_tsv(p, comment = "#", show_col_types = FALSE,
+                                       progress = FALSE)), silent = TRUE)
+  if (inherits(out, "try-error") || nrow(out) == 0) NULL else out
+}
+
+chim_cand <- read_tsv_safe(args$chimera_candidates, "NO_CHIMERA_CANDIDATES")
+chim_join <- read_tsv_safe(args$chimera_joins,      "NO_CHIMERA_JOINS")
+chim_evid <- NULL
+if (!str_detect(basename(args$chimera_evidence), "NO_CHIMERA_EVIDENCE")) {
+  ev_files <- if (dir.exists(args$chimera_evidence)) {
+    list.files(args$chimera_evidence, pattern = "\\.chimera_evidence\\.tsv$", full.names = TRUE)
+  } else {
+    Filter(file.exists, str_split(args$chimera_evidence, "[,[:space:]]+")[[1]])
+  }
+  ev_files <- ev_files[file.exists(ev_files) & file.size(ev_files) > 0]
+  if (length(ev_files) > 0) {
+    # each evidence file is metric/value long-form for ONE cut; widen and stack
+    chim_evid <- bind_rows(lapply(ev_files, function(f) {
+      d <- try(suppressWarnings(read_tsv(f, comment = "#", show_col_types = FALSE,
+                                         progress = FALSE)), silent = TRUE)
+      if (inherits(d, "try-error") || !all(c("metric", "value") %in% names(d))) return(NULL)
+      w <- as_tibble(setNames(as.list(d$value), d$metric))
+      w$.evidence_file <- f
+      w
+    }))
+  }
+}
+# has_chimera was computed with the registry; only proceed if the data parsed
+has_chimera_data <- !is.null(chim_cand) || !is.null(chim_join)
+
+if (has_chimera && has_chimera_data) {
+  md <- c(md, sec_head("chimera"), "")
+  md <- c(md,
+    paste("A scaffold spanning two reference chromosomes is a scaffolding error, not biology:",
+          "Hi-C proximity joined sequence from two different chromosomes. It matters beyond",
+          "contiguity because pangenome construction assigns each contig to a single",
+          "chromosome, so the smaller arm is absent from the graph entirely."), "")
+
+  # ---- 7a: what was found, per assembly ----
+  if (!is.null(chim_cand) && all(c("assembly", "verdict") %in% names(chim_cand))) {
+    cand_tbl <- chim_cand %>%
+      group_by(Assembly = .data$assembly) %>%
+      summarise(Composites = n(),
+                `Break Candidates` = sum(.data$verdict == "BREAK_CANDIDATE", na.rm = TRUE),
+                Review = sum(.data$verdict == "REVIEW", na.rm = TRUE),
+                .groups = "drop") %>%
+      arrange(desc(.data$`Break Candidates`), desc(.data$Composites))
+    md <- c(md, sprintf("### %d%s. Composite Scaffolds Detected", sec_n("chimera"), "a"), "",
+            make_markdown_table(cand_tbl), "",
+            paste("A composite is only a BREAK CANDIDATE when the cross-haplotype vote says",
+                  "other haplotypes keep those two chromosomes separate, both arms clear the",
+                  "size floors, and this individual's OTHER haplotype does not carry the same",
+                  "junction. That last condition is what separates a scaffolding artifact from",
+                  "a polymorphic chromosomal fusion, which would be real biology; REVIEW means",
+                  "the vote could not separate them and nothing is cut automatically."), "")
+  }
+
+  # ---- 7b: the cuts, with their evidence ----
+  if (!is.null(chim_evid) && "cut_bp" %in% names(chim_evid)) {
+    num <- function(x) suppressWarnings(as.numeric(x))
+    ev_tbl <- chim_evid %>%
+      transmute(
+        Assembly   = .data$assembly,
+        Scaffold   = if ("name" %in% names(chim_evid)) .data$name else .data$scaffold,
+        `Cut (bp)` = comma(num(.data$cut_bp)),
+        `Hi-C Ratio` = if ("hic_ratio" %in% names(chim_evid))
+                         sprintf("%.3f", num(.data$hic_ratio)) else NA_character_,
+        `Low Windows` = if ("hic_n_low_contiguous" %in% names(chim_evid))
+                          .data$hic_n_low_contiguous else NA_character_,
+        `Telomere x bg` = if ("telomere_junction_over_background" %in% names(chim_evid))
+                            sprintf("%.1f", num(.data$telomere_junction_over_background)) else NA_character_,
+        Vote       = if ("vote" %in% names(chim_evid)) .data$vote else NA_character_) %>%
+      arrange(.data$Assembly, .data$Scaffold)
+    md <- c(md, sprintf("### %d%s. Applied Cuts and Supporting Evidence", sec_n("chimera"), "b"), "",
+            make_markdown_table(ev_tbl), "",
+            paste("**Hi-C Ratio** is contact ACROSS the junction relative to the scaffold",
+                  "median at matched distance; below 1 means the read data never supported the",
+                  "join. **Low Windows** counts how many of the five most depleted windows are",
+                  "contiguous -- five consecutive is a boundary, one isolated window is noise.",
+                  "**Telomere x bg** is interstitial telomeric repeat at the junction over the",
+                  "scaffold background; a high value in both orientations indicates two",
+                  "chromosome ends fused back to back, while its absence is expected for a",
+                  "mid-arm join and is not evidence against the cut."), "")
+    md <- c(md,
+            paste("Cut positions come from the scaffolding AGP, so each lands inside the 100 bp",
+                  "gap the join itself introduced and severs no sequence. Hi-C confirms the",
+                  "decision rather than making it: the same data produced the join, so depleted",
+                  "contact across it is corroboration, not independent proof."), "")
+
+    # ---- 7c: the figures ----
+    figs <- str_replace(chim_evid$.evidence_file, "\\.tsv$", ".png")
+    figs <- figs[file.exists(figs)]
+    if (length(figs) > 0) {
+      md <- c(md, sprintf("### %d%s. Per-Cut Evidence Figures", sec_n("chimera"), "c"), "")
+      for (f in figs) {
+        stem <- str_replace(basename(f), "\\.chimera_evidence\\.png$", "")
+        md <- c(md, sprintf("**%s**", stem), "",
+                img_tag(file.path("chimeras", "evidence", basename(f)), stem), "")
+      }
+    }
+  } else if (!is.null(chim_join) && "callable" %in% names(chim_join)) {
+    # detection ran but nothing was cut -- say so explicitly rather than leaving a gap
+    n_call <- sum(chim_join$callable == "yes", na.rm = TRUE)
+    md <- c(md, sprintf("### %d%s. Applied Cuts", sec_n("chimera"), "b"), "",
+            sprintf(paste("No cuts were applied on this run. %d chimeric join%s identified;",
+                          "breaking is off by default and is enabled with",
+                          "`--chimera_break auto` or by supplying an edited joins file."),
+                    n_call, if (n_call == 1) " was" else "s were"), "")
+  }
+}
+
 pw_path <- args$pairwise_summary
-if (!str_detect(basename(pw_path), "NO_PAIRWISE") &&
-    file.exists(pw_path) && file.size(pw_path) > 0) {
+# has_pairwise is computed with the registry, so this guard and the ToC entry agree by
+# construction rather than by both being edited together.
+if (has_pairwise) {
   pw_data <- tryCatch(read_tsv(pw_path, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(pw_data) && nrow(pw_data) > 0) {
     md <- c(md,
-            "## 7. Pairwise Alignment Summary", "",
+            sec_head("pairwise"), "",
             make_collapsible(
               make_markdown_table(pw_data %>% mutate(across(everything(), as.character))),
               "Click to expand: Pairwise alignment metrics"
@@ -1502,6 +1693,7 @@ if (sig_hic)   narr <- paste0(narr, " Contigs were scaffolded against Hi-C data 
 if (sig_mito)  narr <- paste0(narr, " Organelle genomes were assembled with MitoHiFi.")
 narr <- paste0(narr, " Assembly quality was assessed with BUSCO (per-sample lineage; see section 2), Merqury (consensus QV and k-mer completeness) and QUAST (contiguity), with read coverage from minimap2/SAMtools alignments; telomeric repeats were surveyed with tidk.")
 if (has_teloclip) narr <- paste0(narr, " Scaffold ends were extended into telomeric repeats with teloclip.")
+if (has_chimera) narr <- paste0(narr, " Scaffolds spanning two reference chromosomes were detected from the scaffolding AGPs and the reference alignment, gated on a cross-haplotype concordance vote, and confirmed against Hi-C cross-contact and interstitial telomeric repeat before any cut.")
 if (sig_syn)   narr <- paste0(narr, " Synteny was visualised from minimap2 alignments (gggenomes).")
 narr <- paste0(narr, " Per-step parameters and exact software versions are recorded in the pipeline's Nextflow execution reports.")
 
@@ -1551,18 +1743,18 @@ if (sig_syn)                            keys <- c(keys, "gggenomes")
 if (has_pangenome) keys <- c(keys, "cactus", "minigraph", "vg", "odgi", "panacus", "vcflib", "bcftools", "ape")
 keys <- unique(keys)
 
-# --- Pangenome section (workstream F fragment), numbered as section 8 ---
+# --- Pangenome section (workstream F fragment); its number comes from the registry ---
 if (has_pangenome) {
   frag <- readLines(args$pangenome_report, warn = FALSE)
   hi <- grep("^## Pangenome", frag)[1]
-  if (!is.na(hi)) frag[hi] <- "## 8. Pangenome"
+  if (!is.na(hi)) frag[hi] <- sec_head("pangenome")
   md <- c(md, "", frag)
 }
 
 
 # --- Methods and citations section ---
 md <- c(md,
-        sprintf("## %s. Methods and Citations", if (has_pangenome) "9" else "8"), "",
+        sec_head("methods"), "",
         narr, "",
         "### Tool References", "",
         "Primary references for the tools used in this run. Exact versions are recorded in the pipeline's Nextflow execution reports (not reproduced here).", "",
