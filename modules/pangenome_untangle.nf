@@ -124,7 +124,7 @@ process PANGENOME_UNTANGLE {
     #
     # One awk pass gives the same answer: the path with the fewest '#'-separated fields,
     # which is how cactus names the reference (no PanSN haplotype field).
-    awk -F'#' 'NR==1 || NF<m || (NF==m && $0<best) {m=NF; best=\$0} END{print best}' all_paths.txt > target.txt
+    awk -F'#' 'NR==1 || NF<m || (NF==m && \$0<best) {m=NF; best=\$0} END{print best}' all_paths.txt > target.txt
 
     if [ ! -s target.txt ]; then
         echo "[UNTANGLE ${taxid}:${flavor}:${base}] no paths in graph; nothing to do" >&2
