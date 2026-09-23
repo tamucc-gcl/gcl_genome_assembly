@@ -115,7 +115,16 @@ process PANGENOME_UNTANGLE {
     # the file silently. That produced a 42-line path list from a 556-path graph during
     # development and sent untangle at a subpath as its target.
     odgi paths -i ${og} -L > all_paths.txt
-    awk -F'#' '{print NF"\\t"\$0}' all_paths.txt | sort -n | head -n1 | cut -f2 > target.txt
+    # NO PIPE. `... | sort -n | head -n1 | cut` raised SIGPIPE under `set -o pipefail` and
+    # killed this task with exit 141: head exits after one line and sort dies writing the
+    # rest. That is a RACE, not a size limit -- the list is 23 KB, well under the 64 KB pipe
+    # buffer, so sort usually finishes its write first and the bug hid for months before
+    # taking out one chromosome of thirty. The failed task's stderr was empty because it
+    # died before the echo below, the only thing that would have written to it.
+    #
+    # One awk pass gives the same answer: the path with the fewest '#'-separated fields,
+    # which is how cactus names the reference (no PanSN haplotype field).
+    awk -F'#' 'NR==1 || NF<m || (NF==m && $0<best) {m=NF; best=\$0} END{print best}' all_paths.txt > target.txt
 
     if [ ! -s target.txt ]; then
         echo "[UNTANGLE ${taxid}:${flavor}:${base}] no paths in graph; nothing to do" >&2
