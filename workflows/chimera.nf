@@ -73,7 +73,7 @@ workflow CHIMERA {
     // accepts as a no-op expression, so nothing failed until an output of the never-invoked
     // BREAK_CHIMERAS was read further down.
     ch_pre_finalize = ch_harmonized
-        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) } )
+        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) } )
 
     // ---- which joins are chimeric, and exactly where ---------------------------------
     // Detection runs whenever harmonization did, independently of chimera_break: the
@@ -88,22 +88,19 @@ workflow CHIMERA {
 
         // round 2 is conditional, so this join tolerates its absence: without a round-2 AGP
         // the round-1 objects are final, which agp_joins.py handles natively.
-        ch_r1_agp = ch_round1_agp.map { meta, agp -> tuple(meta.id, agp) }
+        ch_r1_agp = ch_round1_agp.map { meta, agp -> tuple(meta.id, meta.taxid.toString(), agp) }
         ch_r2_agp = ch_round2_agp.map { meta, agp -> tuple(meta.id, agp) }
 
         CHIMERA_JOINS(
             ch_r1_agp
                 .join( ch_r2_agp, remainder: true )
                 .join( ch_ref_pafs_by_id, remainder: true )
-                .filter { id, r1, r2, paf -> r1 != null }
-                .map { id, r1, r2, paf ->
-                    tuple(id, r1, r2 ?: file('NO_ROUND2'), paf ?: file('NO_PAF')) }
-                // the candidates file and the reference name map are per SPECIES, so they
-                // attach by cartesian product rather than by key
-                .combine( ch_chimera_candidates
-                              .map { taxid, f -> tuple(taxid, f) } )
-                .combine( ch_ref_name_map.map { taxid, f -> f } )
-                .map { id, r1, r2, paf, taxid, cand, rnm ->
+                .filter { id, taxid, r1, r2, paf -> r1 != null }
+                .map { id, taxid, r1, r2, paf ->
+                    tuple(taxid, id, r1, r2 ?: file("${projectDir}/assets/NO_ROUND2", checkIfExists: true), paf ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
+                .combine(ch_chimera_candidates, by: 0)
+                .combine(ch_ref_name_map, by: 0)
+                .map { taxid, id, r1, r2, paf, cand, rnm ->
                     tuple(taxid, id, r1, r2, paf, cand, rnm) },
             ch_agp_script.first(),
             ch_cj_script.first() )
@@ -142,7 +139,7 @@ workflow CHIMERA {
                     .filter { id, taxid, called, fa, r1, r2, pairs -> called != null && fa != null }
                     .map { id, taxid, called, fa, r1, r2, pairs ->
                         tuple(taxid, id, fa, called, r1,
-                              r2 ?: file('NO_ROUND2'), pairs ?: file('NO_PAIRS')) }
+                              r2 ?: file("${projectDir}/assets/NO_ROUND2", checkIfExists: true), pairs ?: file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)) }
                     // the motif is per species, so it attaches by key
                     .combine( ch_telo_by_taxid, by: 0 )
                     .map { taxid, id, fa, called, r1, r2, pairs, motif ->
@@ -174,6 +171,7 @@ workflow CHIMERA {
         ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
         ch_broken       = BREAK_CHIMERAS.out.assemblies
         ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
+            .mix(ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) })
     }
 
     ch_name_map_files = ch_harmonized

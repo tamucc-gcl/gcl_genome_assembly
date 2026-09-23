@@ -48,9 +48,9 @@ process FILTER_HIC_BAM {
     # over-subscription.  The sort stages are the bottleneck, so they get the
     # largest share.
     CPUS=${task.cpus}
-    T_SORT=\$(( CPUS / 2 ))           # pairtools sort / samtools sort
+    T_SORT=\$(( CPUS / 2 > 0 ? CPUS / 2 : 1 ))
     T_IO=\$(( (CPUS - T_SORT) / 2 ))  # collate, parse, split, view
-    T_IO=\$(( T_IO > 1 ? T_IO : 2 ))  # minimum 2
+    T_IO=\$(( T_IO > 0 ? T_IO : 1 ))
 
     # -------------------------------------------------------------------------
     # 1) Prepare chrom sizes (prefer existing .fai if present)
@@ -68,6 +68,7 @@ process FILTER_HIC_BAM {
       pairtools parse \\
         --min-mapq \${MINQ} \\
         --walks-policy 5unique \\
+        --add-columns RG \\
         --max-inter-align-gap 30 \\
         --chroms-path chrom.sizes \\
         --output-stats ${meta.id}_parse_stats.txt \\
@@ -78,6 +79,7 @@ process FILTER_HIC_BAM {
         --nproc \${T_SORT} \\
         --tmpdir "\$PWD" \\
     | pairtools dedup \\
+        --extra-col-pair RG1 RG1 --extra-col-pair RG2 RG2 \\
         --mark-dups \\
         --output-stats ${meta.id}_dedup_stats.txt \\
         --output-dups ${meta.id}.dups.pairs.gz \\
@@ -132,7 +134,7 @@ process FILTER_HIC_BAM {
       echo
       echo "Filtering definition (explicit):"
       echo "  - pairtools parse: min MAPQ = \${MINQ}"
-      echo "  - pairtools dedup: PCR duplicates marked/removed in pair-space"
+      echo "  - pairtools dedup: PCR duplicates marked/removed only within matching library RG tags"
       echo "  - pairtools select: keep only UU pairs (both ends uniquely mapped)"
       echo
       echo "--------------------------------------------------------------------------------"

@@ -41,7 +41,7 @@ process FINALIZE_ASSEMBLY {
     """
     set -euo pipefail
 
-    INPUT_FA="${assembly_fasta.name}"
+    INPUT_FA="${assembly_fasta}"
     MAP="${name_map.name}"
 
     # ------------------------------------------------------------------

@@ -8,7 +8,7 @@
 */
 
 process TRIM_HIC {
-    tag "${meta.sample}"
+    tag "${meta.id}"
     label 'fastp'
 
     //temporarily publish
@@ -18,15 +18,15 @@ process TRIM_HIC {
     tuple val(meta), path(hic_r1), path(hic_r2)
 
     output:
-    tuple val(meta), path("${meta.sample}_R1.trim.fastq.gz"), path("${meta.sample}_R2.trim.fastq.gz"), emit: trimmed_reads
-    tuple val(meta), path("${meta.sample}_fastp.html"), emit: html
-    tuple val(meta), path("${meta.sample}_fastp.json"), emit: json
+    tuple val(meta), path("${meta.id}_R1.trim.fastq.gz"), path("${meta.id}_R2.trim.fastq.gz"), emit: trimmed_reads
+    tuple val(meta), path("${meta.id}_fastp.html"), emit: html
+    tuple val(meta), path("${meta.id}_fastp.json"), emit: json
 
     script:
     """
     fastp \\
         -i ${hic_r1} -I ${hic_r2} \\
-        -o ${meta.sample}_R1.trim.fastq.gz -O ${meta.sample}_R2.trim.fastq.gz \\
+        -o ${meta.id}_R1.trim.fastq.gz -O ${meta.id}_R2.trim.fastq.gz \\
         --detect_adapter_for_pe \\
         --trim_poly_g \\
         --cut_tail \\
@@ -34,15 +34,15 @@ process TRIM_HIC {
         --cut_tail_mean_quality 20 \\
         --length_required 30 \\
         --thread ${task.cpus} \\
-        --html ${meta.sample}_fastp.html \\
-        --json ${meta.sample}_fastp.json
+        --html ${meta.id}_fastp.html \\
+        --json ${meta.id}_fastp.json
     """
 
     stub:
     """
-    touch ${meta.sample}_R1.trim.fastq.gz
-    touch ${meta.sample}_R2.trim.fastq.gz
-    touch ${meta.sample}_fastp.html
-    touch ${meta.sample}_fastp.json
+    touch ${meta.id}_R1.trim.fastq.gz
+    touch ${meta.id}_R2.trim.fastq.gz
+    touch ${meta.id}_fastp.html
+    touch ${meta.id}_fastp.json
     """
 }

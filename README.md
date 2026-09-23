@@ -167,15 +167,38 @@ decision to hifiasm's own estimate; `null` uses the GenomeScope2 estimate comput
 
 ### Error policy
 
-Per-row problems — bad enum value, half a read pair, a missing file, no contig-capable reads —
-**log a warning and skip that row.** The run only hard-fails if the header lacks `sample_id` or no
-valid rows remain. This is deliberate (it lets a batch proceed when one library is unavailable) but
-it means a silently dropped sample looks identical to a sample you never added. After launching,
-confirm the parse:
+Invalid individual rows are announced and recorded in `pipeline/input_validation.tsv` and
+`pipeline/input_validation.md`; valid assembly rows can proceed. Hi-C-only rows remain in the
+sheet as explicit assembly skips. Duplicate sample IDs, ambiguous file assignments, malformed
+tables and unknown library-table sample IDs are fatal. No valid assembly rows is also fatal.
+Pangenome runs currently reject invalid assembly rows rather than silently reducing their cohort.
 
-```bash
-grep -E "parsed '|Skipping row|Successfully parsed" .nextflow.log
+### Multiple Hi-C libraries or sequencing runs
+
+Keep one biological sample row. Supply an optional `--hic_readsets hic_readsets.csv` with:
+
+```csv
+sample_id,library_id,readset_id,hic_r1,hic_r2
+sample1,libraryA,run1,hic/run1_R1.fq.gz,hic/run1_R2.fq.gz
+sample1,libraryB,run2,hic/run2_R1.fq.gz,hic/run2_R2.fq.gz
 ```
+
+For samples listed here, leave the main sheet's `hic_r1` and `hic_r2` cells empty. Other samples
+can retain their inline Hi-C pair. Relative paths in each table resolve against that table's
+directory. IDs start with a letter or number and otherwise use letters, numbers, dot, underscore
+or hyphen. Read-set IDs are unique within a sample; library IDs are shared only by runs from the
+same physical library. All libraries for an assembly must come from the same individual.
+
+Read sets are trimmed separately and passed in paired, deterministic lists to hifiasm. Mapping
+retains library RG tags and namespaces read names by read set. Pairtools duplicate matching
+requires matching library tags, allowing cross-run duplicates within one library without removing
+independent contacts across libraries. Mapping publishes a read-set manifest and per-read-set
+mapping statistics.
+
+`-entry VALIDATE_INPUTS` runs only table validation and the input report. It does not launch
+assembly or database preparation. The new `run_assembly_checkpoint.sbatch` defaults to this mode;
+see [the checkpoint handoff](planning_docs/assembly-checkpoint-handoff.md) before the first run.
+Runtime validation on Nextflow 23.10.1 is pending; source inspection is not a compilation test.
 
 ### Examples
 

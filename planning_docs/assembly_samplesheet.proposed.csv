@@ -1,0 +1,8 @@
+sample_id,hifi_bam,hic_r1,hic_r2,sr_r1,sr_r2
+Sde-CBau_104,raw_bam/m84066_251218_031205_s4.hifi_reads.bc2064.bam,raw_fastq/hic/Sde_CBau_104_Ex2_HiC_CKDL260000073-1A_23CGCTLT3_L4_1.fq.gz,raw_fastq/hic/Sde_CBau_104_Ex2_HiC_CKDL260000073-1A_23CGCTLT3_L4_2.fq.gz,,
+Sde-CPla_115,raw_bam/m84066_260114_212201_s2.hifi_reads.bc2086.bam,raw_fastq/hic/Sde_CPla_115_Ex3_HiC_CKDL260000073-1A_23CGCTLT3_L4_1.fq.gz,raw_fastq/hic/Sde_CPla_115_Ex3_HiC_CKDL260000073-1A_23CGCTLT3_L4_2.fq.gz,,
+Sde-CLim_110,raw_bam/m84066_260114_212201_s2.hifi_reads.bc2066.bam,raw_fastq/hic/Sde_CLim_110_Ex4_HiC_CKDL260000073-1A_23CGCTLT3_L4_1.fq.gz,raw_fastq/hic/Sde_CLim_110_Ex4_HiC_CKDL260000073-1A_23CGCTLT3_L4_2.fq.gz,,
+Sde-CTlk_101,,raw_fastq/hic/Sde_CTlk_101_Ex3_HiC_CKDL260000073-1A_23CGCTLT3_L4_1.fq.gz,raw_fastq/hic/Sde_CTlk_101_Ex3_HiC_CKDL260000073-1A_23CGCTLT3_L4_2.fq.gz,,
+Sde-CMat_203,raw_bam/m84066_251218_031205_s4.hifi_reads.bc2065.bam,raw_fastq/hic/Sde_CMat_203_Ex3_HiC_CKDL260000073-1A_23CGCTLT3_L4_1.fq.gz,raw_fastq/hic/Sde_CMat_203_Ex3_HiC_CKDL260000073-1A_23CGCTLT3_L4_2.fq.gz,,
+Sde-CTlk_104,raw_bam/m84066_260114_212201_s2.hifi_reads.bc2087.bam,,,,
+Sde-CMat_061,,,,raw_fastq/ssl/Sde-CMat_061_1.fq.gz,raw_fastq/ssl/Sde-CMat_061_2.fq.gz

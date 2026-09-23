@@ -22,6 +22,7 @@ process BAM_TO_FASTQ {
 
     script:
     """
+    set -euo pipefail
     samtools fastq \\
         -@ ${task.cpus} \\
         ${hifi_bam} \\

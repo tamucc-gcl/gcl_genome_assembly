@@ -85,7 +85,7 @@ workflow HARMONIZE_SCAFFOLDS {
 
     if( !params.harmonize_scaffold_names ) {
         // pass-through: every assembly gets the sentinel, no barrier
-        ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
+        ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
         ch_report = Channel.empty()
         ch_report_by_taxid = Channel.empty()
         ch_chimera_cand = Channel.empty()
@@ -98,8 +98,8 @@ workflow HARMONIZE_SCAFFOLDS {
         // long-read candidates vs short-read (short-read never harmonized)
         ch_assemblies
             .branch { meta, fa ->
-                lr: !meta.shortread
-                sr:  meta.shortread
+                lr: meta.assembler == 'hifiasm'
+                sr: true
             }
             .set { ch_split }
 
@@ -137,13 +137,12 @@ workflow HARMONIZE_SCAFFOLDS {
             ch_score_in = ch_species
                 .join( HARMONIZE_CANDIDATES.out.candidates )
                 .flatMap { taxid, ids, fas, cfile ->
-                    cfile.readLines()
+                    def candidates = cfile.readLines()
                          .findAll { it?.trim() && !it.startsWith('#') && !it.startsWith('candidate\t') }
                          .collect { line -> tuple(taxid, line.tokenize('\t')[0], ids, fas) }
+                    if (!candidates) error "HARMONIZE: ${taxid} emitted an empty candidate table: ${cfile}"
+                    candidates
                 }
-                .ifEmpty { error "HARMONIZE: two-pass selection produced no candidates to score. " +
-                                 "Check <taxid>.reference_candidates.tsv, or set " +
-                                 "harmonize_two_pass_selection = false." }
 
             HARMONIZE_SCORE( ch_score_in, resolver, hargs )
             ch_versions = ch_versions.mix( HARMONIZE_SCORE.out.versions.first() )
@@ -190,7 +189,7 @@ workflow HARMONIZE_SCAFFOLDS {
         // harmonized long-read assemblies get their map; singletons fall through to sentinel
         ch_lr_out = ch_lr_by_id
             .join( ch_name_map_by_id, remainder: true )
-            .map { id, meta, fa, nm -> tuple(meta, fa, nm ?: file('NO_HARMONIZE')) }
+            .map { id, meta, fa, nm -> tuple(meta, fa, nm ?: file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
 
         // The reference's own name map, picked out of the per-id set built just above.
         // PLACED HERE because it consumes ch_name_map_by_id: a workflow body is ordinary
@@ -207,7 +206,7 @@ workflow HARMONIZE_SCAFFOLDS {
             .map { taxid, rid, nm_id, nm -> tuple(taxid, nm) }
 
         // short-read always sentinel
-        ch_sr_out = ch_split.sr.map { meta, fa -> tuple(meta, fa, file('NO_HARMONIZE')) }
+        ch_sr_out = ch_split.sr.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
 
         ch_out = ch_lr_out.mix( ch_sr_out )
 

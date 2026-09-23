@@ -115,6 +115,10 @@ def buildMeta(Map a) {
         throw new IllegalArgumentException("sample '${sample}': assembler=hifiasm but no HiFi reads provided")
     if (assembler == 'spades' && !hasSr)
         throw new IllegalArgumentException("sample '${sample}': assembler=spades but no short-read shotgun provided")
+    if (assembler == 'spades' && dedup == 'purge_dups')
+        throw new IllegalArgumentException("sample '${sample}': purge_dups is not supported on the short-read route")
+    if (assembler == 'hifiasm' && dedup == 'redundans')
+        throw new IllegalArgumentException("sample '${sample}': redundans is not supported on the HiFi route")
 
     // OUTPUT haplotype count (assembly fork + groupKey), DISTINCT from organism ploidy.
     // Optional per-row 'n_hap' override; else derived: SPAdes -> 1 (collapsed);
@@ -127,6 +131,8 @@ def buildMeta(Map a) {
         throw new IllegalArgumentException("sample '${sample}': invalid n_hap '${n_hapRaw}' (allowed: 1 = one collapsed assembly, 2 = phased diploid)")
     if (assembler == 'spades' && n_hap != 1)
         throw new IllegalArgumentException("sample '${sample}': assembler=spades cannot output n_hap=${n_hap} (SPAdes yields a single collapsed assembly — use n_hap=1 or leave blank)")
+    if (assembler == 'hifiasm' && params.hifiasm_primary && n_hap != 1)
+        throw new IllegalArgumentException("sample '${sample}': hifiasm_primary requires n_hap=1; primary/alternate is not a phased pair")
 
     return [
         id:          sample,

@@ -56,7 +56,7 @@ process REDUNDANS {
              : !(v.toString().trim().toLowerCase() in ['false', 'no', '0', 'off'])
     }
 
-    def do_reduction   = boolParam('run_redundans_reduction',   true)
+    def do_reduction   = meta.dedup != 'none' && boolParam('run_redundans_reduction', true)
     def do_scaffolding = boolParam('run_redundans_scaffolding', true)
     def do_gapclosing  = boolParam('run_redundans_gapclosing',  true)
 

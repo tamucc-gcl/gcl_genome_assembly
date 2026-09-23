@@ -76,13 +76,17 @@ log.info """\
 if (!params.sample_sheet) {
     exit 1, "Sample sheet not specified! Please provide --sample_sheet"
 }
+if (params.run_blobtools_evidence) {
+    error 'BlobTools/decontamination evidence is unsupported pending its rebuild; set --run_blobtools_evidence false'
+}
 
 /*
 ========================================================================================
     IMPORT FUNCTIONS
 ========================================================================================
 */
-include { parseSampleSheet } from './functions/parse_sample_sheet.nf'
+include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
+include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
 
 /*
@@ -95,6 +99,9 @@ include { HIC_QC as HIC_QC_TRIMMED } from './workflows/hic_qc.nf'
 include { HIFI_QC } from './workflows/hifi_qc.nf'
 
 // Assembly
+include { HIC_SCAFFOLDING } from './workflows/hic_scaffolding.nf'
+include { READ_PREPARATION } from './workflows/read_preparation.nf'
+include { CONTIG_REFINEMENT } from './workflows/contig_refinement.nf'
 include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 
 //Organelle assembly/annotation
@@ -114,9 +121,7 @@ include { HIC_SCAFFOLD_QC } from './workflows/hic_scaffold_qc.nf'
 
 // DECONTAMINATION MODULAR WORKFLOWS
 include { SETUP_DECONTAM_DBS } from './workflows/setup_decontam_dbs.nf'
-include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_CONTIG } from './workflows/decontaminate_assembly.nf'
-include { DECONTAMINATE_ASSEMBLY as DECONTAMINATE_ASSEMBLY_SCAFFOLD } from './workflows/decontaminate_assembly.nf'
-include { GENERATE_DECONTAM_EVIDENCE } from './workflows/generate_decontam_evidence.nf'
+
 
 //Final Visualization
 include { FINAL_VIZ } from './workflows/final_viz.nf'
@@ -134,33 +139,11 @@ include { RESOLVE_TAXONOMY } from './modules/resolve_taxonomy.nf'
 include { buscoLineageFor; kingdomFlag; organismName; geneticCodeFor; telomereMotifFor; organelleTypesFor; getorganelleRecursionFor; getorganelleKmersFor; getorganelleCoverageFor } from './functions/taxonomy.nf'
 include { DOWNLOAD_TAXDUMP } from './modules/download_taxdump.nf'
 
-include { BAM_TO_FASTQ } from './modules/bam_to_fastq.nf'
 include { BUILD_MERYL_DB } from './modules/build_meryl_db.nf'
-include { TRIM_HIC } from './modules/trim_hic.nf'
-include { ESTIMATE_GENOME_SIZE } from './modules/estimate_genome_size.nf'
 
 include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
-include { FILTER_ORGANELLE } from './modules/filter_organelle.nf'
 
-include { TRIM_SHORTREAD } from './modules/trim_shortread.nf'
-include { REDUNDANS }      from './modules/redundans.nf'
-include { PILON }          from './modules/pilon.nf'
 
-include { PURGE_DUPS } from './modules/purge_dups.nf'
-include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_CONTIG } from './modules/correct_misassemblies.nf'
-include { CORRECT_MISASSEMBLIES as CORRECT_MISASSEMBLIES_SCAFFOLD } from './modules/correct_misassemblies.nf'
-include { MAP_HIC_TO_ASSEMBLY } from './modules/map_hic_to_assembly.nf'
-include { MAP_HIC_TO_ASSEMBLY as MAP_HIC_TO_SCAFFOLD } from './modules/map_hic_to_assembly.nf'
-include { FILTER_HIC_BAM } from './modules/filter_hic_bam.nf'
-include { FILTER_HIC_BAM as FILTER_HIC_BAM_SCAFFOLD } from './modules/filter_hic_bam.nf'
-include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from './modules/scaffold_hic.nf'
-include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from './modules/scaffold_hic.nf'
-include { GAP_FILLING } from './modules/gap_filling.nf'
-include { TELOCLIP_EXTEND; COLLECT_TELOCLIP_STATS } from './modules/teloclip.nf'
-include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIG } from './modules/hic_mapping_metrics.nf'
-include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from './modules/hic_mapping_metrics.nf'
-include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from './modules/hic_mapping_metrics.nf'
-include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLDSCAF } from './modules/hic_mapping_metrics.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 //include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
@@ -187,6 +170,11 @@ ch_harmonize_script       = file("${projectDir}/py_scripts/harmonize_names.py", 
 ========================================================================================
 */
 
+// User-run input checkpoint: performs input validation/reporting only.
+workflow VALIDATE_INPUTS {
+    INPUT_PREPARATION(params.sample_sheet, params.hic_readsets)
+}
+
 workflow {
     
     // ---- run-scope gates, defined once before any use ----
@@ -197,7 +185,9 @@ workflow {
     def chimera_on  = params.chimera_break && params.chimera_break.toString() != 'false'
 
     // Parse sample sheet -> per-sample tuple(meta, reads)
-    ch_input = parseSampleSheet(params.sample_sheet)
+    INPUT_PREPARATION(params.sample_sheet, params.hic_readsets)
+    ch_input = INPUT_PREPARATION.out.samples
+    ch_input_status = INPUT_PREPARATION.out.status
 
     // ploidy + haploid-size overrides ride sample-keyed side-channels (genomescope/hifiasm only),
     // so ploidy/size tweaks stay off the per-sample task hash.
@@ -205,6 +195,7 @@ workflow {
     ch_hgsize_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, meta.haploid_genome_size) }   // column>param, or null
     ch_input            = ch_input.map { meta, reads -> tuple(meta.findAll { k, v -> !(k in ['ploidy', 'haploid_genome_size']) }, reads) }
     ch_versions = Channel.empty()
+    ch_gxdb_dir = Channel.empty()
 
     // ── Ensure the NCBI taxdump once, up front. Idempotent: the module skips the download
     //    when names.dmp/nodes.dmp are already present at the target path. Needed by
@@ -306,6 +297,7 @@ workflow {
     // BUSCO databases — one download per DISTINCT lineage across all samples
     // (storeDir dedupes; the per-lineage tasks run in parallel).
     ch_busco_lineages = ch_taxonomy
+        .filter { qc_on }
         .map { taxid, tax -> tax.busco_lineage }
         .unique()
     DOWNLOAD_BUSCO_DB(ch_busco_lineages)
@@ -350,99 +342,15 @@ workflow {
 
     /*
     ========================================================================================
-        STEP 1: Convert BAM to FASTQ (extract hifi_bam from the reads map)
+        STEPS 1-3: Prepare reads and estimate genome size
     ========================================================================================
     */
     
-    BAM_TO_FASTQ(
-        ch_input.filter { meta, reads -> meta.hifi }
-                .map { meta, reads -> tuple(meta, reads.hifi_bam) }
-    )
-
-    
-    /*
-    ========================================================================================
-        STEP 2: Trim Hi-C Reads (extract the Hi-C pair from the reads map)
-    ========================================================================================
-    */
-    TRIM_HIC(
-        ch_input.filter { meta, reads -> meta.hic }
-                .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) }
-    )
-
-    // Optional short-read trimming (fastp): raw shotgun -> adapter/quality-trimmed, or
-    // pass-through when off. Feeds the assembly + assembly-QC path; SHORTREAD_QC stays on raw.
-    ch_shortread_raw = ch_input
-        .filter { meta, reads -> meta.shortread }
-        .map    { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) }
-
-    if (params.run_shortread_trim) {
-        TRIM_SHORTREAD(ch_shortread_raw)
-        ch_shortread_reads = TRIM_SHORTREAD.out.trimmed_reads
-        ch_versions = ch_versions.mix(TRIM_SHORTREAD.out.versions)
-    } else {
-        ch_shortread_reads = ch_shortread_raw
-    }
-
-    /*
-    ========================================================================================
-        STEP 3: Combine HiFi FASTQ with trimmed Hi-C reads
-    ========================================================================================
-    */
-    // Full per-sample read bundle for the selector + organelle + genome-size.
-    // remainder:true left-joins keep samples lacking HiFi or Hi-C (null slots), so
-    // short-read-only rows flow instead of being dropped by an inner join.
-    // Per-modality slots: every sample gets exactly one entry per slot — its processed
-    // reads if it has that modality, else a null placeholder from ch_input (immediate).
-    // Plain 1:1 joins then emit each sample as soon as ITS OWN reads are ready — no
-    // waiting on other samples' BAM_TO_FASTQ / TRIM_HIC / TRIM_SHORTREAD to finish.
-    ch_hifi_slot = BAM_TO_FASTQ.out.fastq
-        .map { meta, fq -> [ meta.sample, fq ] }
-        .mix( ch_input.filter { meta, reads -> !meta.hifi }.map { meta, reads -> [ meta.sample, null ] } )
-
-    ch_hic_slot = TRIM_HIC.out.trimmed_reads
-        .map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }
-        .mix( ch_input.filter { meta, reads -> !meta.hic }.map { meta, reads -> [ meta.sample, null ] } )
-
-    ch_sr_slot = ch_shortread_reads
-        .map { meta, r1, r2 -> [ meta.sample, [r1, r2] ] }
-        .mix( ch_input.filter { meta, reads -> !meta.shortread }.map { meta, reads -> [ meta.sample, null ] } )
-
-    ch_input
-        .map { meta, reads -> [ meta.sample, meta ] }
-        .join( ch_hifi_slot )
-        .join( ch_hic_slot )
-        .join( ch_sr_slot )
-        .map { sample, meta, hifi_fastq, hic_pair, sr_pair ->
-            def hic_r1 = hic_pair ? hic_pair[0] : null
-            def hic_r2 = hic_pair ? hic_pair[1] : null
-            def sr_r1  = sr_pair  ? sr_pair[0]  : null
-            def sr_r2  = sr_pair  ? sr_pair[1]  : null
-            tuple(meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2)
-        }
-        .set { ch_reads_all }
-        
-    // Per-sample reads for assembly QC (meryl DB + mapping): HiFi FASTQ for HiFi samples,
-    // the Illumina R1+R2 pair for short-read samples. Read-source-aware QC.
-    ch_reads_all
-        .map { meta, hifi_fastq, hic_r1, hic_r2, sr_r1, sr_r2 ->
-            meta.hifi ? tuple(meta, hifi_fastq) : tuple(meta, [sr_r1, sr_r2])
-        }
-        .set { ch_qc_reads }
-
-    // Genome-size estimation (jellyfish -> GenomeScope2), concurrent with assembly.
-    // Reads by assembler: HiFi for the long-read path, PE for short-read.
-    ch_reads_all
-        .map { meta, hifi_fastq, r1, r2, sr1, sr2 ->
-            def gs_reads = (meta.assembler == 'spades') ? [ sr1, sr2 ] : [ hifi_fastq ]
-            tuple(meta.sample, meta, gs_reads)
-        }
-        .join(ch_ploidy_by_sample)
-        .map { sample, meta, gs_reads, ploidy -> tuple(meta, gs_reads, ploidy) }
-        .set { ch_gsize_input }
-
-    ESTIMATE_GENOME_SIZE(ch_gsize_input)
-    ch_versions = ch_versions.mix(ESTIMATE_GENOME_SIZE.out.versions)
+    READ_PREPARATION(ch_input, ch_ploidy_by_sample)
+    ch_reads_all = READ_PREPARATION.out.reads
+    ch_qc_reads = READ_PREPARATION.out.qc_reads
+    ch_shortread_reads = READ_PREPARATION.out.shortread
+    ch_versions = ch_versions.mix(READ_PREPARATION.out.versions)
 
 
     /*
@@ -471,7 +379,7 @@ workflow {
     CONTIG_ASSEMBLY(
         ch_reads_all,
         ch_hifiasm_traits,
-        ESTIMATE_GENOME_SIZE.out.size.map { meta, f -> tuple(meta.sample, f) }
+        READ_PREPARATION.out.genome_size.map { meta, f -> tuple(meta.sample, f) }
     )
     ch_versions = ch_versions.mix(CONTIG_ASSEMBLY.out.versions)
 
@@ -480,6 +388,7 @@ workflow {
         .flatMap { meta, fastas ->
             def hmetas = forkHaplotypeMeta(meta)           // [hap1, hap2]  or  [primary]
             def fs = (fastas instanceof List) ? fastas.sort { it.name } : [fastas]
+            if (fs.size() != hmetas.size()) error "${meta.sample}: expected ${hmetas.size()} assembly files, received ${fs.size()}"
             [hmetas, fs].transpose().collect { hm, fa -> tuple(hm, fa) }
         }
         .set { ch_contigs }                                // per-haplotype tuple(meta, fasta)
@@ -498,461 +407,22 @@ workflow {
     // one sample can't stall the rest. An empty bait list means the sample produced no
     // organelle: those bypass FILTER_ORGANELLE untouched, so a failed organelle assembly
     // still can't drop a whole nuclear assembly.
-    ch_contigs
-        .map { meta, fasta -> tuple(meta.sample, meta, fasta) }
-        .combine( ORGANELLE.out.baits, by: 0 )
-        .branch { sample, meta, fasta, baits ->
-            has_bait: baits.size() > 0
-            no_bait:  true
-        }
-        .set { ch_contigs_baitsplit }
-
-    ch_contigs_baitsplit.has_bait
-        .map { sample, meta, fasta, baits -> tuple(meta, fasta, baits) }
-        .set { ch_organelle_filter_input }
-
-    FILTER_ORGANELLE(ch_organelle_filter_input)
-
-    ch_organelle_filtered = FILTER_ORGANELLE.out.filtered
-        .mix( ch_contigs_baitsplit.no_bait.map { s, meta, fasta, b -> tuple(meta, fasta) } )
-
-    // Fork the FILTERED contigs into the read-type-specific conditioning paths.
-    ch_organelle_filtered
-        .branch { meta, fasta ->
-            hifi:      meta.hifi
-            shortread: true
-        }
-        .set { ch_filtered_by_type }
-
-    ch_organelle_filtered_hifi = ch_filtered_by_type.hifi   // HiFi filtered -> PURGE_DUPS / QC
-
-    /*
-    ====================================================================================
-        STEP 4b: PURGE DUPLICATES (optional)
-        ch_organelle_filtered_hifi is per-haplotype; attach per-sample HiFi reads (combine
-        by sample), one PURGE_DUPS over both haplotypes.
-    ====================================================================================
-    */
-    if (params.run_purge_dups) {
-        ch_organelle_filtered_hifi
-            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-            .map { sample, meta, fasta, hifi_reads -> tuple(meta, fasta, hifi_reads) }
-            .set { ch_purge_dups_input }
-
-        PURGE_DUPS(ch_purge_dups_input)
-        ch_hifiasm_output = PURGE_DUPS.out.purged_assembly      // per-haplotype (meta, fasta)
-        ch_versions = ch_versions.mix(PURGE_DUPS.out.versions)
-    } else {
-        ch_hifiasm_output = ch_organelle_filtered_hifi          // per-haplotype (meta, fasta)
-    }
-
-    // Short-read conditioning: REDUNDANS (reduce/scaffold/gap-close) -> optional Pilon.
-    // Fed by the organelle-filtered short-read contigs (was ch_contigs_by_type.shortread).
-    ch_filtered_by_type.shortread
-        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-        .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
-        .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
-        .set { ch_redundans_input }
-
-    REDUNDANS(ch_redundans_input)
-    ch_versions = ch_versions.mix(REDUNDANS.out.versions)
-
-    if (params.run_pilon) {
-        REDUNDANS.out.assembly
-            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-            .combine( ch_shortread_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
-            .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
-            .set { ch_pilon_input }
-        PILON(ch_pilon_input)
-        ch_shortread_conditioned = PILON.out.assembly
-        ch_versions = ch_versions.mix(PILON.out.versions)
-    } else {
-        ch_shortread_conditioned = REDUNDANS.out.assembly
-    }
-
-    /*
-    ====================================================================================
-        STEP 4.5: Optional Misassembly Correction of Contig Assemblies (Inspector)
-    ====================================================================================
-    */
-    if (params.run_inspector_contigs) {
-        ch_hifiasm_output
-            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-            .map { sample, meta, fasta, hifi_fastq ->
-                def correction_params = [
-                    min_depth: params.inspector_contig_min_depth,
-                    min_contig_length: params.inspector_contig_min_contig_bp,
-                    min_contig_length_assemblyerror: params.inspector_contig_assemblyerror_min_bp,
-                    min_assembly_error_size: params.inspector_contig_min_assembly_error_bp,
-                    max_assembly_error_size: params.inspector_contig_max_assembly_error_bp,
-                    skip_baseerror: !params.inspector_contig_base_error_check
-                ]
-                tuple(meta, fasta, hifi_fastq, "contig", correction_params)
-            }
-            .set { ch_correction_input }
-
-        CORRECT_MISASSEMBLIES_CONTIG(ch_correction_input)
-        ch_hifi_conditioned = CORRECT_MISASSEMBLIES_CONTIG.out.corrected   // per-hap (meta, fasta)
-        ch_versions = ch_versions.mix(CORRECT_MISASSEMBLIES_CONTIG.out.versions)
-    } else {
-        ch_hifi_conditioned = ch_hifiasm_output                           // per-hap (meta, fasta)
-    }
-
-    /*
-    ====================================================================================
-        STEP 5: Optional Decontamination of Contig Assemblies
-        HiFi-conditioned (mito-filter / purge / correct) and short-read-conditioned
-        (redundans / pilon) both flow through the SAME optional decontamination — FCS-GX is
-        genome-based, so short-read assemblies are screened too (per-sample taxid via
-        meta.taxid; see decontaminate_assembly.nf). Short-read gets NO Inspector correction
-        (long-read-only). After decontam: HiFi continues into Hi-C scaffolding / the HiFi-only
-        bypass; short-read is finished (nothing to scaffold with) → straight to FINALIZE.
-    ====================================================================================
-    */
-    ch_assemblies_for_decontam = ch_hifi_conditioned.mix(ch_shortread_conditioned)
-
-    if (params.run_decon_contigs) {
-        DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
-        ch_decontaminated_contigs = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
-        ch_versions = ch_versions.mix(DECONTAMINATE_ASSEMBLY_CONTIG.out.versions)
-    } else {
-        ch_decontaminated_contigs = ch_assemblies_for_decontam
-    }
-
-    ch_individual_haplotypes = ch_decontaminated_contigs.filter { meta, fasta -> !meta.shortread }  // HiFi (+ HiFi-only)
-    ch_shortread_finished    = ch_decontaminated_contigs.filter { meta, fasta ->  meta.shortread }  // → FINALIZE
-
-    // short-read already split off, so this is HiFi-only:
-    ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
-
-    // HiFi-only rows have no Hi-C, so they drop out of the Hi-C scaffolding block below.
-    // Their decontaminated contigs are their "scaffolds" — rejoin at gap-filling.
-    ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
-
-    /*
-    ====================================================================================
-        STEP 6: Map Hi-C to Assemblies (contigs or decontaminated contigs)
-    ====================================================================================
-    */
-    // Combine each haplotype with its sample's trimmed Hi-C reads (key on meta.sample —
-    // TRIM_HIC carries the sample-level meta; ch_individual_haplotypes is per-haplotype)
-    ch_individual_haplotypes
-        .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-        .combine( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
-        .map { sample, meta, fasta, hic_r1, hic_r2 ->
-            tuple(meta, fasta, hic_r1, hic_r2, "contig")
-        }
-        .set { ch_hic_mapping_input }
-
-    MAP_HIC_TO_ASSEMBLY(ch_hic_mapping_input)
-
-    // checkpoint: contig_raw_map (BAM-level only)
-    MAP_HIC_TO_ASSEMBLY.out.bam
-        .map { meta, stage, bam, bai -> tuple(meta, "contig_raw_map", bam, bai) }
-        .set { ch_hic_raw_bam_for_qc }
-
-    // Hi-C QC-metric accumulators — appended at each metrics step below and
-    // consumed by COMPILE_FINAL_QC (kept here so the QC phase needs only these two channels).
-    ch_all_bam_metrics   = Channel.empty()
-    ch_all_pairs_metrics = Channel.empty()
-
-    HIC_BAM_METRICS_CONTIG(ch_hic_raw_bam_for_qc)
-    ch_all_bam_metrics = ch_all_bam_metrics.mix(HIC_BAM_METRICS_CONTIG.out.metrics)
-
-    // Assemblies channel for the filter / scaffold joins (meta, fasta)
-    ch_individual_haplotypes
-        .map { meta, fasta -> tuple(meta, fasta) }
-        .set { ch_assemblies_for_qc }
-
-
-    /*
-    ====================================================================================
-        STEP 7: Filter Hi-C BAM Files
-    ====================================================================================
-    */
-    MAP_HIC_TO_ASSEMBLY.out.bam
-        .join(ch_assemblies_for_qc)
-        .map { meta, stage, bam, bai, assembly_fasta ->
-            tuple(meta, stage, bam, bai, assembly_fasta)
-        }
-        .set { ch_bam_with_assembly }
-
-    FILTER_HIC_BAM(ch_bam_with_assembly)
-
-    // checkpoint: contig_filtered (pairs-level + retention); no AGP here -> []
-    FILTER_HIC_BAM.out.pairs
-        .join(FILTER_HIC_BAM.out.parse_stats)
-        .join(FILTER_HIC_BAM.out.dedup_stats)
-        .map { meta, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-            tuple(meta, "contig_filtered", pairs_gz, [], parse_stats, dedup_stats)
-        }
-        .set { ch_hic_pairs_contig_filtered_for_qc }
-
-    HIC_PAIRS_METRICS_CONTIG(ch_hic_pairs_contig_filtered_for_qc)
-    ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_CONTIG.out.metrics)
-    
-    /*
-    ====================================================================================
-        STEP 8: First Round of Scaffolding with Hi-C
-    ====================================================================================
-    */
-    FILTER_HIC_BAM.out.bam
-        .join(ch_assemblies_for_qc)
-        .map { meta, stage, bam, bai, assembly_fasta ->
-            tuple(meta, bam, bai, assembly_fasta, "round1", [ min_contig_length: params.yahs_round1_min_contig_bp, min_mapq: params.yahs_round1_min_mapq, resolutions: params.yahs_round1_resolutions, rounds_per_resolution: params.yahs_round1_rounds_per_resolution, enzyme: params.yahs_round1_enzyme, no_contig_ec: !params.yahs_round1_contig_ec, no_scaffold_ec: !params.yahs_round1_scaffold_ec ])
-        }
-        .set { ch_scaffolding_round1_input }
-
-    SCAFFOLD_HIC_ROUND1(ch_scaffolding_round1_input)
-    ch_versions = ch_versions.mix(SCAFFOLD_HIC_ROUND1.out.versions)
-
-    // checkpoint: scaffold_space (relabel contigs->scaffolds via round1 AGP; no remap)
-    FILTER_HIC_BAM.out.pairs
-        .join(SCAFFOLD_HIC_ROUND1.out.agp)
-        .join(FILTER_HIC_BAM.out.parse_stats)
-        .join(FILTER_HIC_BAM.out.dedup_stats)
-        .map { meta, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
-            tuple(meta, "scaffold_space", pairs_gz, agp, parse_stats, dedup_stats)
-        }
-        .set { ch_hic_pairs_scaffold_space_for_qc }
-
-    HIC_PAIRS_METRICS_CONTIGSCAF(ch_hic_pairs_scaffold_space_for_qc)
-    ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_CONTIGSCAF.out.metrics)
-
-    /*
-    ====================================================================================
-        STEP 8.5: Optional Misassembly Correction of Scaffolded Assemblies (Inspector)
-    ====================================================================================
-    */
-    if (params.run_inspector_scaffolds) {
-        // Combine each scaffolded haplotype with its sample's HiFi reads (key on meta.sample)
-        SCAFFOLD_HIC_ROUND1.out.scaffolds
-            .map { meta, scaffold -> [ meta.sample, meta, scaffold ] }
-            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-            .map { sample, meta, scaffold, hifi_fastq ->
-                def correction_params = [
-                    min_depth: params.inspector_scaffold_min_depth,
-                    min_contig_length: params.inspector_scaffold_min_contig_bp,
-                    min_contig_length_assemblyerror: params.inspector_scaffold_assemblyerror_min_bp,
-                    min_assembly_error_size: params.inspector_scaffold_min_assembly_error_bp,
-                    max_assembly_error_size: params.inspector_scaffold_max_assembly_error_bp,
-                    skip_baseerror: !params.inspector_scaffold_base_error_check
-                ]
-                tuple(meta, scaffold, hifi_fastq, "scaffold", correction_params)
-            }
-            .set { ch_scaffold_correction_input }
-
-        CORRECT_MISASSEMBLIES_SCAFFOLD(ch_scaffold_correction_input)
-        ch_scaffolds_for_decontam = CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected   // per-hap (meta, fasta)
-    } else {
-        ch_scaffolds_for_decontam = SCAFFOLD_HIC_ROUND1.out.scaffolds              // per-hap (meta, fasta)
-    }
-
-    /*
-    ========================================================================================
-        STEP 9: Optional Decontamination of Scaffolded Assemblies
-        Runs after scaffolding (and optional correction) is complete
-        Databases were already set up in STEP 0
-        Works on either original scaffolds OR corrected scaffolds (if Inspector was run)
-    ========================================================================================
-    */
-    if (params.run_decon_scaffolds) {
-        // Decontaminate scaffolds (parallel across all haplotypes)
-        DECONTAMINATE_ASSEMBLY_SCAFFOLD(
-            ch_scaffolds_for_decontam,
-            ch_gxdb_dir,
-            "scaffold"
-        )
-
-        // Store final decontaminated scaffolds
-        ch_final_scaffolds = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
-    } else {
-        // Use corrected or original scaffolds (depending on Inspector setting)
-        ch_final_scaffolds = ch_scaffolds_for_decontam
-    }
-    
-    /*
-    ========================================================================================
-        STEP 10-12: Conditional Second Round of Scaffolding
-        Only runs if:
-        - Inspector correction on scaffolds is enabled, OR
-        - Decontamination on scaffolds is enabled, OR
-        - Explicitly enabled via --run_scaffold_round2 true
-        
-        Can be explicitly disabled via --run_scaffold_round2 false
-    ========================================================================================
-    */
-    // Defaulted BEFORE the branch: assigned only inside it, this would not be
-    // visible to CHIMERA_JOINS further down.
-    ch_scaffold_round2_agp = Channel.empty()
-
-    if (params.run_scaffold_round2) {
-        
-        log.info "[INFO] Running second round of scaffolding (scaffold correction or decontamination was performed)"
-        
-        /*
-        ================================================================================
-            STEP 10: Map Hi-C to Final Scaffolds
-        ================================================================================
-        */
-        ch_final_scaffolds
-            .map { meta, fasta -> [ meta.sample, meta, fasta ] }
-            .combine( TRIM_HIC.out.trimmed_reads.map { meta, r1, r2 -> [ meta.sample, r1, r2 ] }, by: 0 )
-            .map { sample, meta, fasta, hic_r1, hic_r2 ->
-                tuple(meta, fasta, hic_r1, hic_r2, "scaffold")
-            }
-            .set { ch_hic_scaffold_mapping_input }
-
-        MAP_HIC_TO_SCAFFOLD(ch_hic_scaffold_mapping_input)
-
-        // checkpoint: scaffold_round2_raw_map (BAM-level only)
-        MAP_HIC_TO_SCAFFOLD.out.bam
-            .map { meta, stage, bam, bai -> tuple(meta, "scaffold_round2_raw_map", bam, bai) }
-            .set { ch_hic_scaffold_raw_bam_for_qc }
-
-        HIC_BAM_METRICS_SCAFFOLD(ch_hic_scaffold_raw_bam_for_qc)
-        ch_all_bam_metrics = ch_all_bam_metrics.mix(HIC_BAM_METRICS_SCAFFOLD.out.metrics)
-
-        /*
-        ================================================================================
-            STEP 11: Filter Hi-C BAM mapped to final scaffolds
-        ================================================================================
-        */
-        MAP_HIC_TO_SCAFFOLD.out.bam
-            .join(ch_final_scaffolds)
-            .map { meta, stage, bam, bai, scaffold_fasta ->
-                tuple(meta, stage, bam, bai, scaffold_fasta)
-            }
-            .set { ch_bam_with_scaffold }
-
-        FILTER_HIC_BAM_SCAFFOLD(ch_bam_with_scaffold)
-
-        // checkpoint: scaffold_round2_filtered (pairs-level + retention); already in scaffold1 names -> []
-        FILTER_HIC_BAM_SCAFFOLD.out.pairs
-            .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
-            .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
-            .map { meta, stage, pairs_gz, stage2, parse_stats, stage3, dedup_stats ->
-                tuple(meta, "scaffold_round2_filtered", pairs_gz, [], parse_stats, dedup_stats)
-            }
-            .set { ch_hic_pairs_scaffold_round2_filtered_for_qc }
-
-        HIC_PAIRS_METRICS_SCAFFOLD(ch_hic_pairs_scaffold_round2_filtered_for_qc)
-        ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_SCAFFOLD.out.metrics)
-
-
-        /*
-        ================================================================================
-            STEP 12: Second Round of Scaffolding
-        ================================================================================
-        */
-        FILTER_HIC_BAM_SCAFFOLD.out.bam
-            .join(ch_final_scaffolds)
-            .map { meta, stage, bam, bai, scaffold_fasta ->
-                tuple(meta, bam, bai, scaffold_fasta, "round2", [ min_contig_length: params.yahs_round2_min_contig_bp, min_mapq: params.yahs_round2_min_mapq, resolutions: params.yahs_round2_resolutions, rounds_per_resolution: params.yahs_round2_rounds_per_resolution, enzyme: params.yahs_round2_enzyme, no_contig_ec: !params.yahs_round2_contig_ec, no_scaffold_ec: !params.yahs_round2_scaffold_ec ])
-            }
-            .set { ch_second_scaffolding_input }
-
-        SCAFFOLD_HIC_ROUND2(ch_second_scaffolding_input)
-        ch_final_scaffolds_round2 = SCAFFOLD_HIC_ROUND2.out.scaffolds   // per-hap (meta, fasta)
-        ch_scaffold_round2_agp    = SCAFFOLD_HIC_ROUND2.out.agp
-
-        // checkpoint: scaffold_round2_space (relabel scaffold1->scaffold2 via round2 AGP; no remap)
-        FILTER_HIC_BAM_SCAFFOLD.out.pairs
-            .join(SCAFFOLD_HIC_ROUND2.out.agp)
-            .join(FILTER_HIC_BAM_SCAFFOLD.out.parse_stats)
-            .join(FILTER_HIC_BAM_SCAFFOLD.out.dedup_stats)
-            .map { meta, stage, pairs_gz, agp, stage2, parse_stats, stage3, dedup_stats ->
-                tuple(meta, "scaffold_round2_space", pairs_gz, agp, parse_stats, dedup_stats)
-            }
-            .set { ch_hic_pairs_scaffold_round2_space_for_qc }
-
-        HIC_PAIRS_METRICS_SCAFFOLDSCAF(ch_hic_pairs_scaffold_round2_space_for_qc)
-        ch_all_pairs_metrics = ch_all_pairs_metrics.mix(HIC_PAIRS_METRICS_SCAFFOLDSCAF.out.metrics)
-        
-    } else {
-        log.info "[INFO] Skipping second round of scaffolding (no scaffold correction or decontamination)"
-        
-        // Create empty channel for round 2 scaffolds when not running
-        ch_final_scaffolds_round2 = Channel.empty()
-    }
-
-    /*
-    ========================================================================================
-        STEP 13: Gap Filling
-        Fills gaps in final scaffolded assemblies using HiFi reads
-        Operates on the final scaffold output from either:
-        - Round 2 scaffolding (if round 2 was run)
-        - Decontaminated scaffolds (if decontamination on scaffolds was run)
-        - Corrected scaffolds (if correction on scaffolds was run)
-        - Original scaffolds (from round 1)
-    ========================================================================================
-    */
-    
-    // Determine which scaffolds to gap fill based on what was run
-    if (params.run_scaffold_round2) {
-        // Use round 2 scaffolds
-        ch_scaffolds_for_gap_filling = ch_final_scaffolds_round2
-    } else {
-        // Use round 1 final scaffolds (corrected/decontaminated if those options were chosen)
-        ch_scaffolds_for_gap_filling = ch_final_scaffolds
-    }
-
-    // HiFi-only assemblies are NOT gap-filled — no Hi-C scaffolding means no scaffold gaps to
-    // close. They rejoin the finishing chain at teloclip/finalize below (they still have HiFi
-    // reads), mirroring how short-read rejoins at ch_final_assembly.
-    
-    // Combine scaffolds with sample HiFi reads for gap filling (key on meta.sample)
-    ch_scaffolds_for_gap_filling
-        .map { meta, scaffold -> [ meta.sample, meta, scaffold ] }
-        .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-        .map { sample, meta, scaffold, hifi_fastq -> tuple(meta, scaffold, hifi_fastq) }
-        .set { ch_gap_filling_input }
-    
-    // Run gap filling
-    GAP_FILLING(ch_gap_filling_input)
-    ch_versions = ch_versions.mix(GAP_FILLING.out.versions)
-
-    // Gap-filled Hi-C scaffolds + HiFi-only contigs (which correctly skipped gap-fill) both
-    // continue to teloclip/finalize.
-    ch_post_gap_fill = GAP_FILLING.out.filled_assembly.mix(ch_hifi_only_scaffolds)
-
-    /*
-    ========================================================================================
-        STEP 13b: Teloclip — Extend scaffolds with missing telomeres (Optional)
-        Maps raw HiFi reads back to gap-filled scaffolds to find soft-clipped
-        alignments at scaffold ends containing telomeric motifs, then appends
-        the overhang sequence to recover missing telomeres.
-    ========================================================================================
-    */
-    if (params.run_teloclip_extend) {
-        // Combine gap-filled assemblies with sample HiFi reads (key on meta.sample)
-        ch_post_gap_fill
-            .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
-            .combine( BAM_TO_FASTQ.out.fastq.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-            .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta.taxid?.toString(), meta, filled_fa, hifi_fastq) }
-            .combine( ch_telo_by_taxid, by: 0 )
-            .map { taxid, meta, filled_fa, hifi_fastq, telo -> tuple(meta, filled_fa, hifi_fastq, telo) }
-            .set { ch_teloclip_input }
-
-        TELOCLIP_EXTEND(ch_teloclip_input)
-        ch_versions = ch_versions.mix(TELOCLIP_EXTEND.out.versions)
-
-        // Collect teloclip stats across all haplotypes
-        COLLECT_TELOCLIP_STATS(
-            TELOCLIP_EXTEND.out.stats.map { meta, stats -> stats }.collect()
-        )
-
-        // The teloclip-extended assembly becomes the "final" assembly
-        ch_final_assembly = TELOCLIP_EXTEND.out.extended_assembly
-        ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats.ifEmpty(file('NO_TELOCLIP'))
-    } else {
-        // No teloclip — gap-filled assembly IS the final assembly
-        ch_final_assembly = ch_post_gap_fill
-        ch_teloclip_stats_for_report = Channel.of(file('NO_TELOCLIP'))
-    }
-
+    CONTIG_REFINEMENT(ch_contigs, ORGANELLE.out.baits, READ_PREPARATION.out.hifi,
+        ch_shortread_reads, ch_gxdb_dir)
+    ch_decontaminated_contigs = CONTIG_REFINEMENT.out.assembly
+    ch_organelle_filtered = CONTIG_REFINEMENT.out.organelle_filtered
+    ch_shortread_conditioned = CONTIG_REFINEMENT.out.shortread_conditioned
+    ch_versions = ch_versions.mix(CONTIG_REFINEMENT.out.versions)
+    HIC_SCAFFOLDING(ch_decontaminated_contigs, READ_PREPARATION.out.hifi,
+        READ_PREPARATION.out.hic, ch_telo_by_taxid, ch_gxdb_dir)
+    ch_final_assembly = HIC_SCAFFOLDING.out.assembly
+    ch_shortread_finished = HIC_SCAFFOLDING.out.shortread
+    ch_final_scaffolds_round2 = HIC_SCAFFOLDING.out.round2
+    ch_scaffold_round2_agp = HIC_SCAFFOLDING.out.round2_agp
+    ch_all_bam_metrics = HIC_SCAFFOLDING.out.bam_metrics
+    ch_all_pairs_metrics = HIC_SCAFFOLDING.out.pairs_metrics
+    ch_teloclip_stats_for_report = HIC_SCAFFOLDING.out.teloclip_stats
+    ch_versions = ch_versions.mix(HIC_SCAFFOLDING.out.versions)
     // =========================================================================
     //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
     // =========================================================================
@@ -973,7 +443,7 @@ workflow {
     //
     // ---- chimeric scaffold detection, confirmation and repair ------------------------
     // Lifted into workflows/chimera.nf: main.nf exceeded Groovy's 65,535-character
-    // compiled-unit limit. The bodies moved verbatim, so task hashes are unaffected.
+    // compiled-unit limit. Workflow nesting is part of task identity.
     //
     // Detection runs whenever harmonization did, independently of chimera_break -- the
     // candidates and called joins are the evidence a cut is justified by, and they are worth
@@ -981,12 +451,12 @@ workflow {
     CHIMERA(
         HARMONIZE_SCAFFOLDS.out.assemblies,
         ch_shortread_finished,
-        SCAFFOLD_HIC_ROUND1.out.agp,
+        HIC_SCAFFOLDING.out.round1_agp,
         ch_scaffold_round2_agp,
         HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id,
         HARMONIZE_SCAFFOLDS.out.chimera_candidates,
         HARMONIZE_SCAFFOLDS.out.ref_name_map,
-        FILTER_HIC_BAM.out.pairs,
+        HIC_SCAFFOLDING.out.contig_pairs,
         ch_telo_by_taxid )
     ch_versions = ch_versions.mix(CHIMERA.out.versions)
 
@@ -1005,6 +475,8 @@ workflow {
 
     FINALIZE_ASSEMBLY(ch_pre_finalize)
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
+    ASSEMBLY_RUN_SUMMARY(ch_input_status,
+        ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false))
 
     // =========================================================================
     //  PanGenome Assembly - combine all same species chromosome level assemblies into a pangenome
@@ -1020,7 +492,7 @@ workflow {
         Reused across ALL assembly QC steps for dramatic speedup
     ========================================================================================
     */
-    BUILD_MERYL_DB(ch_qc_reads)
+    BUILD_MERYL_DB(ch_qc_reads.filter { qc_on || params.run_pangenome })
     ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
 
     // resolved organism name per taxid (RESOLVE_TAXONOMY -> ch_taxonomy; tax.name is the
@@ -1046,12 +518,12 @@ workflow {
     ========================================================================================
     */
     // 1. Contact Maps for Final Assemblies
-    //    REPLACE: GAP_FILLING.out.filled_assembly → ch_final_assembly
+    //    REPLACE: HIC_SCAFFOLDING.out.filled → ch_final_assembly
     ch_final_contact_maps = Channel.empty()
     if (post_on && params.run_final_contact_maps) {
         FINAL_HIC_MAPS(
             ch_finalized_assembly,
-            TRIM_HIC.out.trimmed_reads,
+            READ_PREPARATION.out.hic,
             ch_compartments_script,
             ch_tad_book_script
         )
@@ -1122,8 +594,7 @@ workflow {
     // Read QC. `qc_mode = 'none'` means none, including the input read reports.
     if (qc_on) {
     HIC_QC_RAW(
-        ch_input.filter { meta, reads -> meta.hic }
-                .map { meta, reads -> tuple(meta, reads.hic_r1, reads.hic_r2) },
+        READ_PREPARATION.out.hic_raw,
         "raw"
     )
     ch_versions = ch_versions.mix(HIC_QC_RAW.out.versions)
@@ -1134,7 +605,7 @@ workflow {
     ========================================================================================
     */
     HIFI_QC(
-        BAM_TO_FASTQ.out.fastq
+        READ_PREPARATION.out.hifi
     )
     ch_versions = ch_versions.mix(HIFI_QC.out.versions)
 
@@ -1144,7 +615,7 @@ workflow {
     ========================================================================================
     */
     HIC_QC_TRIMMED(
-        TRIM_HIC.out.trimmed_reads,
+        READ_PREPARATION.out.hic_trimmed,
         "trimmed"
     )
 
@@ -1156,7 +627,7 @@ workflow {
     )
     ch_versions = ch_versions.mix(SHORTREAD_QC_RAW.out.versions)
     if (params.run_shortread_trim) {
-        SHORTREAD_QC_TRIMMED(TRIM_SHORTREAD.out.trimmed_reads, "trimmed")
+        SHORTREAD_QC_TRIMMED(READ_PREPARATION.out.shortread, "trimmed")
     }
     }
     else {
@@ -1174,16 +645,16 @@ workflow {
     ch_staged_assemblies = Channel.empty()
     if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ch_contigs.map { m, f -> tuple(m, 'initial', f) } )
     if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ch_organelle_filtered.map { m, f -> tuple(m, 'organelle_filtered', f) } )
-    if (run_all_qc && params.run_purge_dups) ch_staged_assemblies = ch_staged_assemblies.mix( ch_hifiasm_output.map { m, f -> tuple(m, 'purged', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( CONTIG_REFINEMENT.out.purged.map { m, f -> tuple(m, 'purged', f) } )
     if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ch_shortread_conditioned.map { m, f -> tuple(m, 'redundans', f) } )
-    if (run_all_qc && params.run_inspector_contigs) ch_staged_assemblies = ch_staged_assemblies.mix( CORRECT_MISASSEMBLIES_CONTIG.out.corrected.map { m, f -> tuple(m, 'contig_corrected', f) } )
-    if (run_all_qc && params.run_decon_contigs) ch_staged_assemblies = ch_staged_assemblies.mix( DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated.map { m, f -> tuple(m, 'contig_decontam', f) } )
-    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( SCAFFOLD_HIC_ROUND1.out.scaffolds.map { m, f -> tuple(m, 'scaffold', f) } )
-    if (run_all_qc && params.run_inspector_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( CORRECT_MISASSEMBLIES_SCAFFOLD.out.corrected.map { m, f -> tuple(m, 'scaffold_corrected', f) } )
-    if (run_all_qc && params.run_decon_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated.map { m, f -> tuple(m, 'scaffold_decontam', f) } )
+    if (run_all_qc && params.run_inspector_contigs) ch_staged_assemblies = ch_staged_assemblies.mix( CONTIG_REFINEMENT.out.corrected.map { m, f -> tuple(m, 'contig_corrected', f) } )
+    if (run_all_qc && params.run_decon_contigs) ch_staged_assemblies = ch_staged_assemblies.mix( CONTIG_REFINEMENT.out.decontaminated.map { m, f -> tuple(m, 'contig_decontam', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.round1.map { m, f -> tuple(m, 'scaffold', f) } )
+    if (run_all_qc && params.run_inspector_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.corrected.map { m, f -> tuple(m, 'scaffold_corrected', f) } )
+    if (run_all_qc && params.run_decon_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.decontaminated.map { m, f -> tuple(m, 'scaffold_decontam', f) } )
     if (run_all_qc && params.run_scaffold_round2) ch_staged_assemblies = ch_staged_assemblies.mix( ch_final_scaffolds_round2.map { m, f -> tuple(m, 'scaffold_round2', f) } )
-    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( GAP_FILLING.out.filled_assembly.map { m, f -> tuple(m, 'gap_filled', f) } )
-    if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( TELOCLIP_EXTEND.out.extended_assembly.map { m, f -> tuple(m, 'teloclip', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.filled.map { m, f -> tuple(m, 'gap_filled', f) } )
+    if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.extended.map { m, f -> tuple(m, 'teloclip', f) } )
     if (run_all_qc && chimera_on) ch_staged_assemblies = ch_staged_assemblies.mix( CHIMERA.out.broken.map { m, f, nm -> tuple(m, 'chimera_broken', f) } )
     if (qc_on) ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
 
@@ -1217,37 +688,7 @@ workflow {
         Generate Optional Decontamination Evidence
     ========================================================================================
     */
-    if (params.run_decon_contigs) {
-        // Optional: Generate evidence for decontamination decisions
-        // This runs in parallel with Hi-C mapping preparation
-        if (params.run_blobtools_evidence) {
-            GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants,
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.action_report,
-                DECONTAMINATE_ASSEMBLY_CONTIG.out.taxonomy_report,
-                ch_qc_reads,
-                ch_diamond_db,
-                ch_taxdump_dir
-            )
-        }
-    }
-
-    if (params.run_decon_scaffolds) {
-        // Optional: Generate evidence for scaffold decontamination
-        // This runs in parallel with scaffold QC
-        if (params.run_blobtools_evidence) {
-            GENERATE_DECONTAM_EVIDENCE(
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated,
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants,
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.action_report,
-                DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.taxonomy_report,
-                ch_qc_reads,
-                ch_diamond_db,
-                ch_taxdump_dir
-            )
-        }
-    }
+    // BlobTools evidence remains unsupported pending its separate rebuild.
 
     // Guarded where they stand rather than by extending the QC_PHASE block: the span
     // between them contains the scaffold decontamination report branch, which is not a QC
@@ -1295,7 +736,7 @@ workflow {
     ch_finalized_assembly
         .map { meta, final_fa -> tuple(meta.sample, meta, final_fa) }
         .combine(
-            BAM_TO_FASTQ.out.fastq.map { meta, hifi_fastq -> tuple(meta.sample, hifi_fastq) },
+            READ_PREPARATION.out.hifi.map { meta, hifi_fastq -> tuple(meta.sample, hifi_fastq) },
             by: 0
         )
         .map { sample, meta, final_fa, hifi_fastq ->
@@ -1330,8 +771,8 @@ workflow {
         ORGANELLE.out.annotation,
         ORGANELLE.out.stats,
         ORGANELLE.out.circular_map,
-        ESTIMATE_GENOME_SIZE.out.results,
-        ESTIMATE_GENOME_SIZE.out.size,
+        READ_PREPARATION.out.genome_results,
+        READ_PREPARATION.out.genome_size,
         ch_sample_identity,
         ch_input,
         ch_ploidy_by_sample,

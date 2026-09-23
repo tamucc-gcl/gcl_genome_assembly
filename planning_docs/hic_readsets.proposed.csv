@@ -1,0 +1,3 @@
+sample_id,library_id,readset_id,hic_r1,hic_r2
+Sde-CTlk_104,Ex2,Ex2_run1,raw_fastq/hic/Sde_CTlk_104_Ex2_HiC_CKDL260000073-1A_23CGCTLT3_L4_1.fq.gz,raw_fastq/hic/Sde_CTlk_104_Ex2_HiC_CKDL260000073-1A_23CGCTLT3_L4_2.fq.gz
+Sde-CTlk_104,Ex3,Ex3_run1,raw_fastq/hic/SdeCTlk_104_Ex3_WKDL260014935-1A_253MYVLT4_R1.fq.gz,raw_fastq/hic/SdeCTlk_104_Ex3_WKDL260014935-1A_253MYVLT4_R2.fq.gz

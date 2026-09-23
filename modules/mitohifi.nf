@@ -33,10 +33,11 @@ process MITOHIFI {
     tuple val(meta), path(hifi_fastq), path(ref_fasta), path(ref_gb), val(genetic_code)
 
     output:
-    tuple val(meta), path("${meta.sample}_mitogenome.fasta"),           emit: mitogenome
-    tuple val(meta), path("${meta.sample}_mitogenome.gb"),              emit: annotation
+    tuple val(meta), path("${meta.sample}_mitogenome.fasta"),           emit: mitogenome, optional: true
+    tuple val(meta), path("${meta.sample}_mitogenome.gb"),              emit: annotation, optional: true
     tuple val(meta), path("${meta.sample}_mito_stats.tsv"),             emit: stats
-    tuple val(meta), path("${meta.sample}_mito_contigs.fasta"),         emit: contigs_fasta
+    tuple val(meta), path("${meta.sample}_mito_contigs.fasta"),         emit: contigs_fasta, optional: true
+    tuple val(meta), path("${meta.sample}_mito_status.tsv"),           emit: status
     //tuple val(meta), path("mitohifi_output"),                          emit: output_dir
     tuple val(meta), path("${meta.sample}_final_mitogenome*.png"),      emit: gene_map, optional: true
     path "versions.tsv", emit: versions
@@ -79,7 +80,7 @@ process MITOHIFI {
     # -------------------------------------------------------------------------
 
     # Final mitogenome
-    if [ -f final_mitogenome.fasta ]; then
+    if [ -s final_mitogenome.fasta ]; then
         # Prefix the header with sample for clarity
         sed "s/^>/>mitogenome_${meta.sample} /" final_mitogenome.fasta \\
             > ${meta.sample}_mitogenome.fasta
@@ -88,14 +89,16 @@ process MITOHIFI {
         echo "[MITOHIFI] MitoHiFi may have failed to assemble a complete mitogenome"
         echo "[MITOHIFI] Checking for partial results..."
         ls -la *.fasta 2>/dev/null || true
-        exit 1
+        printf 'sample_id\\tstatus\\n${meta.sample}\\tno_complete_mitogenome\\n' > ${meta.sample}_mito_status.tsv
+        printf 'sample_id\\tstatus\\n${meta.sample}\\tno_complete_mitogenome\\n' > ${meta.sample}_mito_stats.tsv
+        printf 'MitoHiFi\\t%s\\n' "\$(mitohifi.py -v 2>&1 | head -n1)" > versions.tsv
+        exit 0
     fi
+    printf 'sample_id\\tstatus\\n${meta.sample}\\trecovered\\n' > ${meta.sample}_mito_status.tsv
 
     # GenBank annotation
     if [ -f final_mitogenome.gb ]; then
         cp final_mitogenome.gb ${meta.sample}_mitogenome.gb
-    else
-        touch ${meta.sample}_mitogenome.gb
     fi
 
     # Gene map image(s)
@@ -167,6 +170,7 @@ EOF
     echo "ATCGATCG" >> ${meta.sample}_mitogenome.fasta
     touch ${meta.sample}_mitogenome.gb
     touch ${meta.sample}_mito_stats.tsv
+    touch ${meta.sample}_mito_status.tsv
     cp ${meta.sample}_mitogenome.fasta ${meta.sample}_mito_contigs.fasta
     touch ${meta.sample}_final_mitogenome.annotation.png
     touch versions.tsv

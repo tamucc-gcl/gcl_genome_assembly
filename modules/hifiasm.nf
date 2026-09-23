@@ -25,7 +25,7 @@ process HIFIASM {
     publishDir "${params.outdir}/assembly/contig/hifiasm", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(hifi_fastq), path(hic_r1), path(hic_r2), val(traits), path(gsize_file)
+    tuple val(meta), path(hifi_fastq), path(hic_r1, stageAs: 'hic_r1??/*'), path(hic_r2, stageAs: 'hic_r2??/*'), val(traits), path(gsize_file)
 
     output:
     tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.fasta"), emit: assemblies
@@ -41,25 +41,31 @@ process HIFIASM {
     def useHiC   = !haploid && params.hifiasm_use_hic && meta.hic
     def primary  = haploid || params.hifiasm_primary
 
-    primary_flag  = primary ? '--primary' : ''
-    dualscaf_flag = params.hifiasm_dual_scaffolding ? '--dual-scaf' : ''
-    hic_opts      = useHiC ? "--h1 ${hic_r1} --h2 ${hic_r2}" : ''
+    def primary_flag  = primary ? '--primary' : ''
+    def dualscaf_flag = params.hifiasm_dual_scaffolding ? '--dual-scaf' : ''
+    def hic1 = hic_r1 instanceof Collection ? hic_r1 : (hic_r1 ? [hic_r1] : [])
+    def hic2 = hic_r2 instanceof Collection ? hic_r2 : (hic_r2 ? [hic_r2] : [])
+    if (useHiC && (!hic1 || hic1.size() != hic2.size()))
+        error "${meta.sample}: incomplete paired Hi-C lists"
+    def hic_opts = useHiC ? "--h1 '${hic1.join(',')}' --h2 '${hic2.join(',')}'" : ''
+    if (primary && meta.n_hap != 1)
+        error "${meta.sample}: --hifiasm_primary requires n_hap=1; primary/alternate cannot be labeled hap1/hap2"
 
     // Handle 'auto' parameters - omit flag entirely for auto behavior
     def telomere_motif = traits.telomere_motif
     def ploidy         = traits.ploidy
     def hg_override    = traits.haploid_genome_size
-    homcov_opt   = params.hifiasm_homozygous_coverage   == 'auto' ? '' : "--hom-cov ${params.hifiasm_homozygous_coverage}"
-    purgemax_opt = params.hifiasm_purge_max_coverage == 'auto' ? '' : "--purge-max ${params.hifiasm_purge_max_coverage}"
+    def homcov_opt   = params.hifiasm_homozygous_coverage   == 'auto' ? '' : "--hom-cov ${params.hifiasm_homozygous_coverage}"
+    def purgemax_opt = params.hifiasm_purge_max_coverage == 'auto' ? '' : "--purge-max ${params.hifiasm_purge_max_coverage}"
 
     // Source GFA naming:
     //   primary (no Hi-C):  *.p_ctg.gfa / *.a_ctg.gfa
     //   HiFi-only default:  *.bp.hap1.p_ctg.gfa / *.bp.hap2.p_ctg.gfa
     //   Hi-C phased:        *.hic.hap1.p_ctg.gfa / *.hic.hap2.p_ctg.gfa
-    use_primary_alt = primary && !useHiC
-    prefix = useHiC ? 'hic.' : 'bp.'
-    gfa1 = use_primary_alt ? "${meta.sample}.p_ctg.gfa" : "${meta.sample}.${prefix}hap1.p_ctg.gfa"
-    gfa2 = use_primary_alt ? "${meta.sample}.a_ctg.gfa" : "${meta.sample}.${prefix}hap2.p_ctg.gfa"
+    def use_primary_alt = primary && !useHiC
+    def prefix = useHiC ? 'hic.' : 'bp.'
+    def gfa1 = use_primary_alt ? "${meta.sample}.p_ctg.gfa" : "${meta.sample}.${prefix}hap1.p_ctg.gfa"
+    def gfa2 = use_primary_alt ? "${meta.sample}.a_ctg.gfa" : "${meta.sample}.${prefix}hap2.p_ctg.gfa"
 
     // Haploid: single primary output from gfa1 (== <sample>.p_ctg.gfa).
     // Diploid: two haplotype outputs from gfa1/gfa2.
@@ -71,6 +77,7 @@ process HIFIASM {
     }
 
     """
+    set -euo pipefail
     # --- resolve hifiasm --hg-size ---
     # override wins: 'auto' -> let hifiasm estimate (omit flag); a value -> use it verbatim.
     # else the per-sample GenomeScope estimate (digits only); empty/NA -> omit (hifiasm estimates).

@@ -77,33 +77,12 @@ workflow ORGANELLE {
         .mix( ORGANELLE_ANNOTATION.out.gene_map.map { meta, org, png -> tuple(meta, png) } )
 
     // ---- Per-sample bait bundles for FILTER_ORGANELLE ---------------------------------
-    // Exactly one emission per input sample (empty list = produced no organelle), with the
-    // gather confined to a SINGLE read-type branch. main.nf used to gather globally over
-    // ch_assemblies, so one slow or newly added sample in either branch stalled contig
-    // filtering -- and every step downstream of it -- for every other sample.
-    //
-    // Both arms end in groupTuple() so the bait value stays the same ArrayBag the global
-    // gather produced. A bare [fa] list would be a different collection type and is not
-    // guaranteed to hash identically, which would re-run FILTER_ORGANELLE and cascade from
-    // there through every downstream task.
-    //
-    //   HiFi       MITOHIFI.out.mitogenome is NOT optional and errorStrategy is
-    //              retry/terminate (never 'ignore'), so a HiFi sample yields exactly one
-    //              mitogenome or the run fails. groupKey(sample, 1) therefore lets
-    //              groupTuple emit on that single arrival with no dependence on any channel
-    //              closing. If MITOHIFI ever gains 'ignore' or an optional mitogenome this
-    //              arm needs the remainder join the short-read arm uses, or a sample will
-    //              go missing from the combine in main.nf.
-    //   short-read GETORGANELLE.out.assembly IS optional and a sample can have >1 organelle
-    //              target, so the count is not knowable up front and this arm gathers --
-    //              but only over ch_org.other. The remainder join re-attaches an empty list
-    //              for samples that produced none. Sorting is applied only above size 1,
-    //              where groupTuple's arrival order is genuinely unstable; at size 1 it
-    //              would convert the ArrayBag to a List for no benefit.
-    ch_hifi_baits = MITOHIFI.out.mitogenome
-        .map { meta, fa -> tuple(groupKey(meta.sample, 1), meta.sample, fa) }
-        .groupTuple()
-        .map { key, samples, fas -> tuple(samples[0], fas) }
+    // Completion is explicit even when successful recovery produces no final FASTA.
+    // Nonzero tool exits still fail: they are not reclassified as biological absence.
+    ch_hifi_baits = MITOHIFI.out.status
+        .map { meta, status -> tuple(meta.sample, status) }
+        .join(MITOHIFI.out.mitogenome.map { meta, fa -> tuple(meta.sample, fa) }, remainder: true)
+        .map { sample, status, fa -> tuple(sample, fa ? [fa] : []) }
 
     ch_sr_baits = ch_org.other
         .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.sample, meta.sample) }

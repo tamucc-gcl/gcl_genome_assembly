@@ -19,7 +19,7 @@ process MAP_HIC_TO_ASSEMBLY {
         mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(assembly_fasta), path(hic_r1), path(hic_r2), val(stage)
+    tuple val(meta), path(assembly_fasta), path(hic_r1, stageAs: 'hic_r1??/*'), path(hic_r2, stageAs: 'hic_r2??/*'), val(stage)
 
     output:
     tuple val(meta), val(stage),
@@ -33,6 +33,8 @@ process MAP_HIC_TO_ASSEMBLY {
           emit: stats
 
     path "versions.tsv", emit: versions
+    tuple val(meta), val(stage), path("${meta.id}.readsets.tsv"), emit: readsets
+    tuple val(meta), val(stage), path("${meta.id}.readset*.mapping_stats.txt"), emit: readset_stats
 
     script:
     def extra_args = (params.bwa_mem2_hic_args ?: "").toString()
@@ -41,6 +43,32 @@ process MAP_HIC_TO_ASSEMBLY {
     // in the same pipe) gets the bulk — split across a capped sort-thread count.
     def sort_threads = Math.min(task.cpus as int, 16)
     def sort_mem_mb  = Math.max(768L, (task.memory.toMega() / 4 / sort_threads) as long)
+    def r1s = hic_r1 instanceof Collection ? hic_r1 : [hic_r1]
+    def r2s = hic_r2 instanceof Collection ? hic_r2 : [hic_r2]
+    def sets = meta.hic_readsets
+    if (!sets || sets.size() != r1s.size() || r1s.size() != r2s.size())
+        error "${meta.id}: mapping read-set identities and mate lists do not agree"
+    def bwa_threads = Math.max(1, (task.cpus as int) - 2)
+    def mapping = sets.withIndex().collect { rs, i ->
+        def prefix = String.format('readset%04d', i + 1)
+        // RG identifies the LIBRARY, not the run: dedup may match across its runs.
+        def rg = "@RG\\tID:${rs.library_id}\\tSM:${meta.sample}\\tLB:${rs.library_id}\\tPL:ILLUMINA"
+        """
+        bwa-mem2 mem -t ${bwa_threads} -5SP ${extra_args} -R '${rg}' '${assembly_fasta}' '${r1s[i]}' '${r2s[i]}' \\
+          | awk 'BEGIN { FS=OFS="\\t" } /^@/ { print; next } { \$1="${prefix}_" \$1; if(length(\$1)>254) exit 2; print }' \\
+          | samtools view -@ 1 -b -o ${prefix}.unsorted.bam -
+        samtools sort -@ ${sort_threads} -m ${sort_mem_mb}M -T "\$PWD/${prefix}.sorttmp" \\
+          -o ${prefix}.sorted.bam ${prefix}.unsorted.bam
+        rm -f ${prefix}.unsorted.bam
+        samtools flagstat ${prefix}.sorted.bam > ${meta.id}.${prefix}.mapping_stats.txt
+        """
+    }.join('\n')
+    def bamNames = (0..<sets.size()).collect { String.format('readset%04d.sorted.bam', it + 1) }
+    def merge = sets.size() == 1 ? "mv ${bamNames[0]} ${meta.id}.sorted.bam"
+        : "samtools merge -c -@ ${sort_threads} -o ${meta.id}.sorted.bam ${bamNames.join(' ')}"
+    def manifest = 'sample_id\tlibrary_id\treadset_id\tqname_prefix\n' + sets.withIndex().collect { rs, i ->
+        "${meta.sample}\t${rs.library_id}\t${rs.readset_id}\t${String.format('readset%04d_', i + 1)}"
+    }.join('\n')
     """
     set -euo pipefail
     export LC_ALL=C
@@ -65,11 +93,12 @@ process MAP_HIC_TO_ASSEMBLY {
     # Map to an unsorted BAM first, then sort as a separate step.
     # (A fused bwa|view|sort pipe keeps sort running under bwa's backpressure for the
     #  whole mapping run; on large Hi-C sets that long-lived pipe dies mid-merge -> SIGPIPE/141.)
-    bwa-mem2 mem -t ${task.cpus} -5SP ${extra_args} ${assembly_fasta} ${hic_r1} ${hic_r2} \
-      | samtools view -@ ${task.cpus} -b -o ${meta.id}.unsorted.bam -
-    samtools sort -@ ${sort_threads} -m ${sort_mem_mb}M -T "\$PWD/${meta.id}.sorttmp" \
-      -o ${meta.id}.sorted.bam ${meta.id}.unsorted.bam
-    rm -f ${meta.id}.unsorted.bam
+    ${mapping}
+    ${merge}
+    rm -f ${bamNames.join(' ')}
+    cat > ${meta.id}.readsets.tsv <<'READSET_MANIFEST'
+${manifest}
+READSET_MANIFEST
 
     # samtools index -@ ${task.cpus} ${meta.id}.sorted.bam
     samtools index -@ ${task.cpus} -c ${meta.id}.sorted.bam
@@ -91,5 +120,7 @@ process MAP_HIC_TO_ASSEMBLY {
     touch ${meta.id}.sorted.bam.csi
     touch ${meta.id}_mapping_stats.txt
     touch versions.tsv
+    touch ${meta.id}.readsets.tsv
+    touch ${meta.id}.readset0001.mapping_stats.txt
     """
 }
