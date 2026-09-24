@@ -11,7 +11,8 @@ process DOWNLOAD_MITOS_DB {
 
     output:
     val db_dir, emit: db
-    path(refseq_sets.tokenize(',').collect { it.trim() }), emit: datasets
+    // Defer input-dependent file lists until the task context is available.
+    path({ refseq_sets.tokenize(',').collect { it.trim() } }), emit: datasets
 
     script:
     def sets = refseq_sets.tokenize(',').collect { it.trim() }

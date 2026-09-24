@@ -18,7 +18,8 @@ process FCS_DB_GET {
 
     output:
     val gxdb_dir, emit: out_dir
-    path(gxDatabaseFiles(gxdb_manifest)), emit: files
+    // Defer input-dependent file lists until the task context is available.
+    path({ gxDatabaseFiles(gxdb_manifest) }), emit: files
 
     script:
     def required = gxDatabaseFiles(gxdb_manifest).collect { "test -s '${it}'" }.join('\n')
