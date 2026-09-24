@@ -352,11 +352,11 @@ workflow {
         .unique()                                      // distinct (taxid, name)
     ch_mito_ref_by_taxid = Channel.empty()
     if (capabilities.hifi) {
-    FIND_MITO_REFERENCE(ch_mito_ref_todo)
-
-    // Per-taxid reference for the organelle step: (taxid, ref_fasta, ref_gb)
-    ch_mito_ref_by_taxid = FIND_MITO_REFERENCE.out.ref_fasta
-        .join( FIND_MITO_REFERENCE.out.ref_gb )        // .join is 1:1 by taxid — one ref per species
+        FIND_MITO_REFERENCE(ch_mito_ref_todo)
+        // Per-taxid reference for the organelle step: (taxid, ref_fasta, ref_gb).
+        ch_mito_ref_by_taxid = FIND_MITO_REFERENCE.out.ref_fasta
+            .join(FIND_MITO_REFERENCE.out.ref_gb)
+    }
 
     /*
     ========================================================================================
