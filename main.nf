@@ -35,6 +35,11 @@ nextflow.enable.dsl=2
 // Core pipeline parameters (keep existing ones)
 // ============================================================================
 
+// Shared databases are snapshots. storeDir reuses existing outputs even when the
+// task script or source URL changes; select a new directory to refresh a database.
+if (params.diamond_force || params.gxdb_force || params.getorganelle_force_download || params.mitos_force_download) {
+    error 'Database force-download flags are retired. Set the relevant database directory to a new snapshot directory instead.'
+}
 // Print pipeline header
 // helpers for the startup banner
 def onOff  = { it ? 'Enabled' : 'Disabled' }
@@ -56,8 +61,8 @@ log.info """\
      Decontamination  : ${stages(params.run_decon_contigs, params.run_decon_scaffolds)}${params.run_fcs_adaptor ? '  (+FCS-adaptor)' : ''}
      Scaffold round 2 : ${onOff(params.run_scaffold_round2)}
      Gap filling      : Enabled
-     Hi-C contact maps: ${onOff(params.run_final_contact_maps)}
-     Pairwise synteny : ${params.run_pairwise_alignments ? params.pairwise_alignment_mode : 'Disabled'}
+     Hi-C contact maps: ${onOff(params.run_post_assembly != false && params.run_final_contact_maps)}
+     Pairwise synteny : ${params.run_post_assembly != false && params.run_pairwise_alignments ? params.pairwise_alignment_mode : 'Disabled'}
      Teloclip extend  : ${onOff(params.run_teloclip_extend)}
     ------------------------------------------------------------
      Analysis k-mer   : ${params.kmer_size}
@@ -85,6 +90,7 @@ if (params.run_blobtools_evidence) {
     IMPORT FUNCTIONS
 ========================================================================================
 */
+include { parseSampleSheet } from './functions/input_validation.nf'
 include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
@@ -172,7 +178,10 @@ ch_harmonize_script       = file("${projectDir}/py_scripts/harmonize_names.py", 
 
 // User-run input checkpoint: performs input validation/reporting only.
 workflow VALIDATE_INPUTS {
-    INPUT_PREPARATION(params.sample_sheet, params.hic_readsets)
+    def validated_inputs = parseSampleSheet(params.sample_sheet, params.hic_readsets)
+    def capabilities = validated_inputs.capabilities
+    log.info '[INPUT] Enabled branches: ' + capabilities.findAll { key, enabled -> enabled }.keySet().join(', ')
+    INPUT_PREPARATION(validated_inputs)
 }
 
 workflow {
@@ -185,7 +194,10 @@ workflow {
     def chimera_on  = params.chimera_break && params.chimera_break.toString() != 'false'
 
     // Parse sample sheet -> per-sample tuple(meta, reads)
-    INPUT_PREPARATION(params.sample_sheet, params.hic_readsets)
+    def validated_inputs = parseSampleSheet(params.sample_sheet, params.hic_readsets)
+    def capabilities = validated_inputs.capabilities
+    log.info '[INPUT] Enabled branches: ' + capabilities.findAll { key, enabled -> enabled }.keySet().join(', ')
+    INPUT_PREPARATION(validated_inputs)
     ch_input = INPUT_PREPARATION.out.samples
     ch_input_status = INPUT_PREPARATION.out.status
 
@@ -286,7 +298,7 @@ workflow {
         Only executes if decontamination is requested
     ========================================================================================
     */
-    if (params.run_decon_contigs || params.run_decon_scaffolds) {
+    if (params.run_decon_contigs || (capabilities.scaffold && params.run_decon_scaffolds)) {
         SETUP_DECONTAM_DBS(ch_taxdump)
         
         // Store outputs for later use
@@ -300,7 +312,11 @@ workflow {
         .filter { qc_on }
         .map { taxid, tax -> tax.busco_lineage }
         .unique()
-    DOWNLOAD_BUSCO_DB(ch_busco_lineages)
+    ch_busco_downloads = Channel.empty()
+    if (qc_on) {
+        DOWNLOAD_BUSCO_DB(ch_busco_lineages)
+        ch_busco_downloads = DOWNLOAD_BUSCO_DB.out.db
+    }
 
     // ch_busco_db is now a VALUE-channel MAP:  taxid -> busco_lineage (a String).
     //   * value channel  -> broadcasts unchanged to all 13 ASSEMBLY_QC calls
@@ -312,7 +328,7 @@ workflow {
     // NOTE: many taxids can share one lineage -> combine(by:0) (one-to-many), NOT join.
     ch_busco_db = ch_taxonomy
         .map { taxid, tax -> tuple(tax.busco_lineage, taxid) }
-        .combine( DOWNLOAD_BUSCO_DB.out.db.map { db -> tuple(db.name, db) }, by: 0 )
+        .combine( ch_busco_downloads.map { db -> tuple(db.name, db) }, by: 0 )
         .map { lineage, taxid, db -> [ (taxid): lineage ] }
         .reduce([:]) { acc, m -> acc + m }
         .map { m -> m.sort { a, b -> a.key <=> b.key } }        // deterministic key order -> stable cache hash
@@ -334,6 +350,8 @@ workflow {
         .map    { taxid, sample, tax -> tuple(taxid, tax.name) }
         .filter { taxid, name -> name != null }        // no resolved name -> no reference
         .unique()                                      // distinct (taxid, name)
+    ch_mito_ref_by_taxid = Channel.empty()
+    if (capabilities.hifi) {
     FIND_MITO_REFERENCE(ch_mito_ref_todo)
 
     // Per-taxid reference for the organelle step: (taxid, ref_fasta, ref_gb)
@@ -346,7 +364,7 @@ workflow {
     ========================================================================================
     */
     
-    READ_PREPARATION(ch_input, ch_ploidy_by_sample)
+    READ_PREPARATION(ch_input, ch_ploidy_by_sample, capabilities)
     ch_reads_all = READ_PREPARATION.out.reads
     ch_qc_reads = READ_PREPARATION.out.qc_reads
     ch_shortread_reads = READ_PREPARATION.out.shortread
@@ -364,7 +382,7 @@ workflow {
         ch_reads_all.map { meta, hifi_fastq, hic1, hic2, sr1, sr2 -> tuple(meta, hifi_fastq, sr1, sr2) },
         ch_mito_ref_by_taxid,
         ch_gcode_by_taxid,
-        ch_organelle_by_taxid
+        ch_organelle_by_taxid, capabilities
     )
     ch_versions = ch_versions.mix(ORGANELLE.out.versions)
 
@@ -379,7 +397,7 @@ workflow {
     CONTIG_ASSEMBLY(
         ch_reads_all,
         ch_hifiasm_traits,
-        READ_PREPARATION.out.genome_size.map { meta, f -> tuple(meta.sample, f) }
+        READ_PREPARATION.out.genome_size.map { meta, f -> tuple(meta.sample, f) }, capabilities
     )
     ch_versions = ch_versions.mix(CONTIG_ASSEMBLY.out.versions)
 
@@ -408,13 +426,13 @@ workflow {
     // organelle: those bypass FILTER_ORGANELLE untouched, so a failed organelle assembly
     // still can't drop a whole nuclear assembly.
     CONTIG_REFINEMENT(ch_contigs, ORGANELLE.out.baits, READ_PREPARATION.out.hifi,
-        ch_shortread_reads, ch_gxdb_dir)
+        ch_shortread_reads, ch_gxdb_dir, capabilities)
     ch_decontaminated_contigs = CONTIG_REFINEMENT.out.assembly
     ch_organelle_filtered = CONTIG_REFINEMENT.out.organelle_filtered
     ch_shortread_conditioned = CONTIG_REFINEMENT.out.shortread_conditioned
     ch_versions = ch_versions.mix(CONTIG_REFINEMENT.out.versions)
     HIC_SCAFFOLDING(ch_decontaminated_contigs, READ_PREPARATION.out.hifi,
-        READ_PREPARATION.out.hic, ch_telo_by_taxid, ch_gxdb_dir)
+        READ_PREPARATION.out.hic, ch_telo_by_taxid, ch_gxdb_dir, capabilities)
     ch_final_assembly = HIC_SCAFFOLDING.out.assembly
     ch_shortread_finished = HIC_SCAFFOLDING.out.shortread
     ch_final_scaffolds_round2 = HIC_SCAFFOLDING.out.round2
@@ -432,7 +450,7 @@ workflow {
     // and mixing them into the INPUT here would hold its cross-sample groupTuple open until
     // the short-read path finished -- blocking FINALIZE and everything after it for every
     // long-read assembly. They bypass it and rejoin at the output with the same sentinel.
-    HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script)
+    HARMONIZE_SCAFFOLDS(ch_final_assembly, ch_harmonize_script, capabilities)
     ch_versions = ch_versions.mix(HARMONIZE_SCAFFOLDS.out.versions)
 
     // ---- break chimeric scaffolds, if asked -------------------------------------------
@@ -457,7 +475,7 @@ workflow {
         HARMONIZE_SCAFFOLDS.out.chimera_candidates,
         HARMONIZE_SCAFFOLDS.out.ref_name_map,
         HIC_SCAFFOLDING.out.contig_pairs,
-        ch_telo_by_taxid )
+        ch_telo_by_taxid, capabilities )
     ch_versions = ch_versions.mix(CHIMERA.out.versions)
 
     // ch_pre_finalize is emitted rather than assigned here: its default carries the
@@ -492,8 +510,12 @@ workflow {
         Reused across ALL assembly QC steps for dramatic speedup
     ========================================================================================
     */
-    BUILD_MERYL_DB(ch_qc_reads.filter { qc_on || params.run_pangenome })
-    ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
+    ch_meryl_db = Channel.empty()
+    if (qc_on || params.run_pangenome) {
+        BUILD_MERYL_DB(ch_qc_reads)
+        ch_meryl_db = BUILD_MERYL_DB.out.meryl_db
+        ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
+    }
 
     // resolved organism name per taxid (RESOLVE_TAXONOMY -> ch_taxonomy; tax.name is the
     // taxid-derived species, e.g. 373251 -> "Spratelloides delicatulus")
@@ -504,7 +526,7 @@ workflow {
         HARMONIZE_SCAFFOLDS.out.reference_id,
         ch_species_by_taxid,
         HARMONIZE_SCAFFOLDS.out.report_by_taxid,
-        BUILD_MERYL_DB.out.meryl_db
+        ch_meryl_db
     )
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 
@@ -520,7 +542,7 @@ workflow {
     // 1. Contact Maps for Final Assemblies
     //    REPLACE: HIC_SCAFFOLDING.out.filled → ch_final_assembly
     ch_final_contact_maps = Channel.empty()
-    if (post_on && params.run_final_contact_maps) {
+    if (post_on && capabilities.hic && params.run_final_contact_maps) {
         FINAL_HIC_MAPS(
             ch_finalized_assembly,
             READ_PREPARATION.out.hic,
@@ -591,49 +613,24 @@ workflow {
         QC Raw Hi-C Reads
     ========================================================================================
     */
-    // Read QC. `qc_mode = 'none'` means none, including the input read reports.
-    if (qc_on) {
-    HIC_QC_RAW(
-        READ_PREPARATION.out.hic_raw,
-        "raw"
-    )
-    ch_versions = ch_versions.mix(HIC_QC_RAW.out.versions)
-
-    /*
-    ========================================================================================
-        QC HiFi Reads
-    ========================================================================================
-    */
-    HIFI_QC(
-        READ_PREPARATION.out.hifi
-    )
-    ch_versions = ch_versions.mix(HIFI_QC.out.versions)
-
-    /*
-    ========================================================================================
-        QC Trimmed Hi-C Reads
-    ========================================================================================
-    */
-    HIC_QC_TRIMMED(
-        READ_PREPARATION.out.hic_trimmed,
-        "trimmed"
-    )
-
-    // Short-read input QC — raw + trimmed (mirrors HIC_QC_RAW / HIC_QC_TRIMMED)
-    SHORTREAD_QC_RAW(
-        ch_input.filter { meta, reads -> meta.shortread }
-                .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) },
-        "raw"
-    )
-    ch_versions = ch_versions.mix(SHORTREAD_QC_RAW.out.versions)
-    if (params.run_shortread_trim) {
-        SHORTREAD_QC_TRIMMED(READ_PREPARATION.out.shortread, "trimmed")
+    // Register only read-QC branches supported by accepted inputs.
+    if (qc_on && capabilities.hic) {
+        HIC_QC_RAW(READ_PREPARATION.out.hic_raw, "raw")
+        HIC_QC_TRIMMED(READ_PREPARATION.out.hic_trimmed, "trimmed")
+        ch_versions = ch_versions.mix(HIC_QC_RAW.out.versions)
     }
+    if (qc_on && capabilities.hifi) {
+        HIFI_QC(READ_PREPARATION.out.hifi)
+        ch_versions = ch_versions.mix(HIFI_QC.out.versions)
     }
-    else {
-        log.info "[INFO] qc_mode = 'none': skipping input read QC"
+    if (qc_on && capabilities.shortread) {
+        SHORTREAD_QC_RAW(ch_input.filter { meta, reads -> meta.shortread }
+            .map { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) }, "raw")
+        ch_versions = ch_versions.mix(SHORTREAD_QC_RAW.out.versions)
+        if (params.run_shortread_trim) {
+            SHORTREAD_QC_TRIMMED(READ_PREPARATION.out.shortread, "trimmed")
+        }
     }
-    
     /*
     ========================================================================================
         Assembly QC
@@ -670,12 +667,12 @@ workflow {
     QC_PHASE(
         ch_staged_assemblies,
         ch_qc_reads,
-        BUILD_MERYL_DB.out.meryl_db,
+        ch_meryl_db,
         ch_busco_db,
         ch_all_bam_metrics,
         ch_all_pairs_metrics,
         ch_compile_qc_script,
-        ch_assembly_report_script
+        ch_assembly_report_script, capabilities
     )
     ch_versions = ch_versions.mix(QC_PHASE.out.versions)
     }

@@ -1,6 +1,6 @@
 process FCS_CLEAN_GENOME {
   tag "${meta.id}"
-  label 'fcs'
+  label 'fcs_clean'
 
   publishDir "${params.outdir}/assembly/${stage}/decontam", mode: params.publish_dir_mode
 

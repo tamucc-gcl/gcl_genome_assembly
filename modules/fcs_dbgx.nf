@@ -1,61 +1,36 @@
-process FCS_DB_GET {
-  tag "fcs_db_get"
-  label 'fcs' 
+// Payload names documented in the NCBI FCS-GX quickstart.
+def gxDatabaseFiles(manifest) {
+    def prefix = manifest.replaceAll('.*/([^/]+)\\.manifest.*$', '$1')
+    ['README.txt', 'assemblies.tsv', 'blast_div.tsv.gz', 'gxi', 'gxs',
+     'manifest', 'meta.jsonl', 'seq_info.tsv.gz', 'taxa.tsv'].collect { "${prefix}.${it}" }
+}
 
-  input:
+process FCS_DB_GET {
+    tag "fcs_db_get"
+    label 'fcs_download'
+    storeDir { gxdb_dir }
+    scratch false
+
+    input:
     val gxdb_manifest
     val gxdb_dir
     val force_download
 
-  output:
-    val "${gxdb_dir}", emit: out_dir
+    output:
+    val gxdb_dir, emit: out_dir
+    path(gxDatabaseFiles(gxdb_manifest)), emit: files
 
-  script:
-  // Extract database name from manifest (test-only or all)
-  def db_name = gxdb_manifest.replaceAll('.*/([^/]+)\\.manifest.*$', '$1')
-  """
-  set -euo pipefail
+    script:
+    def required = gxDatabaseFiles(gxdb_manifest).collect { "test -s '${it}'" }.join('\n')
+    """
+    set -euo pipefail
+    /app/bin/sync_files get --mft "${gxdb_manifest}" --dir .
+    ${required}
+    """
 
-  mkdir -p "${gxdb_dir}"
-  
-  # Make sentinel specific to database type
-  SENTINEL="${gxdb_dir}/.gxdb_ready_${db_name}"
-
-  if [ "${force_download}" = "true" ] || [ ! -f "\${SENTINEL}" ] || [ ! ls ${gxdb_dir}/${db_name}.gx* 1> /dev/null 2>&1 ]; then
-    echo "[FCS_DB_GET] Downloading GXDB: ${db_name}"
-    echo "[FCS_DB_GET] Manifest: ${gxdb_manifest}"
-    echo "[FCS_DB_GET] Target directory: ${gxdb_dir}"
-    
-    # Remove stale lockfile if it exists
-    LOCKFILE="${gxdb_dir}.lockfile"
-    if [ -f "\${LOCKFILE}" ]; then
-      echo "[FCS_DB_GET] Removing stale lockfile: \${LOCKFILE}"
-      rm -f "\${LOCKFILE}"
-    fi
-    
-    # Nextflow automatically wraps this in singularity exec
-    /app/bin/sync_files get \\
-      --mft "${gxdb_manifest}" \\
-      --dir "${gxdb_dir}"
-    
-    # Verify essential files exist for this specific database
-    echo "Verifying downloaded files..."
-    ls -lh "${gxdb_dir}"
-    
-    if ! ls ${gxdb_dir}/${db_name}.gxs 1> /dev/null 2>&1 || ! ls ${gxdb_dir}/${db_name}.gxi 1> /dev/null 2>&1; then
-      echo "ERROR: Required database files (${db_name}.gxs and ${db_name}.gxi) not found"
-      echo "Downloaded files:"
-      ls -lh "${gxdb_dir}"
-      exit 1
-    fi
-    
-    date -Is > "\${SENTINEL}"
-    echo "[FCS_DB_GET] Database download complete. Files:"
-    ls -lh "${gxdb_dir}"/${db_name}*
-  else
-    echo "[FCS_DB_GET] GXDB '${db_name}' already present at ${gxdb_dir}; skipping download."
-    echo "Existing files:"
-    ls -lh "${gxdb_dir}"/${db_name}* 2>/dev/null || echo "No files found for ${db_name}"
-  fi
-  """
+    stub:
+    """
+    echo 'Stub database downloads are disabled; use a prepared test database.' >&2
+    exit 1
+    """
 }

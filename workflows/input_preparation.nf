@@ -1,17 +1,16 @@
-include { parseSampleSheet } from '../functions/input_validation.nf'
 include { INPUT_SUMMARY } from '../modules/input_summary.nf'
 
 workflow INPUT_PREPARATION {
     take:
-    sample_sheet
-    hic_readsets
+    parsed
 
     main:
-    parsed = parseSampleSheet(sample_sheet, hic_readsets)
-    INPUT_SUMMARY(parsed.status.first())
+    ch_samples = Channel.fromList(parsed.samples)
+    ch_status = Channel.value(parsed.status)
+    INPUT_SUMMARY(ch_status)
 
     emit:
-    samples = parsed.samples
-    status = parsed.status.first()
+    samples = ch_samples
+    status = ch_status
     report = INPUT_SUMMARY.out.report
 }

@@ -14,13 +14,20 @@ workflow READ_PREPARATION {
     ch_input
     ch_ploidy_by_sample
 
+    capabilities
+
     main:
+    ch_hifi_fastq = Channel.empty()
+    ch_hic_trimmed = Channel.empty()
     ch_versions = Channel.empty()
 
+    if (capabilities.hifi) {
     BAM_TO_FASTQ(
         ch_input.filter { meta, reads -> meta.hifi }
                 .map { meta, reads -> tuple(meta, reads.hifi_bam) }
     )
+    ch_hifi_fastq = BAM_TO_FASTQ.out.fastq
+    }
 
     
     /*
@@ -35,9 +42,12 @@ workflow READ_PREPARATION {
                    readset_count: reads.hic_sets.size()], rs.r1, rs.r2)
         }
     }
+    if (capabilities.hic) {
     TRIM_HIC(ch_hic_raw)
+    ch_hic_trimmed = TRIM_HIC.out.trimmed_reads
+    }
     // Release a sample as soon as all of ITS read sets finish, in stable ID order.
-    ch_hic_prepared = TRIM_HIC.out.trimmed_reads
+    ch_hic_prepared = ch_hic_trimmed
         .map { rs, r1, r2 -> tuple(groupKey(rs.sample, rs.readset_count), rs.readset_id, r1, r2) }
         .groupTuple()
         .map { key, ids, r1s, r2s ->
@@ -53,7 +63,7 @@ workflow READ_PREPARATION {
         .filter { meta, reads -> meta.shortread }
         .map    { meta, reads -> tuple(meta, reads.sr_r1, reads.sr_r2) }
 
-    if (params.run_shortread_trim) {
+    if (capabilities.shortread && params.run_shortread_trim) {
         TRIM_SHORTREAD(ch_shortread_raw)
         ch_shortread_reads = TRIM_SHORTREAD.out.trimmed_reads
         ch_versions = ch_versions.mix(TRIM_SHORTREAD.out.versions)
@@ -73,7 +83,7 @@ workflow READ_PREPARATION {
     // reads if it has that modality, else a null placeholder from ch_input (immediate).
     // Plain 1:1 joins then emit each sample as soon as ITS OWN reads are ready — no
     // waiting on other samples' BAM_TO_FASTQ / TRIM_HIC / TRIM_SHORTREAD to finish.
-    ch_hifi_slot = BAM_TO_FASTQ.out.fastq
+    ch_hifi_slot = ch_hifi_fastq
         .map { meta, fq -> [ meta.sample, fq ] }
         .mix( ch_input.filter { meta, reads -> !meta.hifi }.map { meta, reads -> [ meta.sample, null ] } )
 
@@ -124,10 +134,10 @@ workflow READ_PREPARATION {
     emit:
     reads = ch_reads_all                       // (meta, hifi, hic_r1, hic_r2, sr_r1, sr_r2)
     qc_reads = ch_qc_reads                     // (meta, read file or paired read list)
-    hifi = BAM_TO_FASTQ.out.fastq               // (meta, fastq)
+    hifi = ch_hifi_fastq               // (meta, fastq)
     hic = ch_hic_prepared                      // (sample meta, ordered R1 list, ordered R2 list)
     hic_raw = ch_hic_raw                       // per read set, for raw QC
-    hic_trimmed = TRIM_HIC.out.trimmed_reads    // per read set, for trimmed QC
+    hic_trimmed = ch_hic_trimmed    // per read set, for trimmed QC
     shortread = ch_shortread_reads             // (meta, r1, r2), trimmed or raw
     genome_size = ESTIMATE_GENOME_SIZE.out.size // (meta, size file)
     genome_results = ESTIMATE_GENOME_SIZE.out.results // (meta, summary file)

@@ -76,6 +76,8 @@ workflow HARMONIZE_SCAFFOLDS {
     ch_assemblies    // tuple(meta, fasta)
     resolver         // path to py_scripts/harmonize_names.py
 
+    capabilities
+
     main:
     ch_versions = Channel.empty()
 
@@ -83,7 +85,7 @@ workflow HARMONIZE_SCAFFOLDS {
     // 65,535-char compiled-unit limit, so lines there are the scarce resource
     selector = file("${projectDir}/py_scripts/select_reference.py", checkIfExists: true)
 
-    if( !params.harmonize_scaffold_names ) {
+    if( !params.harmonize_scaffold_names || !capabilities.harmonize ) {
         // pass-through: every assembly gets the sentinel, no barrier
         ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
         ch_report = Channel.empty()

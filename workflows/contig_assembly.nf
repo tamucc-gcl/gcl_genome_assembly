@@ -8,8 +8,7 @@
     single per-sample assemblies channel that the downstream haplotype fork consumes
     unchanged:
 
-      hifiasm : HiFi (+ Hi-C) -> HIFIASM   (byte-identical to the previous direct
-                                            HIFIASM(ch_fastq_all) call)
+      hifiasm : HiFi (+ Hi-C) -> HIFIASM
       spades  : PE short reads -> SPADES    (single collapsed assembly; meta.n_hap == 1)
 
     The input tuple carries every contig-capable read set so each branch picks what it needs:
@@ -42,7 +41,11 @@ workflow CONTIG_ASSEMBLY {
     ch_traits   // tuple(sample, {telomere_motif, ploidy, haploid_genome_size})
     ch_gsize    // tuple(sample, genome_size_txt)
 
+    capabilities
+
     main:
+    ch_assemblies = Channel.empty()
+    ch_versions = Channel.empty()
     ch_reads
         .branch { meta, hifi, hic1, hic2, sr1, sr2 ->
             spades:  meta.assembler == 'spades'
@@ -52,6 +55,7 @@ workflow CONTIG_ASSEMBLY {
 
     // --- hifiasm branch: HiFi (+ optional Hi-C). Null Hi-C (HiFi-only rows) -> empty list
     //     so path staging accepts it; HIFIASM gates Hi-C phasing on meta.hic. ---
+    if (capabilities.hifiasm) {
     HIFIASM(
         ch_by_assembler.hifiasm
             .map { meta, hifi, hic1, hic2, sr1, sr2 -> tuple(meta.sample, meta, hifi, hic1 ?: [], hic2 ?: []) }
@@ -60,6 +64,11 @@ workflow CONTIG_ASSEMBLY {
             .map { sample, meta, hifi, hic1, hic2, traits, gsize -> tuple(meta, hifi, hic1, hic2, traits, gsize) }
     )
 
+    ch_assemblies = HIFIASM.out.assemblies
+    ch_versions = ch_versions.mix(HIFIASM.out.versions)
+    }
+
+    if (capabilities.spades) {
     // --- spades branch: PE short reads. ---
     // genome size into meta (fallback/floor); gs file still handed to SUBSAMPLE
     ch_spades_reads = ch_by_assembler.spades
@@ -86,14 +95,13 @@ workflow CONTIG_ASSEMBLY {
         tuple(meta.subMap(meta.keySet() - ['genome_size', 'sr_bases']), fa)
     }
 
-    // Re-converge on the shape the downstream fork consumes: tuple(meta, fastas).
-    // (Each sample took exactly one branch, so no sample is duplicated by the mix.)
-    ch_assemblies = HIFIASM.out.assemblies.mix( ch_primary )
+    ch_assemblies = ch_assemblies.mix(ch_primary)
+    ch_versions = ch_versions.mix(SPADES.out.versions)
+        .mix(SUBSAMPLE_SHORTREAD.out.versions)
+        .mix(COUNT_SHORTREAD.out.versions)
+    }
 
     emit:
     assemblies = ch_assemblies
-    versions   = HIFIASM.out.versions
-        .mix(SPADES.out.versions)
-        .mix(SUBSAMPLE_SHORTREAD.out.versions)
-        .mix(COUNT_SHORTREAD.out.versions)
+    versions = ch_versions
 }

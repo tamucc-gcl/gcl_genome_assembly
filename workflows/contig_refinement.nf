@@ -14,7 +14,11 @@ workflow CONTIG_REFINEMENT {
     ch_shortread_reads
     ch_gxdb_dir
 
+    capabilities
+
     main:
+    ch_purged = Channel.empty()
+    ch_shortread_conditioned = Channel.empty()
     ch_versions = Channel.empty()
     ch_corrected = Channel.empty()
     ch_decontaminated = Channel.empty()
@@ -61,10 +65,13 @@ workflow CONTIG_REFINEMENT {
             .map { sample, meta, fasta, hifi_reads -> tuple(meta, fasta, hifi_reads) }
             .set { ch_purge_dups_input }
 
+        if (capabilities.purge) {
         PURGE_DUPS(ch_purge_dups_input)
-        ch_hifiasm_output = PURGE_DUPS.out.purged_assembly
-            .mix(ch_organelle_filtered_hifi.filter { meta, fasta -> meta.dedup != 'purge_dups' })
+        ch_purged = PURGE_DUPS.out.purged_assembly
         ch_versions = ch_versions.mix(PURGE_DUPS.out.versions)
+        }
+        ch_hifiasm_output = ch_purged
+            .mix(ch_organelle_filtered_hifi.filter { meta, fasta -> meta.dedup != 'purge_dups' })
 
     // Short-read conditioning: REDUNDANS (reduce/scaffold/gap-close) -> optional Pilon.
     // Fed by the organelle-filtered short-read contigs (was ch_contigs_by_type.shortread).
@@ -74,6 +81,7 @@ workflow CONTIG_REFINEMENT {
         .map { sample, meta, fasta, r1, r2 -> tuple(meta, fasta, r1, r2) }
         .set { ch_redundans_input }
 
+    if (capabilities.spades) {
     REDUNDANS(ch_redundans_input)
     ch_versions = ch_versions.mix(REDUNDANS.out.versions)
 
@@ -89,13 +97,14 @@ workflow CONTIG_REFINEMENT {
     } else {
         ch_shortread_conditioned = REDUNDANS.out.assembly
     }
+    }
 
     /*
     ====================================================================================
         STEP 4.5: Optional Misassembly Correction of Contig Assemblies (Inspector)
     ====================================================================================
     */
-    if (params.run_inspector_contigs) {
+    if (capabilities.hifiasm && params.run_inspector_contigs) {
         ch_hifiasm_output
             .map { meta, fasta -> [ meta.sample, meta, fasta ] }
             .combine( ch_hifi_reads.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
@@ -145,7 +154,7 @@ workflow CONTIG_REFINEMENT {
     emit:
     assembly = ch_decontaminated_contigs
     organelle_filtered = ch_organelle_filtered
-    purged = PURGE_DUPS.out.purged_assembly
+    purged = ch_purged
     shortread_conditioned = ch_shortread_conditioned
     corrected = ch_corrected
     decontaminated = ch_decontaminated

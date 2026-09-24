@@ -33,7 +33,7 @@ workflow SHORTREAD_ORGANELLE {
     ch_organelle
 
     main:
-    // One DB fetch, only if at least one short-read sample exists (sentinel-guarded).
+    // One DB fetch, only if at least one short-read sample exists (reused through storeDir).
     ch_db = DOWNLOAD_GETORGANELLE_DB(
                 ch_reads.map { meta, sr1, sr2 -> params.getorganelle_downloads }.unique(),
                 params.getorganelle_force_download

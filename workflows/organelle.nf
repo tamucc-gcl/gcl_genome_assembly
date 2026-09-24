@@ -1,25 +1,3 @@
-/*
-========================================================================================
-    ORGANELLE — unified organelle assembly + annotation + plotting (long & short read)
-========================================================================================
-    Repo location: workflows/organelle.nf
-
-    One entry point for all organelle work, branching on read type:
-
-      HiFi  (meta.hifi)  -> MITOHIFI (assemble + annotate mito) + MITO_CIRCULAR_MAP
-      other              -> SHORTREAD_ORGANELLE (GetOrganelle: mito, +plastid for plants)
-                            + ORGANELLE_ANNOTATION (MITOS2 for animal/fungal mito -> GenBank
-                              + circular map; GeSeq note for plant organelles)
-
-    Input `ch_reads` = tuple(meta, hifi_fastq, sr_r1, sr_r2). Emits are unified across both
-    branches as (meta, file) two-tuples (one emission per organelle), so:
-      - `assemblies` feeds FILTER_ORGANELLE (grouped per sample -> bait)
-      - annotation / stats / circular_map / gene_map stay compatible with the report manifest
-
-    Everything publishes flat under ${params.outdir}/organelle with the sample in the filename.
-========================================================================================
-*/
-
 include { MITOHIFI }             from '../modules/mitohifi.nf'
 include { MITO_CIRCULAR_MAP }    from '../modules/mito_circular_map.nf'
 include { SHORTREAD_ORGANELLE }  from './shortread_organelle.nf'
@@ -28,80 +6,77 @@ include { ORGANELLE_ANNOTATION } from './organelle_annotation.nf'
 mito_circular_script = file("${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
 
 workflow ORGANELLE {
-
     take:
-    ch_reads       // tuple(meta, hifi_fastq, sr_r1, sr_r2)
-    ch_mito_ref    // tuple(taxid, ref_fasta, ref_gb)   — MitoHiFi reference per species
-    ch_gcode       // tuple(taxid, genetic_code)
-    ch_organelle   // tuple(taxid, [ [type,recursion,kmers,coverage,word_size], ... ])
+    ch_reads
+    ch_mito_ref
+    ch_gcode
+    ch_organelle
+    capabilities
 
     main:
-    ch_reads
-        .branch { meta, hifi_fastq, sr1, sr2 ->
-            hifi:  meta.hifi
-            other: true
-        }
-        .set { ch_org }
+    ch_assemblies = Channel.empty()
+    ch_annotation = Channel.empty()
+    ch_stats = Channel.empty()
+    ch_circular = Channel.empty()
+    ch_gene_map = Channel.empty()
+    ch_baits = Channel.empty()
+    ch_notes = Channel.empty()
+    ch_versions = Channel.empty()
 
-    // ── HiFi branch: MitoHiFi (mito assembly + annotation) + circular map ────────────────
-    ch_org.hifi
-        .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.taxid?.toString(), meta, hifi_fastq) }
-        .combine( ch_mito_ref, by: 0 )
-        .combine( ch_gcode,    by: 0 )
-        .map { taxid, meta, hifi_fastq, ref_fa, ref_gb, gcode -> tuple(meta, hifi_fastq, ref_fa, ref_gb, gcode) }
-        .set { ch_mitohifi_input }
-    MITOHIFI( ch_mitohifi_input )
-    MITO_CIRCULAR_MAP( MITOHIFI.out.annotation, mito_circular_script )
+    ch_reads.branch { meta, hifi_fastq, sr1, sr2 ->
+        hifi: meta.hifi
+        other: true
+    }.set { ch_org }
 
-    // ── Non-HiFi branch: GetOrganelle assembly + annotation/plotting ─────────────────────
-    ch_org.other
-        .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta, sr1, sr2) }
-        .set { ch_sr_reads }
-    SHORTREAD_ORGANELLE( ch_sr_reads, ch_organelle )
-    ORGANELLE_ANNOTATION( SHORTREAD_ORGANELLE.out.assembly, SHORTREAD_ORGANELLE.out.stats, ch_gcode )
+    if (capabilities.hifi) {
+        ch_mitohifi_input = ch_org.hifi
+            .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.taxid?.toString(), meta, hifi_fastq) }
+            .combine(ch_mito_ref, by: 0)
+            .combine(ch_gcode, by: 0)
+            .map { taxid, meta, hifi_fastq, ref_fa, ref_gb, gcode -> tuple(meta, hifi_fastq, ref_fa, ref_gb, gcode) }
+        MITOHIFI(ch_mitohifi_input)
+        MITO_CIRCULAR_MAP(MITOHIFI.out.annotation, mito_circular_script)
+        ch_assemblies = MITOHIFI.out.mitogenome
+        ch_annotation = MITOHIFI.out.annotation
+        ch_stats = MITOHIFI.out.stats
+        ch_circular = MITO_CIRCULAR_MAP.out.circular_map
+        ch_gene_map = MITOHIFI.out.gene_map
+        ch_versions = ch_versions.mix(MITOHIFI.out.versions)
+        // Explicit successful completion even when no complete mitogenome was recovered.
+        ch_baits = MITOHIFI.out.status
+            .map { meta, status -> tuple(meta.sample, status) }
+            .join(MITOHIFI.out.mitogenome.map { meta, fa -> tuple(meta.sample, fa) }, remainder: true)
+            .map { sample, status, fa -> tuple(sample, fa ? [fa] : []) }
+    }
 
-    // ── Unify (2-tuples; one per organelle) ──────────────────────────────────────────────
-    ch_assemblies = MITOHIFI.out.mitogenome
-        .mix( SHORTREAD_ORGANELLE.out.assembly.map { meta, org, fa -> tuple(meta, fa) } )
-
-    ch_annotation = MITOHIFI.out.annotation
-        .mix( ORGANELLE_ANNOTATION.out.annotation.map { meta, org, gb -> tuple(meta, gb) } )
-
-    ch_stats = MITOHIFI.out.stats
-        .mix( ORGANELLE_ANNOTATION.out.mito_stats.map { meta, org, tsv -> tuple(meta, tsv) } )
-
-    ch_circular = MITO_CIRCULAR_MAP.out.circular_map
-        .mix( ORGANELLE_ANNOTATION.out.circular_map )
-
-    ch_gene_map = MITOHIFI.out.gene_map
-        .mix( ORGANELLE_ANNOTATION.out.gene_map.map { meta, org, png -> tuple(meta, png) } )
-
-    // ---- Per-sample bait bundles for FILTER_ORGANELLE ---------------------------------
-    // Completion is explicit even when successful recovery produces no final FASTA.
-    // Nonzero tool exits still fail: they are not reclassified as biological absence.
-    ch_hifi_baits = MITOHIFI.out.status
-        .map { meta, status -> tuple(meta.sample, status) }
-        .join(MITOHIFI.out.mitogenome.map { meta, fa -> tuple(meta.sample, fa) }, remainder: true)
-        .map { sample, status, fa -> tuple(sample, fa ? [fa] : []) }
-
-    ch_sr_baits = ch_org.other
-        .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.sample, meta.sample) }
-        .join( SHORTREAD_ORGANELLE.out.assembly
-                   .map { meta, org, fa -> tuple(meta.sample, fa) }
-                   .groupTuple(),
-               remainder: true )
-        .map { sample, s, fas ->
-            tuple(sample, (fas == null) ? [] : (fas.size() > 1 ? fas.sort { it.name } : fas)) }
-
-    ch_baits = ch_hifi_baits.mix( ch_sr_baits )
+    if (capabilities.shortread_organelle) {
+        ch_sr_reads = ch_org.other.map { meta, hifi_fastq, sr1, sr2 -> tuple(meta, sr1, sr2) }
+        SHORTREAD_ORGANELLE(ch_sr_reads, ch_organelle)
+        ORGANELLE_ANNOTATION(SHORTREAD_ORGANELLE.out.assembly, SHORTREAD_ORGANELLE.out.stats, ch_gcode)
+        ch_assemblies = ch_assemblies.mix(SHORTREAD_ORGANELLE.out.assembly.map { meta, org, fa -> tuple(meta, fa) })
+        ch_annotation = ch_annotation.mix(ORGANELLE_ANNOTATION.out.annotation.map { meta, org, gb -> tuple(meta, gb) })
+        ch_stats = ch_stats.mix(ORGANELLE_ANNOTATION.out.mito_stats.map { meta, org, tsv -> tuple(meta, tsv) })
+        ch_circular = ch_circular.mix(ORGANELLE_ANNOTATION.out.circular_map)
+        ch_gene_map = ch_gene_map.mix(ORGANELLE_ANNOTATION.out.gene_map.map { meta, org, png -> tuple(meta, png) })
+        ch_notes = ORGANELLE_ANNOTATION.out.notes
+        ch_versions = ch_versions.mix(SHORTREAD_ORGANELLE.out.versions, ORGANELLE_ANNOTATION.out.versions)
+        ch_sr_baits = ch_org.other
+            .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.sample, meta.sample) }
+            .join(SHORTREAD_ORGANELLE.out.assembly
+                .map { meta, org, fa -> tuple(meta.sample, fa) }.groupTuple(), remainder: true)
+            .map { sample, s, fas ->
+                tuple(sample, fas == null ? [] : (fas.size() > 1 ? fas.sort { it.name } : fas))
+            }
+        ch_baits = ch_baits.mix(ch_sr_baits)
+    }
 
     emit:
-    assemblies   = ch_assemblies                       // tuple(meta, fasta)  -> FILTER_ORGANELLE bait
-    baits        = ch_baits                            // tuple(sample, [fasta,...]) per sample
-    annotation   = ch_annotation                       // tuple(meta, gb)
-    stats        = ch_stats                            // tuple(meta, tsv)    MitoHiFi-format
-    circular_map = ch_circular                         // tuple(meta, png)
-    gene_map     = ch_gene_map                         // tuple(meta, png)
-    notes        = ORGANELLE_ANNOTATION.out.notes      // tuple(meta, org, txt)  plant organelles
-    versions     = MITOHIFI.out.versions.mix( SHORTREAD_ORGANELLE.out.versions, ORGANELLE_ANNOTATION.out.versions )
+    assemblies = ch_assemblies
+    baits = ch_baits
+    annotation = ch_annotation
+    stats = ch_stats
+    circular_map = ch_circular
+    gene_map = ch_gene_map
+    notes = ch_notes
+    versions = ch_versions
 }

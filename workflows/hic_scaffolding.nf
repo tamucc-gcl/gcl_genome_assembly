@@ -25,7 +25,17 @@ workflow HIC_SCAFFOLDING {
     ch_telo_by_taxid
     ch_gxdb_dir
 
+    capabilities
+
     main:
+    ch_round1 = Channel.empty()
+    ch_round1_agp = Channel.empty()
+    ch_contig_pairs = Channel.empty()
+    ch_filled = Channel.empty()
+    ch_final_scaffolds_round2 = Channel.empty()
+    ch_scaffold_round2_agp = Channel.empty()
+    ch_all_bam_metrics = Channel.empty()
+    ch_all_pairs_metrics = Channel.empty()
     ch_versions = Channel.empty()
     ch_scaffold_corrected = Channel.empty()
     ch_scaffold_decontaminated = Channel.empty()
@@ -38,6 +48,7 @@ workflow HIC_SCAFFOLDING {
     // Their decontaminated contigs are their "scaffolds" — rejoin at gap-filling.
     ch_hifi_only_scaffolds = ch_individual_haplotypes.filter { meta, fasta -> !meta.hic }
 
+    if (capabilities.scaffold) {
     /*
     ====================================================================================
         STEP 6: Map Hi-C to Assemblies (contigs or decontaminated contigs)
@@ -329,7 +340,12 @@ workflow HIC_SCAFFOLDING {
 
     // Gap-filled Hi-C scaffolds + HiFi-only contigs (which correctly skipped gap-fill) both
     // continue to teloclip/finalize.
-    ch_post_gap_fill = GAP_FILLING.out.filled_assembly.mix(ch_hifi_only_scaffolds)
+    ch_round1 = SCAFFOLD_HIC_ROUND1.out.scaffolds
+    ch_round1_agp = SCAFFOLD_HIC_ROUND1.out.agp
+    ch_contig_pairs = FILTER_HIC_BAM.out.pairs
+    ch_filled = GAP_FILLING.out.filled_assembly
+    }
+    ch_post_gap_fill = ch_filled.mix(ch_hifi_only_scaffolds)
 
     /*
     ========================================================================================
@@ -339,7 +355,7 @@ workflow HIC_SCAFFOLDING {
         the overhang sequence to recover missing telomeres.
     ========================================================================================
     */
-    if (params.run_teloclip_extend) {
+    if (capabilities.hifiasm && params.run_teloclip_extend) {
         // Combine gap-filled assemblies with sample HiFi reads (key on meta.sample)
         ch_post_gap_fill
             .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
@@ -371,14 +387,14 @@ workflow HIC_SCAFFOLDING {
     emit:
     assembly = ch_final_assembly
     shortread = ch_shortread_finished
-    round1 = SCAFFOLD_HIC_ROUND1.out.scaffolds
-    round1_agp = SCAFFOLD_HIC_ROUND1.out.agp
+    round1 = ch_round1
+    round1_agp = ch_round1_agp
     round2 = ch_final_scaffolds_round2
     round2_agp = ch_scaffold_round2_agp
-    contig_pairs = FILTER_HIC_BAM.out.pairs
+    contig_pairs = ch_contig_pairs
     corrected = ch_scaffold_corrected
     decontaminated = ch_scaffold_decontaminated
-    filled = GAP_FILLING.out.filled_assembly
+    filled = ch_filled
     extended = ch_extended
     bam_metrics = ch_all_bam_metrics
     pairs_metrics = ch_all_pairs_metrics

@@ -50,6 +50,8 @@ workflow CHIMERA {
     ch_contig_pairs_in             //  FILTER_HIC_BAM.out.pairs (contig stage)
     ch_telo_by_taxid               //  per-taxid telomere motif              tuple(taxid, motif)
 
+    capabilities
+
     main:
     ch_versions = Channel.empty()
     // The broken assemblies on their own, separate from pre_finalize (which mixes them with
@@ -80,7 +82,7 @@ workflow CHIMERA {
     // candidates and the called joins are the evidence a break is justified by, and they are
     // worth having even on a run that cuts nothing.
     ch_chimeric_joins = Channel.empty()
-    if( params.chimera_detect != false ) {
+    if( capabilities.scaffold && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_detect != false ) {
         ch_agp_script = Channel.fromPath("${projectDir}/py_scripts/agp_joins.py",
                                         checkIfExists: true)
         ch_cj_script  = Channel.fromPath("${projectDir}/py_scripts/chimera_joins.py",
@@ -150,7 +152,7 @@ workflow CHIMERA {
         }
     }
 
-    if( params.chimera_break && params.chimera_break.toString() != 'false' ) {
+    if( capabilities.scaffold && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false' ) {
         ch_break_script = Channel.fromPath("${projectDir}/py_scripts/break_chimeras.py",
                                           checkIfExists: true)
         // 'auto' uses the joins CHIMERA_JOINS just called; a path uses that file, so an
