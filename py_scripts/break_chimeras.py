@@ -50,6 +50,7 @@
 # ======================================================================================
 
 import argparse
+import hashlib
 import os
 import sys
 
@@ -137,6 +138,19 @@ def main():
     # N joins per scaffold, not one. Grouped, sorted, and validated as a SET: a cut is only
     # legal relative to its neighbours, so each piece has to clear min_piece_bp against the
     # adjacent cuts rather than against the scaffold ends.
+    # Reject tables from a different assembly stage, including previous finished runs.
+    if cands:
+        digest = hashlib.sha256()
+        with open(a.fasta, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        checksum = digest.hexdigest()
+        for row in cands:
+            if (row.get("assembly_sha256") != checksum or
+                    row.get("coordinate_stage") != "pre_finishing"):
+                sys.exit("Breakpoint table does not match this pre-finishing FASTA. "
+                         "Regenerate detection and review the newly stamped table.")
+
     actions, per_scaf = [], {}
     for r in cands:
         sc = r.get("scaffold", "")

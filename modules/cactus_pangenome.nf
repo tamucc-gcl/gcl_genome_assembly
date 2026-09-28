@@ -1,29 +1,8 @@
-/*
-========================================================================================
-    CACTUS PANGENOME MODULE
-========================================================================================
-    Repo location: modules/cactus_pangenome.nf
-
-    One minigraph-cactus graph per species. Inputs are already PanSN-named by the
-    PANGENOME subworkflow: `names` are the seqfile sample names (reference has NO
-    haplotype suffix; other haplotypes are <sample>.<hap>), aligned by position with the
-    staged `fastas`. This module builds the two-column seqfile, derives --refContigs from
-    the reference's harmonized chromosome scaffolds (cactus auto-detection only matches
-    'chr'+<=3 chars, so it misses chr10_1..; we set them explicitly), and runs cactus.
-
-    Toil runs single-machine inside the container. The jobstore must not pre-exist and the
-    workDir and jobstore both live in the task dir. This label sets scratch = false, so
-    that is on /work rather than node-local /scratch: odgi_squeeze needs >110 GB on top of
-    a job store that reaches 337 GB, and the 447 GB node disk is not enough. Measured
-    twice, both failures at odgi_squeeze with ENOSPC, the second with the node to itself.
-    /work is NFS at ~1.1 GB/s, so the cost falls on the conversion phase; the alignment
-    phase is compute-bound and barely notices. Both directories are removed explicitly at
-    the end of a successful run, since nothing discards the task dir now.
-
-    Input : tuple(taxid, ref_name, names, fastas)
-    Output: gbz / gfa / vcf / odgi(.og) / full graph dir  + versions
-========================================================================================
-*/
+/* One same-species graph from an explicit eligible cohort and reference chromosome list.
+ * CLIP supplies biological products. GREF(CLIP) supplies standard variants.
+ * FULL GFA plus Cactus clipping statistics are support artifacts, with no parallel analysis.
+ * Graph-role validation runs separately so a missing optional export does not discard a build.
+ */
 
 process CACTUS_PANGENOME {
     tag "taxid_${taxid}"
@@ -35,7 +14,7 @@ process CACTUS_PANGENOME {
         saveAs: { fn -> fn.startsWith('out/') ? fn.substring(4) : fn }
 
     input:
-    tuple val(taxid), val(ref_name), val(names), path(fastas)
+    tuple val(taxid), val(ref_name), val(names), path(fastas), val(ref_contigs), path(capabilities)
 
     output:
     // primary clip-graph handles (exact names -> single files, never the .full.* variants)
@@ -47,15 +26,10 @@ process CACTUS_PANGENOME {
     tuple val(taxid), path("out/${taxid}.vcf.gz"),     emit: vcf
     tuple val(taxid), path("out/${taxid}.vcf.gz.tbi"), emit: vcf_tbi
     tuple val(taxid), path("out/${taxid}.raw.vcf.gz"), emit: raw_vcf
-    tuple val(taxid), path("out/${taxid}.chroms/*"),   emit: chrom_og
+    tuple val(taxid), path("out/${taxid}.chroms/*"),   emit: chrom_og, optional: true
     tuple val(taxid), path("out/${taxid}.gaf.gz"),      emit: gaf, optional: true
-    tuple val(taxid), path("out/${taxid}.viz/*"),      emit: viz
-    // ---- full-graph handles -----------------------------------------------------------
-    // Produced by the `full clip` arguments already passed to --gfa/--gbz/--odgi/--chrom-og
-    // and by --vcf full clip below, but previously reachable only via the out/** catch-all.
-    // The full graph carries 704,499,041 bp that clipping removes, 99.1% of it private, so
-    // private-sequence and large-event analyses belong on this arm rather than the clip arm.
-    // All optional: a wrong naming assumption must not fail a multi-hour cactus task.
+    tuple val(taxid), path("out/${taxid}.viz/*"),      emit: viz, optional: true
+    // Optional construction products; FULL has no parallel biological analysis arm.
     tuple val(taxid), path("out/${taxid}.full.gbz"),        emit: gbz_full,      optional: true
     tuple val(taxid), path("out/${taxid}.full.og"),         emit: og_full,       optional: true
     tuple val(taxid), path("out/${taxid}.full.gfa.gz"),     emit: gfa_full,      optional: true
@@ -89,6 +63,15 @@ process CACTUS_PANGENOME {
 
     script:
     def extra = params.pangenome_cactus_extra ?: ''
+    if (!ref_contigs || ref_contigs.any { !(it ==~ /[A-Za-z0-9_.-]+/) })
+        error 'Reference contigs must be explicit, nonempty finalized sequence IDs'
+    if (names.size() != fastas.size() || names.toSet().size() != names.size() || !names.contains(ref_name))
+        error 'Cactus input identity/cardinality mismatch'
+    if (extra =~ /--(reference|refContigs|gref|grefL|vcf|vcfwave|vcfbub|haplo|gfa|gbz|odgi|chrom-og|viz|clip|collapse|outName|outDir)(?:\s|=|$)/)
+        error 'pangenome_cactus_extra cannot override graph-role contract options'
+    def chromog = params.pangenome_odgi_chromosomes ? '--chrom-og clip' : ''
+    def vizopt = params.pangenome_odgi_visualization ? '--viz clip' : ''
+    def vcfbub = params.pangenome_vcfbub_max_ref ?: 100000
     // batch 6 C1. A NAMED param rather than a line in pangenome_cactus_extra: this is a
     // controlled experiment whose whole value is that one variable changed, and a free-text
     // passthrough leaves no record of which run carried it. Named, it appears in the params
@@ -133,12 +116,9 @@ process CACTUS_PANGENOME {
         echo "[PANGENOME ${taxid}] ERROR: reference '${ref_name}' not among inputs" >&2; exit 1
     fi
 
-    # ---- refContigs = reference's harmonized chromosome scaffolds (chrN_p, not composites) ----
-    REFCONTIGS=\$(grep '^>' "\${REF_FA}" | sed 's/^>//; s/[[:space:]].*//' \\
-        | awk '/^chr[0-9]+_[0-9]+\$/' | tr '\\n' ' ')
-    if [ -z "\${REFCONTIGS}" ]; then
-        echo "[PANGENOME ${taxid}] ERROR: no chr-named scaffolds in reference \${REF_FA}" >&2; exit 1
-    fi
+    # Reference chromosomes come from the final-assembly eligibility audit.
+    # This also supports a chromosome-scale haploid assembly without harmonized chr names.
+    REFCONTIGS="${ref_contigs.join(' ')}"
     echo "[PANGENOME ${taxid}] reference=${ref_name}; refContigs=\${REFCONTIGS}"
 
     # ---- run cactus (jobstore must not exist; workDir + jobstore in the task dir) ----
@@ -164,7 +144,7 @@ process CACTUS_PANGENOME {
         echo "[PANGENOME ${taxid}] graph reference: ${gref} ${grefmin} ${grefl}" >&2
         echo "  .gref.* outputs are ADDITIONAL; the clip graph is unchanged, so no" >&2
         echo "  haplotype analysis needs gref_* exclusion. Confirm after the run:" >&2
-        echo "    vg paths -L -x ${taxid}.gbz | sed 's/#.*//' | sort -u   -> ten samples" >&2
+        echo "    Biological sample identities are recorded in assembly_eligibility.tsv" >&2
     else
         echo "[PANGENOME ${taxid}] graph reference: disabled" >&2
     fi
@@ -177,13 +157,14 @@ process CACTUS_PANGENOME {
         --outName ${taxid} \\
         --reference ${ref_name} \\
         --refContigs \${REFCONTIGS} \\
-        --vcf full clip \\
+        --vcf clip \\
+        --vcfbub ${vcfbub} \\
         --haplo \\
         --gfa full clip \\
-        --gbz full clip \\
-        --viz full clip \\
-        --odgi full clip \\
-        --chrom-og full clip \\
+        --gbz clip \\
+        ${vizopt} \\
+        --odgi clip \\
+        ${chromog} \\
         --maxCores ${task.cpus} \\
         ${gpu} \\
         ${lasttrain} \\
@@ -198,17 +179,6 @@ process CACTUS_PANGENOME {
     rm -rf out/chrom-subproblems out/chrom-alignments
     rm -f  out/seqfile.txt
     rm -rf cactus_work js
-
-    # UNDER-ALIGNMENT TRIPWIRE. last-train fits its model against the most diverged input, and
-    # within-species haplotypes are barely diverged -- so the fitted model can be tight enough
-    # to under-align, which SHRINKS the graph and INFLATES private sequence. The B-run clip
-    # total is 1,926,884,214 bp; a large drop here means under-alignment, not a better graph.
-    # Printed at build time so it is visible in this task's log rather than three processes
-    # downstream.
-    if [ -s out/${taxid}.og ]; then
-        GT=\$(odgi stats -i out/${taxid}.og -S 2>/dev/null | awk 'NR==2{print \$1}' || true)
-        echo "[PANGENOME ${taxid}] clip graph total: \${GT:-unknown} bp (B run: 1,926,884,214)" >&2
-    fi
 
     CV=\$(cactus --version 2>&1 | awk 'NR==1{print}')
     printf 'process\\ttool\\tversion\\n%s\\tcactus\\t%s\\n' "${task.process}" "\${CV}" > versions.tsv

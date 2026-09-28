@@ -94,10 +94,6 @@ process HARMONIZE_CANDIDATES {
         --outdir .
 
     N=\$(grep -vc '^#' "${taxid}.reference_candidates.tsv" || true)
-    if [ "\${N}" -lt 2 ]; then
-        echo "[HARMONIZE taxid ${taxid}] ERROR: only \$((N-1)) reference candidate(s)." >&2
-        exit 1
-    fi
     echo "[HARMONIZE taxid ${taxid}] \$((N-1)) reference candidate(s) to score"
 
     ST=\$(samtools --version 2>&1 | awk 'NR==1{print \$2}')

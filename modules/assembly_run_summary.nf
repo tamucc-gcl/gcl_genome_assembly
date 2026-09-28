@@ -8,6 +8,8 @@ process ASSEMBLY_RUN_SUMMARY {
     input:
     val expected
     val completed
+    path coordinate_report
+    path eligibility_report
 
     output:
     path 'assembly_run_summary.md', emit: report
@@ -32,8 +34,12 @@ process ASSEMBLY_RUN_SUMMARY {
 
 ${state}
 
+Run: ${workflow.runName}. Revision: ${workflow.revision ?: "working tree"}.
+
 QC mode: ${params.qc_mode}. Pangenome requested: ${params.run_pangenome}.
 Finalized describes workflow completion, not biological quality or pangenome eligibility.
+This table inventories this invocation. Older published files may remain in the output directory.
+The current failure policy retries failed tasks and then stops; this report does not certify a failed run.
 
 <details>
 <summary>Sample status</summary>
@@ -51,5 +57,7 @@ ${artifacts}
 
 </details>
 ASSEMBLY_REPORT
+    cat ${coordinate_report} >> assembly_run_summary.md
+    cat ${eligibility_report} >> assembly_run_summary.md
     """
 }

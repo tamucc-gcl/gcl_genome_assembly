@@ -1,47 +1,4 @@
-/*
-========================================================================================
-    CHIMERA EVIDENCE MODULE
-========================================================================================
-    Repo location: modules/chimera_evidence.nf
-
-    Independent confirmation of each called chimeric join: interstitial and terminal telomere
-    signal, the nearest N-gap, and a Hi-C cross-contact profile -- plus one figure per join.
-
-    WHAT THIS IS AND IS NOT FOR
-    ---------------------------
-    The concordance vote decides WHETHER to break; the AGP says WHERE, exactly, with a 100 bp
-    scaffolding gap at the position. This adds the two signals independent of both, so a human
-    can confirm the call and an `auto` run leaves a record of what justified it.
-
-    Hi-C is confirmation, never justification: it made the join, so depleted contact across a
-    junction it created is not independent evidence. Measured on the two known candidates,
-    0.748 and 0.740 of the scaffold median -- consistent with the vote, and not a substitute
-    for it. Telomere ABSENCE is likewise not evidence against a break: a mid-arm fusion leaves
-    none, and Sde-CTlk_104_hap2's candidate is exactly that.
-
-    WHY THE PAIRS ARE TRANSLATED RATHER THAN RE-MAPPED
-    -------------------------------------------------
-    A contact map only helps if its coordinates match the assembly being cut, and nothing
-    existing is in them: FILTER_HIC_BAM is contig space, FILTER_HIC_BAM_SCAFFOLD is round-1
-    space (where `scaffold_1` is a DIFFERENT sequence from round-2's `scaffold_1`), and the
-    _final mcool is produced downstream of harmonization so it does not exist yet.
-
-    Using a PREVIOUS run's mcool was rejected: on a fresh `chimera_break = auto` run there is
-    none, so Hi-C would be silently unavailable exactly when an unattended cut is made.
-
-    Re-mapping would work but needs bwa + samtools + pairtools + cooler chained. Unnecessary:
-    FILTER_HIC_BAM already publishes deduplicated unique-unique pairs in CONTIG space, and the
-    AGP chain says where every contig lands. So chimera_hic_pairs.py translates coordinates
-    instead, in ONE pass over the ~1.9 GB gzipped input for all of an assembly's candidates.
-
-    The translated pairs MUST be re-sorted: the input is `#sorted: chr1-chr2-pos1-pos2` in
-    contig order, which translation destroys, and `cooler cload pairs` requires sorted input.
-
-    Input : tuple(taxid, asm_id, assembly_fasta, called_joins, round1_agp, round2_agp|NO_ROUND2,
-                  contig_pairs|NO_PAIRS, telomere_motif), hic_script, evidence_script
-    Output: per-join evidence tables, figures, the translation audit, versions
-========================================================================================
-*/
+/* Assess current pre-finishing joins using telomeres, N gaps, and existing Hi-C mappings lifted through the last-round AGP only. Hi-C is supplementary evidence, not independent proof of a scaffolding error. */
 
 process CHIMERA_EVIDENCE {
     tag "${asm_id}"

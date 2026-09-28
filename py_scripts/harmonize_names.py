@@ -102,16 +102,10 @@ def assign_roles(metrics, min_cut_ratio, min_genome_frac, min_n50_ratio,
         reasons[rid] = ";".join(why) if why else "-"
     voters = [r for r, v in roles.items() if v == "voter"]
     if len(voters) < min_voters:
-        flags.append("voter_filter_disabled(only_%d_of_%d_passed)" % (len(voters), len(roles)))
-        for rid in roles:
-            roles[rid] = "voter"
-            reasons[rid] = (reasons[rid] + ";overridden_min_voters").lstrip("-;")
-    elif roles.get(reference_id) == "passenger":
-        # The PAFs are already computed against this reference, so we cannot re-select
-        # here. Keep it as a voter but make the contradiction loud.
-        flags.append("reference_failed_voter_criteria")
-        roles[reference_id] = "voter"
-        reasons[reference_id] = reasons[reference_id] + ";forced_voter_is_reference"
+        flags.append("insufficient_voters(%d<%d);passengers_not_promoted" %
+                     (len(voters), min_voters))
+    if roles.get(reference_id) == "passenger":
+        flags.append("reference_failed_voter_criteria;reference_does_not_vote")
     return roles, reasons, flags
 
 
@@ -803,8 +797,7 @@ def main():
     ap.add_argument("--no-voter-require-dropoff", dest="voter_require_dropoff",
                     action="store_false")
     ap.add_argument("--min-voters", type=int, default=3,
-                    help="if fewer assemblies than this pass the voter criteria, disable "
-                         "the filter (everything votes) and flag it")
+                    help="flag insufficient support below this count; never promote passengers")
     ap.add_argument("--batch-consensus-action", choices=("flag", "demote"), default="flag",
                     help="what to do with a reference chromosome no voter covers: 'flag' "
                          "keeps the name and tags it (default; safe for sex-limited "
@@ -855,9 +848,8 @@ def main():
         pool = sorted((r for r in by_id if rl[r] == "voter"),
                       key=lambda r: (-met[r]["genome_fraction"], -met[r]["n50"], r))
         if not pool:
-            pool = sorted(by_id, key=lambda r: (-met[r]["genome_fraction"], r))
-            sys.stderr.write("[harmonize %s] WARNING: no voters; offering all assemblies "
-                             "as candidates\n" % a.species)
+            sys.stderr.write("[harmonize %s] no chromosome-scale reference candidates; "
+                             "naming will be bypassed\n" % a.species)
         keep = pool[:a.list_candidates]
         dest = os.path.join(a.outdir, f"{a.species}.reference_candidates.tsv")
         with open(dest, "w") as fh:

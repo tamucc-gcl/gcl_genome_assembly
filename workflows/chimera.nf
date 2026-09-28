@@ -1,37 +1,9 @@
-/*
-========================================================================================
-    CHIMERIC SCAFFOLD SUBWORKFLOW
-========================================================================================
-    Repo location: workflows/chimera.nf
-
-    Detection, confirmation and repair of scaffolds that span two reference chromosomes,
-    extracted VERBATIM from main.nf.
-
-    WHY IT MOVED
-    ------------
-    main.nf hit Groovy's compiled-unit limit:
-
-        String too long. The given string is 65676 Unicode code units long, but only a
-        maximum of 65535 is allowed.
-
-    The chimera arm is the natural unit to lift out: it is self-contained, it is the newest
-    addition, and it accounts for ~9.3 kB of main.nf. Nothing in the logic changed -- the
-    bodies below are the same statements in the same order, so behaviour and task hashes are
-    unaffected except where a channel had to be renamed to a `take:` parameter.
-
-    WHAT IT DOES
-    ------------
-      CHIMERA_JOINS      AGP joins + reference PAF -> which joins separate two chromosomes
-      CHIMERA_EVIDENCE   Hi-C cross-contact, telomeres, N-gaps -> confirmation per cut
-      BREAK_CHIMERAS     applies the concordance gate and cuts, N joins -> N+1 pieces
-
-    `ch_pre_finalize` is emitted rather than assigned in place, because FINALIZE_ASSEMBLY in
-    main.nf consumes it. Its default -- harmonized assemblies mixed with the short-read-only
-    branch -- is built here so the assign-then-override pattern stays intact; that .mix()
-    carries assemblies with no harmonization name map and losing it silently dropped
-    short-read-only samples from finalization for several runs.
-========================================================================================
-*/
+include { CHIMERA_COORDINATE_SUMMARY } from '../modules/chimera_coordinate_summary.nf'
+/* Chimera assessment and optional cuts on the last-scaffold FASTA, before finishing.
+ * The round1 parameter carries the LAST-round AGP; no two-round chain is used.
+ * Pairs were mapped to that AGP's input. Older joins across corrections are unresolved.
+ * Name assignments are applied only after finishing by FINALIZE_ASSEMBLY.
+ */
 
 include { BREAK_CHIMERAS }   from '../modules/break_chimeras.nf'
 include { CHIMERA_JOINS }    from '../modules/chimera_joins.nf'
@@ -42,18 +14,22 @@ workflow CHIMERA {
     take:
     ch_harmonized                  //  HARMONIZE_SCAFFOLDS.out.assemblies    tuple(meta, fa, nm)
     ch_shortread_finished          //  short-read-only assemblies            tuple(meta, fa)
-    ch_round1_agp                  //  SCAFFOLD_HIC_ROUND1.out.agp           tuple(meta, agp)
-    ch_round2_agp                  //  round-2 AGP or empty                  tuple(meta, agp)
+    ch_round1_agp                  // LAST-round AGP, paired with its own input mappings
     ch_ref_pafs_by_id              //  HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id
     ch_chimera_candidates          //  HARMONIZE_SCAFFOLDS.out.chimera_candidates
     ch_ref_name_map                //  HARMONIZE_SCAFFOLDS.out.ref_name_map
-    ch_contig_pairs_in             //  FILTER_HIC_BAM.out.pairs (contig stage)
+    ch_contig_pairs_in             // pairs mapped to the LAST-round scaffolding input
     ch_telo_by_taxid               //  per-taxid telomere motif              tuple(taxid, motif)
 
     capabilities
 
     main:
     ch_versions = Channel.empty()
+    def detect_on = capabilities.scaffold && capabilities.harmonize &&
+                    params.harmonize_scaffold_names && params.chimera_detect != false
+    def evidence_on = detect_on && params.chimera_evidence != false
+    if (params.chimera_break?.toString() == 'auto' && !detect_on)
+        error 'chimera_break=auto requires enabled chimera detection and a harmonization cohort'
     // The broken assemblies on their own, separate from pre_finalize (which mixes them with
     // the untouched and short-read-only ones). main.nf stages THIS as the 'chimera_broken'
     // QC checkpoint, so contiguity before and after a cut is comparable in the QC table.
@@ -82,36 +58,36 @@ workflow CHIMERA {
     // candidates and the called joins are the evidence a break is justified by, and they are
     // worth having even on a run that cuts nothing.
     ch_chimeric_joins = Channel.empty()
-    if( capabilities.scaffold && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_detect != false ) {
+    if( detect_on ) {
         ch_agp_script = Channel.fromPath("${projectDir}/py_scripts/agp_joins.py",
                                         checkIfExists: true)
         ch_cj_script  = Channel.fromPath("${projectDir}/py_scripts/chimera_joins.py",
                                         checkIfExists: true)
 
-        // round 2 is conditional, so this join tolerates its absence: without a round-2 AGP
-        // the round-1 objects are final, which agp_joins.py handles natively.
-        ch_r1_agp = ch_round1_agp.map { meta, agp -> tuple(meta.id, meta.taxid.toString(), agp) }
-        ch_r2_agp = ch_round2_agp.map { meta, agp -> tuple(meta.id, agp) }
-
+        // Optional PAFs are a lookup value, not an outer join with unknown empty arity.
+        ch_paf_lookup = ch_ref_pafs_by_id.collect(flat: false)
+            .map { records -> records.collectEntries { id, pf -> [(id): pf] } }
         CHIMERA_JOINS(
-            ch_r1_agp
-                .join( ch_r2_agp, remainder: true )
-                .join( ch_ref_pafs_by_id, remainder: true )
-                .filter { id, taxid, r1, r2, paf -> r1 != null }
-                .map { id, taxid, r1, r2, paf ->
-                    tuple(taxid, id, r1, r2 ?: file("${projectDir}/assets/NO_ROUND2", checkIfExists: true), paf ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
+            ch_round1_agp.map { meta, agp -> tuple(meta.taxid.toString(), meta.id, agp) }
+                .combine(ch_paf_lookup)
+                .map { taxid, id, agp, pafs ->
+                    tuple(taxid, id, agp,
+                        file("${projectDir}/assets/NO_ROUND2", checkIfExists: true),
+                        pafs[id] ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
+                .combine(ch_harmonized.map { meta, fa, nm -> tuple(meta.taxid.toString(), meta.id, fa) }, by: [0, 1])
                 .combine(ch_chimera_candidates, by: 0)
                 .combine(ch_ref_name_map, by: 0)
-                .map { taxid, id, r1, r2, paf, cand, rnm ->
-                    tuple(taxid, id, r1, r2, paf, cand, rnm) },
+                .map { taxid, id, r1, r2, paf, fa, cand, rnm ->
+                    tuple(taxid, id, r1, r2, paf, cand, rnm, fa) },
             ch_agp_script.first(),
-            ch_cj_script.first() )
+            ch_cj_script.first(),
+            file("${projectDir}/py_scripts/chimera_coordinate_guard.py", checkIfExists: true) )
         ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
         ch_chimeric_joins = CHIMERA_JOINS.out.called
 
         // ---- independent confirmation of each called join ----------------------------
         // Telomere and N-gap evidence, plus a Hi-C cross-contact profile built by
-        // TRANSLATING the published contig-space pairs into scaffold coordinates -- no
+        // TRANSLATING last-round input pairs into current scaffold coordinates -- no
         // re-alignment, and no dependence on a contact map that does not exist yet at this
         // point in the DAG.
         //
@@ -124,9 +100,8 @@ workflow CHIMERA {
             ch_ce_script     = Channel.fromPath("${projectDir}/py_scripts/chimera_evidence.py",
                                                checkIfExists: true)
 
-            // the contig-stage pairs: deduplicated UU pairs in contig coordinates
+            // Deduplicated pairs aligned to the last scaffolding input.
             ch_contig_pairs = ch_contig_pairs_in
-                .filter { meta, stage, pairs_gz -> stage == 'contig' }
                 .map    { meta, stage, pairs_gz -> tuple(meta.id, pairs_gz) }
 
             CHIMERA_EVIDENCE(
@@ -135,13 +110,12 @@ workflow CHIMERA {
                     .join( ch_harmonized
                                .map { meta, fa, nm -> tuple(meta.id, fa) } )
                     .join( ch_round1_agp.map { meta, agp -> tuple(meta.id, agp) } )
-                    .join( ch_round2_agp.map { meta, agp -> tuple(meta.id, agp) },
-                           remainder: true )
-                    .join( ch_contig_pairs, remainder: true )
-                    .filter { id, taxid, called, fa, r1, r2, pairs -> called != null && fa != null }
-                    .map { id, taxid, called, fa, r1, r2, pairs ->
-                        tuple(taxid, id, fa, called, r1,
-                              r2 ?: file("${projectDir}/assets/NO_ROUND2", checkIfExists: true), pairs ?: file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)) }
+                    .combine(ch_contig_pairs.collect(flat: false)
+                        .map { records -> records.collectEntries { id, pf -> [(id): pf] } })
+                    .map { id, taxid, called, fa, agp, pairs ->
+                        tuple(taxid, id, fa, called, agp,
+                              file("${projectDir}/assets/NO_ROUND2", checkIfExists: true),
+                              pairs[id] ?: file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)) }
                     // the motif is per species, so it attaches by key
                     .combine( ch_telo_by_taxid, by: 0 )
                     .map { taxid, id, fa, called, r1, r2, pairs, motif ->
@@ -159,20 +133,27 @@ workflow CHIMERA {
         // edited copy is how you choose which scaffolds to cut. Either way the input is the
         // CALLED JOINS table, not the candidates: it carries cut_bp from the AGP and one row
         // per chimeric join, so a scaffold with N of them yields N+1 pieces.
-        ch_cand = ( params.chimera_break.toString() == 'auto' )
-            ? ch_chimeric_joins.map { taxid, id, f -> f }.collectFile(name: 'called.tsv',
-                                                                      keepHeader: true,
-                                                                      skip: 1)
-            : Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first()
-
-        BREAK_CHIMERAS(
-            ch_harmonized
-                .map { meta, fa, nm -> tuple(meta, fa, nm) }
-                .combine( ch_cand ),
-            ch_break_script.first() )
+        ch_break_in = Channel.empty()
+        if (params.chimera_break.toString() == 'auto') {
+            // Left-side pass-through keeps every assembly when no join table was available.
+            ch_break_in = ch_harmonized.map { meta, fa, nm -> tuple(meta.id, meta, fa, nm) }
+                .join(ch_chimeric_joins.map { taxid, id, f -> tuple(id, f) }, remainder: true)
+                .filter { row -> row[1] != null }
+                .map { id, meta, fa, nm, cand ->
+                    tuple(meta, fa, nm, cand ?: file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
+        } else {
+            ch_break_in = ch_harmonized.combine(
+                Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first())
+        }
+        ch_break_in.branch { meta, fa, nm, cand ->
+            cut: nm.name != 'NO_HARMONIZE' && cand.name != 'NO_HARMONIZE'
+            passthrough: true
+        }.set { ch_break_routes }
+        BREAK_CHIMERAS(ch_break_routes.cut, ch_break_script.first())
         ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
         ch_broken       = BREAK_CHIMERAS.out.assemblies
         ch_pre_finalize = BREAK_CHIMERAS.out.assemblies
+            .mix(ch_break_routes.passthrough.map { meta, fa, nm, cand -> tuple(meta, fa, nm) })
             .mix(ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) })
     }
 
@@ -188,10 +169,11 @@ workflow CHIMERA {
     ch_chimera_evidence_rpt   = Channel.value(file('NO_CHIMERA_EVIDENCE'))
     ch_chimera_figures_rpt    = Channel.value(file('NO_CHIMERA_FIGURES'))
 
-    if (params.chimera_detect != false) {
+    if (detect_on) {
         ch_chimera_candidates_rpt = ch_chimera_candidates
             .map { taxid, f -> f }
             .first()
+            .ifEmpty(file('NO_CHIMERA_CANDIDATES'))
         // one table per assembly -> one table for the report. keepHeader because every file
         // carries the same header row.
         ch_chimera_joins_rpt = ch_chimeric_joins
@@ -199,7 +181,7 @@ workflow CHIMERA {
             .collectFile(name: 'all_chimeric_joins.tsv', keepHeader: true, skip: 1)
             .ifEmpty(file('NO_CHIMERA_JOINS'))
     }
-    if (params.chimera_detect != false && params.chimera_evidence != false) {
+    if (evidence_on) {
         // each evidence file is ONE cut in metric/value long form, so they go as a list and
         // the R side widens and stacks them
         ch_chimera_evidence_rpt = CHIMERA_EVIDENCE.out.evidence
@@ -217,7 +199,16 @@ workflow CHIMERA {
     }
 
 
+    CHIMERA_COORDINATE_SUMMARY(
+        ch_harmonized.map { meta, fa, nm ->
+            [id: meta.id, hic: meta.hic, harmonized: nm.name != 'NO_HARMONIZE']
+        }.mix(ch_shortread_finished.map { meta, fa ->
+            [id: meta.id, hic: meta.hic, harmonized: false]
+        }).collect(flat: false),
+        ch_chimeric_joins.map { taxid, id, f -> id }.collect())
+
     emit:
+    coordinate_report = CHIMERA_COORDINATE_SUMMARY.out.report
     pre_finalize        = ch_pre_finalize          // tuple(meta, fasta, name_map)
     broken              = ch_broken                // ONLY the cut assemblies, for QC_PHASE
     called              = ch_chimeric_joins        // tuple(taxid, id, chimeric_joins.tsv)

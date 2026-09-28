@@ -139,3 +139,10 @@ DSL2 workflow boundaries follow [Nextflow's named workflow and input/output mode
 ## 6. Immediate next implementation step
 
 Begin batch 0 with a source-level ownership map and precise channel contracts. Before changing pipeline source, read applicable repository instructions, inspect working-tree changes, and preserve unrelated user edits. Source write access may need a narrowly scoped filesystem permission because this repository is outside the current writable workspace. This roadmap does not request execution on the assistant's computer or a new biological run yet.
+
+
+## 2026-09-28 addition: optional PSMC (batch 6A)
+
+Add a toggleable PSMC fork from final assemblies after the assembly checkpoint and shared species reference selection are accepted. It runs independently of pangenome enablement and supports a phased diploid pair or one assembly representation of a diploid individual with same-individual HiFi reads. True biological haploids are not standard PSMC inputs. This is a bounded addition to the earlier exclusion of population analyses; general population genetics remains out of scope.
+
+See [completed-run assessment and PSMC integration plan](completed-run-review-and-psmc-plan.md) for script findings, reference rules, callability, outputs, method decisions and validation. This is planned, not implemented. The current assembly testing run excluded short-read input and expects ten HiFi haplotypes; short-read validation remains outstanding.

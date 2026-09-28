@@ -1,55 +1,4 @@
-/*
-========================================================================================
-    CHIMERA JOINS MODULE
-========================================================================================
-    Repo location: modules/chimera_joins.nf
-
-    Which scaffolding joins separate two different CONSENSUS chromosomes -- the chimeric
-    ones -- and exactly where each sits.
-
-    Runs both scripts, because they are never useful apart:
-      agp_joins.py      both AGPs chained -> every join, exact, in final coordinates
-      chimera_joins.py  AGP components + the reference PAF -> which joins are chimeric
-
-    WHY BOTH, AND WHY NEITHER ALONE
-    -------------------------------
-    The AGP says where joins ARE but not which matter: Sde-CTlk_104_hap2 scaffold_3 has 173
-    joins and one is chimeric; Sde-CPla_115_hap1 has 919 across the assembly. Breaking at
-    every join would undo scaffolding entirely.
-
-    Inference alone cannot give a cut point. Estimating the junction by binning the PAF put
-    it within ~0.7 Mb on both known candidates -- close enough to look right, and landing in
-    sequence rather than in the 100 bp scaffolding gap that the join actually is.
-
-    CHAINING BOTH ROUNDS IS REQUIRED
-    --------------------------------
-    Round 1 makes 1,830-1,891 joins per haplotype here; round 2 makes 32-54. BOTH known
-    junctions are round-1 joins, so without lifting them ~97% of the search space -- including
-    every real answer -- is invisible. --round2 is optional: when round 2 did not run, the
-    round-1 objects are final.
-
-    THE REFERENCE NAME MAP IS NOT OPTIONAL
-    --------------------------------------
-    Harmonization keeps two namespaces: refN is a reference-frame PIECE, chrN a CONSENSUS
-    chromosome from the join graph's connected components across voters. A consensus
-    chromosome can span several reference pieces, so a scaffold joining ref5 and ref12 into
-    chr5 is CORRECTLY JOINED, not chimeric -- and calling it chimeric would cut a good
-    scaffold. Transitions must be measured in consensus chromosomes, which is what the
-    reference's own name map supplies.
-
-    It also fixes a namespace mismatch: harmonization's PAFs align the INPUT fastas so their
-    targets are `scaffold_N`, while PAIRWISE_ALIGNMENT's align finalized assemblies so theirs
-    are `chr5_1`. The map handles either, and an untranslatable target aborts rather than
-    yielding zero transitions -- which would read as a clean result.
-
-    DETECTION ONLY. Nothing is cut here. The concordance vote in chimera_candidates.tsv is
-    the gate and BREAK_CHIMERAS applies it.
-
-    Input : tuple(taxid, meta.id, round1_agp, round2_agp|NO_ROUND2, ref_paf|NO_PAF,
-                  candidates, ref_name_map), agp_script, joins_script
-    Output: per-assembly joins table, called-chimera table, versions
-========================================================================================
-*/
+/* Validate and classify joins from the last scaffolding AGP against pre-finishing reference PAFs. Earlier joins are unresolved; no AGP chain crosses correction. The output table is bound to its assessment FASTA by SHA-256. */
 
 process CHIMERA_JOINS {
     tag "${asm_id}"
@@ -59,13 +8,15 @@ process CHIMERA_JOINS {
 
     input:
     tuple val(taxid), val(asm_id), path(round1_agp), path(round2_agp), path(ref_paf),
-          path(candidates), path(ref_name_map)
+          path(candidates), path(ref_name_map), path(assessment_fasta, stageAs: 'assessment/*')
     path(agp_script)
     path(joins_script)
+    path(coordinate_guard)
 
     output:
     tuple val(taxid), val(asm_id), path("${asm_id}.agp_joins.tsv"),      emit: agp_joins
     tuple val(taxid), val(asm_id), path("${asm_id}.chimeric_joins.tsv"), emit: called
+    tuple val(taxid), val(asm_id), path("${asm_id}.coordinate_audit.tsv"), emit: coordinate_audit
     path("versions.tsv"),                                                emit: versions
 
     script:
@@ -123,6 +74,9 @@ process CHIMERA_JOINS {
             --max-join-distance ${maxdist}
     fi
 
+    python3 ${coordinate_guard} --fasta ${assessment_fasta} --agp ${round1_agp} \\
+        --table ${asm_id}.chimeric_joins.tsv --audit ${asm_id}.coordinate_audit.tsv \\
+        --round ${params.run_scaffold_round2 ? 'round2' : 'round1'}
     # Surface what was called, and what was NOT tested. A scaffold whose components could
     # none be assigned a chromosome is reported by the script as a warning -- it must not be
     # confused with a scaffold that was tested and came back clean.
@@ -145,6 +99,7 @@ process CHIMERA_JOINS {
 
     stub:
     """
+    printf 'metric\\tvalue\\nstatus\\tstub_unvalidated\\n' > ${asm_id}.coordinate_audit.tsv
     printf 'assembly\\tfinal_object\\tfinal_cut\\tsource\\tlift\\tgap_len\\n' \\
       > ${asm_id}.agp_joins.tsv
     printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\n' \\

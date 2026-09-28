@@ -93,6 +93,7 @@ if (params.run_blobtools_evidence) {
 include { parseSampleSheet } from './functions/input_validation.nf'
 include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
+include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
 
 /*
@@ -106,6 +107,7 @@ include { HIFI_QC } from './workflows/hifi_qc.nf'
 
 // Assembly
 include { HIC_SCAFFOLDING } from './workflows/hic_scaffolding.nf'
+include { ASSEMBLY_FINISHING } from './workflows/assembly_finishing.nf'
 include { READ_PREPARATION } from './workflows/read_preparation.nf'
 include { CONTIG_REFINEMENT } from './workflows/contig_refinement.nf'
 include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
@@ -200,6 +202,7 @@ workflow {
     INPUT_PREPARATION(validated_inputs)
     ch_input = INPUT_PREPARATION.out.samples
     ch_input_status = INPUT_PREPARATION.out.status
+    ch_declared_assemblies = ch_input.map { meta, reads -> tuple(meta.sample, meta) }
 
     // ploidy + haploid-size overrides ride sample-keyed side-channels (genomescope/hifiasm only),
     // so ploidy/size tweaks stay off the per-sample task hash.
@@ -439,10 +442,9 @@ workflow {
     ch_scaffold_round2_agp = HIC_SCAFFOLDING.out.round2_agp
     ch_all_bam_metrics = HIC_SCAFFOLDING.out.bam_metrics
     ch_all_pairs_metrics = HIC_SCAFFOLDING.out.pairs_metrics
-    ch_teloclip_stats_for_report = HIC_SCAFFOLDING.out.teloclip_stats
     ch_versions = ch_versions.mix(HIC_SCAFFOLDING.out.versions)
     // =========================================================================
-    //  FINALIZE ASSEMBLY — now uses ch_final_assembly (post-teloclip if enabled)
+    //  HARMONIZATION / CHIMERA ASSESSMENT - before sequence finishing
     // =========================================================================
     // Harmonize scaffold names across same-species long-read assemblies (>= 2) before
     // finalizing, so homologous chromosomes share names and FINAL_VIZ inherits them.
@@ -469,39 +471,49 @@ workflow {
     CHIMERA(
         HARMONIZE_SCAFFOLDS.out.assemblies,
         ch_shortread_finished,
-        HIC_SCAFFOLDING.out.round1_agp,
-        ch_scaffold_round2_agp,
+        HIC_SCAFFOLDING.out.evidence_agp,
         HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id,
         HARMONIZE_SCAFFOLDS.out.chimera_candidates,
         HARMONIZE_SCAFFOLDS.out.ref_name_map,
-        HIC_SCAFFOLDING.out.contig_pairs,
+        HIC_SCAFFOLDING.out.evidence_pairs,
         ch_telo_by_taxid, capabilities )
     ch_versions = ch_versions.mix(CHIMERA.out.versions)
 
     // ch_pre_finalize is emitted rather than assigned here: its default carries the
     // short-read-only branch (no harmonization name map), and separating that default from
     // the BREAK_CHIMERAS override is what previously dropped those assemblies silently.
-    ch_pre_finalize   = CHIMERA.out.pre_finalize
+    ASSEMBLY_FINISHING(CHIMERA.out.pre_finalize, READ_PREPARATION.out.hifi,
+        ch_telo_by_taxid, capabilities)
+    ch_versions = ch_versions.mix(ASSEMBLY_FINISHING.out.versions)
+    ch_teloclip_stats_for_report = ASSEMBLY_FINISHING.out.teloclip_stats
+    ch_pre_finalize = ASSEMBLY_FINISHING.out.assemblies
     ch_chimeric_joins = CHIMERA.out.called
 
-    ch_name_map_files = HARMONIZE_SCAFFOLDS.out.assemblies
-        .map { meta, fa, nm -> nm }
-        .filter { nm -> !nm.name.startsWith('NO_') }
-        .collect()
-    COLLECT_NAME_MAPS( ch_name_map_files )
-    ch_name_map_for_report = COLLECT_NAME_MAPS.out.map.ifEmpty( file('NO_NAMEMAP') )
-
     FINALIZE_ASSEMBLY(ch_pre_finalize)
+    COLLECT_NAME_MAPS(FINALIZE_ASSEMBLY.out.name_map.map { meta, nm -> nm }.collect())
+    ch_name_map_for_report = COLLECT_NAME_MAPS.out.map.ifEmpty(file('NO_NAMEMAP'))
     ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
-    ASSEMBLY_RUN_SUMMARY(ch_input_status,
-        ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false))
-
-    // =========================================================================
-    //  PanGenome Assembly - combine all same species chromosome level assemblies into a pangenome
-    // =========================================================================
-
-    // Pangenome graph (minigraph-cactus) per species, from the gated finalized assemblies.
+    // Side-channel identities do not enter expensive upstream task metadata.
+    ch_expected_assemblies = ch_declared_assemblies.join(ch_sample_identity)
+        .map { sample, meta, tax ->
+            [sample: sample, taxid: tax.taxid.toString(), species: tax.name,
+             assembler: meta.assembler, ploidy: meta.ploidy as int, n_hap: meta.n_hap as int,
+             hic_phasing: meta.hic && params.hifiasm_use_hic && meta.n_hap == 2]
+        }.collect(flat: false)
     ch_finalized_with_fai = FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.fai)
+    ASSEMBLY_ELIGIBILITY(ch_expected_assemblies,
+        ch_finalized_with_fai.collect(flat: false).map { records ->
+            def ordered = records.sort { a, b -> a[0].id <=> b[0].id }
+            tuple(ordered.collect { meta, fa, fai ->
+                [meta: meta, fasta: fa.toString(), fai: fai.toString(), fai_name: fai.name]
+            }, ordered.collect { meta, fa, fai -> fai })
+        },
+        HARMONIZE_SCAFFOLDS.out.reference_id.collect(flat: false),
+        file("${projectDir}/py_scripts/assembly_eligibility.py", checkIfExists: true),
+        file("${projectDir}/py_scripts/harmonize_names.py", checkIfExists: true))
+    ASSEMBLY_RUN_SUMMARY(ch_input_status,
+        ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false),
+        CHIMERA.out.coordinate_report, ASSEMBLY_ELIGIBILITY.out.report)
 
     /*
     ========================================================================================
@@ -511,7 +523,7 @@ workflow {
     ========================================================================================
     */
     ch_meryl_db = Channel.empty()
-    if (qc_on || params.run_pangenome) {
+    if (qc_on) {
         BUILD_MERYL_DB(ch_qc_reads)
         ch_meryl_db = BUILD_MERYL_DB.out.meryl_db
         ch_versions = ch_versions.mix(BUILD_MERYL_DB.out.versions)
@@ -521,13 +533,7 @@ workflow {
     // taxid-derived species, e.g. 373251 -> "Spratelloides delicatulus")
     ch_species_by_taxid = ch_taxonomy.map { taxid, tax -> tuple(taxid.toString(), tax.name) }
 
-    PANGENOME(
-        ch_finalized_with_fai,
-        HARMONIZE_SCAFFOLDS.out.reference_id,
-        ch_species_by_taxid,
-        HARMONIZE_SCAFFOLDS.out.report_by_taxid,
-        ch_meryl_db
-    )
+    PANGENOME(ASSEMBLY_ELIGIBILITY.out.manifest)
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 
     ch_pangenome_report_for_report = PANGENOME.out.report
@@ -540,7 +546,7 @@ workflow {
     ========================================================================================
     */
     // 1. Contact Maps for Final Assemblies
-    //    REPLACE: HIC_SCAFFOLDING.out.filled → ch_final_assembly
+    //    REPLACE: ASSEMBLY_FINISHING.out.filled → ch_final_assembly
     ch_final_contact_maps = Channel.empty()
     if (post_on && capabilities.hic && params.run_final_contact_maps) {
         FINAL_HIC_MAPS(
@@ -650,8 +656,8 @@ workflow {
     if (run_all_qc && params.run_inspector_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.corrected.map { m, f -> tuple(m, 'scaffold_corrected', f) } )
     if (run_all_qc && params.run_decon_scaffolds) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.decontaminated.map { m, f -> tuple(m, 'scaffold_decontam', f) } )
     if (run_all_qc && params.run_scaffold_round2) ch_staged_assemblies = ch_staged_assemblies.mix( ch_final_scaffolds_round2.map { m, f -> tuple(m, 'scaffold_round2', f) } )
-    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.filled.map { m, f -> tuple(m, 'gap_filled', f) } )
-    if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( HIC_SCAFFOLDING.out.extended.map { m, f -> tuple(m, 'teloclip', f) } )
+    if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ASSEMBLY_FINISHING.out.filled.map { m, f -> tuple(m, 'gap_filled', f) } )
+    if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( ASSEMBLY_FINISHING.out.extended.map { m, f -> tuple(m, 'teloclip', f) } )
     if (run_all_qc && chimera_on) ch_staged_assemblies = ch_staged_assemblies.mix( CHIMERA.out.broken.map { m, f, nm -> tuple(m, 'chimera_broken', f) } )
     if (qc_on) ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
 

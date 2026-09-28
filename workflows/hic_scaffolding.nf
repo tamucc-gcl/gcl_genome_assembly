@@ -6,8 +6,6 @@ include { FILTER_HIC_BAM } from '../modules/filter_hic_bam.nf'
 include { FILTER_HIC_BAM as FILTER_HIC_BAM_SCAFFOLD } from '../modules/filter_hic_bam.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND1 } from '../modules/scaffold_hic.nf'
 include { SCAFFOLD_HIC as SCAFFOLD_HIC_ROUND2 } from '../modules/scaffold_hic.nf'
-include { GAP_FILLING } from '../modules/gap_filling.nf'
-include { TELOCLIP_EXTEND; COLLECT_TELOCLIP_STATS } from '../modules/teloclip.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_CONTIG; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIG } from '../modules/hic_mapping_metrics.nf'
 include { HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_CONTIGSCAF } from '../modules/hic_mapping_metrics.nf'
 include { HIC_BAM_METRICS as HIC_BAM_METRICS_SCAFFOLD; HIC_PAIRS_METRICS as HIC_PAIRS_METRICS_SCAFFOLD } from '../modules/hic_mapping_metrics.nf'
@@ -31,7 +29,9 @@ workflow HIC_SCAFFOLDING {
     ch_round1 = Channel.empty()
     ch_round1_agp = Channel.empty()
     ch_contig_pairs = Channel.empty()
-    ch_filled = Channel.empty()
+    ch_pre_finish = Channel.empty()
+    ch_evidence_agp = Channel.empty()
+    ch_evidence_pairs = Channel.empty()
     ch_final_scaffolds_round2 = Channel.empty()
     ch_scaffold_round2_agp = Channel.empty()
     ch_all_bam_metrics = Channel.empty()
@@ -39,7 +39,7 @@ workflow HIC_SCAFFOLDING {
     ch_versions = Channel.empty()
     ch_scaffold_corrected = Channel.empty()
     ch_scaffold_decontaminated = Channel.empty()
-    ch_extended = Channel.empty()
+
 
     ch_individual_haplotypes = ch_decontaminated_contigs.filter { meta, fasta -> meta.assembler == 'hifiasm' }
     ch_shortread_finished    = ch_decontaminated_contigs.filter { meta, fasta -> meta.assembler == 'spades' }
@@ -302,87 +302,24 @@ workflow HIC_SCAFFOLDING {
         ch_final_scaffolds_round2 = Channel.empty()
     }
 
-    /*
-    ========================================================================================
-        STEP 13: Gap Filling
-        Fills gaps in final scaffolded assemblies using HiFi reads
-        Operates on the final scaffold output from either:
-        - Round 2 scaffolding (if round 2 was run)
-        - Decontaminated scaffolds (if decontamination on scaffolds was run)
-        - Corrected scaffolds (if correction on scaffolds was run)
-        - Original scaffolds (from round 1)
-    ========================================================================================
-    */
-    
-    // Determine which scaffolds to gap fill based on what was run
-    if (params.run_scaffold_round2) {
-        // Use round 2 scaffolds
-        ch_scaffolds_for_gap_filling = ch_final_scaffolds_round2
-    } else {
-        // Use round 1 final scaffolds (corrected/decontaminated if those options were chosen)
-        ch_scaffolds_for_gap_filling = ch_final_scaffolds
-    }
-
-    // HiFi-only assemblies are NOT gap-filled — no Hi-C scaffolding means no scaffold gaps to
-    // close. They rejoin the finishing chain at teloclip/finalize below (they still have HiFi
-    // reads), mirroring how short-read rejoins at ch_final_assembly.
-    
-    // Combine scaffolds with sample HiFi reads for gap filling (key on meta.sample)
-    ch_scaffolds_for_gap_filling
-        .map { meta, scaffold -> [ meta.sample, meta, scaffold ] }
-        .combine( ch_hifi_reads.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-        .map { sample, meta, scaffold, hifi_fastq -> tuple(meta, scaffold, hifi_fastq) }
-        .set { ch_gap_filling_input }
-    
-    // Run gap filling
-    GAP_FILLING(ch_gap_filling_input)
-    ch_versions = ch_versions.mix(GAP_FILLING.out.versions)
-
-    // Gap-filled Hi-C scaffolds + HiFi-only contigs (which correctly skipped gap-fill) both
-    // continue to teloclip/finalize.
+    // Stop before sequence finishing: harmonization and chimera evidence use this frame.
+    ch_pre_finish = params.run_scaffold_round2 ? ch_final_scaffolds_round2 : ch_final_scaffolds
     ch_round1 = SCAFFOLD_HIC_ROUND1.out.scaffolds
     ch_round1_agp = SCAFFOLD_HIC_ROUND1.out.agp
     ch_contig_pairs = FILTER_HIC_BAM.out.pairs
-    ch_filled = GAP_FILLING.out.filled_assembly
-    }
-    ch_post_gap_fill = ch_filled.mix(ch_hifi_only_scaffolds)
 
-    /*
-    ========================================================================================
-        STEP 13b: Teloclip — Extend scaffolds with missing telomeres (Optional)
-        Maps raw HiFi reads back to gap-filled scaffolds to find soft-clipped
-        alignments at scaffold ends containing telomeric motifs, then appends
-        the overhang sequence to recover missing telomeres.
-    ========================================================================================
-    */
-    if (capabilities.hifiasm && params.run_teloclip_extend) {
-        // Combine gap-filled assemblies with sample HiFi reads (key on meta.sample)
-        ch_post_gap_fill
-            .map { meta, filled_fa -> [ meta.sample, meta, filled_fa ] }
-            .combine( ch_hifi_reads.map { meta, fq -> [ meta.sample, fq ] }, by: 0 )
-            .map { sample, meta, filled_fa, hifi_fastq -> tuple(meta.taxid?.toString(), meta, filled_fa, hifi_fastq) }
-            .combine( ch_telo_by_taxid, by: 0 )
-            .map { taxid, meta, filled_fa, hifi_fastq, telo -> tuple(meta, filled_fa, hifi_fastq, telo) }
-            .set { ch_teloclip_input }
-
-        TELOCLIP_EXTEND(ch_teloclip_input)
-        ch_versions = ch_versions.mix(TELOCLIP_EXTEND.out.versions)
-
-        // Collect teloclip stats across all haplotypes
-        COLLECT_TELOCLIP_STATS(
-            TELOCLIP_EXTEND.out.stats.map { meta, stats -> stats }.collect()
-        )
-
-        // The teloclip-extended assembly becomes the "final" assembly
-        ch_extended = TELOCLIP_EXTEND.out.extended_assembly
-        ch_final_assembly = ch_extended
-        ch_teloclip_stats_for_report = COLLECT_TELOCLIP_STATS.out.stats.ifEmpty(file('NO_TELOCLIP'))
+    // Pairs are aligned to the INPUT of precisely this AGP. Never chain through Inspector.
+    if (params.run_scaffold_round2) {
+        ch_evidence_agp = ch_scaffold_round2_agp
+        ch_evidence_pairs = FILTER_HIC_BAM_SCAFFOLD.out.pairs
+    } else if (!params.run_inspector_scaffolds && !params.run_decon_scaffolds) {
+        ch_evidence_agp = ch_round1_agp
+        ch_evidence_pairs = ch_contig_pairs
     } else {
-        // No teloclip — gap-filled assembly IS the final assembly
-        ch_final_assembly = ch_post_gap_fill
-        ch_teloclip_stats_for_report = Channel.of(file('NO_TELOCLIP'))
+        log.warn('[CHIMERA] Correction/decontamination without round-two scaffolding: AGP coordinates unavailable; candidate detection remains available, exact join evidence is withheld.')
     }
-
+    }
+    ch_final_assembly = ch_pre_finish.mix(ch_hifi_only_scaffolds)
 
     emit:
     assembly = ch_final_assembly
@@ -394,10 +331,9 @@ workflow HIC_SCAFFOLDING {
     contig_pairs = ch_contig_pairs
     corrected = ch_scaffold_corrected
     decontaminated = ch_scaffold_decontaminated
-    filled = ch_filled
-    extended = ch_extended
+    evidence_agp = ch_evidence_agp
+    evidence_pairs = ch_evidence_pairs
     bam_metrics = ch_all_bam_metrics
     pairs_metrics = ch_all_pairs_metrics
-    teloclip_stats = ch_teloclip_stats_for_report
     versions = ch_versions
 }

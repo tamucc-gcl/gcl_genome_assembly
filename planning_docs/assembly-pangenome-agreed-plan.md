@@ -374,3 +374,10 @@ Tool reference: [hifiasm Hi-C input options](https://hifiasm.readthedocs.io/en/l
 
 [review]: <C:/Users/jselwyn/Documents/Codex/2026-09-23/referenced-chatgpt-conversation-this-is-an/outputs/pipeline-static-review.md>
 [previous]: <C:/Users/jselwyn/Documents/Codex/2026-09-23/referenced-chatgpt-conversation-this-is-an/outputs/pangenome-refocus-plan-revised.md>
+
+
+## 2026-09-28 addition: optional PSMC (batch 6A)
+
+Add a toggleable PSMC fork from final assemblies after the assembly checkpoint and shared species reference selection are accepted. It runs independently of pangenome enablement and supports a phased diploid pair or one assembly representation of a diploid individual with same-individual HiFi reads. True biological haploids are not standard PSMC inputs. This is a bounded addition to the earlier exclusion of population analyses; general population genetics remains out of scope.
+
+See [completed-run assessment and PSMC integration plan](completed-run-review-and-psmc-plan.md) for script findings, reference rules, callability, outputs, method decisions and validation. This is planned, not implemented. The current assembly testing run excluded short-read input and expects ten HiFi haplotypes; short-read validation remains outstanding.

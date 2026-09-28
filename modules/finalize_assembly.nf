@@ -99,6 +99,19 @@ process FINALIZE_ASSEMBLY {
             exit 1
         fi
 
+        # Assignments precede finishing. Require unchanged IDs and refresh actual lengths.
+        awk 'BEGIN{FS=OFS="\\t"}
+             NR==FNR {len[\$1]=\$2; next}
+             FNR==1 {print; next}
+             {
+                 if (!(\$1 in len) || seen[\$1]++ || target[\$2]++) {
+                     print "Invalid/duplicate finished name-map identity: " \$1 > "/dev/stderr"
+                     exit 1
+                 }
+                 \$5=len[\$1]; print
+             }' "\${INPUT_FA}.fai" "\${MAP}" > finished_name_map.tsv
+        MAP=finished_name_map.tsv
+
         # rows in output order (col 4)
         tail -n +2 "\${MAP}" | sort -t\$'\\t' -k4,4n > rows.tsv
 

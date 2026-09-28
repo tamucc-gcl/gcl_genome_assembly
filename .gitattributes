@@ -4,3 +4,4 @@
 *.config text eol=lf
 *.sh text eol=lf
 *.sbatch text eol=lf
+*.py text eol=lf

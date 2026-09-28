@@ -142,7 +142,7 @@ workflow HARMONIZE_SCAFFOLDS {
                     def candidates = cfile.readLines()
                          .findAll { it?.trim() && !it.startsWith('#') && !it.startsWith('candidate\t') }
                          .collect { line -> tuple(taxid, line.tokenize('\t')[0], ids, fas) }
-                    if (!candidates) error "HARMONIZE: ${taxid} emitted an empty candidate table: ${cfile}"
+                    if (!candidates) log.warn("[HARMONIZE] taxid ${taxid}: no eligible reference; assemblies pass through")
                     candidates
                 }
 
