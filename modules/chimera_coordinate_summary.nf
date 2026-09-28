@@ -18,7 +18,7 @@ process CHIMERA_COORDINATE_SUMMARY {
     def recoveryRows = assemblies.sort { it.id }.collect { r ->
         def item = older[r.id.toString()]
         def recovered = item ? (item.statuses.recovered_exact_flanks_and_gap ?: 0) : null
-        def status = item ? "${recovered}/${item.total} recovered; ${item.total - recovered} unresolved" : 'Not run'
+        def status = item ? "${recovered}/${item.total} recovered; ${item.total - recovered} unresolved; ${item.transition_intervals ?: 0} transition intervals; ${item.diagnostic_profiles ?: 0} diagnostic profiles requested" : 'Not run'
         "| ${clean(r.id)} | ${status} |"
     }.join('\n')
     def rows = assemblies.sort { it.id }.collect { r ->
@@ -51,7 +51,8 @@ No older join is automatically cut by this recovery branch.
 |---|---|
 ${recoveryRows}
 
-Detailed audits and review tables are under assembly/chimeras/older_joins.
+Detailed audits, review tables and *.transition_intervals.tsv are under assembly/chimeras/older_joins.
+Interval midpoints are diagnostic positions, not safe cuts. Each evidence TSV records figure_status.
 Unresolved older joins are **not cleared**.
 Current-assembly harmonization can still flag those scaffolds for review.
 These evidence coordinates describe the pre-finishing assembly, not the final FASTA.

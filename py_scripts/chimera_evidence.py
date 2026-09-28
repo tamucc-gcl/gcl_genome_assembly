@@ -331,7 +331,7 @@ def snap(gs, target, window=500000):
 # --------------------------------------------------------------------------------------
 # figure
 # --------------------------------------------------------------------------------------
-def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, title):
+def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, title, interval=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -348,8 +348,8 @@ def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, tit
     fig, ax = plt.subplots(3, 1, figsize=(9, 11),
                            gridspec_kw={"height_ratios": [4, 1.1, 1.1]})
     ax[0].imshow(np.log10(M + 1), cmap="YlOrRd", extent=[0, mb, mb, 0])
-    for v, col, lab in ((paf_bp, "tab:blue", "PAF"), (hic_bp, "tab:green", "Hi-C min"),
-                        (cut_bp, "black", "cut")):
+    for v, col, lab in ((paf_bp, "tab:blue", "requested position"), (hic_bp, "tab:green", "Hi-C min"),
+                        (cut_bp, "black", "evidence position")):
         if v is not None:
             ax[0].axhline(v / 1e6, color=col, lw=0.8, ls="--")
             ax[0].axvline(v / 1e6, color=col, lw=0.8, ls="--", label=lab)
@@ -379,6 +379,9 @@ def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, tit
         ax[2].set_xlim(0, mb)
     ax[2].set_xlabel("position (Mb)")
 
+    if interval:
+        for panel in ax:
+            panel.axvspan(interval[0]/1e6, interval[1]/1e6, color="grey", alpha=0.2)
     plt.tight_layout()
     plt.savefig(path, dpi=150)
     plt.close()
@@ -435,8 +438,11 @@ def main():
         sys.exit("ERROR: no row for %s / %s in %s" % (a.assembly, a.scaffold, a.candidates))
     if a.cut_bp:
         rows = [r for r in rows
-                if str(r.get("cut_bp", "")) == str(a.cut_bp)] or rows
+                if str(r.get("cut_bp", "")) == str(a.cut_bp)]
+    if not rows:
+        sys.exit("ERROR: requested diagnostic/cut position is absent from the input table")
     row = rows[0]
+    diagnostic_only = row.get("evidence_only") == "yes"
     try:
         paf_bp = int(float(row.get("cut_bp") or row.get("junction_bp") or 0)) or None
     except ValueError:
@@ -478,14 +484,14 @@ def main():
     target = paf_bp or (hic["min_bp"] if hic else 0)
     telo = summarise_telomere(tw, target)
     gs = gaps(seq)
-    sn = snap(gs, target, a.gap_snap_window)
+    sn = None if diagnostic_only else snap(gs, target, a.gap_snap_window)
 
     # ---- the cut point, and the verdict -------------------------------------------
     # the AGP position already sits in a 100 bp scaffolding gap, so snapping should be a
     # no-op or a few kb -- measured offsets on the known candidates were -9 kb, +0 kb, -0 kb,
     # the residue of gap filling upstream of the join.
     cut_bp = sn["cut_bp"] if sn else target
-    notes = []
+    notes = ["diagnostic_midpoint_not_a_cut"] if diagnostic_only else []
     verdict = row.get("candidate_verdict", row.get("verdict", "?"))
     if hic is None:
         notes.append("no_hic")
@@ -494,12 +500,12 @@ def main():
         # depleted approaching a junction as well as at it -- measured, the Hi-C minimum was
         # 256 kb and 705 kb from the AGP join on the two candidates. Disagreement is worth
         # flagging, not worth overriding an exact position with an inferred one.
-        notes.append("hic_min_%+d_from_agp_cut" % (hic["min_bp"] - paf_bp))
+        notes.append("hic_min_%+d_from_evidence_position" % (hic["min_bp"] - paf_bp))
     if hic and hic["ratio"] >= 1.0:
         notes.append("hic_not_depleted=%.3f" % hic["ratio"])
     if sn:
         notes.append("snapped_to_gap=%d(%+d)" % (sn["cut_bp"], sn["offset_from_target"]))
-    else:
+    elif not diagnostic_only:
         notes.append("no_gap_within_%d" % a.gap_snap_window)
     if telo and telo["both_orientations"] and telo["junction_over_background"] >= 3:
         notes.append("interstitial_telomere=%dx" % round(telo["junction_over_background"]))
@@ -513,26 +519,14 @@ def main():
             notes.append("hic_at_cut_not_depleted=%.3f" % hic_cut["ratio"])
 
     with open(op(".chimera_evidence.tsv"), "w") as out:
-        out.write("# Independent evidence for one candidate. The concordance vote in the\n")
-        out.write("#   candidates file remains the GATE -- it is the only signal independent\n")
-        out.write("#   of how this scaffold was built. Hi-C made the join, so it is used here\n")
-        out.write("#   to LOCATE the junction, not to justify breaking it.\n")
-        out.write("# hic_ratio is measured AT THE CUT; hic_min_ratio is the scaffold-wide\n")
-        out.write("#   minimum, which can be elsewhere. On one candidate here the minimum is\n")
-        out.write("#   0.534 at a SAME-chromosome join 41 Mb away while the cut itself is\n")
-        out.write("#   0.740, so the two must not be conflated in a per-cut table.\n")
-        out.write("# Either below 1 means contact across that position is under the scaffold\n")
-        out.write("#   median at matched distance -- the data never supported the join.\n")
-        out.write("# hic_n_low_contiguous is the discriminating statistic: five consecutive\n")
-        out.write("#   low windows is a boundary, one isolated low window is noise.\n")
-        out.write("# telomere ABSENCE is not evidence against breaking -- a mid-arm fusion\n")
-        out.write("#   leaves none. Presence in BOTH orientations indicates fused ends.\n")
+        out.write("# Descriptive review evidence; neither Hi-C depletion nor telomere signal authorizes a cut.\n")
+        out.write("# Hi-C minimum is scaffold-wide; evidence_position_bp is the position assessed here.\n")
         out.write("metric\tvalue\n")
         for k, v in (("assembly", a.assembly), ("scaffold", a.scaffold),
                      ("name", row.get("name", ".")), ("span_bp", span),
                      ("vote", row.get("vote", ".")),
-                     ("verdict_from_candidates", row.get("verdict", ".")),
-                     ("paf_junction_bp", paf_bp if paf_bp else "NA")):
+                     ("verdict_from_candidates", row.get("candidate_verdict", row.get("verdict", "."))),
+                     ("paf_junction_bp", paf_bp if paf_bp and not diagnostic_only else "NA")):
             out.write("%s\t%s\n" % (k, v))
         if hic:
             out.write("hic_resolution_bp\t%d\n" % res)
@@ -544,10 +538,10 @@ def main():
                 out.write("hic_value_at_cut\t%s\n" % hic_cut["value"])
                 if hic_cut["note"]:
                     out.write("hic_at_cut_note\t%s\n" % hic_cut["note"])
-            for k, lab in (("min_bp", "min_bp"), ("min_value", "min_value"),
+            for k, metric_label in (("min_bp", "min_bp"), ("min_value", "min_value"),
                            ("median", "median"), ("ratio", "min_ratio"),
                            ("n_low_contiguous", "n_low_contiguous")):
-                out.write("hic_%s\t%s\n" % (lab, hic[k]))
+                out.write("hic_%s\t%s\n" % (metric_label, hic[k]))
             out.write("hic_low_windows_bp\t%s\n"
                       % ",".join(str(x) for x in hic["low_bp"]))
         else:
@@ -560,7 +554,10 @@ def main():
         if sn:
             for k in ("gap_start", "gap_end", "cut_bp", "offset_from_target"):
                 out.write("gap_%s\t%s\n" % (k, sn[k]))
-        out.write("cut_bp\t%d\n" % cut_bp)
+        out.write("evidence_position_bp\t%d\n" % cut_bp)
+        out.write("evidence_only\t%s\n" % ("yes" if diagnostic_only else "no"))
+        out.write("transition_lo\t%s\ntransition_hi\t%s\n" % (row.get("transition_lo", "."), row.get("transition_hi", ".")))
+        out.write("cut_bp\t%s\n" % ("NA" if diagnostic_only else cut_bp))
         out.write("verdict\t%s\n" % verdict)
         out.write("notes\t%s\n" % (";".join(notes) or "."))
 
@@ -568,9 +565,15 @@ def main():
         figure(op(".chimera_evidence.png"), a.cool, name, res, prof, paf_bp,
                hic["min_bp"] if hic else None, cut_bp, tw,
                "%s  %s\n%s  vote %s" % (a.assembly, row.get("name", a.scaffold),
-                                        a.scaffold, row.get("vote", "?")))
+                                        a.scaffold, row.get("vote", "?")),
+               interval=(int(row["transition_lo"]), int(row["transition_hi"])) if diagnostic_only else None)
 
-    sys.stderr.write("[chimera_evidence] %s %s: cut %d, verdict %s%s\n"
+    with open(op(".chimera_evidence.tsv"), "a") as out:
+        out.write("figure_status\t%s\n" % ("generated" if prof is not None else "not_generated_no_hic_profile"))
+    if prof is not None and not os.path.isfile(op(".chimera_evidence.png")):
+        raise RuntimeError("Expected evidence figure was not created")
+
+    sys.stderr.write("[chimera_evidence] %s %s: evidence position %d, verdict %s%s\n"
                      % (a.assembly, a.scaffold, cut_bp, verdict,
                         ("  [" + ";".join(notes) + "]") if notes else ""))
 

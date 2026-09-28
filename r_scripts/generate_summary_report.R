@@ -1591,7 +1591,11 @@ if (has_chimera && has_chimera_data) {
       transmute(
         Assembly   = .data$assembly,
         Scaffold   = if ("name" %in% names(chim_evid)) .data$name else .data$scaffold,
-        `Cut (bp)` = comma(num(.data$cut_bp)),
+        `Evidence position (bp)` = if ("evidence_position_bp" %in% names(chim_evid))
+                                     comma(num(.data$evidence_position_bp)) else comma(num(.data$cut_bp)),
+        Scope = if ("evidence_only" %in% names(chim_evid))
+                  ifelse(!is.na(.data$evidence_only) & .data$evidence_only == "yes",
+                         "Diagnostic interval; not a cut", "Join review") else "Join review",
         `Hi-C Ratio` = if ("hic_ratio" %in% names(chim_evid))
                          sprintf("%.3f", num(.data$hic_ratio)) else NA_character_,
         `Low Windows` = if ("hic_n_low_contiguous" %in% names(chim_evid))
@@ -1600,21 +1604,15 @@ if (has_chimera && has_chimera_data) {
                             sprintf("%.1f", num(.data$telomere_junction_over_background)) else NA_character_,
         Vote       = if ("vote" %in% names(chim_evid)) .data$vote else NA_character_) %>%
       arrange(.data$Assembly, .data$Scaffold)
-    md <- c(md, sprintf("### %d%s. Applied Cuts and Supporting Evidence", sec_n("chimera"), "b"), "",
+    md <- c(md, sprintf("### %d%s. Junction and Transition Review Evidence", sec_n("chimera"), "b"), "",
             make_markdown_table(ev_tbl), "",
-            paste("**Hi-C Ratio** is contact ACROSS the junction relative to the scaffold",
-                  "median at matched distance; below 1 means the read data never supported the",
-                  "join. **Low Windows** counts how many of the five most depleted windows are",
-                  "contiguous -- five consecutive is a boundary, one isolated window is noise.",
-                  "**Telomere x bg** is interstitial telomeric repeat at the junction over the",
-                  "scaffold background; a high value in both orientations indicates two",
-                  "chromosome ends fused back to back, while its absence is expected for a",
-                  "mid-arm join and is not evidence against the cut."), "")
-    md <- c(md,
-            paste("Cut positions come from the scaffolding AGP, so each lands inside the 100 bp",
-                  "gap the join itself introduced and severs no sequence. Hi-C confirms the",
-                  "decision rather than making it: the same data produced the join, so depleted",
-                  "contact across it is corroboration, not independent proof."), "")
+            paste("**Hi-C Ratio** describes contact across the evidence position relative to the",
+                  "scaffold median. Depletion, low-window clustering and telomere enrichment are",
+                  "descriptive signals; none establishes an assembly error or authorizes a cut.",
+                  "The same Hi-C data were used for scaffolding.",
+                  "Diagnostic interval midpoints are not inferred breakpoints and are not snapped to gaps.",
+                  "The transition interval and associated recovered joins are recorded in the detailed",
+                  "transition table. Missing full-window statistics remain unavailable."), "")
 
     # ---- 7c: the figures ----
     # From the explicit argument. Deriving them from the evidence paths does not work: those
@@ -1630,7 +1628,7 @@ if (has_chimera && has_chimera_data) {
       figs <- figs[file.exists(figs) & file.size(figs) > 0]
     }
     if (length(figs) > 0) {
-      md <- c(md, sprintf("### %d%s. Per-Cut Evidence Figures", sec_n("chimera"), "c"), "")
+      md <- c(md, sprintf("### %d%s. Review Evidence Figures", sec_n("chimera"), "c"), "")
       for (f in figs) {
         stem <- str_replace(basename(f), "\\.chimera_evidence\\.png$", "")
         md <- c(md, sprintf("**%s**", stem), "",

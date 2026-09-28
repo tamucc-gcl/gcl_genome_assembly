@@ -1,3 +1,5 @@
+Current follow-up: [transition-evidence-checkpoint.md](transition-evidence-checkpoint.md). The current test suite has 35 tests; the 25-test instructions below describe the previous checkpoint.
+
 # Older-join review checkpoint and rerun handoff
 
 2026-09-28. Source reviewed statically; no pipeline, analysis code, or tests executed locally.

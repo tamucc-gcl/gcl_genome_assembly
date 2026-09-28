@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_scripts"))
-from recover_older_joins import prepare, exact_hits, locate, assess, checksum, rows, chromosome
+from recover_older_joins import prepare, exact_hits, locate, assess, checksum, rows, chromosome, transition_intervals
 
 
 class OlderJoinTests(unittest.TestCase):
@@ -85,7 +85,7 @@ class OlderJoinTests(unittest.TestCase):
         assess(argparse.Namespace(prefix="a", flank_paf="flanks.paf", ref_map="map.tsv",
             ref_paf="ref.paf", candidates="candidates.tsv", assembly="a", min_mapq=30,
             current="current.fa", native="native.tsv", window=8, min_bp=4, margin=2,
-            min_block=1, min_span=0))
+            min_block=1, min_span=0, transition_max_bridge=10))
 
     def test_recovered_join_is_review_only_and_stamped(self):
         self.assess_fixture()
@@ -95,9 +95,44 @@ class OlderJoinTests(unittest.TestCase):
         self.assertEqual(call["assembly_sha256"], checksum("current.fa"))
         self.assertEqual(rows("a.older_join_audit.tsv")[1][0]["auto_cut"], "no")
 
+
+    def test_transition_bridges_unassigned_window(self):
+        tr = transition_intervals([(0, 10, "chr1"), (20, 30, "chr2")],
+                                  30, 10, 5, 2, 10)
+        self.assertEqual(len(tr), 1)
+        self.assertEqual((tr[0]["transition_lo"], tr[0]["transition_hi"]), (0, 30))
+        self.assertTrue(tr[0]["profile_allowed"])
+
+    def test_transition_wide_bridge_reported_but_not_profiled(self):
+        tr = transition_intervals([(0, 10, "chr1"), (40, 50, "chr2")],
+                                  50, 10, 5, 2, 10)
+        self.assertEqual(len(tr), 1)
+        self.assertFalse(tr[0]["profile_allowed"])
+
+    def test_same_chromosome_across_missing_window_not_transition(self):
+        self.assertEqual(transition_intervals([(0, 10, "chr1"), (20, 30, "chr1")],
+                                             30, 10, 5, 2, 10), [])
+
+    def test_three_chromosomes_give_separate_transitions(self):
+        tr = transition_intervals([(0, 10, "chr9"), (10, 20, "chr7"), (20, 30, "chr12")],
+                                  30, 10, 5, 2, 10)
+        self.assertEqual([(r["left_chrom"], r["right_chrom"]) for r in tr],
+                         [("chr9", "chr7"), ("chr7", "chr12")])
+
+    def test_no_alignment_has_no_inferred_transition(self):
+        self.assertEqual(transition_intervals([], 30, 10, 5, 2, 10), [])
+
+    def test_interval_lists_recovered_joins_without_authorizing_cut(self):
+        self.assess_fixture()
+        transitions = rows("a.transition_intervals.tsv")[1]
+        self.assertEqual(transitions[0]["recovered_join_ids"], "J00000000")
+        self.assertEqual(transitions[0]["auto_cut"], "no")
+
     def test_replaced_gap_not_promoted_to_safe_join(self):
         self.assess_fixture("ACGT")
-        self.assertEqual(rows("a.review_joins.tsv")[1], [])
+        calls = rows("a.review_joins.tsv")[1]
+        self.assertTrue(calls)
+        self.assertTrue(all(r["callable"] == "no" and r["evidence_only"] == "yes" for r in calls))
         self.assertEqual(rows("a.older_join_audit.tsv")[1][0]["status"],
                          "unresolved_gap_changed_or_replaced")
 

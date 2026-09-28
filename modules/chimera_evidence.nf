@@ -33,7 +33,7 @@ process CHIMERA_EVIDENCE {
     set -euo pipefail
 
     # Review cases need evidence too; collecting it does not authorize a cut.
-    awk -F'\\t' 'NR>1 && \$1!~/^#/ && \$15=="yes" && (\$19=="BREAK_CANDIDATE" || \$19=="REVIEW") {print \$2}' \\
+    awk -F'\\t' '\$1=="assembly" {for(i=1;i<=NF;i++) if(\$i=="evidence_only") E=i; next} NR>1 && \$1!~/^#/ && (\$15=="yes" || (E && \$(E)=="yes")) && (\$19=="BREAK_CANDIDATE" || \$19=="REVIEW") {print \$2}' \\
         ${called_joins} | sort -u > scaffolds.txt
 
     if [ ! -s scaffolds.txt ]; then
@@ -116,7 +116,7 @@ process CHIMERA_EVIDENCE {
 
         # ---- one evidence record per CUT on this scaffold ---------------------------
         awk -F'\\t' -v S="\$SC" \\
-            'NR>1 && \$1!~/^#/ && \$2==S && \$15=="yes" && (\$19=="BREAK_CANDIDATE" || \$19=="REVIEW") {print \$4}' \\
+            '\$1=="assembly" {for(i=1;i<=NF;i++) if(\$i=="evidence_only") E=i; next} NR>1 && \$1!~/^#/ && \$2==S && (\$15=="yes" || (E && \$(E)=="yes")) && (\$19=="BREAK_CANDIDATE" || \$19=="REVIEW") {print \$4}' \\
             ${called_joins} | sort -un > "\${SAFE}.cuts.txt"
 
         while read -r CUT; do

@@ -154,6 +154,27 @@ def chromosome(alns, lo, hi, minimum, margin):
     return ranked[0][1]
 
 
+
+def transition_intervals(alns, length, window, minimum, margin, max_bridge):
+    """Coarse uncertainty intervals between successive informative windows.
+    Empty/ambiguous windows are bridged only for reporting; broad intervals
+    remain visible but do not trigger profiles. No breakpoint is inferred.
+    """
+    previous = None
+    result = []
+    for lo in range(0, length, window):
+        hi = min(length, lo + window)
+        chrom = chromosome(alns, lo, hi, minimum, margin)
+        if chrom == ".":
+            continue
+        if previous and previous[2] != chrom:
+            result.append(dict(transition_lo=previous[0], transition_hi=hi,
+                               left_chrom=previous[2], right_chrom=chrom,
+                               profile_allowed=(lo - previous[1] <= max_bridge)))
+        previous = (lo, hi, chrom)
+    return result
+
+
 def assess(a):
     data = json.loads(Path(a.prefix+".source.json").read_text())
     hits = exact_hits(a.flank_paf)
@@ -185,10 +206,12 @@ def assess(a):
             by_target[name].append(j)
     digest = checksum(a.current)
     fields, called = rows(a.native)
+    fields += ["transition_lo", "transition_hi", "evidence_only"]
     if "assembly_sha256" not in fields:
         raise ValueError("Native table must carry current FASTA provenance")
     if any(r["assembly_sha256"] != digest for r in called):
         raise ValueError("Native calls belong to a different FASTA")
+    transition_rows = []
     seen = set()
     for name, seq in records(a.current):
         if name in seen:
@@ -229,6 +252,40 @@ def assess(a):
                        coordinate_stage="pre_finishing", join_scope="recovered_round1_review_only")
             if not any(r["scaffold"] == name and r["cut_bp"] == row["cut_bp"] for r in called):
                 called.append(row)
+
+        # Diagnose chromosome changes independently of whether a safe gap exists.
+        for ti, transition in enumerate(transition_intervals(
+                alignments.get(name, []), len(seq), a.window, a.min_bp,
+                a.margin, a.transition_max_bridge), 1):
+            lo, hi = transition["transition_lo"], transition["transition_hi"]
+            matched = [j for j in by_target.get(name, [])
+                       if j["status"] == "recovered_exact_flanks_and_gap"
+                       and lo <= (j["current_lo"] + j["current_hi"]) // 2 < hi]
+            selected = transition["profile_allowed"] and len(seq) >= a.min_span
+            transition_rows.append(dict(
+                assembly=a.assembly, scaffold=name, transition_id=f"{name}:T{ti}",
+                **transition, recovered_join_ids=";".join(j["join_id"] for j in matched) or ".",
+                recovered_join_count=len(matched), diagnostic_bp=(lo+hi)//2,
+                profile_status=("selected_review" if selected else
+                                "below_scaffold_size_threshold" if len(seq) < a.min_span else
+                                "unassigned_span_exceeds_bridge_limit"),
+                auto_cut="no", assembly_sha256=digest))
+            if not selected:
+                continue
+            row = {k: "." for k in fields}
+            row.update(assembly=a.assembly, scaffold=name,
+                       name=candidates.get(name, {}).get("name", name),
+                       cut_bp=str((lo+hi)//2), left_chrom=transition["left_chrom"],
+                       right_chrom=transition["right_chrom"], callable="no",
+                       reason="transition_interval_midpoint;not_a_breakpoint_or_safe_cut",
+                       span_bp=str(len(seq)), vote="not_recomputed_per_junction",
+                       candidate_verdict="REVIEW", assembly_sha256=digest,
+                       coordinate_stage="pre_finishing", join_scope="transition_diagnostic_only",
+                       transition_lo=str(lo), transition_hi=str(hi), evidence_only="yes")
+            # If a native/gap profile already occupies this exact coordinate, retain it.
+            if not any(r["scaffold"] == name and r["cut_bp"] == row["cut_bp"] for r in called):
+                called.append(row)
+
     if set(by_target)-seen:
         raise ValueError("Flank alignment target absent from current FASTA")
     with open(a.prefix+".review_joins.tsv", "w") as out:
@@ -245,11 +302,21 @@ def assess(a):
         writer.writeheader()
         for j in data["joins"]:
             writer.writerow(dict(j, source_sha256=data["source_sha256"], current_sha256=digest))
+    transition_fields = ["assembly", "scaffold", "transition_id", "transition_lo", "transition_hi",
+                         "left_chrom", "right_chrom", "profile_allowed", "recovered_join_ids",
+                         "recovered_join_count", "diagnostic_bp", "profile_status", "auto_cut",
+                         "assembly_sha256"]
+    with open(a.prefix+".transition_intervals.tsv", "w") as out:
+        writer = csv.DictWriter(out, fieldnames=transition_fields, delimiter="\t", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(transition_rows)
     counts = defaultdict(int)
     for j in data["joins"]:
         counts[j["status"]] += 1
     Path(a.prefix+".older_join_summary.json").write_text(json.dumps(dict(
         assembly=a.assembly, total=len(data["joins"]), statuses=dict(counts),
+        transition_intervals=len(transition_rows),
+        diagnostic_profiles=sum(r["profile_status"] == "selected_review" for r in transition_rows),
         auto_cut=False, coordinate_system="0-based half-open",
         source_sha256=data["source_sha256"], current_sha256=digest), indent=2)+"\n")
 
@@ -275,8 +342,9 @@ def main():
     p.add_argument("--margin", type=float, default=2.0)
     p.add_argument("--min-block", type=int, default=2000)
     p.add_argument("--min-span", type=int, default=20000000)
+    p.add_argument("--transition-max-bridge", type=int, default=5000000)
     a = p.parse_args()
-    if a.flank < a.minimum or a.minimum < 1 or a.min_bp < 1 or a.window < a.min_bp or a.margin <= 1:
+    if a.transition_max_bridge < 0 or a.flank < a.minimum or a.minimum < 1 or a.min_bp < 1 or a.window < a.min_bp or a.margin <= 1:
         p.error("Invalid flank/evidence thresholds")
     if a.mode == "prepare":
         prepare(a.round1_agp, a.round1_fasta, a.flank, a.minimum, a.prefix)
