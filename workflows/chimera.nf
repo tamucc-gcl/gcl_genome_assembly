@@ -1,3 +1,4 @@
+include { RECOVER_OLDER_JOINS } from '../modules/recover_older_joins.nf'
 include { CHIMERA_COORDINATE_SUMMARY } from '../modules/chimera_coordinate_summary.nf'
 /* Chimera assessment and optional cuts on the last-scaffold FASTA, before finishing.
  * The round1 parameter carries the LAST-round AGP; no two-round chain is used.
@@ -21,6 +22,8 @@ workflow CHIMERA {
     ch_contig_pairs_in             // pairs mapped to the LAST-round scaffolding input
     ch_telo_by_taxid               //  per-taxid telomere motif              tuple(taxid, motif)
 
+    ch_original_scaffolds
+    ch_original_agp
     capabilities
 
     main:
@@ -58,6 +61,8 @@ workflow CHIMERA {
     // candidates and the called joins are the evidence a break is justified by, and they are
     // worth having even on a run that cuts nothing.
     ch_chimeric_joins = Channel.empty()
+    ch_evidence_calls = Channel.empty()
+    ch_older_summaries = Channel.empty()
     if( detect_on ) {
         ch_agp_script = Channel.fromPath("${projectDir}/py_scripts/agp_joins.py",
                                         checkIfExists: true)
@@ -66,14 +71,14 @@ workflow CHIMERA {
 
         // Optional PAFs are a lookup value, not an outer join with unknown empty arity.
         ch_paf_lookup = ch_ref_pafs_by_id.collect(flat: false)
-            .map { records -> records.collectEntries { id, pf -> [(id): pf] } }
+            .map { records -> records.collectEntries { id, pf -> [(id.toString()): pf] } }
         CHIMERA_JOINS(
             ch_round1_agp.map { meta, agp -> tuple(meta.taxid.toString(), meta.id, agp) }
                 .combine(ch_paf_lookup)
                 .map { taxid, id, agp, pafs ->
                     tuple(taxid, id, agp,
                         file("${projectDir}/assets/NO_ROUND2", checkIfExists: true),
-                        pafs[id] ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
+                        pafs[id.toString()] ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
                 .combine(ch_harmonized.map { meta, fa, nm -> tuple(meta.taxid.toString(), meta.id, fa) }, by: [0, 1])
                 .combine(ch_chimera_candidates, by: 0)
                 .combine(ch_ref_name_map, by: 0)
@@ -84,6 +89,28 @@ workflow CHIMERA {
             file("${projectDir}/py_scripts/chimera_coordinate_guard.py", checkIfExists: true) )
         ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
         ch_chimeric_joins = CHIMERA_JOINS.out.called
+        ch_evidence_calls = ch_chimeric_joins
+        if (params.run_scaffold_round2 && params.chimera_recover_older) {
+            ch_original = ch_original_scaffolds.join(ch_original_agp)
+                .map { meta, fa, agp -> tuple(meta.id.toString(), fa, agp) }
+            ch_recovery = ch_chimeric_joins
+                .map { taxid, id, called -> tuple(id.toString(), taxid, called) }
+                .join(ch_original)
+                .join(ch_harmonized.map { meta, fa, nm -> tuple(meta.id.toString(), fa) })
+                .combine(ch_paf_lookup)
+                .map { id, taxid, called, oldfa, oldagp, current, pafs ->
+                    tuple(taxid, id, oldfa, oldagp, current, called,
+                          pafs[id.toString()] ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
+                .combine(ch_chimera_candidates, by: 0)
+                .combine(ch_ref_name_map, by: 0)
+            RECOVER_OLDER_JOINS(ch_recovery,
+                file("${projectDir}/py_scripts/recover_older_joins.py", checkIfExists: true))
+            ch_evidence_calls = RECOVER_OLDER_JOINS.out.called
+            ch_older_summaries = RECOVER_OLDER_JOINS.out.summary.map { taxid, id, report ->
+                new groovy.json.JsonSlurper().parseText(report.text)
+            }
+            ch_versions = ch_versions.mix(RECOVER_OLDER_JOINS.out.versions)
+        }
 
         // ---- independent confirmation of each called join ----------------------------
         // Telomere and N-gap evidence, plus a Hi-C cross-contact profile built by
@@ -105,17 +132,17 @@ workflow CHIMERA {
                 .map    { meta, stage, pairs_gz -> tuple(meta.id, pairs_gz) }
 
             CHIMERA_EVIDENCE(
-                CHIMERA_JOINS.out.called
-                    .map { taxid, id, called -> tuple(id, taxid, called) }
+                ch_evidence_calls
+                    .map { taxid, id, called -> tuple(id.toString(), taxid, called) }
                     .join( ch_harmonized
-                               .map { meta, fa, nm -> tuple(meta.id, fa) } )
-                    .join( ch_round1_agp.map { meta, agp -> tuple(meta.id, agp) } )
+                               .map { meta, fa, nm -> tuple(meta.id.toString(), fa) } )
+                    .join( ch_round1_agp.map { meta, agp -> tuple(meta.id.toString(), agp) } )
                     .combine(ch_contig_pairs.collect(flat: false)
-                        .map { records -> records.collectEntries { id, pf -> [(id): pf] } })
+                        .map { records -> records.collectEntries { id, pf -> [(id.toString()): pf] } })
                     .map { id, taxid, called, fa, agp, pairs ->
                         tuple(taxid, id, fa, called, agp,
                               file("${projectDir}/assets/NO_ROUND2", checkIfExists: true),
-                              pairs[id] ?: file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)) }
+                              pairs[id.toString()] ?: file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)) }
                     // the motif is per species, so it attaches by key
                     .combine( ch_telo_by_taxid, by: 0 )
                     .map { taxid, id, fa, called, r1, r2, pairs, motif ->
@@ -205,7 +232,7 @@ workflow CHIMERA {
         }.mix(ch_shortread_finished.map { meta, fa ->
             [id: meta.id, hic: meta.hic, harmonized: false]
         }).collect(flat: false),
-        ch_chimeric_joins.map { taxid, id, f -> id }.collect())
+        ch_chimeric_joins.map { taxid, id, f -> id.toString() }.collect(), ch_older_summaries.collect(flat: false))
 
     emit:
     coordinate_report = CHIMERA_COORDINATE_SUMMARY.out.report

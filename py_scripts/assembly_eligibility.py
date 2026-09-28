@@ -77,8 +77,11 @@ def evaluate(data):
             m["voter"] = roles.get(m["id"]) == "voter" and bool(m.get("reference_contigs"))
             m["chromosome_scale"] = m["voter"]
             m["voter_reason"] = reasons.get(m["id"], "missing")
-            m["reference_candidate"] = (m["voter"] and m["representation_eligible"] and
-                                       not any("+" in n for n in m.get("reference_contigs", [])))
+            # Composite names describe the selected reference frame, not proven errors.
+            m["reference_candidate"] = m["voter"] and m["representation_eligible"]
+            m["reference_warning"] = (
+                "composite_chromosome_assignment;review_structure"
+                if any("+" in n for n in m.get("reference_contigs", [])) else "")
         kept = [m for m in members if m["representation_eligible"] and m["completion"] == "finalized"]
         candidates = [m for m in kept if m["reference_candidate"]]
         preferred = refs.get(taxid)
@@ -125,7 +128,7 @@ def main():
     result = evaluate(json.loads(Path(a.input).read_text()))
     Path("assembly_eligibility.json").write_text(json.dumps(result, indent=2, sort_keys=True)+"\n")
     columns = ["taxid", "sample", "id", "ploidy", "haplotype", "representation", "completion",
-               "qc", "chromosome_scale", "voter", "voter_reason", "reference_candidate",
+               "qc", "chromosome_scale", "voter", "voter_reason", "reference_candidate", "reference_warning",
                "graph_member", "graph_name"]
     with open("assembly_eligibility.tsv", "w") as out:
         writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore", delimiter="\t", lineterminator="\n")

@@ -32,15 +32,12 @@ process CHIMERA_EVIDENCE {
     """
     set -euo pipefail
 
-    # Only CALLABLE joins on a BREAK_CANDIDATE scaffold are worth confirming. A REVIEW row is
-    # by definition one the vote could not resolve, and a NOT_A_CANDIDATE row was excluded on
-    # span or on the vote -- neither is about to be cut, so neither needs a contact map built
-    # for it. Sde-CPla_115_hap1 has ~79 callable joins and none is a break candidate.
-    awk -F'\\t' 'NR>1 && \$1!~/^#/ && \$15=="yes" && \$19=="BREAK_CANDIDATE" {print \$2}' \\
+    # Review cases need evidence too; collecting it does not authorize a cut.
+    awk -F'\\t' 'NR>1 && \$1!~/^#/ && \$15=="yes" && (\$19=="BREAK_CANDIDATE" || \$19=="REVIEW") {print \$2}' \\
         ${called_joins} | sort -u > scaffolds.txt
 
     if [ ! -s scaffolds.txt ]; then
-        echo "[CHIMERA_EVIDENCE ${asm_id}] no callable break candidates; nothing to confirm" >&2
+        echo "[CHIMERA_EVIDENCE ${asm_id}] no callable break/review joins; no evidence profiles generated" >&2
         printf 'process\\ttool\\tversion\\n' > versions.tsv
         exit 0
     fi
@@ -119,7 +116,7 @@ process CHIMERA_EVIDENCE {
 
         # ---- one evidence record per CUT on this scaffold ---------------------------
         awk -F'\\t' -v S="\$SC" \\
-            'NR>1 && \$1!~/^#/ && \$2==S && \$15=="yes" && \$19=="BREAK_CANDIDATE" {print \$4}' \\
+            'NR>1 && \$1!~/^#/ && \$2==S && \$15=="yes" && (\$19=="BREAK_CANDIDATE" || \$19=="REVIEW") {print \$4}' \\
             ${called_joins} | sort -un > "\${SAFE}.cuts.txt"
 
         while read -r CUT; do

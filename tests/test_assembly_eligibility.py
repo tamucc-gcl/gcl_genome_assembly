@@ -102,6 +102,18 @@ class EligibilityTests(unittest.TestCase):
         names = [m["graph_name"] for m in cohort["members"]]
         self.assertEqual(len(names), len(set(names)))
 
+    def test_composite_name_warns_without_excluding_reference(self):
+        self.add("one")
+        self.add("two")
+        path = Path("one_hap1.fasta.fai")
+        path.write_text(path.read_text().replace("seq0", "chr7_1+chr12_1"))
+        self.data["harmonization_references"] = [["1", "one_hap1"]]
+        result = evaluate(self.data)
+        row = next(r for r in result["assemblies"] if r["id"] == "one_hap1")
+        self.assertTrue(row["reference_candidate"])
+        self.assertIn("composite_chromosome_assignment", row["reference_warning"])
+        self.assertEqual(result["cohorts"][0]["reference_id"], "one_hap1")
+
     def test_duplicate_final_identity_rejected(self):
         self.add("one")
         self.data["observed"].append(self.data["observed"][0])

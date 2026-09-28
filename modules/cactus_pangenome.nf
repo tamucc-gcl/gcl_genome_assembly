@@ -63,7 +63,7 @@ process CACTUS_PANGENOME {
 
     script:
     def extra = params.pangenome_cactus_extra ?: ''
-    if (!ref_contigs || ref_contigs.any { !(it ==~ /[A-Za-z0-9_.-]+/) })
+    if (!ref_contigs || ref_contigs.any { !(it ==~ /[A-Za-z0-9_.+-]+/) })
         error 'Reference contigs must be explicit, nonempty finalized sequence IDs'
     if (names.size() != fastas.size() || names.toSet().size() != names.size() || !names.contains(ref_name))
         error 'Cactus input identity/cardinality mismatch'

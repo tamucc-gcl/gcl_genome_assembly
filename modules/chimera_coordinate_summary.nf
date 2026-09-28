@@ -7,13 +7,22 @@ process CHIMERA_COORDINATE_SUMMARY {
     input:
     val assemblies
     val tested_ids
+    val older_status
     output:
     path 'chimera_coordinate_status.md', emit: report
     script:
-    def tested = tested_ids as Set
+    // Normalize GString metadata IDs and process-output String IDs before hash lookup.
+    def tested = tested_ids.collect { it.toString() } as Set
     def clean = { x -> x.toString().replaceAll(/[\r\n\t|]/, ' ') }
+    def older = older_status.collectEntries { r -> [(r.assembly.toString()): r] }
+    def recoveryRows = assemblies.sort { it.id }.collect { r ->
+        def item = older[r.id.toString()]
+        def recovered = item ? (item.statuses.recovered_exact_flanks_and_gap ?: 0) : null
+        def status = item ? "${recovered}/${item.total} recovered; ${item.total - recovered} unresolved" : 'Not run'
+        "| ${clean(r.id)} | ${status} |"
+    }.join('\n')
     def rows = assemblies.sort { it.id }.collect { r ->
-        def state = tested.contains(r.id) ? 'AGP/FASTA checked; last-round join scope' :
+        def state = tested.contains(r.id.toString()) ? 'AGP/FASTA checked; last-round join scope' :
             (!params.chimera_detect ? 'Detection disabled' :
              (!r.hic ? 'No Hi-C scaffold-join evidence' :
               (!r.harmonized ? 'No harmonization reference/map' : 'Exact join evidence unavailable')))
@@ -33,7 +42,17 @@ to that round's input. No projection is made through Inspector corrections.
 ${rows}
 
 Only joins recorded by the last scaffolding round are tested for exact cuts.
-Older joins inside corrected components have unresolved provenance and are **not cleared**.
+Older joins are assessed separately using exact mapped flanks and a retained N-gap.
+Recovery is conservative: altered, missing, ambiguous or split flanks stay unresolved.
+A recovered coordinate is not proof of a biological misjoin or permission to cut.
+No older join is automatically cut by this recovery branch.
+
+| Assembly | Older-join recovery |
+|---|---|
+${recoveryRows}
+
+Detailed audits and review tables are under assembly/chimeras/older_joins.
+Unresolved older joins are **not cleared**.
 Current-assembly harmonization can still flag those scaffolds for review.
 These evidence coordinates describe the pre-finishing assembly, not the final FASTA.
 A checked coordinate frame does not mean that Hi-C supports a cut or that the assembly is chimera-free.
