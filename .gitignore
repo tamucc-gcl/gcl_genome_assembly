@@ -9,3 +9,7 @@
 /planning_docs/deprecated
 /r_scripts/deprecated
 /modules/deprecated
+
+# Python test/import caches
+__pycache__/
+*.py[cod]

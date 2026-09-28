@@ -7,7 +7,7 @@ process RECOVER_OLDER_JOINS {
     input:
     tuple val(taxid), val(asm_id), path(original, stageAs: 'original/*'),
           path(original_agp, stageAs: 'original_agp/*'),
-          path(current, stageAs: 'current/*'), path(native),
+          path(current, stageAs: 'current/*'), path(native_calls),
           path(ref_paf), path(candidates), path(ref_map)
     path resolver
     output:
@@ -30,7 +30,7 @@ process RECOVER_OLDER_JOINS {
         : > ${asm_id}.flanks.paf
     fi
     python3 ${resolver} assess --prefix ${asm_id} --assembly ${asm_id} \\
-        --current ${current} --native ${native} --flank-paf ${asm_id}.flanks.paf \\
+        --current ${current} --native ${native_calls} --flank-paf ${asm_id}.flanks.paf \\
         --ref-paf ${ref_paf} --ref-map ${ref_map} --candidates ${candidates} \\
         --min-mapq ${params.chimera_older_min_mapq} --window ${params.chimera_older_window_bp} \\
         --min-span ${params.chimera_min_span} --min-bp ${params.chimera_component_min_bp} --margin ${params.chimera_component_margin}
