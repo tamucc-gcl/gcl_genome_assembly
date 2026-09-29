@@ -34,7 +34,7 @@ process RECOVER_OLDER_JOINS {
         --current ${current} --native ${native_calls} --flank-paf ${asm_id}.flanks.paf \\
         --ref-paf ${ref_paf} --ref-map ${ref_map} --candidates ${candidates} \\
         --min-mapq ${params.chimera_older_min_mapq} --window ${params.chimera_older_window_bp} \\
-        --transition-max-bridge ${params.chimera_transition_max_bridge} --min-span ${params.chimera_min_span} --min-bp ${params.chimera_component_min_bp} --margin ${params.chimera_component_margin}
+        --transition-max-bridge ${params.chimera_transition_max_bridge} --min-bp ${params.chimera_component_min_bp} --margin ${params.chimera_component_margin}
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     printf 'older_join_recovery\\tminimap2\\t%s\\n' "\$(minimap2 --version)" >> versions.tsv
     """

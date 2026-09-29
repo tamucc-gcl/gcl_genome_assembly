@@ -44,14 +44,10 @@ class EvidenceReportingTests(unittest.TestCase):
              patch.object(m, "hic_profile", return_value=([1, 2], 10, "")), \
              patch.object(m, "summarise_profile", return_value=hic), \
              patch.object(m, "ratio_at", return_value=dict(ratio=0.8, value=1.6, note="")), \
-             patch.object(m, "telomere_windows", return_value=[]), \
              patch.object(m, "summarise_telomere", return_value=None), \
              patch.object(m, "gaps", return_value=[]), \
-             patch.object(m, "snap", return_value=None) as snap_mock, \
              patch.object(m, "figure", side_effect=draw):
             m.main()
-            if diagnostic:
-                snap_mock.assert_not_called()
         text = (self.root / "a.s_50.chimera_evidence.tsv").read_text()
         return text
 
@@ -61,6 +57,7 @@ class EvidenceReportingTests(unittest.TestCase):
         self.assertFalse((self.root / "n_low_contiguous.chimera_evidence.png").exists())
         self.assertIn("verdict_from_candidates\tREVIEW", text)
         self.assertIn("figure_status\tgenerated", text)
+        self.assertIn("telomere_source\tunavailable_no_tidk_rows", text)
 
     def test_diagnostic_position_is_not_snapped_or_reported_as_cut(self):
         text = self.run_main(diagnostic=True)

@@ -188,12 +188,8 @@ def summarise_profile(prof, res, n_low=5):
 
 
 # --------------------------------------------------------------------------------------
-# telomeres, computed here rather than taken from tidk
+# telomere evidence from tidk only
 # --------------------------------------------------------------------------------------
-def revcomp(s):
-    return s.translate(str.maketrans("ACGTacgt", "TGCAtgca"))[::-1]
-
-
 def read_tidk_windows(path, scaffold):
     """tidk search output -> [(window_start, forward, reverse), ...] for one scaffold.
 
@@ -229,28 +225,11 @@ def read_tidk_windows(path, scaffold):
                 continue
     rows.sort()
     # tidk reports the window END; convert to START so positions match the sequence-derived
-    # fallback and the figure's x axis
+    # figure's x axis
     if len(rows) >= 2:
         w = rows[1][0] - rows[0][0]
         rows = [(max(0, p - w), f, r) for p, f, r in rows]
     return rows
-
-
-def telomere_windows(seq, motif, win=10000):
-    """FALLBACK ONLY: motif count per window in both orientations, from the sequence.
-
-    Used when no tidk output is supplied. Equivalent for CCCTAA -- that motif has no
-    prefix/suffix self-overlap, so non-overlapping str.count is exact -- but it does not
-    normalise the canonical repeat, so for an unusual motif it can diverge from tidk. The
-    audit records which source was used.
-    """
-    fwd, rev = motif.upper(), revcomp(motif.upper())
-    up = seq.upper()
-    out = []
-    for s in range(0, len(up), win):
-        chunk = up[s:s + win]
-        out.append((s, chunk.count(fwd), chunk.count(rev)))
-    return out
 
 
 def summarise_telomere(tw, junction_bp, flank=2000000, term=100000):
@@ -308,24 +287,6 @@ def gaps(seq, min_bp=50):
     if st is not None and len(up) - st >= min_bp:
         out.append((st, len(up)))
     return out
-
-
-def snap(gs, target, window=500000):
-    """Nearest gap to the target, if one is within `window`.
-
-    Cutting inside a gap severs nothing; cutting in sequence severs real bases. Which of
-    those happened has to be recorded, because a reviewer cannot tell otherwise -- and after
-    gap filling the answer varies per junction. Measured: chr6_3+chr12_1 has a gap 8 kb from
-    its Hi-C minimum, chr5_1+chr9_1's nearest is 114 kb away.
-    """
-    if not gs:
-        return None
-    best = min(gs, key=lambda g: abs((g[0] + g[1]) // 2 - target))
-    mid = (best[0] + best[1]) // 2
-    if abs(mid - target) > window:
-        return None
-    return {"gap_start": best[0], "gap_end": best[1], "cut_bp": mid,
-            "offset_from_target": mid - target}
 
 
 # --------------------------------------------------------------------------------------
@@ -408,12 +369,9 @@ def main():
     p.add_argument("--assembly", required=True)
     p.add_argument("--scaffold", required=True)
     p.add_argument("--telomere-windows", default="",
-                   help="tidk search output for this scaffold. PREFERRED: tidk is the tool of "
-                        "record and already a dependency. Without it the motif is counted "
-                        "from the sequence instead, which is equivalent for CCCTAA but does "
-                        "not normalise the canonical repeat.")
+                   help="tidk search output; absent rows mean unavailable telomere evidence")
     p.add_argument("--telomere-motif", default="CCCTAA",
-                   help="only used for the sequence-derived fallback")
+                   help="motif label; evidence is read only from tidk")
     p.add_argument("--outdir", required=True)
     p.add_argument("--label", default="")
     p.add_argument("--win-bins", type=int, default=20,
@@ -466,31 +424,21 @@ def main():
                          "only. Those are independent of Hi-C, which cannot justify breaking "
                          "a join it made anyway -- it confirms, and confirmation can follow.\n")
 
-    if a.telomere_windows and os.path.isfile(a.telomere_windows) \
-            and os.path.getsize(a.telomere_windows) > 0:
+    tw = []
+    if a.telomere_windows and os.path.isfile(a.telomere_windows):
         tw = read_tidk_windows(a.telomere_windows, name)
-        telo_src = "tidk"
-        if not tw:
-            sys.stderr.write("[chimera_evidence] WARNING: no tidk rows for %r; falling back "
-                             "to a sequence-derived motif count\n" % name)
-            tw = telomere_windows(seq, a.telomere_motif)
-            telo_src = "sequence_fallback_no_tidk_rows"
-    else:
-        tw = telomere_windows(seq, a.telomere_motif)
-        telo_src = "sequence_fallback"
-        sys.stderr.write("[chimera_evidence] no tidk output supplied; counting %s from the "
-                         "sequence\n" % a.telomere_motif)
+    telo_src = "tidk" if tw else "unavailable_no_tidk_rows"
+    if not tw:
+        sys.stderr.write("[chimera_evidence] telomere evidence unavailable: no tidk rows\n")
     # the AGP cut is the position of record; the Hi-C minimum is a cross-check on it
     target = paf_bp or (hic["min_bp"] if hic else 0)
     telo = summarise_telomere(tw, target)
     gs = gaps(seq)
-    sn = None if diagnostic_only else snap(gs, target, a.gap_snap_window)
-
-    # ---- the cut point, and the verdict -------------------------------------------
-    # the AGP position already sits in a 100 bp scaffolding gap, so snapping should be a
-    # no-op or a few kb -- measured offsets on the known candidates were -9 kb, +0 kb, -0 kb,
-    # the residue of gap filling upstream of the join.
-    cut_bp = sn["cut_bp"] if sn else target
+    containing = next(((lo, hi) for lo, hi in gs if lo < target < hi), None)
+    sn = (dict(gap_start=containing[0], gap_end=containing[1], cut_bp=target, offset_from_target=0)
+          if containing and not diagnostic_only else None)
+    # Evidence evaluates the exact proposed position; it never moves a cut.
+    cut_bp = target
     notes = ["diagnostic_midpoint_not_a_cut"] if diagnostic_only else []
     verdict = row.get("candidate_verdict", row.get("verdict", "?"))
     if hic is None:
@@ -504,9 +452,9 @@ def main():
     if hic and hic["ratio"] >= 1.0:
         notes.append("hic_not_depleted=%.3f" % hic["ratio"])
     if sn:
-        notes.append("snapped_to_gap=%d(%+d)" % (sn["cut_bp"], sn["offset_from_target"]))
+        notes.append("validated_position_inside_gap")
     elif not diagnostic_only:
-        notes.append("no_gap_within_%d" % a.gap_snap_window)
+        notes.append("no_gap_at_proposed_position")
     if telo and telo["both_orientations"] and telo["junction_over_background"] >= 3:
         notes.append("interstitial_telomere=%dx" % round(telo["junction_over_background"]))
 

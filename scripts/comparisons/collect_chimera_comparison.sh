@@ -10,7 +10,8 @@ for root in "$old_results" "$new_results"; do
     }
 done
 stamp=$(date +%Y%m%d-%H%M%S)
-prefix="chimera-comparison-${stamp}"
+mkdir -p comparisons
+prefix="comparisons/chimera-comparison-${stamp}"
 mkdir "$prefix"
 reports=$(mktemp)
 alignments=$(mktemp)
@@ -29,7 +30,7 @@ for root in "$old_results" "$new_results"; do
         -name 'assembly_run_summary.md' -o -name 'assembly_eligibility.*' -o \
         -name '*trace*.txt' -o -name '*trace*.tsv' \
     \) \( -name '*.tsv' -o -name '*.json' -o -name '*.md' -o \
-           -name '*.txt' -o -name '*.png' -o -name '*.agp' -o -name '*.fai' \
+           -name '*.txt' -o -name '*.tidk.log' -o -name '*.png' -o -name '*.agp' -o -name '*.fai' \
     \) -print0 >> "$reports"
     find -L "$root" -type f -name '*.ref.paf.gz' -print0 >> "$alignments"
 done
@@ -44,10 +45,10 @@ for f in data/assembly_samplesheet.csv data/hic_readsets.csv \
 done
 printf '%s\0' "$prefix" >> "$reports"
 sort -zu "$reports" -o "$reports"
-tar --null -czf "${prefix}-reports.tar.gz" -T "$reports"
+tar --dereference --null -czf "${prefix}-reports.tar.gz" -T "$reports"
 if [[ -s "$alignments" ]]; then
     sort -zu "$alignments" -o "$alignments"
-    tar --null -czf "${prefix}-alignments.tar.gz" -T "$alignments"
+    tar --dereference --null -czf "${prefix}-alignments.tar.gz" -T "$alignments"
 fi
 ls -lh "${prefix}"-*.tar.gz
 echo "Attach the reports archive first; retain the alignments archive for follow-up."

@@ -13,3 +13,6 @@
 # Python test/import caches
 __pycache__/
 *.py[cod]
+
+# Generated comparison artifacts if collected inside this checkout
+/comparisons/

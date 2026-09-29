@@ -154,6 +154,14 @@ def main():
     actions, per_scaf = [], {}
     for r in cands:
         sc = r.get("scaffold", "")
+        if (by_old.get(sc, {}).get("chromosome_member") != "yes" or
+                r.get("chromosome_member") != "yes" or
+                r.get("evidence_only") == "yes" or r.get("callable") != "yes" or
+                r.get("location_status") != "unique_supported_gap"):
+            if a.mode == "file":
+                sys.exit("Unsafe supplied breakpoint: requires an inferred chromosome and a validated gap: " + sc)
+            actions.append((sc, "SKIP", "outside chromosome scope or no validated gap"))
+            continue
         if sc not in by_old:
             actions.append((sc, "SKIP", "not in the name map"))
             continue
@@ -166,6 +174,9 @@ def main():
         except ValueError:
             actions.append((sc, "SKIP", "cut_bp unparseable"))
             continue
+        if not (int(r["transition_lo"]) <= cut <= int(r["transition_hi"]) and
+                cut == int(r["agp_join_bp"])):
+            sys.exit("Breakpoint differs from its validated alignment interval/gap: " + sc)
         per_scaf.setdefault(sc, []).append((cut, r.get("left_chrom", ""),
                                             r.get("right_chrom", "")))
 
@@ -177,6 +188,8 @@ def main():
         except ValueError:
             pass
         rows.sort()
+        if any(left[2] != right[1] for left, right in zip(rows, rows[1:])):
+            sys.exit("Inconsistent chromosome labels between consecutive cuts: " + sc)
         cuts = [c for c, _, _ in rows]
         if any(c <= 0 or (span and c >= span) for c in cuts):
             actions.append((sc, "SKIP", "a cut falls outside 0..%d" % span))
@@ -210,6 +223,10 @@ def main():
                          % (a.assembly, len(cands)))
 
     seqs = read_fasta(a.fasta)
+    for sc, (cuts, _) in breaks.items():
+        for cut in cuts:
+            if sc not in seqs or not (0 < cut < len(seqs[sc])) or seqs[sc][cut-1:cut+1].upper() != "NN":
+                sys.exit("Validated cut is not inside an N-gap in this FASTA: " + sc)
     order = [r["old_name"] for r in nm]
 
     n_break = 0

@@ -22,6 +22,7 @@ process CHIMERA_EVIDENCE {
     tuple val(taxid), val(asm_id), path("${asm_id}.*.chimera_evidence.png"),
         emit: figures, optional: true
     path("${asm_id}.hic_pairs_audit.tsv"), emit: pairs_audit, optional: true
+    path("${asm_id}.*.tidk.log"), emit: telomere_logs, optional: true
     path("versions.tsv"),                  emit: versions
 
     script:
@@ -87,14 +88,14 @@ process CHIMERA_EVIDENCE {
         # canonical repeat. Note tidk reports the window END; the reader converts to START.
         TW=""
         if tidk search --string '${motif}' --output "\${SAFE}" --dir . --extension tsv \\
-               "\${SAFE}.mini.fa" > "\${SAFE}.tidk.log" 2>&1; then
+               "\${SAFE}.mini.fa" > "${asm_id}.\${SAFE}.tidk.log" 2>&1; then
             for c in "\${SAFE}_telomeric_repeat_windows.tsv" "\${SAFE}.tsv"; do
                 [ -s "\$c" ] && TW="--telomere-windows \$c" && break
             done
         fi
         if [ -z "\$TW" ]; then
             echo "[CHIMERA_EVIDENCE ${asm_id}] tidk produced no windows for \$SC;" >&2
-            echo "  falling back to a sequence-derived motif count (recorded in the audit)" >&2
+            echo "  telomere evidence unavailable (recorded in the audit)" >&2
         fi
 
         # ---- Hi-C: translate, RE-SORT, load ---------------------------------------

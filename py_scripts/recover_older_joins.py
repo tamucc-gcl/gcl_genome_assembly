@@ -155,26 +155,6 @@ def chromosome(alns, lo, hi, minimum, margin):
 
 
 
-def transition_intervals(alns, length, window, minimum, margin, max_bridge):
-    """Coarse uncertainty intervals between successive informative windows.
-    Empty/ambiguous windows are bridged only for reporting; broad intervals
-    remain visible but do not trigger profiles. No breakpoint is inferred.
-    """
-    previous = None
-    result = []
-    for lo in range(0, length, window):
-        hi = min(length, lo + window)
-        chrom = chromosome(alns, lo, hi, minimum, margin)
-        if chrom == ".":
-            continue
-        if previous and previous[2] != chrom:
-            result.append(dict(transition_lo=previous[0], transition_hi=hi,
-                               left_chrom=previous[2], right_chrom=chrom,
-                               profile_allowed=(lo - previous[1] <= max_bridge)))
-        previous = (lo, hi, chrom)
-    return result
-
-
 def assess(a):
     data = json.loads(Path(a.prefix+".source.json").read_text())
     hits = exact_hits(a.flank_paf)
@@ -206,7 +186,7 @@ def assess(a):
             by_target[name].append(j)
     digest = checksum(a.current)
     fields, called = rows(a.native)
-    fields += ["transition_lo", "transition_hi", "evidence_only"]
+    fields += [k for k in ("transition_lo", "transition_hi", "evidence_only", "chromosome_member", "location_status") if k not in fields]
     if "assembly_sha256" not in fields:
         raise ValueError("Native table must carry current FASTA provenance")
     if any(r["assembly_sha256"] != digest for r in called):
@@ -230,61 +210,49 @@ def assess(a):
                      junction_assessment=("unassigned_reference_flank" if "." in (lc, rc) else
                                           "different_reference_chromosomes" if lc != rc else
                                           "same_reference_chromosome"))
-            if "." in (lc, rc) or lc == rc:
-                continue
-            if len(seq) < a.min_span:
-                j["evidence_profile"] = "below_scaffold_size_threshold"
-                continue
+    # Enrich only intervals already located on inferred chromosome candidates.
+    # Exact recovery audits all old gaps but never creates an independent candidate.
+    for ti, row in enumerate(called, 1):
+        meta = candidates.get(row["scaffold"], {})
+        if meta.get("chromosome_member") != "yes" or meta.get("verdict") not in ("BREAK_CANDIDATE", "REVIEW"):
+            raise ValueError("Native call outside inferred chromosome candidate scope")
+        if row.get("transition_lo", ".") == ".":
+            continue
+        lo, hi = int(row["transition_lo"]), int(row["transition_hi"])
+        matched = [j for j in by_target.get(row["scaffold"], [])
+                   if j["status"] == "recovered_exact_flanks_and_gap"
+                   and lo <= (j["current_lo"]+j["current_hi"])//2 <= hi]
+        safe = [j for j in matched
+                if (j["left_chrom"], j["right_chrom"]) ==
+                   (row["left_chrom"], row["right_chrom"])]
+        native_pos = int(row["cut_bp"]) if row["callable"] == "yes" else None
+        # Native AGP midpoints use a 1-based formula; recovered intervals are
+        # 0-based. An odd-sized gap can otherwise appear twice one base apart.
+        positions = {(native_pos if native_pos is not None and j["current_lo"] < native_pos < j["current_hi"]
+                      else (j["current_lo"]+j["current_hi"])//2) for j in matched}
+        if native_pos is not None:
+            positions.add(native_pos)
+        if len(positions) > 1 or (native_pos is not None and matched and not safe):
+            row.update(callable="no", candidate_verdict="REVIEW", evidence_only="yes",
+                       location_status="unresolved", reason="multiple_current_or_recovered_gaps")
+        elif (native_pos is None and len(safe) == 1 and len(positions) == 1
+              and row.get("reason") == "no_gap_between_alignment_anchors"
+              and hi-lo <= a.transition_max_bridge):
+            j = safe[0]
+            pos = (j["current_lo"]+j["current_hi"])//2
+            row.update(cut_bp=str(pos), agp_join_bp=str(pos), agp_join_distance="0",
+                       agp_source="round1_recovered_by_exact_flanks", gap_len=str(j["current_hi"]-j["current_lo"]),
+                       callable="yes", candidate_verdict="REVIEW", evidence_only="no",
+                       location_status="unique_supported_gap",
+                       reason="exact_recovered_gap_between_alignment_anchors;review_required",
+                       join_scope="recovered_round1_review_only")
             j["evidence_profile"] = "selected_review"
-            meta = candidates.get(name, {})
-            # Separate each junction's evidence location. Scaffold-wide votes are not cut authorization.
-            row = {k: "." for k in fields}
-            row.update(assembly=a.assembly, scaffold=name, name=meta.get("name", name),
-                       cut_bp=str((lo+hi)//2), left_chrom=lc, right_chrom=rc,
-                       left_component=j["join_id"]+"_current_left",
-                       right_component=j["join_id"]+"_current_right",
-                       n_components="2", n_transitions="1", agp_join_bp=str((lo+hi)//2),
-                       agp_join_distance="0", agp_source="round1_recovered_by_exact_flanks",
-                       gap_len=str(hi-lo), callable="yes",
-                       reason="exact_coordinate_recovery;biological_decision_requires_review",
-                       span_bp=str(len(seq)), vote="not_recomputed_per_junction",
-                       candidate_verdict="REVIEW", assembly_sha256=digest,
-                       coordinate_stage="pre_finishing", join_scope="recovered_round1_review_only")
-            if not any(r["scaffold"] == name and r["cut_bp"] == row["cut_bp"] for r in called):
-                called.append(row)
-
-        # Diagnose chromosome changes independently of whether a safe gap exists.
-        for ti, transition in enumerate(transition_intervals(
-                alignments.get(name, []), len(seq), a.window, a.min_bp,
-                a.margin, a.transition_max_bridge), 1):
-            lo, hi = transition["transition_lo"], transition["transition_hi"]
-            matched = [j for j in by_target.get(name, [])
-                       if j["status"] == "recovered_exact_flanks_and_gap"
-                       and lo <= (j["current_lo"] + j["current_hi"]) // 2 < hi]
-            selected = transition["profile_allowed"] and len(seq) >= a.min_span
-            transition_rows.append(dict(
-                assembly=a.assembly, scaffold=name, transition_id=f"{name}:T{ti}",
-                **transition, recovered_join_ids=";".join(j["join_id"] for j in matched) or ".",
-                recovered_join_count=len(matched), diagnostic_bp=(lo+hi)//2,
-                profile_status=("selected_review" if selected else
-                                "below_scaffold_size_threshold" if len(seq) < a.min_span else
-                                "unassigned_span_exceeds_bridge_limit"),
-                auto_cut="no", assembly_sha256=digest))
-            if not selected:
-                continue
-            row = {k: "." for k in fields}
-            row.update(assembly=a.assembly, scaffold=name,
-                       name=candidates.get(name, {}).get("name", name),
-                       cut_bp=str((lo+hi)//2), left_chrom=transition["left_chrom"],
-                       right_chrom=transition["right_chrom"], callable="no",
-                       reason="transition_interval_midpoint;not_a_breakpoint_or_safe_cut",
-                       span_bp=str(len(seq)), vote="not_recomputed_per_junction",
-                       candidate_verdict="REVIEW", assembly_sha256=digest,
-                       coordinate_stage="pre_finishing", join_scope="transition_diagnostic_only",
-                       transition_lo=str(lo), transition_hi=str(hi), evidence_only="yes")
-            # If a native/gap profile already occupies this exact coordinate, retain it.
-            if not any(r["scaffold"] == name and r["cut_bp"] == row["cut_bp"] for r in called):
-                called.append(row)
+        transition_rows.append(dict(
+            assembly=a.assembly, scaffold=row["scaffold"], transition_id=f'{row["scaffold"]}:T{ti}',
+            transition_lo=lo, transition_hi=hi, left_chrom=row["left_chrom"], right_chrom=row["right_chrom"],
+            profile_allowed=True, recovered_join_ids=";".join(j["join_id"] for j in matched) or ".",
+            recovered_join_count=len(matched), diagnostic_bp=int(row["cut_bp"]),
+            profile_status="selected_review", auto_cut="no", assembly_sha256=digest))
 
     if set(by_target)-seen:
         raise ValueError("Flank alignment target absent from current FASTA")
@@ -341,7 +309,8 @@ def main():
     p.add_argument("--min-bp", type=int, default=100000)
     p.add_argument("--margin", type=float, default=2.0)
     p.add_argument("--min-block", type=int, default=2000)
-    p.add_argument("--min-span", type=int, default=20000000)
+    p.add_argument("--min-span", type=int, default=0,
+                   help="deprecated and ignored; scope comes from candidate chromosome membership")
     p.add_argument("--transition-max-bridge", type=int, default=5000000)
     a = p.parse_args()
     if a.transition_max_bridge < 0 or a.flank < a.minimum or a.minimum < 1 or a.min_bp < 1 or a.window < a.min_bp or a.margin <= 1:

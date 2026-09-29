@@ -86,7 +86,8 @@ workflow CHIMERA {
                     tuple(taxid, id, r1, r2, paf, cand, rnm, fa) },
             ch_agp_script.first(),
             ch_cj_script.first(),
-            file("${projectDir}/py_scripts/chimera_coordinate_guard.py", checkIfExists: true) )
+            file("${projectDir}/py_scripts/chimera_coordinate_guard.py", checkIfExists: true),
+            file("${projectDir}/py_scripts/chimera_intervals.py", checkIfExists: true) )
         ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
         ch_chimeric_joins = CHIMERA_JOINS.out.called
         ch_evidence_calls = ch_chimeric_joins
@@ -105,7 +106,8 @@ workflow CHIMERA {
                 .combine(ch_ref_name_map, by: 0)
             RECOVER_OLDER_JOINS(ch_recovery,
                 file("${projectDir}/py_scripts/recover_older_joins.py", checkIfExists: true))
-            ch_evidence_calls = RECOVER_OLDER_JOINS.out.called
+            ch_chimeric_joins = RECOVER_OLDER_JOINS.out.called
+            ch_evidence_calls = ch_chimeric_joins
             ch_older_summaries = RECOVER_OLDER_JOINS.out.summary.map { taxid, id, report ->
                 new groovy.json.JsonSlurper().parseText(report.text)
             }

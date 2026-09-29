@@ -93,6 +93,38 @@ class Coordinates(unittest.TestCase):
         self.lift()
         self.assertIn("no_supporting_pairs", (self.d / "asm.hic_pairs_audit.tsv").read_text())
 
+    def cut_fixture(self, member="yes", diagnostic="no", mode="file", ok=True):
+        self.table.write_text(
+            "assembly\tscaffold\tcut_bp\tleft_chrom\tright_chrom\tcallable\t"
+            "candidate_verdict\tchromosome_member\tevidence_only\tlocation_status\t"
+            "transition_lo\ttransition_hi\tagp_join_bp\n"
+            f"asm\ts1\t13\tchr1\tchr2\tyes\tBREAK_CANDIDATE\t{member}\t{diagnostic}\t"
+            "unique_supported_gap\t10\t15\t13\n")
+        self.guard()
+        nm = self.d / "names.tsv"
+        nm.write_text("old_name\tnew_name\tlength\tclass\tchromosome_member\n"
+                      f"s1\tchr1_1+chr2_1\t25\tcomposite\t{member}\n"
+                      "s2\tchr3_1\t10\tchromosome\tyes\n")
+        return self.run_script("break_chimeras.py", "--fasta", self.fa,
+            "--name-map", nm, "--candidates", self.table, "--assembly", "asm",
+            "--out-fasta", self.d / "out.fa", "--out-name-map", self.d / "out.tsv",
+            "--mode", mode, "--min-piece-bp", "1", ok=ok)
+
+    def test_supplied_file_cannot_bypass_chromosome_scope(self):
+        result = self.cut_fixture(member="no", ok=False)
+        self.assertIn("Unsafe supplied breakpoint", result.stderr)
+
+    def test_diagnostic_position_cannot_be_supplied_as_cut(self):
+        self.cut_fixture(diagnostic="yes", ok=False)
+
+    def test_auto_skips_out_of_scope_scaffold(self):
+        self.cut_fixture(member="no", mode="auto")
+        self.assertNotIn("_sub_", (self.d / "out.fa").read_text())
+
+    def test_valid_scoped_gap_can_be_cut(self):
+        self.cut_fixture()
+        self.assertIn(">s1_sub_0_13", (self.d / "out.fa").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

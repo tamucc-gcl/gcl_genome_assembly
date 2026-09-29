@@ -12,6 +12,7 @@ process CHIMERA_JOINS {
     path(agp_script)
     path(joins_script)
     path(coordinate_guard)
+    path(interval_helper)
 
     output:
     tuple val(taxid), val(asm_id), path("${asm_id}.agp_joins.tsv"),      emit: agp_joins
@@ -56,7 +57,7 @@ process CHIMERA_JOINS {
         echo "  emitting an empty called table" >&2
         printf '# no reference PAF: this assembly IS the reference\\n' \\
             > ${asm_id}.chimeric_joins.tsv
-        printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\n' \\
+        printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\ttransition_lo\\ttransition_hi\\tevidence_only\\tchromosome_member\\tlocation_status\\tleft_anchor_start\\tleft_anchor_end\\tright_anchor_start\\tright_anchor_end\\tminimum_anchor_bp\\tcompatible_gap_count\\n' \\
             >> ${asm_id}.chimeric_joins.tsv
     else
         python3 ${joins_script} \\
@@ -102,7 +103,7 @@ process CHIMERA_JOINS {
     printf 'metric\\tvalue\\nstatus\\tstub_unvalidated\\n' > ${asm_id}.coordinate_audit.tsv
     printf 'assembly\\tfinal_object\\tfinal_cut\\tsource\\tlift\\tgap_len\\n' \\
       > ${asm_id}.agp_joins.tsv
-    printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\n' \\
+    printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\ttransition_lo\\ttransition_hi\\tevidence_only\\tchromosome_member\\tlocation_status\\tleft_anchor_start\\tleft_anchor_end\\tright_anchor_start\\tright_anchor_end\\tminimum_anchor_bp\\tcompatible_gap_count\\n' \\
       > ${asm_id}.chimeric_joins.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """

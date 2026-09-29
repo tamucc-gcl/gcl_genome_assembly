@@ -755,14 +755,11 @@ def main():
                          "share-only behaviour that hides small chromosomes joined to "
                          "large ones)")
     # ---- chimera gate ---------------------------------------------------------------
-    # Only chromosome-scale scaffolds, and only where the vote says the junction is an error.
-    # Sde-CPla_115 has 135 composites of 1-14 Mb: those are a fragmented assembly, not
-    # mis-joined chromosomes, and breaking them achieves nothing because both halves stay
-    # unplaced. The span floor keeps them out.
-    ap.add_argument("--chimera-min-span", type=int, default=20000000,
-                    help="minimum scaffold length to consider (default 20 Mb)")
-    ap.add_argument("--chimera-min-member-bp", type=int, default=5000000,
-                    help="each side of the junction needs this much aligned bp (default 5 Mb)")
+    # Scope comes from the inferred chromosome set; legacy flags remain parseable only.
+    ap.add_argument("--chimera-min-span", type=int, default=0,
+                    help="deprecated and ignored: scope uses inferred chromosome membership")
+    ap.add_argument("--chimera-min-member-bp", type=int, default=0,
+                    help="deprecated and ignored: composite membership uses relative coverage")
     ap.add_argument("--chimera-min-arm-frac", type=float, default=0.80,
                     help="the two longest runs of different reference chromosomes must "
                          "account for at least this fraction of the scaffold, or it is "
@@ -889,6 +886,8 @@ def main():
         set_meta[rid] = qmeta
         fai_n50[rid] = scaffold_n50([L for _, L in qfai])
         fai_nscaf[rid] = len(qfai)
+
+    qset_by_id[a.reference_id] = {nm for nm, _ in chrom}
 
     # ---- voter / passenger roles. Each assembly's own chromosome-set metrics are already
     # computed above; this just surfaces them and applies contiguity-based thresholds. A
@@ -1375,11 +1374,12 @@ def main():
     os.makedirs(a.outdir, exist_ok=True)
     for rid, out in results.items():
         with open(os.path.join(a.outdir, f"{rid}.harmonized_name_map.tsv"), "w") as fh:
-            fh.write("old_name\tnew_name\torient\torder\tlength\tclass\tref_span\tflags\n")
+            fh.write("old_name\tnew_name\torient\torder\tlength\tclass\tref_span\tflags\tchromosome_member\n")
             for d in out:
                 fh.write("\t".join(str(x) for x in (
                     d["old"], d["new"], d["orient"], d["order"],
-                    d["length"], d["class"], d["span"], d["flags"])) + "\n")
+                    d["length"], d["class"], d["span"], d["flags"],
+                    "yes" if d["old"] in qset_by_id[rid] else "no")) + "\n")
 
     # ---- per-assembly chromosome-set audit table. select_chromosome_set() runs on every
     # assembly but its metrics were previously discarded for everything except the
@@ -1526,37 +1526,15 @@ def main():
         fh.write("# Composite scaffolds -- one scaffold spanning two or more reference\n")
         fh.write("#   chromosomes. CANDIDATES ONLY: nothing here has been broken.\n")
         fh.write("#\n")
-        fh.write("# verdict is CONCORDANCE-BASED, because the cross-haplotype vote is the only\n")
-        fh.write("#   signal independent of how this scaffold was BUILT. Hi-C confirms but\n")
-        fh.write("#   cannot decide: it made the join, so depleted contact across a junction\n")
-        fh.write("#   it created is not independent evidence that the join is wrong. Measured\n")
-        fh.write("#   cross-junction contact is 0.748 and 0.740 of the scaffold median on the\n")
-        fh.write("#   two candidates -- informative, and consistent with the vote.\n")
-        fh.write("#\n")
-        fh.write("# vote n_f/n_s(sisN,othN): haplotypes carrying this junction / keeping\n")
-        fh.write("#   the two chromosomes separate, then the carriers split into this\n")
-        fh.write("#   individual's SISTER haplotype and OTHER individuals.\n")
-        fh.write("# The split matters: n_f=1,n_s=8 is produced BOTH by an artifact and by a\n")
-        fh.write("#   POLYMORPHIC fusion present in one individual. Which haplotype carries\n")
-        fh.write("#   it separates them -- each haplotype is scaffolded independently, so the\n")
-        fh.write("#   same mis-join in both is unlikely, while real biology should appear in\n")
-        fh.write("#   both. oth>0 = real, sis>0 = REVIEW, both 0 = artifact.\n")
-        fh.write("# INVERSIONS cannot be affected: an inversion is intra-chromosomal, so it\n")
-        fh.write("#   produces no chromosome transition and this detector never fires on one.\n")
-        fh.write("# n_switches: 1 = one clean mis-join, breakable at junction_bp. >1 = the\n")
-        fh.write("#   members interdigitate, so this is a FRAGMENTED scaffold and one cut will\n")
-        fh.write("#   not fix it.\n")
-        fh.write("# junction_bp is BINNED at 1 Mb and is a CROSS-CHECK, not the cut point.\n")
-        fh.write("#   chimera_joins.py takes the position from the AGP, which records each\n")
-        fh.write("#   join exactly with a 100 bp proximity_ligation gap at it. Measured, the\n")
-        fh.write("#   binned estimate was -144 kb and +256 kb from the AGP join on the two\n")
-        fh.write("#   candidates: close enough to look right, not close enough to cut at.\n")
-        fh.write("#\n")
-        fh.write("# TO BREAK: keep the rows you want, set params.chimera_break to this file's\n")
-        fh.write("#   path, and rerun. Edit junction_bp if the evidence says elsewhere.\n")
+        fh.write("# Candidate scope is the inferred chromosome set exported in each name map.\n")
+        fh.write("# Concordance is a screening heuristic, not proof that a rare fusion is an error.\n")
+        fh.write("# Haplotypes from one individual are not independent biological replicates.\n")
+        fh.write("# junction_bp is a coarse diagnostic, never a cut instruction.\n")
+        fh.write("# Use the FASTA-stamped called/review_joins table for supplied-file cutting;\n")
+        fh.write("# retain validated rows only. Do not edit diagnostic positions into cuts.\n")
         fh.write("assembly\tscaffold\tname\tspan_bp\tmembers\tmember_footprints\t"
                  "junction_bp\tleft_member\tleft_bp\tright_member\tright_bp\t"
-                 "n_switches\tvote\tverdict\tverdict_reason\tflags\n")
+                 "n_switches\tvote\tverdict\tverdict_reason\tflags\tchromosome_member\n")
         for r in sorted(chimera_rows, key=lambda x: (-x["span_bp"], x["scaffold"])):
             j = r["junction"]
             worst_nf = min((v[2] for v in r["votes"]), default=99)
@@ -1565,8 +1543,8 @@ def main():
             max_oth = max((v[5] for v in r["votes"]), default=0)
             fps = r["footprints"]
             small = min(fps.values()) if fps else 0
-            if r["span_bp"] < a.chimera_min_span:
-                verdict, why = "NOT_A_CANDIDATE", "span<%d" % a.chimera_min_span
+            if r["scaffold"] not in qset_by_id[r["assembly"]]:
+                verdict, why = "NOT_A_CANDIDATE", "outside_inferred_chromosome_set"
             elif j is None:
                 verdict, why = "REVIEW", "no junction locatable from the PAF"
             elif (j[2] + j[4]) < a.chimera_min_arm_frac * r["span_bp"]:
@@ -1577,9 +1555,6 @@ def main():
                 # transition is clean. chimera_junction() already picks the two longest runs.
                 verdict, why = "REVIEW", ("two arms cover %.2f of the span (%d switches)"
                                           % ((j[2] + j[4]) / float(r["span_bp"] or 1), j[5]))
-            elif small < a.chimera_min_member_bp:
-                verdict, why = "NOT_A_CANDIDATE", ("smallest member footprint %d < %d"
-                                                   % (small, a.chimera_min_member_bp))
             elif max_oth > 0:
                 # other INDIVIDUALS carry this junction, so it is real rather than an
                 # artifact of this assembly -- possibly a fixed fusion.
@@ -1598,7 +1573,7 @@ def main():
             else:
                 verdict, why = "NOT_A_CANDIDATE", ("vote %df/%ds does not indicate an error"
                                                    % (worst_nf, best_ns))
-            fh.write("%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"
+            fh.write("%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"
                      % (r["assembly"], r["scaffold"], r["name"], r["span_bp"],
                         "+".join("ref%d" % k for k in r["members"]),
                         ",".join("ref%d:%d" % (k, fps[k]) for k in r["members"]),
@@ -1607,7 +1582,8 @@ def main():
                         j[4] if j else ".", j[5] if j else ".",
                         ";".join("ref%d+ref%d:%df/%ds(sis%d,oth%d)" % v
                                  for v in r["votes"]) or ".",
-                        verdict, why, ";".join(r["flags"]) or "."))
+                        verdict, why, ";".join(r["flags"]) or ".",
+                        "yes" if r["scaffold"] in qset_by_id[r["assembly"]] else "no"))
     n_break = sum(1 for _l in open(cand) if "\tBREAK_CANDIDATE\t" in _l)
     sys.stderr.write("[harmonize] chimera candidates: %d composite(s), %d break candidate(s)"
                      " -> %s\n" % (len(chimera_rows), n_break, os.path.basename(cand)))
