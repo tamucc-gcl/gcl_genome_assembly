@@ -44,6 +44,9 @@ class CandidateScopeTests(unittest.TestCase):
     def test_excluded_scaffold_produces_no_profile(self):
         self.assertEqual(self.call(member="no"), [])
 
+    def test_unresolved_inference_produces_no_profile(self):
+        self.assertEqual(self.call(member="unresolved"), [])
+
     def test_non_candidate_produces_no_profile(self):
         self.assertEqual(self.call(verdict="NOT_A_CANDIDATE"), [])
 

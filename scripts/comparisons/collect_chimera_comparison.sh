@@ -3,6 +3,14 @@
 set -euo pipefail
 old_results="${1:-tst/genome_assembly_store}"
 new_results="${2:-genome_assembly}"
+sample_sheet="${3:-data/assembly_samplesheet.csv}"
+hic_readsets="${4:-data/hic_readsets.csv}"
+for input in "$sample_sheet" "$hic_readsets"; do
+    [[ "$input" != /* && "$input" != *".."* && -f "$input" ]] || {
+        echo "Supply existing project-relative input tables (arguments 3 and 4): $input" >&2
+        exit 1
+    }
+done
 for root in "$old_results" "$new_results"; do
     [[ "$root" != /* && "$root" != *".."* && -d "$root" ]] || {
         echo "Supply existing project-relative result directories: $root" >&2
@@ -17,6 +25,7 @@ reports=$(mktemp)
 alignments=$(mktemp)
 trap 'rm -f "$reports" "$alignments"' EXIT
 printf 'role\tresults_directory\nold\t%s\nnew\t%s\n' "$old_results" "$new_results" > "$prefix/sources.tsv"
+printf 'role\tprovided_input_file\nsample_sheet\t%s\nhic_readsets\t%s\n' "$sample_sheet" "$hic_readsets" > "$prefix/input_files.tsv"
 git -C gcl_genome_assembly rev-parse HEAD > "$prefix/current_checkout_commit.txt"
 git -C gcl_genome_assembly status --short > "$prefix/current_checkout_status.txt"
 git -C gcl_genome_assembly diff > "$prefix/current_checkout.diff"
@@ -39,7 +48,7 @@ if [[ -d logs ]]; then
     find logs -maxdepth 1 -type f \( -name '*assembly*.log*' -o \
         -name 'assembly-*.out' \) -print0 >> "$reports"
 fi
-for f in data/assembly_samplesheet.csv data/hic_readsets.csv \
+for f in "$sample_sheet" "$hic_readsets" \
          gcl_genome_assembly/nextflow.config gcl_genome_assembly/run_assembly_checkpoint.sbatch; do
     [[ ! -f "$f" ]] || printf '%s\0' "$f" >> "$reports"
 done

@@ -114,6 +114,9 @@ class Coordinates(unittest.TestCase):
         result = self.cut_fixture(member="no", ok=False)
         self.assertIn("Unsafe supplied breakpoint", result.stderr)
 
+    def test_supplied_file_cannot_bypass_unresolved_inference(self):
+        self.cut_fixture(member="unresolved", ok=False)
+
     def test_diagnostic_position_cannot_be_supplied_as_cut(self):
         self.cut_fixture(diagnostic="yes", ok=False)
 

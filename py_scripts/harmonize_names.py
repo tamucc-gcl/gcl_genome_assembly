@@ -596,6 +596,20 @@ def select_chromosome_set(ref_fai, min_scaffold_bp, method, dropoff_ratio, dropo
     return cs, meta
 
 
+def chromosome_scope_status(scaffold, selected, meta):
+    """Chimera eligibility requires inferred chromosomes, not a naming fallback.
+
+    Deliberately independent of voting role: a passenger can have an inferred
+    chromosome set. Threshold-only selection cannot establish chromosome scale.
+    """
+    method = meta.get("method", "unknown")
+    if method != "dropoff" or "no_sharp_dropoff" in meta.get("flags", []):
+        return "unresolved", "chromosome_inference_unresolved:" + method
+    if scaffold not in selected:
+        return "no", "outside_inferred_chromosome_set"
+    return "yes", "in_inferred_chromosome_set"
+
+
 def interval_coverage(b0, b1, ivals):
     """Length of [b0, b1) covered by the union of ivals (each clipped to [b0, b1))."""
     clipped = sorted((max(s, b0), min(e, b1)) for s, e in ivals if min(e, b1) > max(s, b0))
@@ -1374,12 +1388,12 @@ def main():
     os.makedirs(a.outdir, exist_ok=True)
     for rid, out in results.items():
         with open(os.path.join(a.outdir, f"{rid}.harmonized_name_map.tsv"), "w") as fh:
-            fh.write("old_name\tnew_name\torient\torder\tlength\tclass\tref_span\tflags\tchromosome_member\n")
+            fh.write("old_name\tnew_name\torient\torder\tlength\tclass\tref_span\tflags\tchromosome_member\tchromosome_scope_reason\n")
             for d in out:
                 fh.write("\t".join(str(x) for x in (
                     d["old"], d["new"], d["orient"], d["order"],
                     d["length"], d["class"], d["span"], d["flags"],
-                    "yes" if d["old"] in qset_by_id[rid] else "no")) + "\n")
+                    *chromosome_scope_status(d["old"], qset_by_id[rid], set_meta[rid]))) + "\n")
 
     # ---- per-assembly chromosome-set audit table. select_chromosome_set() runs on every
     # assembly but its metrics were previously discarded for everything except the
@@ -1534,7 +1548,7 @@ def main():
         fh.write("# retain validated rows only. Do not edit diagnostic positions into cuts.\n")
         fh.write("assembly\tscaffold\tname\tspan_bp\tmembers\tmember_footprints\t"
                  "junction_bp\tleft_member\tleft_bp\tright_member\tright_bp\t"
-                 "n_switches\tvote\tverdict\tverdict_reason\tflags\tchromosome_member\n")
+                 "n_switches\tvote\tverdict\tverdict_reason\tflags\tchromosome_member\tchromosome_scope_reason\n")
         for r in sorted(chimera_rows, key=lambda x: (-x["span_bp"], x["scaffold"])):
             j = r["junction"]
             worst_nf = min((v[2] for v in r["votes"]), default=99)
@@ -1543,8 +1557,10 @@ def main():
             max_oth = max((v[5] for v in r["votes"]), default=0)
             fps = r["footprints"]
             small = min(fps.values()) if fps else 0
-            if r["scaffold"] not in qset_by_id[r["assembly"]]:
-                verdict, why = "NOT_A_CANDIDATE", "outside_inferred_chromosome_set"
+            scope, scope_reason = chromosome_scope_status(
+                r["scaffold"], qset_by_id[r["assembly"]], set_meta[r["assembly"]])
+            if scope != "yes":
+                verdict, why = "NOT_A_CANDIDATE", scope_reason
             elif j is None:
                 verdict, why = "REVIEW", "no junction locatable from the PAF"
             elif (j[2] + j[4]) < a.chimera_min_arm_frac * r["span_bp"]:
@@ -1573,7 +1589,7 @@ def main():
             else:
                 verdict, why = "NOT_A_CANDIDATE", ("vote %df/%ds does not indicate an error"
                                                    % (worst_nf, best_ns))
-            fh.write("%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"
+            fh.write("%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"
                      % (r["assembly"], r["scaffold"], r["name"], r["span_bp"],
                         "+".join("ref%d" % k for k in r["members"]),
                         ",".join("ref%d:%d" % (k, fps[k]) for k in r["members"]),
@@ -1583,7 +1599,7 @@ def main():
                         ";".join("ref%d+ref%d:%df/%ds(sis%d,oth%d)" % v
                                  for v in r["votes"]) or ".",
                         verdict, why, ";".join(r["flags"]) or ".",
-                        "yes" if r["scaffold"] in qset_by_id[r["assembly"]] else "no"))
+                        scope, scope_reason))
     n_break = sum(1 for _l in open(cand) if "\tBREAK_CANDIDATE\t" in _l)
     sys.stderr.write("[harmonize] chimera candidates: %d composite(s), %d break candidate(s)"
                      " -> %s\n" % (len(chimera_rows), n_break, os.path.basename(cand)))

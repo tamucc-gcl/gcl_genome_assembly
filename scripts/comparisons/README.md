@@ -12,6 +12,18 @@ bash gcl_genome_assembly/scripts/comparisons/collect_chimera_comparison.sh \
     genome_assembly
 ```
 
+Arguments 3 and 4 specify the exact sample sheet and additional Hi-C table to
+include. For the current single-library checkpoint, use:
+
+```bash
+bash gcl_genome_assembly/scripts/comparisons/collect_chimera_comparison.sh \
+    comparisons/baselines/single_hic_repair_1501024 genome_assembly \
+    data/assembly_samplesheet_original.csv data/hic_readsets.none.csv
+```
+
+The archive records these supplied paths in `input_files.tsv`; the run log remains
+the evidence of which inputs were actually invoked. Both supplied files must exist.
+
 This collects existing reports without running analyses or changing pipeline results. Outputs are:
 
 - `comparisons/chimera-comparison-<timestamp>/`: inventory and provenance notes.
