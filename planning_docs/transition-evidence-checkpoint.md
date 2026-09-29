@@ -53,3 +53,50 @@ Collect the same logs/reports as for job 1500517, adding:
 Check ten recovery summaries, visible CTlk transition intervals, explicit profile exclusions, correct figure filenames, retained REVIEW verdicts and no automatic cuts. A transition can remain uncertain or have no uniquely recovered join; that is a reported limitation, not a reason to silently clear it.
 
 Biological cutting decisions, library-specific evidence, reference multiplicity policy, short-read validation and the pangenome/PSMC revamp remain separate subsequent checkpoints.
+
+## Copy-paste collection after completion
+
+Run from the cluster project root after the assembly job finishes. Confirm the printed job ID matches the intended run. This packages reports only; it does not run analyses. Attach the resulting archive. Previously published files can remain, so the current trace/log is the authority for this invocation.
+
+~~~bash
+bash <<'BASH'
+set -euo pipefail
+latest_log=$(ls -t logs/nextflow_assembly_*.log | head -n 1)
+job_id=${latest_log##*_}
+job_id=${job_id%.log}
+bundle="assembly-review-${job_id}.tar.gz"
+file_list=$(mktemp)
+trap 'rm -f "$file_list"' EXIT
+printf '%s\0' "$latest_log" >> "$file_list"
+for f in "logs/assembly-${job_id}.out" data/assembly_samplesheet.csv data/hic_readsets.csv; do
+    [[ ! -f "$f" ]] || printf '%s\0' "$f" >> "$file_list"
+done
+find -L genome_assembly -type f \( \
+    -name 'assembly_run_summary.md' -o \
+    -name 'assembly_eligibility.*' -o \
+    -name 'chimera_coordinate_status.md' -o \
+    -name '*.coordinate_audit.tsv' -o \
+    -name '*.older_join_summary.json' -o \
+    -name '*.older_join_audit.tsv' -o \
+    -name '*.transition_intervals.tsv' -o \
+    -name '*.review_joins.tsv' -o \
+    -name '*.chimeric_joins.tsv' -o \
+    -name '*.chimera_candidates.tsv' -o \
+    -name '*.reference_candidates.tsv' -o \
+    -name '*.reference_scores.tsv' -o \
+    -name '*.reference_id.txt' -o \
+    -name '*.chromosome_sets.tsv' -o \
+    -name '*.chimera_evidence.tsv' -o \
+    -name '*.chimera_evidence.png' -o \
+    -name '*.hic_pairs_audit.tsv' -o \
+    -iname '*trace*.txt' -o -iname '*trace*.tsv' \
+\) -print0 >> "$file_list"
+tar --null -czf "$bundle" -T "$file_list"
+echo "Selected assembly job: $job_id"
+ls -lh "$bundle"
+BASH
+~~~
+
+## tidk follow-up
+
+All 35 tests and Nextflow input validation passed remotely (validation job 1500541). Synthetic reporting tests deliberately omit tidk output; their fallback messages do not indicate production failure. The evidence module currently runs tidk first and retains a bespoke fallback on missing/unreadable output. Job 1500517's two evidence tables both recorded telomere_source=tidk. Prefer tidk-only evidence in a subsequent change, with explicit unavailable/failure reporting instead of substituting a second detector. Do not interrupt the active run for this cleanup.
