@@ -1,5 +1,10 @@
 # Comparison helpers
 
+For targeted local alignment/Hi-C checks and stage-aware Inspector evidence
+collection, see [the regional exploration handoff](../../planning_docs/chimera-targeted-exploration.md).
+The regional script reads existing data and writes only a new comparisons directory;
+it does not modify assemblies or the production workflow.
+
 Keep temporary review, collection and comparison scripts in this directory. They are separate from production pipeline modules.
 
 Run helpers from the cluster project root (the directory containing `gcl_genome_assembly`, `data`, `work`, and the result directories). Store all generated comparison artifacts under that project's `comparisons/` directory. Use a descriptive, timestamped prefix for each comparison; preserve earlier outputs until manually cleaned up.
