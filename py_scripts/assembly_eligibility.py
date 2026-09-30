@@ -66,7 +66,14 @@ def evaluate(data):
             by_species[row["taxid"]].append(row)
     if set(by_id) - seen:
         raise ValueError("Unexpected finalized assembly IDs: " + ",".join(sorted(set(by_id)-seen)))
-    refs = {str(taxid): aid for taxid, aid in data["harmonization_references"]}
+    refs = {}
+    for taxid, aid in data["harmonization_references"]:
+        key = str(taxid)
+        if key in refs:
+            raise ValueError('Duplicate harmonization reference for taxid ' + key)
+        if aid not in seen or next(r for r in records if r['id'] == aid)['taxid'] != key:
+            raise ValueError('Harmonization reference is absent or belongs to another species: ' + aid)
+        refs[key] = aid
     cohorts = []
     for taxid, members in sorted(by_species.items()):
         metrics = {m["id"]: m["metrics"] for m in members if "metrics" in m}
@@ -101,8 +108,14 @@ def evaluate(data):
                       status=("ready" if cfg["run_pangenome"] else "disabled_but_eligible") if ready else "withheld",
                       reasons=reasons_skip, missing=missing, individuals=individuals,
                       flags=flags, members=[])
+        cohort['harmonization_reference_id'] = preferred
+        cohort['reference_selection'] = 'not_selected_cohort_withheld'
         if ready:
             ref = candidates[0]
+            cohort['reference_selection'] = (
+                'retained_harmonization_reference' if preferred == ref['id'] else
+                'replacement_harmonization_reference_not_eligible' if preferred else
+                'ranked_final_assembly_no_harmonization_reference')
             refname = "REF_" + ref["id"].encode().hex()
             cohort.update(reference_id=ref["id"], reference_name=refname,
                           reference_contigs=ref["reference_contigs"])
@@ -118,7 +131,7 @@ def evaluate(data):
                 cohort["members"].append(dict(id=m["id"], sample=m["sample"],
                     haplotype=m["haplotype"], graph_name=name, fasta=m["fasta"]))
         cohorts.append(cohort)
-    return dict(schema_version=1, settings=cfg, assemblies=records, cohorts=cohorts)
+    return dict(schema_version=2, settings=cfg, assemblies=records, cohorts=cohorts)
 
 
 def main():
@@ -144,6 +157,11 @@ def main():
                   "from the other samples. Fragmented phased assemblies may be graph members without "
                   "being voters or reference candidates. Chromosome-scale status is an assembly-size "
                   "heuristic, not a karyotype or completeness guarantee. QC does not silently exclude inputs.\n\n")
+        out.write('| Taxid | Harmonization reference | Planned graph reference | Selection reason |\n|---|---|---|---|\n')
+        for c in result['cohorts']:
+            out.write('| %s | %s | %s | %s |\n' % (c['taxid'], c.get('harmonization_reference_id') or 'none',
+                      c.get('reference_id', 'none'), c['reference_selection']))
+        out.write('\n')
         out.write("Graph membership in this audit means planned eligibility, even when graph construction is disabled. Graph names map explicitly to biological individuals/haplotypes in "
                   "[the identity table](assembly_eligibility.tsv). A reference path's special graph name "
                   "does not create a new biological individual. Synthetic GREF paths are not biological samples.\n\n")

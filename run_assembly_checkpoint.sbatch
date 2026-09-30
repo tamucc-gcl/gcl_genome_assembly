@@ -24,10 +24,13 @@ sample_sheet="${1:-data/assembly_samplesheet.csv}"
 hic_readsets="${2:-data/hic_readsets.csv}"
 [[ "$hic_readsets" != /* ]] && hic_readsets="${PROJECT_ROOT}/${hic_readsets}"
 mode="${3:-validate}"
+graph_enabled=false
+graph_validate_only=false
 case "$mode" in
     validate) launch_args=(-profile slurm -entry VALIDATE_INPUTS) ;;
     assembly) launch_args=(-profile slurm -resume) ;;
-    *) echo "Mode must be validate or assembly" >&2; exit 2 ;;
+    graph_validate) launch_args=(-profile slurm -resume); graph_enabled=true; graph_validate_only=true ;;
+    *) echo "Mode must be validate, assembly or graph_validate" >&2; exit 2 ;;
 esac
 # Validation uses a separate launch directory so it cannot become the assembly resume target.
 launch_dir="${PROJECT_ROOT}/.nf/assembly"
@@ -65,7 +68,8 @@ nextflow -log "${PROJECT_ROOT}/logs/nextflow_${mode}_${SLURM_JOB_ID:-manual}.log
         --inspector_scaffold_max_assembly_error_bp 200000000 \
         --pairwise_alignment_mode 'all' \
         --chimera_break false \
-        --run_pangenome false \
+        --run_pangenome "$graph_enabled" \
+        --pangenome_validate_only "$graph_validate_only" \
         --run_post_assembly false \
         --pangenome_2d_viz false \
         --harmonize_graph_rule 'plurality' \

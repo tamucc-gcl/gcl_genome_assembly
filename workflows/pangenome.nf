@@ -20,12 +20,16 @@ workflow PANGENOME {
                 tuple(cohort.taxid, cohort.reference_name,
                     cohort.members.collect { it.graph_name },
                     cohort.members.collect { file(it.fasta, checkIfExists: true) },
-                    cohort.reference_contigs)
+                    cohort.reference_contigs,
+                    cohort + [min_individuals: data.settings.min_individuals])
             }
         }
         PANGENOME_CONSTRUCTION(ch_cohorts)
-        PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input)
-        ch_versions = PANGENOME_CONSTRUCTION.out.versions.mix(PANGENOME_ANALYSIS.out.versions)
+        ch_versions = PANGENOME_CONSTRUCTION.out.versions
+        if (!params.pangenome_validate_only) {
+            PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input)
+            ch_versions = ch_versions.mix(PANGENOME_ANALYSIS.out.versions)
+        }
         ch_report = PANGENOME_CONSTRUCTION.out.report
         ch_manifest = PANGENOME_CONSTRUCTION.out.manifest
     }

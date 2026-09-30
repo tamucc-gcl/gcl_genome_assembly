@@ -41,7 +41,8 @@ standard variant coordinate representation. FULL is retained for compact QC supp
 The standard GREF VCF is Cactus's vcfbub output; no automatic vcfwave/fine catalog is run.
 Synthetic GREF paths must not enter biological haplotype or individual denominators.
 Reference-coordinate and synthetic-coordinate records must not be pooled blindly as
-independent sites. Refer to the identity ledger for biological sample grouping.
+independent sites. Refer to [the identity ledger](pangenome_identity.tsv) for
+biological sample grouping and assembly checksums.
 
 | Role | Graph | File |
 |---|---|---|

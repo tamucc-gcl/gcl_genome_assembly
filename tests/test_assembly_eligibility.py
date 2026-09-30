@@ -51,6 +51,27 @@ class EligibilityTests(unittest.TestCase):
         self.assertFalse(cohort["ready"])
         self.assertEqual(cohort["individuals"], ["one"])
 
+    def test_cross_species_reference_rejected(self):
+        self.add('one')
+        self.add('two', taxid='2')
+        self.data['harmonization_references'] = [['1', 'two_hap1']]
+        with self.assertRaisesRegex(ValueError, 'another species'):
+            evaluate(self.data)
+
+    def test_duplicate_reference_rejected(self):
+        self.add('one')
+        self.data['harmonization_references'] = [['1', 'one_hap1'], ['1', 'one_hap2']]
+        with self.assertRaisesRegex(ValueError, 'Duplicate harmonization reference'):
+            evaluate(self.data)
+
+    def test_reference_replacement_is_explained(self):
+        self.add('one')
+        self.add('two', fragmented=True)
+        self.data['harmonization_references'] = [['1', 'two_hap1']]
+        cohort = evaluate(self.data)['cohorts'][0]
+        self.assertEqual(cohort['reference_id'], 'one_hap1')
+        self.assertEqual(cohort['reference_selection'], 'replacement_harmonization_reference_not_eligible')
+
     def test_same_species_phased_pair_ready_but_disabled(self):
         self.add("one")
         self.add("two", phased=False)
