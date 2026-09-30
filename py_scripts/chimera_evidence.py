@@ -456,7 +456,8 @@ def main():
     elif not diagnostic_only:
         notes.append("no_gap_at_proposed_position")
     if telo and telo["both_orientations"] and telo["junction_over_background"] >= 3:
-        notes.append("interstitial_telomere=%dx" % round(telo["junction_over_background"]))
+        notes.append("telomere_window_peak=%dx;peak_offset_bp=%d;not_a_fusion_test" %
+                     (round(telo["junction_over_background"]), telo["junction_max_bp"] - cut_bp))
 
     # contact at the CHOSEN CUT, which is what the report's per-cut row needs
     hic_cut = ratio_at(prof, res, cut_bp) if prof is not None else None
@@ -496,6 +497,8 @@ def main():
             out.write("hic_available\tno\nhic_reason\t%s\n" % (err or "unknown"))
         out.write("telomere_source\t%s\n" % telo_src)
         if telo:
+            out.write("telomere_peak_offset_from_evidence_bp\t%d\n" % (telo["junction_max_bp"] - cut_bp))
+            out.write("telomere_interpretation\twindow_counts_not_contiguous_tract_or_fusion_test\n")
             for k, v in sorted(telo.items()):
                 out.write("telomere_%s\t%s\n" % (k, v))
         out.write("n_gaps_total\t%d\n" % len(gs))

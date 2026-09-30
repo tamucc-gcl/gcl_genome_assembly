@@ -476,7 +476,8 @@ workflow {
         HARMONIZE_SCAFFOLDS.out.chimera_candidates,
         HARMONIZE_SCAFFOLDS.out.ref_name_map,
         HIC_SCAFFOLDING.out.evidence_pairs,
-        ch_telo_by_taxid, HIC_SCAFFOLDING.out.round1, HIC_SCAFFOLDING.out.round1_agp, capabilities )
+        ch_telo_by_taxid, HIC_SCAFFOLDING.out.round1, HIC_SCAFFOLDING.out.round1_agp,
+        READ_PREPARATION.out.hifi, capabilities )
     ch_versions = ch_versions.mix(CHIMERA.out.versions)
 
     // ch_pre_finalize is emitted rather than assigned here: its default carries the

@@ -23,6 +23,7 @@ process CHIMERA_EVIDENCE {
         emit: figures, optional: true
     path("${asm_id}.hic_pairs_audit.tsv"), emit: pairs_audit, optional: true
     path("${asm_id}.*.tidk.log"), emit: telomere_logs, optional: true
+    path("${asm_id}.*.telomere_windows.tsv"), emit: telomere_windows, optional: true
     path("versions.tsv"),                  emit: versions
 
     script:
@@ -90,7 +91,11 @@ process CHIMERA_EVIDENCE {
         if tidk search --string '${motif}' --output "\${SAFE}" --dir . --extension tsv \\
                "\${SAFE}.mini.fa" > "${asm_id}.\${SAFE}.tidk.log" 2>&1; then
             for c in "\${SAFE}_telomeric_repeat_windows.tsv" "\${SAFE}.tsv"; do
-                [ -s "\$c" ] && TW="--telomere-windows \$c" && break
+                if [ -s "\$c" ]; then
+                    cp "\$c" "${asm_id}.\${SAFE}.telomere_windows.tsv"
+                    TW="--telomere-windows \$c"
+                    break
+                fi
             done
         fi
         if [ -z "\$TW" ]; then

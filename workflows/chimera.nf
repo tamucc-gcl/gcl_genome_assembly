@@ -9,6 +9,7 @@ include { CHIMERA_COORDINATE_SUMMARY } from '../modules/chimera_coordinate_summa
 include { BREAK_CHIMERAS }   from '../modules/break_chimeras.nf'
 include { CHIMERA_JOINS }    from '../modules/chimera_joins.nf'
 include { CHIMERA_EVIDENCE } from '../modules/chimera_evidence.nf'
+include { CHIMERA_SEQUENCE_CONTEXT } from '../modules/chimera_sequence_context.nf'
 
 workflow CHIMERA {
 
@@ -24,6 +25,7 @@ workflow CHIMERA {
 
     ch_original_scaffolds
     ch_original_agp
+    ch_hifi_reads
     capabilities
 
     main:
@@ -114,7 +116,30 @@ workflow CHIMERA {
             ch_versions = ch_versions.mix(RECOVER_OLDER_JOINS.out.versions)
         }
 
-        // ---- independent confirmation of each called join ----------------------------
+        // Direct local peer comparison is diagnostic only, independent of cutting.
+        if (params.chimera_sequence_context) {
+            ch_context_cohort = ch_harmonized.collect(flat: false).map { records -> [records: records] }
+            ch_context_reads = ch_hifi_reads.collect(flat: false)
+                .map { records -> records.collectEntries { m, fq -> [(m.sample.toString()): fq] } }
+            ch_context_in = ch_chimeric_joins
+                .map { taxid, id, calls -> tuple(id.toString(), calls) }
+                .join(ch_harmonized.map { m, fa, nm -> tuple(m.id.toString(), m, fa) })
+                .combine(ch_context_cohort)
+                .combine(ch_context_reads)
+                .map { id, calls, m, fa, cohort, reads ->
+                    def peers = cohort.records.findAll { pm, pf, pn -> pm.taxid.toString() == m.taxid.toString() && pm.id != m.id }
+                    tuple(m.taxid.toString(), m, fa, calls,
+                          peers.collect { it[0] }, peers ? peers.collect { it[1] } : [file("${projectDir}/assets/NO_PAF", checkIfExists: true)],
+                          params.chimera_hifi_context && reads[m.sample.toString()] ? reads[m.sample.toString()] : file("${projectDir}/assets/NO_PAIRS", checkIfExists: true))
+                }
+                .combine(ch_telo_by_taxid, by: 0)
+                .map { taxid, m, fa, calls, pm, pf, reads, motif -> tuple(m, fa, calls, pm, pf, reads, motif ?: 'CCCTAA') }
+            CHIMERA_SEQUENCE_CONTEXT(ch_context_in,
+                file("${projectDir}/py_scripts/chimera_sequence_context.py", checkIfExists: true))
+            ch_versions = ch_versions.mix(CHIMERA_SEQUENCE_CONTEXT.out.versions)
+        }
+
+        // ---- supplementary evidence for each called join ----------------------------
         // Telomere and N-gap evidence, plus a Hi-C cross-contact profile built by
         // TRANSLATING last-round input pairs into current scaffold coordinates -- no
         // re-alignment, and no dependence on a contact map that does not exist yet at this

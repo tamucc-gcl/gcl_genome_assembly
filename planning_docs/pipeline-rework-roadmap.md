@@ -1,5 +1,7 @@
 # Pipeline rework: architecture and ordered implementation
 
+30 September checkpoint: see [chimera context integration and deferred two-library/chr12 review](chimera-context-integration-handoff.md). The chr12 sequence-location and CTlk biological interpretation questions are pinned until the broader improvements and two-library Hi-C rerun are complete; they do not block the remaining revamp.
+
 Status: implementation roadmap; no source edits or execution performed. 23 September 2026.
 
 This document supplements [the agreed biological and operational decisions](assembly-pangenome-agreed-plan.md) and [the static review](pipeline-static-review.md). Those decisions remain authoritative. The user runs all validation and biological jobs on a separate computer after syncing source through GitHub. The assistant edits and statically reviews source; it does not execute pipeline commands, tests, or analysis scripts.
