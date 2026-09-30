@@ -17,15 +17,16 @@ process CACTUS_PANGENOME {
     tuple val(taxid), val(ref_name), val(names), path(fastas), val(ref_contigs), path(capabilities)
 
     output:
-    // primary clip-graph handles (exact names -> single files, never the .full.* variants)
-    tuple val(taxid), path("out/${taxid}.gbz"),        emit: gbz
-    tuple val(taxid), path("out/${taxid}.og"),         emit: og
-    tuple val(taxid), path("out/${taxid}.hapl"),       emit: hapl
-    tuple val(taxid), path("out/${taxid}.snarls"),     emit: snarls
-    tuple val(taxid), path("out/${taxid}.gfa.gz"),     emit: gfa
-    tuple val(taxid), path("out/${taxid}.vcf.gz"),     emit: vcf
-    tuple val(taxid), path("out/${taxid}.vcf.gz.tbi"), emit: vcf_tbi
-    tuple val(taxid), path("out/${taxid}.raw.vcf.gz"), emit: raw_vcf
+    // Exact CLIP handles; the separate audit enforces required exports so a missing
+    // export does not discard an otherwise successful expensive Cactus task.
+    tuple val(taxid), path("out/${taxid}.gbz"),        emit: gbz, optional: true
+    tuple val(taxid), path("out/${taxid}.og"),         emit: og, optional: true
+    tuple val(taxid), path("out/${taxid}.hapl"),       emit: hapl, optional: true
+    tuple val(taxid), path("out/${taxid}.snarls"),     emit: snarls, optional: true
+    tuple val(taxid), path("out/${taxid}.gfa.gz"),     emit: gfa, optional: true
+    tuple val(taxid), path("out/${taxid}.vcf.gz"),     emit: vcf, optional: true
+    tuple val(taxid), path("out/${taxid}.vcf.gz.tbi"), emit: vcf_tbi, optional: true
+    tuple val(taxid), path("out/${taxid}.raw.vcf.gz"), emit: raw_vcf, optional: true
     tuple val(taxid), path("out/${taxid}.chroms/*"),   emit: chrom_og, optional: true
     tuple val(taxid), path("out/${taxid}.gaf.gz"),      emit: gaf, optional: true
     tuple val(taxid), path("out/${taxid}.viz/*"),      emit: viz, optional: true

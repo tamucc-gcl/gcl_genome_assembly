@@ -3,15 +3,19 @@ process PANGENOME_GRAPH_CONTRACT {
     cpus 1
     memory '1 GB'
     time '10m'
+    conda 'conda-forge::python=3.11'
     scratch false
     publishDir "${params.outdir}/pangenome/${taxid}", mode: params.publish_dir_mode
     input:
     tuple val(taxid), val(roles), path(artifacts)
+    path(auditor)
     output:
     tuple val(taxid), path('pangenome_manifest.tsv'), emit: manifest
     tuple val(taxid), path('pangenome_build_report.md'), emit: report
     tuple val(taxid), path('contract.ok'), emit: ready
+    tuple val(taxid), path('pangenome_artifact_checks.tsv'), emit: checks
     script:
+    def payload = groovy.json.JsonOutput.toJson(roles)
     def required = ['biological_gbz', 'biological_gfa', 'biological_odgi', 'haplotype_index',
                     'variant_gbz', 'variant_gfa', 'variants_standard', 'variants_standard_index',
                     'full_qc_gfa', 'clipping_stats']
@@ -23,6 +27,10 @@ process PANGENOME_GRAPH_CONTRACT {
     def rows = roles.findAll { k, v -> v }.collect { k, v -> "| ${k} | ${graphOf(k)} | [${v}](${v}) |" }.join('\n')
     """
     set -euo pipefail
+    cat > roles.json <<'ROLES_JSON'
+${payload}
+ROLES_JSON
+    python3 ${auditor} --roles roles.json
     if [ '${missing.size()}' -ne 0 ]; then
         echo 'Missing required graph products: ${missing.join(', ')}. Inspect cached Cactus outputs; no fallback graph will be substituted.' >&2
         exit 1
@@ -36,13 +44,17 @@ MANIFEST
 <details>
 <summary>Pangenome construction: taxid ${taxid}</summary>
 
-Graph-role contract passed. CLIP is the biological graph; GREF(CLIP) supplies the
+Required artifact checks passed. CLIP is the biological graph; GREF(CLIP) supplies the
 standard variant coordinate representation. FULL is retained for compact QC support.
 The standard GREF VCF is Cactus's vcfbub output; no automatic vcfwave/fine catalog is run.
 Synthetic GREF paths must not enter biological haplotype or individual denominators.
 Reference-coordinate and synthetic-coordinate records must not be pooled blindly as
 independent sites. Refer to [the identity ledger](pangenome_identity.tsv) for
 biological sample grouping and assembly checksums.
+
+[Artifact checks](pangenome_artifact_checks.tsv) cover nonempty required files and
+the standard VCF header. They do not certify binary graph integrity, index
+compatibility, full compressed-stream integrity, or biological correctness.
 
 | Role | Graph | File |
 |---|---|---|

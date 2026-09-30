@@ -34,7 +34,8 @@ workflow PANGENOME_CONSTRUCTION {
         tuple(taxid, selected.collectEntries { role, f -> [(role): f?.name ?: ''] },
               selected.values().findAll { it != null }.unique())
     }
-    PANGENOME_GRAPH_CONTRACT(ch_contract)
+    PANGENOME_GRAPH_CONTRACT(ch_contract,
+        file("${projectDir}/py_scripts/pangenome_output_audit.py", checkIfExists: true))
     ch_clip_stats_input = CACTUS_PANGENOME.out.gbz.join(CACTUS_PANGENOME.out.og)
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)
         .map { taxid, gbz, og, check -> tuple(taxid, gbz, og) }

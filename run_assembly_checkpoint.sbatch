@@ -30,7 +30,8 @@ case "$mode" in
     validate) launch_args=(-profile slurm -entry VALIDATE_INPUTS) ;;
     assembly) launch_args=(-profile slurm -resume) ;;
     graph_validate) launch_args=(-profile slurm -resume); graph_enabled=true; graph_validate_only=true ;;
-    *) echo "Mode must be validate, assembly or graph_validate" >&2; exit 2 ;;
+    graph_build) launch_args=(-profile slurm -resume); graph_enabled=true ;;
+    *) echo "Mode must be validate, assembly, graph_validate or graph_build" >&2; exit 2 ;;
 esac
 # Validation uses a separate launch directory so it cannot become the assembly resume target.
 launch_dir="${PROJECT_ROOT}/.nf/assembly"
