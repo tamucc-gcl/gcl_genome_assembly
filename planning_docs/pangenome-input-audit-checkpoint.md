@@ -1,5 +1,9 @@
 # Reference and pangenome input audit checkpoint
 
+## Preflight repair after job 1501420
+
+The configured image failed before parsing help because Toil could not create `/home/jselwyn/.toil` inside Singularity. The preflight label now uses Singularity's `--home` option to mount the persistent task directory as a writable container home. This change is scoped to the preflight task; it does not change assembly or graph computation. Error output remains preserved. Retry `graph_validate` after syncing; no results cleanup is needed. The fix has been statically checked but awaits cluster execution.
+
 30 September 2026. This begins the next refactor batch, not a declaration that all remaining assembly paths or pangenome analyses are validated.
 
 ## Changes
