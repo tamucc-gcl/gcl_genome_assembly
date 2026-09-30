@@ -12,5 +12,6 @@ export PYTHONDONTWRITEBYTECODE=1
 stamp=$(date +%Y%m%d-%H%M%S)
 out="comparisons/chimera-region-${stamp}-${SLURM_JOB_ID:-manual}"
 python3 gcl_genome_assembly/scripts/comparisons/explore_chimera_region.py "$@" --out "$out"
-tar -czf "${out}.tar.gz" "$out"
+# Keep large reconstructed pairs on the cluster; transfer reports and audit only.
+tar --exclude='*.pairs' -czf "${out}.tar.gz" "$out"
 printf '\nDownload %s.tar.gz and this Slurm log.\n' "$out"

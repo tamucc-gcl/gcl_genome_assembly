@@ -7,6 +7,8 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -36,6 +38,16 @@ def sha(path):
         for b in iter(lambda: f.read(1024*1024), b''):
             h.update(b)
     return h.hexdigest()
+
+
+def retained_file(staged, published, label):
+    """Prefer one retained task input; scratch jobs may retain only outputs."""
+    staged = [p for p in staged if p.is_file()]
+    if staged:
+        return one(staged, label)
+    if published.is_file():
+        return published
+    raise ValueError(f'Missing {label}; checked staged inputs and {published}')
 
 
 def assessment_fasta(work_dirs, expected, explicit=None):
@@ -96,6 +108,9 @@ def main():
     p.add_argument('--results', type=Path, required=True)
     p.add_argument('--assessment-fasta', type=Path,
                    help='optional exact pre-finishing FASTA; SHA256 must match the call table')
+    p.add_argument('--last-agp', type=Path, help='retained AGP for the assessment scaffolding round')
+    p.add_argument('--source-pairs', type=Path,
+                   help='retained filtered pairs mapped to that AGP input; regenerate projected pairs only')
     p.add_argument('--comparison-assembly', action='append', default=[])
     p.add_argument('--log', type=Path, required=True)
     p.add_argument('--work-root', type=Path, required=True)
@@ -107,8 +122,16 @@ def main():
     a = p.parse_args()
     if not 0 <= a.start < a.end:
         p.error('Require 0 <= start < end')
-    a.out.mkdir(parents=True, exist_ok=False)
     calls = a.joins_work / (a.assembly+'.chimeric_joins.tsv')
+    required = [calls, a.log]
+    required += [path for path in (a.assessment_fasta, a.last_agp, a.source_pairs) if path is not None]
+    required += [a.results/'assembly/harmonization'/(name+'.ref.paf.gz') for name in a.comparison_assembly]
+    if not list(a.joins_work.glob('*.ref.paf*')):
+        required.append(a.results/'assembly/harmonization'/(a.assembly+'.ref.paf.gz'))
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        p.error('Missing retained inputs:\n'+'\n'.join(missing))
+    a.out.mkdir(parents=True, exist_ok=False)
     selected = [r for r in table(calls) if r['scaffold'] == a.scaffold]
     if not selected:
         raise ValueError('No matching candidate in this work directory')
@@ -117,8 +140,12 @@ def main():
         raise ValueError('Candidate rows do not identify one valid assessment SHA256')
     digest = next(iter(digests))
     fasta = assessment_fasta([a.joins_work, a.evidence_work], digest, a.assessment_fasta)
-    evidence_calls = one(list(a.evidence_work.glob('*.review_joins.tsv'))+
-                         list(a.evidence_work.glob('*.chimeric_joins.tsv')), 'evidence call table')
+    published_review = a.results/'assembly/chimeras/older_joins'/(a.assembly+'.review_joins.tsv')
+    if not published_review.is_file():
+        published_review = calls
+    evidence_calls = retained_file(list(a.evidence_work.glob('*.review_joins.tsv'))+
+                                   list(a.evidence_work.glob('*.chimeric_joins.tsv')),
+                                   published_review, 'adjudicated call table')
     evidence_rows = [r for r in table(evidence_calls) if r['scaffold'] == a.scaffold]
     if not evidence_rows or any(r['assembly_sha256'] != digest for r in evidence_rows):
         raise ValueError('Evidence work directory refers to a different assessment FASTA')
@@ -136,13 +163,21 @@ def main():
     gaps = [dict(start=m.start(), end=m.end(), length=m.end()-m.start())
             for m in re.finditer('N+', seq) if m.start() < a.end and m.end() > a.start]
     write_table(a.out/'sequence_gaps.tsv', ['start', 'end', 'length'], gaps)
-    agp = one(a.joins_work.glob('*.agp'), 'last-round AGP')
+    agp = a.last_agp if a.last_agp is not None else one(a.joins_work.glob('*.agp'), 'last-round AGP')
+    helpers = Path(__file__).resolve().parents[2]/'py_scripts'
+    # Validate the full AGP against the exact FASTA before projecting any pairs.
+    subprocess.run([sys.executable, str(helpers/'chimera_coordinate_guard.py'),
+                    '--fasta', str(fasta), '--agp', str(agp),
+                    '--table', str(a.out/'native_calls.tsv'),
+                    '--audit', str(a.out/'coordinate_audit.tsv'),
+                    '--round', selected[0]['join_scope'].split('_')[0]], check=True)
     with open(agp) as source, open(a.out/'region.agp', 'w') as dest:
         for line in source:
             f = line.split()
             if f and not line.startswith('#') and f[0] == a.scaffold and int(f[1])-1 < a.end and int(f[2]) > a.start:
                 dest.write(line)
-    paf = one(a.joins_work.glob('*.ref.paf*'), 'reference PAF')
+    paf = retained_file(a.joins_work.glob('*.ref.paf*'),
+                        a.results/'assembly/harmonization'/(a.assembly+'.ref.paf.gz'), 'reference PAF')
     opener = gzip.open if paf.suffix == '.gz' else open
     targets = set()
     fields = ['query', 'qlen', 'qstart', 'qend', 'strand', 'target', 'tlen', 'tstart', 'tend', 'matches', 'block', 'mapq', 'tags']
@@ -162,7 +197,7 @@ def main():
         for line in source:
             if line.split('\t')[5] in targets:
                 dest.write(line)
-    for path in a.joins_work.glob('*name_map.tsv'):
+    for path in (a.results/'assembly/harmonization').glob('*.harmonized_name_map.tsv'):
         shutil.copy2(path, a.out/path.name)
     for assembly in a.comparison_assembly:
         path = a.results/'assembly/harmonization'/(assembly+'.ref.paf.gz')
@@ -174,6 +209,17 @@ def main():
     # Existing pairs are 1-based; convert before binning. Read the full scaffold
     # once, retain only the requested region plus full two-sided flank windows.
     pairs = a.evidence_work/(a.assembly+'.'+a.scaffold+'.pairs')
+    pairs_rebuilt = False
+    if a.source_pairs is not None:
+        # Always reconstruct when explicitly supplied, so provenance is unambiguous.
+        dest = a.out/'rebuilt_pairs'
+        dest.mkdir()
+        subprocess.run([sys.executable, str(helpers/'chimera_hic_pairs.py'),
+                        '--pairs', str(a.source_pairs), '--round1', str(agp),
+                        '--scaffolds', a.scaffold, '--outdir', str(dest),
+                        '--label', a.assembly], check=True)
+        pairs = dest/(a.assembly+'.'+a.scaffold+'.pairs')
+        pairs_rebuilt = True
     resolution, flank = 100000, 20
     first = max(flank, (a.start+resolution-1)//resolution)
     last = min(len(seq)//resolution-flank, a.end//resolution)
@@ -242,6 +288,8 @@ def main():
             dest = a.out/'inspector_context'/('task_'+match[1]+'_'+match[2])
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copy2(task/'.command.sh', dest/'command.txt')
+            if (task/'.command.run').is_file():
+                shutil.copy2(task/'.command.run', dest/'task_wrapper.txt')
             for path in sorted(task.iterdir()):
                 if path.is_file() and path.suffix in ('.fa', '.fasta', '.fq', '.fastq', '.gz', '.bam'):
                     work_links.append(dict(task=str(task), name=path.name,
@@ -259,6 +307,8 @@ def main():
         assembly=a.assembly, scaffold=a.scaffold, region=[a.start,a.end],
         fasta=str(fasta.resolve()), sha256=digest, scaffold_length=len(seq),
         paf=str(paf.resolve()), pairs=str(pairs.resolve()), targets=sorted(targets),
+        last_agp=str(agp.resolve()), pairs_rebuilt=pairs_rebuilt,
+        source_pairs=str(a.source_pairs.resolve()) if a.source_pairs else None,
         joins_work=str(a.joins_work.resolve()), evidence_work=str(a.evidence_work.resolve()),
         coordinate_system='0-based half-open except original AGP and PAF/SAM tool conventions',
         resolution=resolution, flank_bp=flank*resolution,

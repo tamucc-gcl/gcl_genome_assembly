@@ -2,9 +2,12 @@
 import sys
 import unittest
 import tempfile
+import gzip
+import json
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts/comparisons'))
-from explore_chimera_region import local_contacts, assessment_fasta, sha
+from explore_chimera_region import local_contacts, assessment_fasta, sha, retained_file, main
 
 
 class StagedFastaTests(unittest.TestCase):
@@ -51,6 +54,54 @@ class StagedFastaTests(unittest.TestCase):
         path.write_text('>s\nAAAA\n')
         with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
             assessment_fasta([], '0'*64, explicit=path)
+
+    def test_scratch_input_falls_back_to_published_output(self):
+        path = self.root/'published.tsv'
+        path.write_text('retained output\n')
+        self.assertEqual(retained_file([], path, 'test input'), path)
+
+    def test_missing_published_input_fails_explicitly(self):
+        with self.assertRaisesRegex(ValueError, 'Missing test input'):
+            retained_file([], self.root/'missing.tsv', 'test input')
+
+    def test_end_to_end_with_only_declared_task_outputs(self):
+        joins, evidence, results = (self.root/name for name in ('joins', 'evidence', 'results'))
+        for path in (joins, evidence, results):
+            path.mkdir()
+        # No staged inputs and no projected pairs survive in either task directory.
+        fasta = results/'pre_finish.fa'
+        fasta.write_text('>s\n'+'A'*5000000+'\n')
+        calls = ('assembly\tscaffold\tassembly_sha256\tjoin_scope\n'
+                 'a\ts\t'+sha(fasta)+'\tround2_only\n')
+        (joins/'a.chimeric_joins.tsv').write_text(calls)
+        review = results/'assembly/chimeras/older_joins'
+        review.mkdir(parents=True)
+        (review/'a.review_joins.tsv').write_text(calls)
+        agp = results/'last.agp'
+        agp.write_text('s\t1\t5000000\t1\tW\tcomponent\t1\t5000000\t+\n')
+        source = results/'source.pairs.gz'
+        with gzip.open(source, 'wt') as f:
+            f.write('r1\tcomponent\t2400001\tcomponent\t2600001\t+\t-\tUU\n')
+        alignments = results/'assembly/harmonization'
+        alignments.mkdir(parents=True)
+        with gzip.open(alignments/'a.ref.paf.gz', 'wt') as f:
+            f.write('s\t5000000\t0\t5000000\t+\tref\t5000000\t0\t5000000\t5000000\t5000000\t60\n')
+        log = self.root/'run.log'
+        log.write_text('')
+        out = self.root/'diagnostic'
+        args = ['explore_chimera_region.py', '--joins-work', str(joins),
+                '--evidence-work', str(evidence), '--results', str(results),
+                '--work-root', str(self.root), '--log', str(log), '--assembly', 'a',
+                '--scaffold', 's', '--start', '2000000', '--end', '3000000',
+                '--out', str(out), '--assessment-fasta', str(fasta),
+                '--last-agp', str(agp), '--source-pairs', str(source)]
+        with patch.object(sys, 'argv', args):
+            main()
+        self.assertTrue(json.loads((out/'provenance.json').read_text())['pairs_rebuilt'])
+        self.assertTrue((out/'local_hic.tsv').is_file())
+        self.assertIn('agp_fasta_check\tpassed', (out/'coordinate_audit.tsv').read_text())
+        self.assertIn('r1\ts\t2400001\ts\t2600001',
+                      (out/'rebuilt_pairs/a.s.pairs').read_text())
 
 
 class RegionalContacts(unittest.TestCase):
