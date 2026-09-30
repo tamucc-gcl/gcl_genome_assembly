@@ -14,7 +14,8 @@ export PYTHONDONTWRITEBYTECODE=1
 python3 -m unittest discover -s gcl_genome_assembly/tests -p 'test_*.py'
 ```
 
-The suite contains 56 tests. No tests or diagnostic analysis were run locally.
+The suite now contains 62 tests, including staging-layout regressions added after
+job 1501347 failed to find assessment/*. No tests or diagnostic analysis were run locally.
 After tests pass, submit this read-only investigation of the 1501091 work files:
 
 ```bash
@@ -34,6 +35,13 @@ These task paths come from the completed run's log. They are invocation argument
 not sample-specific rules in the script. Requires Python 3.9+ and retained work
 files; no new aligner or plotting environment is required. The Slurm request is
 one CPU, 8 GB and two hours; this is a bounded initial allocation, not a benchmark.
+
+The FASTA resolver checks files in the detection and evidence task roots and one
+directory level below, accepting only content matching the call-table SHA256.
+It supports flat, renamed and nested staging. An optional --assessment-fasta path
+also requires that exact checksum; never substitute the finished assembly merely
+because its scaffold name matches. Job 1501347 stopped before regional analysis.
+Its partial comparison directory can remain: each submission creates a new path.
 
 Upload comparisons/chimera-region-<timestamp>-<jobid>.tar.gz and its
 logs/chimera-region-<jobid>.out. If it fails, send that log; do not rerun assembly.

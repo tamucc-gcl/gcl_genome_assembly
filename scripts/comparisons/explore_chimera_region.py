@@ -38,6 +38,39 @@ def sha(path):
     return h.hexdigest()
 
 
+def assessment_fasta(work_dirs, expected, explicit=None):
+    """Resolve staged FASTA by content, not Nextflow's staging filename.
+
+    Search only task roots and one directory level, never the whole work tree.
+    Identical copies/links are interchangeable; a wrong-stage FASTA is rejected.
+    """
+    if explicit is not None:
+        if sha(explicit) != expected:
+            raise ValueError('Explicit assessment FASTA checksum mismatch')
+        return explicit
+    candidates, inventory = [], []
+    for root in work_dirs:
+        for path in sorted(root.iterdir()):
+            inventory.append(str(path))
+            if path.is_file():
+                candidates.append(path)
+            elif path.is_dir() and not path.is_symlink():
+                candidates.extend(p for p in sorted(path.iterdir()) if p.is_file())
+    seen = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        with open(path, 'rb') as f:
+            is_fasta = f.read(1) == b'>'
+        if is_fasta and sha(path) == expected:
+            return path
+    raise ValueError('No staged FASTA matches the recorded assessment SHA256. '
+                     'Retain the task inputs or supply --assessment-fasta with the exact '
+                     'pre-finishing FASTA. Task entries: '+', '.join(inventory))
+
+
 def local_contacts(counts, center, flank, distance_lo, distance_hi):
     """Equal-distance comparison; return counts AND available bin-pair counts.
 
@@ -61,6 +94,8 @@ def main():
     p.add_argument('--joins-work', type=Path, required=True)
     p.add_argument('--evidence-work', type=Path, required=True)
     p.add_argument('--results', type=Path, required=True)
+    p.add_argument('--assessment-fasta', type=Path,
+                   help='optional exact pre-finishing FASTA; SHA256 must match the call table')
     p.add_argument('--comparison-assembly', action='append', default=[])
     p.add_argument('--log', type=Path, required=True)
     p.add_argument('--work-root', type=Path, required=True)
@@ -77,10 +112,11 @@ def main():
     selected = [r for r in table(calls) if r['scaffold'] == a.scaffold]
     if not selected:
         raise ValueError('No matching candidate in this work directory')
-    fasta = one(a.joins_work.glob('assessment/*'), 'assessment FASTA')
-    digest = sha(fasta)
-    if any(r['assembly_sha256'] != digest for r in selected):
-        raise ValueError('Assessment FASTA checksum mismatch')
+    digests = {r['assembly_sha256'] for r in selected}
+    if len(digests) != 1 or not re.fullmatch('[0-9a-f]{64}', next(iter(digests))):
+        raise ValueError('Candidate rows do not identify one valid assessment SHA256')
+    digest = next(iter(digests))
+    fasta = assessment_fasta([a.joins_work, a.evidence_work], digest, a.assessment_fasta)
     evidence_calls = one(list(a.evidence_work.glob('*.review_joins.tsv'))+
                          list(a.evidence_work.glob('*.chimeric_joins.tsv')), 'evidence call table')
     evidence_rows = [r for r in table(evidence_calls) if r['scaffold'] == a.scaffold]
