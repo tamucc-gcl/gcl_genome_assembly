@@ -16,6 +16,8 @@ The original basic fixtures remain unchanged. The repeats suite plants identical
 
 ## Prepared next gate: real homologous chromosome pair
 
+Repeat job 1502943 completed all five eligible cases. The repeat-bearing unchanged control had no calls; inversion and inverted duplication had exact engineered intervals. Tandem duplication changed from CPG to TDM, with an expanded repeat-associated interval (reference 22,000 bp, query 42,002 bp). The translocation linked the correct chromosomes but extended to 22,001 bp around the 20,000 bp engineered move; the same extra 3 bp source-junction deletion persisted. Thus event recovery is encouraging, but repeat boundaries and local false calls remain unresolved. Report native CPG/TDM classes and interval spans without treating them as exact net gain, or blindly combining overlapping blocks. Proceed to a bounded real chromosome pair for practical assessment, not production acceptance.
+
 After reviewing the repeat gate, select one complete homologous chromosome from two chromosome-scale assemblies of the same species. Use the graph reference assembly for the reference side and a different individual's eligible assembly for the query side. Confirm homolog identity from harmonization/alignment evidence; do not infer it merely from matching labels. Selection is explicit, with no hard-coded samples. For a first pilot, prefer a smaller complete chromosome with unambiguous correspondence; keep its full sequence rather than cropping unequal coordinate windows.
 
 The runner accepts five positional arguments: existing environment, reference FASTA, query FASTA, reference sequence ID, query sequence ID. Template (replace all uppercase placeholders):
