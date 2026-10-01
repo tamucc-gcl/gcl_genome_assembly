@@ -1,5 +1,6 @@
 include { PANGENOME_STATS } from '../modules/pangenome_stats.nf'
 include { PANGENOME_SHARING } from '../modules/pangenome_sharing.nf'
+include { PANGENOME_SHARING_PLOTS } from '../modules/pangenome_sharing_plots.nf'
 
 /* Only validated CLIP handles enter biological statistics.
  * Identity grouping is audited before Panacus; ordination follows separately.
@@ -17,6 +18,10 @@ workflow PANGENOME_ANALYSIS {
             file("${projectDir}/py_scripts/pangenome_sharing.py", checkIfExists: true))
         ch_versions = PANGENOME_SHARING.out.versions
         ch_report = PANGENOME_SHARING.out.report
+        PANGENOME_SHARING_PLOTS(PANGENOME_SHARING.out.files,
+            file("${projectDir}/r_scripts/pangenome_sharing_plots.R", checkIfExists: true))
+        ch_versions = ch_versions.mix(PANGENOME_SHARING_PLOTS.out.versions)
+        ch_report = ch_report.mix(PANGENOME_SHARING_PLOTS.out.report)
     }
     emit:
     stats = PANGENOME_STATS.out.vg_stats
