@@ -9,6 +9,7 @@ workflow PANGENOME_CONSTRUCTION {
     main:
     ch_clip_stats_input = Channel.empty()
     ch_clip_sharing_input = Channel.empty()
+    ch_variant_input = Channel.empty()
     ch_report = Channel.empty()
     ch_manifest = Channel.empty()
     ch_versions = Channel.empty()
@@ -46,11 +47,20 @@ workflow PANGENOME_CONSTRUCTION {
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)
         .map { taxid, gfa, identities, check -> tuple(taxid, gfa, identities) }
     ch_manifest = PANGENOME_GRAPH_CONTRACT.out.manifest
+    ch_variant_input = CACTUS_PANGENOME.out.all.map { taxid, products ->
+        def files = products instanceof Collection ? products.toList() : [products]
+        def vcf = files.find { it.name == taxid + '.gref.vcf.gz' }
+        def tbi = files.find { it.name == taxid + '.gref.vcf.gz.tbi' }
+        if (!vcf || !tbi) error 'Standard GREF VCF or index missing'
+        tuple(taxid, vcf, tbi)
+    }.join(PANGENOME_INPUT_AUDIT.out.identities).join(PANGENOME_GRAPH_CONTRACT.out.ready)
+        .map { taxid, vcf, tbi, identities, check -> tuple(taxid, vcf, tbi, identities) }
     ch_versions = CACTUS_PANGENOME.out.versions
     }
     emit:
     clip_stats_input = ch_clip_stats_input
     clip_sharing_input = ch_clip_sharing_input
+    variant_input = ch_variant_input
     report = ch_report
     manifest = ch_manifest
     identities = PANGENOME_INPUT_AUDIT.out.identities

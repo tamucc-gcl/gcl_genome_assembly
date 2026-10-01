@@ -1,5 +1,6 @@
 include { PANGENOME_CONSTRUCTION } from './pangenome_construction.nf'
 include { PANGENOME_ANALYSIS } from './pangenome_analysis.nf'
+include { PANGENOME_VARIANT_AUDIT } from '../modules/pangenome_variant_audit.nf'
 
 /* Species selection is owned by the always-on assembly eligibility audit. */
 workflow PANGENOME {
@@ -32,6 +33,10 @@ workflow PANGENOME {
                 PANGENOME_CONSTRUCTION.out.clip_sharing_input)
             ch_versions = ch_versions.mix(PANGENOME_ANALYSIS.out.versions)
             ch_report = ch_report.mix(PANGENOME_ANALYSIS.out.report)
+            PANGENOME_VARIANT_AUDIT(PANGENOME_CONSTRUCTION.out.variant_input,
+                file("${projectDir}/py_scripts/pangenome_variant_audit.py", checkIfExists: true))
+            ch_versions = ch_versions.mix(PANGENOME_VARIANT_AUDIT.out.versions)
+            ch_report = ch_report.mix(PANGENOME_VARIANT_AUDIT.out.report)
         }
         ch_manifest = PANGENOME_CONSTRUCTION.out.manifest
     }
