@@ -38,6 +38,15 @@ class SharingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'endpoint'):
             validate_growth(self.root)
 
+    def test_growth_rejects_zero_only_bp_output(self):
+        # Actual failure after adding -c bp: TSV was still parsed as an empty GFA.
+        (self.root / 'denominators.json').write_text(json.dumps({'haplotype': 10, 'individual': 5}))
+        (self.root / 'haplotype.growth.tsv').write_text(
+            'panacus\tgrowth\tgrowth\tgrowth\ncount\tbp\tbp\tbp\n'
+            'coverage\t1\t1\t1\nquorum\t0\t1\t0.9\n0\t0\t0\t0\n')
+        with self.assertRaisesRegex(ValueError, 'count type or cohort range'):
+            validate_growth(self.root)
+
     def test_reference_and_partner_share_individual(self):
         meta = prepare(self.gfa, self.ledger, self.root)
         self.assertEqual((meta['haplotype'], meta['individual']), (3, 2))

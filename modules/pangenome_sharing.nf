@@ -22,7 +22,7 @@ process PANGENOME_SHARING {
         --core ${params.pangenome_tier_core} --softcore ${params.pangenome_tier_softcore} --shell ${params.pangenome_tier_shell}
     for unit in haplotype individual; do
         panacus -t ${task.cpus} growth -c bp -l '${params.pangenome_growth_coverage}' -q '${params.pangenome_growth_quorum}' \\
-            sharing/\${unit}.hist.tsv > sharing/\${unit}.growth.tsv
+            --groupby sharing/\${unit}.groups.tsv ${gfa} > sharing/\${unit}.growth.tsv
         test -s sharing/\${unit}.growth.tsv
     done
     python3 ${adapter} validate-growth --directory sharing
