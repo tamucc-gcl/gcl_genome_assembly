@@ -1,5 +1,11 @@
 # Haplotype comparison checkpoint
 
+## Regional figure follow-up (after accepted run 1502877)
+
+Run 1502877 passed the global/regional reconciliations with 305 cached tasks and five new tasks. The next change is presentation only: PANGENOME_REGIONAL_PLOTS adds haplotype and chromosome composition in bp and percent, plus chromosome-by-haplotype tier heatmaps. Composite scaffolds have their own collapsed section and figures. Missing combinations are grey, not zero. Sharing colors match the accepted plots. NJ and PCoA text layers have show.legend=FALSE, leaving the PCoA point legend.
+
+Use the validation and graph_build commands below after syncing. Expect only the new regional plotting task, the revised comparison plotting task and routine summary to run. Cactus, sharing, node coverage, regional attribution and similarity should remain cached. The collection command below already includes regional/figures recursively. Return that archive and the run logs for visual review. R and Nextflow have not been executed locally; static diff checks passed.
+
 ## Implemented
 
 Panacus 0.5.2 computes bp-weighted Jaccard similarity using the audited haplotype grouping from the accepted CLIP sharing task. A separate tidyverse/ggplot2/patchwork reporting task validates matrix identities, dimensions, symmetry, diagonal and finite [0,1] values, then produces a heatmap, classical PCoA, and descriptive neighbour-joining topology. It writes the distance matrix, PCoA coordinates and all eigenvalues, plus Newick/edge lengths when a tree is meaningful. No individual population analysis is added.

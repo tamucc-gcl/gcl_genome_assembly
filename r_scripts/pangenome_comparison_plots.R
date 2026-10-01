@@ -73,7 +73,7 @@ axis_label <- function(axis) {
   str_glue('PCoA {axis} ({round(100 * decomp$values[positive[[axis]]] / positive_sum, 1)}% positive inertia)')
 }
 ordination <- ggplot(points, aes(axis1, axis2, color = sample)) +
-  geom_point(size = 3) + geom_text_repel(aes(label = id), seed = 1, max.overlaps = Inf, size = 3) +
+  geom_point(size = 3) + geom_text_repel(aes(label = id), seed = 1, max.overlaps = Inf, size = 3, show.legend = FALSE) +
   coord_equal() + labs(title = 'Haplotype PCoA',
     subtitle = str_glue('Distance = 1 - Jaccard; negative inertia {round(100 * negative_fraction, 3)}%'),
     x = axis_label(1), y = axis_label(2), color = 'Individual')
@@ -114,7 +114,7 @@ if (n >= 3 && max(distance) > tol) {
   tree_plot <- ggplot(plotted) +
     geom_segment(aes(x = x, y = y, xend = x, yend = yend)) +
     geom_segment(aes(x = x, y = yend, xend = xend, yend = yend)) +
-    geom_text(data = labels, aes(x = x + 0.1, y = y, label = id, color = sample), hjust = 0, size = 3) +
+    geom_text(data = labels, aes(x = x + 0.1, y = y, label = id, color = sample), hjust = 0, size = 3, show.legend = FALSE) +
     scale_x_continuous(expand = expansion(mult = c(0.02, 0.65))) +
     theme_void() + labs(title = 'Descriptive neighbour-joining topology',
       subtitle = 'Branch lengths not drawn to scale; exact lengths supplied in Newick', color = 'Individual')
