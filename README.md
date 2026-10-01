@@ -1,5 +1,7 @@
 # gcl_genome_assembly
 
+R development uses tidyverse syntax, ggplot2 for graphics, and patchwork for multi-panel figures. See the [pipeline-wide plotting convention](planning_docs/r-plotting-conventions.md). Retained legacy plots are migrated as their analyses are revamped.
+
 **Nextflow DSL2 pipeline for reference-quality eukaryotic genome assembly**
 
 **Author:** Jason Selwyn · **Group:** TAMUCC CORE / birdlab (GCL) · **Executor:** SLURM (Crest HPC) · **Package manager:** conda + Singularity
