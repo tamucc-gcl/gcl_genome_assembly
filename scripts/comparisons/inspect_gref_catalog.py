@@ -39,15 +39,47 @@ def choose_windows(rows, count=12, width=10000):
     return merged
 
 
-def inspect_vcf(path, out, label):
+def ledger_slots(rows):
+    """Expected positions under the numeric graph-haplotype export convention.
+
+    This is a hypothesis checked against GT, not inferred biological ploidy.
+    """
+    slots = {}
+    for row in rows:
+        name = row['graph_name']
+        match = re.fullmatch(r'(.+)\.(\d+)', name)
+        column, index = (match[1], int(match[2]) - 1) if match else (name, 0)
+        if index < 0 or index in slots.setdefault(column, set()):
+            raise ValueError('Duplicate or invalid graph haplotype: ' + name)
+        slots[column].add(index)
+    return slots
+
+
+def slot_accounting(gt, expected):
+    alleles = re.split(r'[/|]', gt)
+    if expected is None:
+        return Counter(unresolved_records=1, unknown_column=1)
+    if max(expected) >= len(alleles) or ('/' in gt and expected != set(range(len(alleles)))):
+        return Counter(unresolved_records=1, unresolved_biological_slots=len(expected))
+    counts = Counter(resolved_records=1)
+    for index, allele in enumerate(alleles):
+        kind = 'biological' if index in expected else 'placeholder'
+        counts[kind + ('_missing' if allele == '.' else '_called')] += 1
+    return counts
+
+
+def inspect_vcf(path, out, label, expected_slots=None):
     samples = []
     shapes = Counter()
     flags = Counter()
     examples = []
+    slot_counts = {}
     with gzip.open(path, 'rt') as handle:
         for line in handle:
             if line.startswith('#CHROM'):
                 samples = line.rstrip().split('\t')[9:]
+                if expected_slots is not None and set(samples) != set(expected_slots):
+                    raise ValueError('VCF columns and identity ledger disagree')
             if line.startswith('#'):
                 continue
             fields = line.rstrip().split('\t')
@@ -65,6 +97,13 @@ def inspect_vcf(path, out, label):
                 for sample, value in zip(samples, fields[9:]):
                     values = value.split(':')
                     gt = values[gt_index] if gt_index < len(values) else '.'
+                    if expected_slots is not None:
+                        accounting = slot_accounting(gt, expected_slots.get(sample))
+                        slot_counts.setdefault(sample, Counter()).update(accounting)
+                        if accounting['placeholder_called']:
+                            issues.append('unexpected_called_placeholder')
+                        if accounting['unresolved_records']:
+                            issues.append('unresolved_slot_assignment')
                     alleles = re.split(r'[/|]', gt)
                     shape = (len(alleles), 'phased' if '|' in gt else 'unphased_or_haploid',
                              sum(x == '.' for x in alleles))
@@ -97,6 +136,17 @@ def inspect_vcf(path, out, label):
             writer = csv.writer(handle, delimiter='\t', lineterminator='\n')
             writer.writerow(header)
             writer.writerows(rows)
+    if expected_slots is not None:
+        columns = ['resolved_records', 'unresolved_records', 'biological_called',
+                   'biological_missing', 'placeholder_missing', 'placeholder_called',
+                   'unresolved_biological_slots']
+        with (out / (label + '.biological_slots.tsv')).open('w', newline='') as handle:
+            writer = csv.writer(handle, delimiter='\t', lineterminator='\n')
+            writer.writerow(['vcf_column', 'expected_slots_1based', *columns])
+            for sample in samples:
+                counts = slot_counts.get(sample, Counter())
+                writer.writerow([sample, ','.join(str(x + 1) for x in sorted(expected_slots[sample])),
+                                 *(counts[x] for x in columns)])
     return dict(flags)
 
 
@@ -119,6 +169,8 @@ def main():
         raise ValueError('Supply --bcftools with an existing executable or --conda-cache; nothing was installed')
     args.out.mkdir(parents=True, exist_ok=False)
     source = args.pangenome_dir.resolve()
+    with (source / 'pangenome_identity.tsv').open() as handle:
+        expected_slots = ledger_slots(csv.DictReader(handle, delimiter='\t'))
     vcf = source / (args.taxid + '.gref.vcf.gz')
     commands = []
 
@@ -152,7 +204,7 @@ def main():
         run(['view', '-h', candidate], args.out / (label + '.header.txt'))
         output = args.out / (label + '.windows.vcf.gz')
         run(['view', '--regions-overlap', '0', '-R', bed, '-Oz', '-o', output, candidate])
-        results[label] = inspect_vcf(output, args.out, label)
+        results[label] = inspect_vcf(output, args.out, label, expected_slots)
     for name in ('pangenome_identity.tsv', 'pangenome_manifest.tsv'):
         shutil.copy2(source / name, args.out / name)
     # Small prefix establishes the actual segment-map schema; full map remains on cluster.

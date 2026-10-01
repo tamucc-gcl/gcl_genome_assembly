@@ -1,5 +1,9 @@
 # Bounded GREF inspection
 
+The follow-up now writes standard/raw.biological_slots.tsv. Identity graph suffix .1/.2 defines the expected first/second GT positions; an unsuffixed reference expects its sole first slot. Missing unused positions are counted separately from biological missing observations. Called unused positions and unphased partial-slot assignments are flagged rather than repaired or silently discarded. Short GT fields that cannot represent the expected position remain unresolved. This checks the export convention; it does not establish phase accuracy or independent population sampling. Original VCFs and AC/AN checks are unchanged. Rows without GT are reported as no_GT and cannot contribute slot counts. Interpret slot totals only alongside inspection.json flags.
+
+The next comparison commands and acceptance gates are in [sv-benchmark-checkpoint.md](sv-benchmark-checkpoint.md).
+
 The catalog audit passed: 32,176,170 records, six VCF columns correctly mapped to five individuals/ten input haplotypes. The next job inspects exported genotype and allele metadata before choosing decomposition or structural-variant benchmark commands. It does not rerun Nextflow or alter graph/VCF files.
 
 The collector chooses up to twelve populated coordinate sequences in each naming stratum (reference-named, _alt, other), spread across sequence-length ranks. It takes 10 kb windows at start/middle/end and merges overlaps. These are deterministic diagnostics, not a random or representative sample and not a mechanism-based SV sensitivity benchmark. A VCF record may itself span more than the window size; exact allele strings are retained in compressed extracts. Raw GREF is inspected only when an existing raw index is available; an expensive new index is not created.
