@@ -26,11 +26,13 @@ workflow PANGENOME {
         }
         PANGENOME_CONSTRUCTION(ch_cohorts)
         ch_versions = PANGENOME_CONSTRUCTION.out.versions
-        if (!params.pangenome_validate_only) {
-            PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input)
-            ch_versions = ch_versions.mix(PANGENOME_ANALYSIS.out.versions)
-        }
         ch_report = PANGENOME_CONSTRUCTION.out.report
+        if (!params.pangenome_validate_only) {
+            PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input,
+                PANGENOME_CONSTRUCTION.out.clip_sharing_input)
+            ch_versions = ch_versions.mix(PANGENOME_ANALYSIS.out.versions)
+            ch_report = ch_report.mix(PANGENOME_ANALYSIS.out.report)
+        }
         ch_manifest = PANGENOME_CONSTRUCTION.out.manifest
     }
     emit:

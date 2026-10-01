@@ -8,6 +8,7 @@ workflow PANGENOME_CONSTRUCTION {
     ch_cohorts  // tuple(taxid, reference_name, names, fastas, ref_contigs, cohort)
     main:
     ch_clip_stats_input = Channel.empty()
+    ch_clip_sharing_input = Channel.empty()
     ch_report = Channel.empty()
     ch_manifest = Channel.empty()
     ch_versions = Channel.empty()
@@ -40,11 +41,16 @@ workflow PANGENOME_CONSTRUCTION {
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)
         .map { taxid, gbz, og, check -> tuple(taxid, gbz, og) }
     ch_report = PANGENOME_GRAPH_CONTRACT.out.report
+    ch_clip_sharing_input = CACTUS_PANGENOME.out.gfa
+        .join(PANGENOME_INPUT_AUDIT.out.identities)
+        .join(PANGENOME_GRAPH_CONTRACT.out.ready)
+        .map { taxid, gfa, identities, check -> tuple(taxid, gfa, identities) }
     ch_manifest = PANGENOME_GRAPH_CONTRACT.out.manifest
     ch_versions = CACTUS_PANGENOME.out.versions
     }
     emit:
     clip_stats_input = ch_clip_stats_input
+    clip_sharing_input = ch_clip_sharing_input
     report = ch_report
     manifest = ch_manifest
     identities = PANGENOME_INPUT_AUDIT.out.identities
