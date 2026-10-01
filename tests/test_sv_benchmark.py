@@ -29,6 +29,17 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(sum(map(len, query.values())), sum(map(len, self.ref.values())))
         self.assertEqual(query['chr1'], self.ref['chr1'][:100000] + self.ref['chr1'][120000:])
 
+    def test_repeat_suite_preserves_truth_and_introduces_shared_repeats(self):
+        ref, cases, truth = fixtures(suite='repeats')
+        self.assertEqual(cases['control'], ref)
+        self.assertEqual(ref['chr1'][98000:100000], ref['chr2'][148000:150000])
+        self.assertNotEqual(ref, self.ref)
+        for case, event, chrom, start, end, target, qstart, qend in truth:
+            expected = ref[chrom][start:end]
+            if event in ('INV', 'DUP_INVERTED_DISPERSED'):
+                expected = reverse_complement(expected)
+            self.assertEqual(cases[case][target][qstart:qend], expected)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -11,6 +11,8 @@ export PYTHONDONTWRITEBYTECODE=1
 # One explicitly selected environment per submission; no installation in jobs.
 tool="${1:?Usage: sbatch run_sv_benchmark.sbatch syri|syri-mummer|svim-asm /absolute/conda/environment}"
 envdir="${2:?Supply an existing tool environment}"
+suite="${3:-basic}"
+case "$suite" in basic|repeats) ;; *) echo 'Suite must be basic or repeats' >&2; exit 2;; esac
 case "$tool" in syri|syri-mummer|svim-asm) ;; *) echo 'Unknown tool' >&2; exit 2;; esac
 [[ "$envdir" = /* ]] || { echo 'Environment must be an absolute path' >&2; exit 2; }
 export PATH="$envdir/bin:$PATH"
@@ -23,10 +25,10 @@ fi
 for exe in python minimap2 samtools "$caller" "${extra[@]}"; do
   [[ -x "$envdir/bin/$exe" ]] || { echo "Missing $envdir/bin/$exe" >&2; exit 2; }
 done
-out="comparisons/sv-benchmark-${tool}-$(date +%Y%m%d-%H%M%S)-${SLURM_JOB_ID:-manual}"
+out="comparisons/sv-benchmark-${tool}-${suite}-$(date +%Y%m%d-%H%M%S)-${SLURM_JOB_ID:-manual}"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
-python gcl_genome_assembly/scripts/comparisons/make_sv_benchmark.py --out "$out/fixtures"
+python gcl_genome_assembly/scripts/comparisons/make_sv_benchmark.py --suite "$suite" --out "$out/fixtures"
 cp "$0" "$out/submitted_runner.sh"
 cp gcl_genome_assembly/scripts/comparisons/make_sv_benchmark.py "$out/fixture_generator.py"
 cp "$envdir/conda-meta/history" "$out/environment_history.txt"

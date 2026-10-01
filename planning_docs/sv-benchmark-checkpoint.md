@@ -1,5 +1,37 @@
 # Bounded rearrangement method comparison
 
+## Current next step: repeat/boundary gate
+
+After syncing, use the existing successful MUMmer/SyRI environment; no reinstall is needed:
+
+```bash
+export PYTHONDONTWRITEBYTECODE=1
+python3 -m unittest discover -s gcl_genome_assembly/tests -p 'test_*.py'
+# Submit after tests pass.
+sbatch gcl_genome_assembly/scripts/comparisons/run_sv_benchmark.sbatch \
+  syri-mummer "$PWD/comparisons/environments/syri-1.7.1" repeats
+```
+
+The original basic fixtures remain unchanged. The repeats suite plants identical 2 kb segments on both chromosomes at five positions near event boundaries, then applies the same four engineered changes. Includes an unchanged repeat-bearing control. Some repeat origins and breakpoint placements are inherently ambiguous: inspect event recovery, source/destination, orientation, false positives and alternative equivalent boundaries rather than demanding a single exact breakpoint. This is still a small synthetic stress test, not a realistic repeat landscape or validation of nested graph alleles. Return the printed archive and Slurm log, including failures.
+
+## Prepared next gate: real homologous chromosome pair
+
+After reviewing the repeat gate, select one complete homologous chromosome from two chromosome-scale assemblies of the same species. Use the graph reference assembly for the reference side and a different individual's eligible assembly for the query side. Confirm homolog identity from harmonization/alignment evidence; do not infer it merely from matching labels. Selection is explicit, with no hard-coded samples. For a first pilot, prefer a smaller complete chromosome with unambiguous correspondence; keep its full sequence rather than cropping unequal coordinate windows.
+
+The runner accepts five positional arguments: existing environment, reference FASTA, query FASTA, reference sequence ID, query sequence ID. Template (replace all uppercase placeholders):
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_sv_real_region.sbatch \
+  "$PWD/comparisons/environments/syri-1.7.1" \
+  REFERENCE_FASTA QUERY_FASTA REFERENCE_CHROMOSOME_ID QUERY_CHROMOSOME_ID
+```
+
+Existing adjacent .fai indexes are required; production FASTAs/indexes are not changed. Local copies of the selected chromosomes are renamed chr1 and the original IDs recorded. A 100 Mb cap per sequence bounds this pilot's workload; it is not a biological chromosome eligibility threshold. The 32 GB/8 h request is provisional. Alignment, filtering and calling record separate elapsed time and maximum resident memory through GNU time. Retain the full local comparison folder; return its printed archive and logs/sv-real-JOBID.out. FASTAs and delta files are excluded from the return archive; coordinate tables, calls, resource reports, selected-sequence hashes and environment build records are included. A scheduler kill may prevent archive creation; return the Slurm log in that case.
+
+A single chromosome pair cannot assess interchromosomal translocations and has no independent event truth. Treat unmatched sequence as unresolved in this restricted search space, not absence from the other whole genome. Inspect alignment coverage, repeat-associated calls, boundary artifacts and resource requirements. This gate evaluates practical behavior, not precision/recall or biological confirmation. A later multi-chromosome comparison is required before accepting translocation reporting on real data.
+
+Scripts and tests were authored and statically reviewed locally; execution remains on the cluster. Neither gate changes production workflows.
+
 This comparison does not change the production graph, VCF or assembly processes. Keep results and work; no baseline move or Nextflow rerun is required.
 
 The generator creates two 300 kb synthetic chromosomes with a fixed seed and records FASTA checksums. Each independent query has one known inversion, tandem duplication, dispersed inverted duplication, or interchromosomal cut-and-paste event. Unchanged and fragmented unchanged assemblies are negative controls. Truth coordinates are zero-based half-open; compare caller coordinates using their documented conventions, not literal equality across formats.
@@ -97,6 +129,18 @@ Return the printed comparisons/sv-benchmark-syri-mummer-*.tar.gz archive and log
 Review whether each true source-to-destination block exists in raw MUMmer coordinates, survives filtering, and appears in SyRI's rearrangement calls. Compare minimap2 CIGAR insertions/deletions and secondary/supplementary alignments to locate where information was lost. Distinguish missing alignment, filtered alignment and unclassified retained alignment. Do not infer method superiority from a successful exit or a change in raw call count.
 
 ## Final review gate
+
+### MUMmer result: job 1502940
+
+All five eligible cases completed; the fragmented control remained explicitly ineligible. The unchanged control had no variants. The 40 kb inversion was recovered exactly, without the previous 206 bp NOTAL flank. Tandem duplication was represented as CPG (copy gain), inverted duplication as INVDP/copygain with reversed alignment orientation, and the interchromosomal move as TRANS with the correct source and destination chromosomes.
+
+Raw and filtered MUMmer coordinate rows were identical in the three duplication/translocation cases inspected. They preserve the overlapping, reversed and cross-chromosomal blocks needed for classification. The diagnostic minimap2 records instead encode these changes inside long alignments as 20 kb I/D CIGAR operations, with no separate source-to-destination block. This supports alignment representation as the principal cause of the earlier classification differences for these fixtures; it does not prove that all minimap2 settings would behave this way.
+
+Boundary accuracy is not perfect. INVDP and TRANS span 20,001 bp rather than the engineered 20,000 bp because alignments extend into adjacent matching bases. The translocation output also contains an extra 3 bp deletion near the source junction, absent from the engineered truth, associated with an overlapping gapped flank alignment. Treat this as an apparent alignment/calling artifact to investigate, not a new true event.
+
+The tandem CPG summary reports 40,002 bp of query interval (120000–160001 inclusive), covering the duplicated region with flanking bases; this is not 40,002 newly gained bases. The engineered gain is 20,000 bp. Preserve event classes, source/destination intervals, orientation, hierarchy and explicit length definitions; do not sum parent and alignment-child rows or convert summary lengths directly into net gains.
+
+Decision: advance MUMmer+SyRI as the leading chromosome-scale rearrangement candidate, not yet a production default. Next gate: repeat/boundary ambiguity fixtures, then a bounded real chromosome comparison with measured alignment and calling resources. Retain explicit ineligibility for fragmented assemblies. Keep GREF variant catalog and assembly rearrangement results distinct. SVIM-asm need not become a parallel default branch on these results. No production changes or local analysis execution were made for this review.
 
 Check each expected event against call coordinates/orientation and inspect false positives in controls. Record partial, missed, ambiguous and ineligible outcomes explicitly. Do not equate VCF/BND row counts with event counts: a translocation may be represented by several breakends or separate loss/gain calls. Review duplications for source and destination recovery, not just inserted length. Runtime includes alignment plus calling; these tiny jobs do not predict whole-genome resource requirements.
 
