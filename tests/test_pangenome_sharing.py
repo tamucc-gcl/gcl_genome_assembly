@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_scripts'))
-from pangenome_sharing import prepare, read_hist, summarize
+from pangenome_sharing import prepare, read_hist, summarize, validate_growth
 
 
 class SharingTests(unittest.TestCase):
@@ -20,6 +20,23 @@ class SharingTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_growth_rejects_successful_but_empty_node_output(self):
+        (self.root / 'denominators.json').write_text(json.dumps({'haplotype': 3, 'individual': 2}))
+        (self.root / 'haplotype.growth.tsv').write_text('count\tnode\ncoverage\t1\nquorum\t0\n0\t0\n')
+        with self.assertRaisesRegex(ValueError, 'count type or cohort range'):
+            validate_growth(self.root)
+
+    def test_growth_endpoints(self):
+        (self.root / 'denominators.json').write_text(json.dumps({'haplotype': 2, 'individual': 2}))
+        for unit in ('haplotype', 'individual'):
+            (self.root / (unit + '.hist.tsv')).write_text('count\tbp\n0\t0\n1\t10\n2\t20\n')
+            (self.root / (unit + '.growth.tsv')).write_text('count\tbp\tbp\ncoverage\t1\t1\nquorum\t0\t1\n0\t0\t0\n1\t25\t25\n2\t30\t20\n')
+        validate_growth(self.root)
+        path = self.root / 'individual.growth.tsv'
+        path.write_text(path.read_text().replace('2\t30\t20', '2\t31.1\t20'))
+        with self.assertRaisesRegex(ValueError, 'endpoint'):
+            validate_growth(self.root)
 
     def test_reference_and_partner_share_individual(self):
         meta = prepare(self.gfa, self.ledger, self.root)

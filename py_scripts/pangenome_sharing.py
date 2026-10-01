@@ -126,6 +126,42 @@ def summarize(directory, core, softcore, shell):
     (directory / 'sharing_report.md').write_text('\n'.join(lines))
 
 
+def validate_growth(directory):
+    directory = Path(directory)
+    meta = json.loads((directory / 'denominators.json').read_text())
+    for unit in ('haplotype', 'individual'):
+        headers, points = {}, {}
+        for line in (directory / (unit + '.growth.tsv')).read_text().splitlines():
+            if not line.strip() or line.startswith('#'):
+                continue
+            fields = line.split('\t')
+            if fields[0].isdigit():
+                k = int(fields[0])
+                values = [float(v) for v in fields[1:]]
+                if k in points or any(not math.isfinite(v) or v < 0 for v in values):
+                    raise ValueError('Invalid growth row: ' + line)
+                points[k] = values
+            else:
+                headers[fields[0]] = fields[1:]
+        counts = headers.get('count', [])
+        n = meta[unit]
+        if (not counts or any(c != 'bp' for c in counts)
+                or set(points) not in (set(range(1, n + 1)), set(range(n + 1)))
+                or any(len(v) != len(counts) for v in points.values())):
+            raise ValueError('Growth count type or cohort range mismatch: ' + unit)
+        coverage, quorum = headers.get('coverage', []), headers.get('quorum', [])
+        if len(coverage) != len(counts) or len(quorum) != len(counts):
+            raise ValueError('Missing growth thresholds: ' + unit)
+        hist = read_hist(directory / (unit + '.hist.tsv'), n)
+        for i, (cov, quo) in enumerate(zip(coverage, quorum)):
+            # Absolute coverage=1 supports exact full-cohort union/core/quorum checks.
+            if float(cov) == 1:
+                threshold = max(1, math.ceil(float(quo) * n))
+                expected = sum(bp for k, bp in hist.items() if k >= threshold)
+                if abs(points[n][i] - expected) > 1:
+                    raise ValueError('Growth endpoint disagrees with histogram: ' + unit)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -135,11 +171,15 @@ def main():
     prep.add_argument('--out', required=True)
     summary = commands.add_parser('summarize')
     summary.add_argument('--directory', required=True)
+    growth = commands.add_parser('validate-growth')
+    growth.add_argument('--directory', required=True)
     for name, default in [('core', 1), ('softcore', -1), ('shell', 2)]:
         summary.add_argument('--' + name, type=float, default=default)
     args = parser.parse_args()
     if args.command == 'prepare':
         prepare(args.gfa, args.ledger, args.out)
+    elif args.command == 'validate-growth':
+        validate_growth(args.directory)
     else:
         summarize(args.directory, args.core, args.softcore, args.shell)
 
