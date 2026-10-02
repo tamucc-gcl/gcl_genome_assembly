@@ -6,6 +6,7 @@
 #SBATCH --mem=8G
 #SBATCH --output=logs/sv-diagnostics-%j.out
 set -euo pipefail
+export TZ=UTC
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 envdir="$(realpath "${1:?Supply R environment and SyRI result directory}")"
 source_dir="$(realpath "${2:?Supply SyRI result directory}")"
