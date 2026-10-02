@@ -1,5 +1,13 @@
 # Optional assembly SV integration checkpoint
 
+## 2026-10-02 pilot failure: delta scratch paths
+
+Run 1503186 completed alignment but ASSEMBLY_SV_CALL failed during SNP identification: show-snps tried to open reference.fa in the previous alignment task's scratch directory. MUMmer delta files retain reference/query paths in their first line; staging the FASTAs into a new scratch directory does not rewrite that header. The pandas FutureWarnings in the excerpt are not the reported fatal error.
+
+The calling process now streams a separate calling.delta copy with its header rebased to the currently staged FASTAs, validates the NUCMER signature and preserves the remaining alignment bytes. It does not edit the cached delta or alignment process. Static review only; the fix still requires cluster validation. A future retry should reuse alignment but rerun SyRI calling; intermediate results from the failed scratch task are not automatically resumed.
+
+Per the latest plan, do not rerun this optional pilot now merely to validate the fix. Proceed with the new-Hi-C production assembly with run_assembly_sv=false once the previous Nextflow controller has exited. Keep its work/cache and failure logs for the post-core extension phase described in [the optional analyses plan](post-core-optional-analyses-plan.md).
+
 ## Latest checkpoint: bounded execution and close-out scope
 
 The returned plan selected CMat hap1 against CLim hap1, CLim hap2 and CMat hap2 (15 chromosomes each). CPla is not chromosome-scale. CBau and CTlk remain chromosome-scale but have split chromosome representations; CTlk hap2 additionally has a composite assignment. Skip reasons now distinguish these implementation limits from unrecognized naming. These restrictions do not alter graph eligibility.

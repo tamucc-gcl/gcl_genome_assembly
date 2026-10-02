@@ -76,7 +76,26 @@ process ASSEMBLY_SV_CALL {
     script:
     """
     set -euo pipefail
-    syri -c ${coords} -d ${delta} -r ${reference} -q ${query}
+    # Delta embeds the alignment task's scratch paths. Rebase a copy for show-snps;
+    # never modify the staged/cached alignment input.
+    python3 - <<'PY'
+from pathlib import Path
+import shutil
+with open('${delta}', 'rb') as source, open('calling.delta', 'wb') as target:
+    original_header = source.readline()
+    if len(original_header.split()) != 2:
+        raise ValueError('Expected reference/query paths in the delta header')
+    signature = source.readline()
+    if signature.strip() != b'NUCMER':
+        raise ValueError('Expected a NUCMER delta file')
+    paths = [str(Path(p).resolve(strict=True)) for p in ['${reference}', '${query}']]
+    if any(any(c.isspace() for c in p) for p in paths):
+        raise ValueError('MUMmer delta reference paths must not contain whitespace')
+    target.write((' '.join(paths) + chr(10)).encode())
+    target.write(signature)
+    shutil.copyfileobj(source, target)
+PY
+    syri -c ${coords} -d calling.delta -r ${reference} -q ${query}
     test -s syri.out
     test -s syri.summary
     test -s syri.vcf
