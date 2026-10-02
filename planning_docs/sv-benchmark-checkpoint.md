@@ -2,9 +2,11 @@
 
 ## Current investigation: anchor uniqueness and resource cost
 
+Correction after jobs 1503142/1503143: all eligible cases failed at command parsing because MUMmer 4.0.1 does not accept --mumreference. No alignment/caller sensitivity or resource conclusions can be drawn from those runs. In the pinned version, reference-unique anchors are the default when neither --maxmatch nor --mum is specified (verified in the v4.0.1 src/umd/nucmer_cmdline.yaggo source). The runner now maps its user-facing mumreference label to an empty anchor-option array, while maxmatch still supplies --maxmatch. The submission commands below remain unchanged. Repeat both small jobs after syncing; no environment changes needed.
+
 Real pilot 1502945 timed out during nucmer after eight hours, with an empty delta and no SyRI results. Slurm reported 121096712K MaxRSS (approximately 115.5 GiB), despite the 32 GB request. Its near-zero TotalCPU cannot establish idle behavior: signal-interrupted accounting may omit child CPU. The original zero exit_status was erroneous; the real runner now requires explicit completion and handles termination signals. No evidence of an OOM kill was supplied.
 
-The user reports approximately 50% repeat content from previous annotations. This makes excessive nonunique anchors a plausible explanation, not a demonstrated cause. The next controlled comparison changes only nucmer's anchor mode to --mumreference. This requires uniqueness in the reference, not in both assemblies, so multiple query copies can still be anchored. Events confined to repeated reference sequence may lose support. Do not promote this setting based on speed alone.
+The user reports approximately 50% repeat content from previous annotations. This makes excessive nonunique anchors a plausible explanation, not a demonstrated cause. The next controlled comparison changes only nucmer's anchor mode to reference-unique (the MUMmer 4 default). This requires uniqueness in the reference, not in both assemblies, so multiple query copies can still be anchored. Events confined to repeated reference sequence may lose support. Do not promote this setting based on speed alone.
 
 After syncing, use the existing environment:
 

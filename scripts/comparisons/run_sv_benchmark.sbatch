@@ -14,6 +14,10 @@ envdir="${2:?Supply an existing tool environment}"
 suite="${3:-basic}"
 anchors="${4:-maxmatch}"
 case "$anchors" in maxmatch|mumreference) ;; *) echo 'Anchor mode must be maxmatch or mumreference' >&2; exit 2;; esac
+# MUMmer 4 uses reference-unique anchors by default. It does not accept
+# the older --mumreference spelling; retain that name only as our mode label.
+anchor_args=()
+if [[ "$anchors" = maxmatch ]]; then anchor_args=(--maxmatch); fi
 if [[ "$tool" != syri-mummer && "$anchors" != maxmatch ]]; then
   echo 'Anchor selection is only supported for syri-mummer' >&2; exit 2
 fi
@@ -67,7 +71,7 @@ for name in control inversion tandem_duplication inverted_duplication translocat
       awk 'BEGIN {OFS="\t"} !/^@/ {print $1,$2,$3,$4,$5,$6}' alignment.sam >> minimap2_alignments.tsv
       if [[ "$tool" = syri-mummer ]]; then
         # SyRI's documented MUMmer workflow; preserve raw and filtered blocks.
-        /usr/bin/time -v -o alignment.resources.txt nucmer "--$anchors" -c 100 -b 500 -l 50 "$ref" "$query"
+        /usr/bin/time -v -o alignment.resources.txt nucmer "${anchor_args[@]}" -c 100 -b 500 -l 50 "$ref" "$query"
         show-coords -THrd out.delta > out.raw.coords
         delta-filter -m -i 90 -l 100 out.delta > out.filtered.delta
         show-coords -THrd out.filtered.delta > out.filtered.coords
