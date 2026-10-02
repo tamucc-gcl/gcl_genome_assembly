@@ -76,7 +76,8 @@ nextflow -log "${PROJECT_ROOT}/logs/nextflow_${mode}_${SLURM_JOB_ID:-manual}.log
         --harmonize_graph_rule 'plurality' \
         --hic_readsets "${hic_readsets}" \
         --sample_sheet "${sample_sheet}" \
-        --outdir "${outdir}"
+        --outdir "${outdir}" \
+        "${@:4}"
 
 cd "${PROJECT_ROOT}"
 #bash scripts/utils/fasta_to_webshare.sh
