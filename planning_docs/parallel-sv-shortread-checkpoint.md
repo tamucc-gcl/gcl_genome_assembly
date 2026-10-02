@@ -1,5 +1,7 @@
 # Work while final HiFi mapping runs
 
+**Current priority:** short-read testing is parked at the user's request. Do not submit the separate short-read assembly commands below. Reintroduce that sample with test-only settings during a future combined HiFi/short-read integration run; arrange cache/work context then. The current actionable checkpoint is section 1 (SV diagnostics).
+
 2026-10-02. Comparison-only additions; production defaults unchanged. No pipeline, Python, R or unit tests executed locally. User runs these checks on the cluster. Do not restart the active mapping run.
 
 ## 1. SV advisory QC and simplified plots
@@ -7,6 +9,8 @@
 The existing diagnostics runner now writes `sv_qc.tsv`, `sv_qc_settings.json` and `sv_qc.md`. Every native selected-class event remains present. It checks sequence-boundary/N proximity and direct alignment-child span coverage (unioned, clipped, separately in each assembly). Default flags use 1 kb proximity and 0.5 assigned-span fraction; these are exploratory review thresholds, not calibrated biological acceptance criteria. The Python helper exposes both as arguments for sensitivity checks.
 
 `NO_FLAGS_IN_IMPLEMENTED_CHECKS` is deliberately not PASS, high-confidence, or validated. Read evidence, alignment identity, alternative placements, repeat ambiguity and adjacency validation remain unassessed. CPG/CPL/TDM typically have no direct AL children and cannot be graded by that measure. Failure of the helper fails the diagnostic job; raw calls are never rewritten.
+
+Missing direct alignment evidence now receives `UNASSESSED` when no boundary flag fires; it is not itself a REVIEW flag. `alignment_assessment` independently records availability, including when an observed boundary issue does produce REVIEW. `sv_qc_summary.tsv` counts outcomes by native class; `sv_qc_flags.tsv` counts individual flags (not additive event totals). The runner's optional arguments 4 and 5 expose boundary proximity and assigned-span thresholds; argument 3 remains the optional comma-separated event list. Defaults remain exploratory, and no production filtering is introduced.
 
 Removed the wide lower panels. Default plots select the largest event per class and advisory status. The optional third runner argument is a comma-separated list of exact event IDs (e.g. INVDP5822,INV2308); unknown IDs fail explicitly. Selection is diagnostic, not a call filter. Existing file numbering can change; consult `largest_candidates.tsv` for IDs.
 

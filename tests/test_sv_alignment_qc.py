@@ -34,7 +34,18 @@ class SVAlignmentQCTests(unittest.TestCase):
         missing = assess(e, [], index, index, 10, .5)
         self.assertIsNone(missing['reference_assigned_span_fraction'])
         self.assertEqual(missing['id'], 'INV1')
-        self.assertIn('unavailable', missing['qc_flags'])
+        self.assertEqual(missing['alignment_assessment'], 'UNAVAILABLE')
+        self.assertEqual(missing['qc_status'], 'UNASSESSED')
+        self.assertEqual(missing['qc_flags'], 'none')
+
+    def test_missing_alignment_does_not_hide_boundary_flag(self):
+        e = dict(ref='x', rstart='1', rend='20', query='x', qstart='31',
+                 qend='50', id='CPG1', parent='SYN1', type='CPG', copy_status='-')
+        index = ({'x': 100}, {'x': []}, '')
+        result = assess(e, [], index, index, 5, .5)
+        self.assertEqual(result['alignment_assessment'], 'UNAVAILABLE')
+        self.assertEqual(result['qc_status'], 'REVIEW')
+        self.assertEqual(result['qc_flags'], 'reference_near_sequence_end')
 
     def test_out_of_bounds_rejected(self):
         e = dict(ref='x', rstart='1', rend='200', query='x', qstart='1',

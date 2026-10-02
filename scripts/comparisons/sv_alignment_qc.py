@@ -109,9 +109,9 @@ def assess(event, children, refs, queries, near_bp, min_fraction):
         if fraction is not None and fraction < min_fraction:
             flags.append(role + '_low_assigned_span_fraction')
     result['direct_alignment_children'] = len(children)
-    if not children:
-        flags.append('direct_alignment_metrics_unavailable')
-    result['qc_status'] = 'REVIEW' if flags else 'NO_FLAGS_IN_IMPLEMENTED_CHECKS'
+    result['alignment_assessment'] = 'AVAILABLE' if children else 'UNAVAILABLE'
+    result['qc_status'] = ('REVIEW' if flags else
+                           'NO_FLAGS_IN_IMPLEMENTED_CHECKS' if children else 'UNASSESSED')
     result['qc_flags'] = ';'.join(flags) or 'none'
     result['read_support'] = 'NOT_ASSESSED'
     return result
@@ -155,6 +155,17 @@ def main():
         w.writeheader()
         w.writerows(results)
     counts = collections.Counter(r['qc_status'] for r in results)
+    grouped = collections.Counter((r['type'], r['qc_status']) for r in results)
+    with open(a.output / 'sv_qc_summary.tsv', 'w', newline='') as handle:
+        writer = csv.writer(handle, delimiter='\t')
+        writer.writerow(['type', 'qc_status', 'events'])
+        writer.writerows((kind, status, n) for (kind, status), n in sorted(grouped.items()))
+    flag_counts = collections.Counter((r['type'], flag) for r in results
+                                      for flag in r['qc_flags'].split(';') if flag != 'none')
+    with open(a.output / 'sv_qc_flags.tsv', 'w', newline='') as handle:
+        writer = csv.writer(handle, delimiter='\t')
+        writer.writerow(['type', 'flag', 'events'])
+        writer.writerows((kind, flag, n) for (kind, flag), n in sorted(flag_counts.items()))
     metadata = {'near_bp': a.near_bp, 'min_assigned_fraction': a.min_assigned_fraction,
                 'reference_sha256': refs[2], 'query_sha256': queries[2],
                 'events': len(events), 'status_counts': dict(counts),
@@ -164,6 +175,9 @@ def main():
         '# Advisory SV QC\n\n' + f'{len(events)} native events retained. Status counts: {dict(counts)}.\n\n' +
         'These are configurable screening flags, not calibrated biological filters. '
         'NO_FLAGS_IN_IMPLEMENTED_CHECKS is not a high-confidence or validated classification.\n\n'
+        'UNASSESSED means direct alignment metrics are unavailable and no implemented boundary flag fired. '
+        'REVIEW indicates an observed advisory flag, not merely missing evidence. '
+        'alignment_assessment records availability independently of those flags.\n\n'
         'Checks: event-boundary proximity to Ns/sequence ends and the union of direct '
         'SyRI alignment-child spans clipped to the event, separately in both assemblies. '
         'Span coverage includes internal alignment gaps; it is not identity. '
