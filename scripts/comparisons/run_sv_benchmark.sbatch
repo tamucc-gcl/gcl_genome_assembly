@@ -12,6 +12,11 @@ export PYTHONDONTWRITEBYTECODE=1
 tool="${1:?Usage: sbatch run_sv_benchmark.sbatch syri|syri-mummer|svim-asm /absolute/conda/environment}"
 envdir="${2:?Supply an existing tool environment}"
 suite="${3:-basic}"
+anchors="${4:-maxmatch}"
+case "$anchors" in maxmatch|mumreference) ;; *) echo 'Anchor mode must be maxmatch or mumreference' >&2; exit 2;; esac
+if [[ "$tool" != syri-mummer && "$anchors" != maxmatch ]]; then
+  echo 'Anchor selection is only supported for syri-mummer' >&2; exit 2
+fi
 case "$suite" in basic|repeats) ;; *) echo 'Suite must be basic or repeats' >&2; exit 2;; esac
 case "$tool" in syri|syri-mummer|svim-asm) ;; *) echo 'Unknown tool' >&2; exit 2;; esac
 [[ "$envdir" = /* ]] || { echo 'Environment must be an absolute path' >&2; exit 2; }
@@ -25,9 +30,11 @@ fi
 for exe in python minimap2 samtools "$caller" "${extra[@]}"; do
   [[ -x "$envdir/bin/$exe" ]] || { echo "Missing $envdir/bin/$exe" >&2; exit 2; }
 done
-out="comparisons/sv-benchmark-${tool}-${suite}-$(date +%Y%m%d-%H%M%S)-${SLURM_JOB_ID:-manual}"
+[[ -x /usr/bin/time ]] || { echo 'GNU time is required' >&2; exit 2; }
+out="comparisons/sv-benchmark-${tool}-${suite}-${anchors}-$(date +%Y%m%d-%H%M%S)-${SLURM_JOB_ID:-manual}"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
+printf 'tool\tsuite\tanchor_mode\n%s\t%s\t%s\n' "$tool" "$suite" "$anchors" > "$out/settings.tsv"
 python gcl_genome_assembly/scripts/comparisons/make_sv_benchmark.py --suite "$suite" --out "$out/fixtures"
 cp "$0" "$out/submitted_runner.sh"
 cp gcl_genome_assembly/scripts/comparisons/make_sv_benchmark.py "$out/fixture_generator.py"
@@ -60,11 +67,11 @@ for name in control inversion tandem_duplication inverted_duplication translocat
       awk 'BEGIN {OFS="\t"} !/^@/ {print $1,$2,$3,$4,$5,$6}' alignment.sam >> minimap2_alignments.tsv
       if [[ "$tool" = syri-mummer ]]; then
         # SyRI's documented MUMmer workflow; preserve raw and filtered blocks.
-        nucmer --maxmatch -c 100 -b 500 -l 50 "$ref" "$query"
+        /usr/bin/time -v -o alignment.resources.txt nucmer "--$anchors" -c 100 -b 500 -l 50 "$ref" "$query"
         show-coords -THrd out.delta > out.raw.coords
         delta-filter -m -i 90 -l 100 out.delta > out.filtered.delta
         show-coords -THrd out.filtered.delta > out.filtered.coords
-        syri -c out.filtered.coords -d out.filtered.delta -r "$ref" -q "$query"
+        /usr/bin/time -v -o syri.resources.txt syri -c out.filtered.coords -d out.filtered.delta -r "$ref" -q "$query"
       else
         syri -c alignment.sam -r "$ref" -q "$query" -k -F S
       fi

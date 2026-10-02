@@ -1,5 +1,22 @@
 # Bounded rearrangement method comparison
 
+## Current investigation: anchor uniqueness and resource cost
+
+Real pilot 1502945 timed out during nucmer after eight hours, with an empty delta and no SyRI results. Slurm reported 121096712K MaxRSS (approximately 115.5 GiB), despite the 32 GB request. Its near-zero TotalCPU cannot establish idle behavior: signal-interrupted accounting may omit child CPU. The original zero exit_status was erroneous; the real runner now requires explicit completion and handles termination signals. No evidence of an OOM kill was supplied.
+
+The user reports approximately 50% repeat content from previous annotations. This makes excessive nonunique anchors a plausible explanation, not a demonstrated cause. The next controlled comparison changes only nucmer's anchor mode to --mumreference. This requires uniqueness in the reference, not in both assemblies, so multiple query copies can still be anchored. Events confined to repeated reference sequence may lose support. Do not promote this setting based on speed alone.
+
+After syncing, use the existing environment:
+
+```bash
+for suite in basic repeats; do
+  sbatch gcl_genome_assembly/scripts/comparisons/run_sv_benchmark.sbatch \
+    syri-mummer "$PWD/comparisons/environments/syri-1.7.1" "$suite" mumreference
+done
+```
+
+Return both printed archives and their Slurm logs. Existing maxmatch outputs provide the baseline; no repeat of those or of the real chromosome run is needed yet. Fixture hashes should match the corresponding earlier suite. The fourth argument is optional and defaults to maxmatch, preserving prior commands. Output names/settings record the anchor mode, and separate GNU time reports capture alignment and SyRI resources. These tiny fixtures establish event retention, not performance at 50% repeat content. Review lost/retained raw blocks, filtering, event labels, source/destination recovery and false calls before choosing a monitored real-data rerun.
+
 ## Current next step: repeat/boundary gate
 
 After syncing, use the existing successful MUMmer/SyRI environment; no reinstall is needed:

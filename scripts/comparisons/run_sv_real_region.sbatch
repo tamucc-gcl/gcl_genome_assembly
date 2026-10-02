@@ -38,15 +38,24 @@ cp "$envdir"/conda-meta/*.json "$out/"
 printf 'role\tsource\toriginal_id\tcomparison_id\nreference\t%s\t%s\tchr1\nquery\t%s\t%s\tchr1\n' \
   "$ref" "$refchr" "$query" "$querychr" > "$out/inputs.tsv"
 # Trap retains diagnostic results even on a normal command failure.
+completed=0
+stage=extraction
 finish() {
   rc=$?
-  trap - EXIT
+  trap - EXIT TERM INT HUP
+  # A terminated foreground process can leave a misleading shell status.
+  # Success requires reaching the explicit end of the analysis as well.
+  if [[ "$rc" -eq 0 && "$completed" -ne 1 ]]; then rc=1; fi
   printf '%s\n' "$rc" > "$out/exit_status.txt"
+  printf 'stage\tcompleted\texit_status\n%s\t%s\t%s\n' "$stage" "$completed" "$rc" > "$out/run_status.tsv"
   tar --exclude='*.fa' --exclude='*.delta' -czf "${out}.tar.gz" -C "$(dirname "$out")" "$(basename "$out")"
   printf 'Return %s.tar.gz and logs/sv-real-%s.out\n' "$out" "${SLURM_JOB_ID:-manual}"
   exit "$rc"
 }
 trap finish EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 # Normalize names only in local copies of the selected, user-confirmed homologs.
 samtools faidx "$ref" "$refchr" | sed '1s/.*/>chr1/' > "$out/reference.fa"
 samtools faidx "$query" "$querychr" | sed '1s/.*/>chr1/' > "$out/query.fa"
@@ -54,8 +63,18 @@ cd "$out"
 sha256sum reference.fa query.fa > selected_sequence_sha256.txt
 exec > >(tee -a commands.log) 2>&1
 set -x
+stage=alignment
+printf '%s\n' "$stage" > stage.txt
 /usr/bin/time -v -o alignment.resources.txt nucmer --threads "${SLURM_CPUS_PER_TASK:-4}" --maxmatch -c 100 -b 500 -l 50 reference.fa query.fa
+stage=filtering
+printf '%s\n' "$stage" > stage.txt
 show-coords -THrd out.delta > out.raw.coords
 /usr/bin/time -v -o filtering.resources.txt delta-filter -m -i 90 -l 100 out.delta > out.filtered.delta
 show-coords -THrd out.filtered.delta > out.filtered.coords
+stage=syri
+printf '%s\n' "$stage" > stage.txt
 /usr/bin/time -v -o syri.resources.txt syri -c out.filtered.coords -d out.filtered.delta -r reference.fa -q query.fa
+[[ -s syri.out && -s syri.summary && -s syri.vcf ]]
+completed=1
+stage=complete
+printf '%s\n' "$stage" > stage.txt
