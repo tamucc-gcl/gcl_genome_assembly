@@ -3,7 +3,7 @@ suppressPackageStartupMessages({
   library(patchwork)
 })
 args <- commandArgs(trailingOnly = TRUE)
-stopifnot(length(args) == 2)
+stopifnot(length(args) %in% c(2, 3))
 source_dir <- args[[1]]
 out <- args[[2]]
 dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -75,7 +75,17 @@ covplot <- ggplot(coverage, aes((start + end) / 2e6, fraction, colour = role)) +
 ggsave(file.path(out, 'overview.png'), ((dot + coord_equal()) / covplot) + plot_layout(heights = c(3, 1)),
        width = 10, height = 10, dpi = 180)
 ggsave(file.path(out, 'event_sizes.png'), sizes, width = 12, height = 8, dpi = 180)
-largest <- events |> group_by(type) |> slice_max(rank_span, n = 2, with_ties = FALSE) |> ungroup()
+qc <- read_tsv(file.path(out, 'sv_qc.tsv'), show_col_types = FALSE)
+stopifnot(!anyDuplicated(qc$id), setequal(events$id, qc$id))
+events <- events |> left_join(qc |> select(id, qc_status, qc_flags), by = 'id')
+# Bounded review selection across outcomes, not a list of purported best calls.
+largest <- events |> group_by(type, qc_status) |>
+  slice_max(rank_span, n = 1, with_ties = FALSE) |> ungroup()
+if (length(args) == 3 && nzchar(args[[3]])) {
+  requested <- str_split(args[[3]], ',', simplify = FALSE)[[1]]
+  stopifnot(all(requested %in% events$id))
+  largest <- events |> filter(id %in% requested)
+}
 write_tsv(largest |> select(-refseq, -altseq), file.path(out, 'largest_candidates.tsv'))
 walk(seq_len(nrow(largest)), function(i) {
   event <- largest[i, ]
@@ -106,23 +116,16 @@ walk(seq_len(nrow(largest)), function(i) {
     xlim = c(max(0, min(event$rstart, event$rend) - pad), max(event$rstart, event$rend) + pad) / 1e6,
     ylim = c(max(0, min(event$qstart, event$qend) - pad), max(event$qstart, event$qend) + pad) / 1e6) +
     labs(title = 'Candidate detail')
-  # One-axis strips retain distant partners hidden by a two-axis local crop.
-  ref_partners <- marked + coord_cartesian(xlim = c(left, right) / 1e6,
-    ylim = c(0, lengths$bases[lengths$role == 'query']) / 1e6) +
-    labs(title = 'Reference interval + flanks: all query partners')
-  query_partners <- marked + coord_cartesian(
-    xlim = c(0, lengths$bases[lengths$role == 'reference']) / 1e6,
-    ylim = c(bottom, top) / 1e6) +
-    labs(title = 'Query interval + flanks: all reference partners')
   status <- if (is.na(event$copy_status)) 'not specified' else event$copy_status
-  plot <- ((context + detail) / (ref_partners + query_partners)) +
+  plot <- (context + detail) +
     plot_layout(guides = 'collect') +
     plot_annotation(title = paste(type_names[[event$type]], paste0('(', event$type, ')'), event$id),
       subtitle = paste('Assembly matches; dashed box: event. Black outline: direct SyRI alignment children.',
-        paste0('Copy status: ', status, '; direct assigned blocks: ', nrow(assigned)), sep = '\n'),
-      caption = paste('Bottom panels use unequal axis scales: compare locations, not slopes.',
+        paste0('Copy status: ', status, '; direct assigned blocks: ', nrow(assigned)),
+        paste0('Advisory QC: ', event$qc_status), sep = '\n'),
+      caption = paste('Local views may omit distant partners for displaced events.',
         'All partners are within this tested chromosome pair. No direct children does not mean no supporting alignment.'))
-  ggsave(file.path(out, sprintf('candidate_%02d.png', i)), plot, width = 16, height = 12, dpi = 180)
+  ggsave(file.path(out, sprintf('candidate_%02d.png', i)), plot, width = 14, height = 7, dpi = 180)
 })
 writeLines(c('# Chromosome-pair diagnostic report', '',
   'Exploratory alignment-based candidates, not validated biological events.',
@@ -131,10 +134,10 @@ writeLines(c('# Chromosome-pair diagnostic report', '',
   'Coverage is the union of filtered alignment spans, including internal gaps; it is not exact matching-base coverage.',
   'Bins use each assembly’s own coordinates. SyRI NOTAL statistics are a different measure.',
   'Alignment-child rows are excluded from event counts. Native CPG/CPL/TDM classes are retained.',
-  'Reported spans can overlap and are not net gained/lost bases. Candidate zooms show two largest regions per class.',
-  'Each candidate includes local context, detail, and two one-axis views retaining distant alignment partners.',
+  'Reported spans can overlap and are not net gained/lost bases. Candidate zooms show the largest event per class and QC status, or requested IDs.',
+  'Each candidate includes local context and detail. Displaced partners can lie outside both views.',
   'Black outlines mark direct SyRI alignment children, not independent validation. Local CPG/CPL/TDM calls may have none.',
-  'Bottom panels have unequal axis scales. They show all partners in this chromosome pair, not the whole genome.',
+  'See sv_qc.md and sv_qc.tsv for advisory checks; calls have not been filtered.',
   'Copygain/copyloss identifies the query/reference side with the extra copy; it does not establish evolutionary direction.',
   '', '![Alignment overview](overview.png)', '', '![Event sizes](event_sizes.png)', '',
   '## Candidate zooms', '',

@@ -25,7 +25,12 @@ done
 printf '%s\n' "$source_dir" > "$out/source.txt"
 cp "$script" "$out/plot_script.R"
 cp "$0" "$out/submitted_runner.sh"
-"$envdir/bin/Rscript" "$script" "$source_dir" "$out" > "$out/plot.log" 2>&1 || {
+qc_script="$(realpath gcl_genome_assembly/scripts/comparisons/sv_alignment_qc.py)"
+cp "$qc_script" "$out/"
+python3 "$qc_script" "$source_dir" "$out" > "$out/qc.log" 2>&1 || {
+  cat "$out/qc.log"; tar -czf "$out.tar.gz" "$out"; exit 1;
+}
+"$envdir/bin/Rscript" "$script" "$source_dir" "$out" "${3:-}" > "$out/plot.log" 2>&1 || {
   cat "$out/plot.log"; tar -czf "$out.tar.gz" "$out"; exit 1;
 }
 tar -czf "$out.tar.gz" "$out"
