@@ -25,7 +25,7 @@ done
 printf '%s\n' "$source_dir" > "$out/source.txt"
 cp "$script" "$out/plot_script.R"
 cp "$0" "$out/submitted_runner.sh"
-qc_script="$(realpath gcl_genome_assembly/scripts/comparisons/sv_alignment_qc.py)"
+qc_script="$(realpath gcl_genome_assembly/py_scripts/sv_alignment_qc.py)"
 cp "$qc_script" "$out/"
 python3 "$qc_script" "$source_dir" "$out" \
   --near-bp "${4:-1000}" --min-assigned-fraction "${5:-0.5}" > "$out/qc.log" 2>&1 || {

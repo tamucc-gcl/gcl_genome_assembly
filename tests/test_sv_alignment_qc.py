@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts/comparisons'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_scripts'))
 from sv_alignment_qc import assess, boundary_gap_distance, fasta_index, interval, union_size
 
 

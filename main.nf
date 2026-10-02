@@ -137,6 +137,7 @@ include { FINAL_HIC_MAPS } from './workflows/final_hic_maps.nf'
 
 // Pangenome
 include { PANGENOME } from './workflows/pangenome.nf'
+include { ASSEMBLY_SV } from './workflows/assembly_sv.nf'
 
 /*
 ========================================================================================
@@ -535,6 +536,8 @@ workflow {
     ch_species_by_taxid = ch_taxonomy.map { taxid, tax -> tuple(taxid.toString(), tax.name) }
 
     PANGENOME(ASSEMBLY_ELIGIBILITY.out.manifest)
+    ASSEMBLY_SV(ASSEMBLY_ELIGIBILITY.out.manifest)
+    ch_versions = ch_versions.mix(ASSEMBLY_SV.out.versions)
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 
     ch_pangenome_report_for_report = PANGENOME.out.report

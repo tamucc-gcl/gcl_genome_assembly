@@ -1,0 +1,11 @@
+name: assembly_sv
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - syri=1.7.1
+  - mummer4=4.0.1
+  - samtools=1.21
+  - pandas=2.2.3
+  - numpy=2.3.5
