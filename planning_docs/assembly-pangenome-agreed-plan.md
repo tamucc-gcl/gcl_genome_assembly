@@ -1,5 +1,7 @@
 # Assembly and pangenome refocus — agreed implementation plan
 
+**2026-10-02 scope/order update:** The [post-core optional analyses plan](post-core-optional-analyses-plan.md) moves optional analysis development after completion of the core Markdown report and cleanup. It adds rebuilding BlobTools/decontamination evidence to that later phase, superseding its exclusion below. Graph SV interpretation remains an intended capability but no longer blocks core release; the restricted SyRI branch is supplementary. Each accepted extension contributes directly to the existing report.
+
 **Status:** decisions agreed with the user; implementation and experiments not yet performed.  
 **Date:** 23 September 2026.  
 **Supersedes:** the recommendations in the [earlier revised plan][previous] where they conflict with the choices recorded here. The [static review][review] remains the detailed evidence ledger.

@@ -1,5 +1,7 @@
 # Pipeline rework: architecture and ordered implementation
 
+**2026-10-02 scheduling update:** Finish and accept core assemblies, QC, pangenome, the consolidated Markdown report and core cleanup before optional extensions. The former step 6 now follows step 7. [Post-core optional analyses plan](post-core-optional-analyses-plan.md) is authoritative for this ordering and details PSMC, graph SV interpretation, self-mapping, private evidence, additional exports/figures and the newly included BlobTools/decontamination resurrection. Every extension must integrate with the already functioning report. Older required-before-release SV milestones below are superseded by that decision.
+
 30 September checkpoint: see [chimera context integration and deferred two-library/chr12 review](chimera-context-integration-handoff.md). The chr12 sequence-location and CTlk biological interpretation questions are pinned until the broader improvements and two-library Hi-C rerun are complete; they do not block the remaining revamp.
 
 Status: implementation roadmap; no source edits or execution performed. 23 September 2026.
