@@ -155,7 +155,7 @@ include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
 //include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
-include { COVERAGE_BOOK } from './modules/coverage_book.nf'
+include { FINAL_READ_EVIDENCE } from './workflows/final_read_evidence.nf'
 include { REPORTING } from './workflows/reporting.nf'
 include { FINALIZE_ASSEMBLY } from './modules/finalize_assembly.nf'
 include { HARMONIZE_SCAFFOLDS } from './workflows/harmonize_scaffolds.nf'
@@ -736,20 +736,14 @@ workflow {
     ========================================================================================
     */
 
-    // Combine gap-filled assemblies with HiFi reads for coverage book
-    ch_finalized_assembly
-        .map { meta, final_fa -> tuple(meta.sample, meta, final_fa) }
-        .combine(
-            READ_PREPARATION.out.hifi.map { meta, hifi_fastq -> tuple(meta.sample, hifi_fastq) },
-            by: 0
-        )
-        .map { sample, meta, final_fa, hifi_fastq ->
-            tuple(meta, final_fa, hifi_fastq)
-        }
-        .set { ch_coverage_book_input }
-
-    if (post_on) COVERAGE_BOOK(ch_coverage_book_input, ch_coverage_book_script)
-
+    // Mapping is reusable evidence; rendering remains gated by QC/post-assembly.
+    ch_final_hifi_bam = Channel.empty()
+    if (capabilities.hifi && (params.run_final_hifi_mapping || (qc_on && post_on))) {
+        FINAL_READ_EVIDENCE(ch_finalized_assembly, READ_PREPARATION.out.hifi,
+            qc_on && post_on, ch_coverage_book_script)
+        ch_final_hifi_bam = FINAL_READ_EVIDENCE.out.bam
+        ch_versions = ch_versions.mix(FINAL_READ_EVIDENCE.out.versions)
+    }
     // =========================================================================
     //  SUMMARY REPORT  (manifest assembly + report -> workflows/reporting.nf)
     // =========================================================================
