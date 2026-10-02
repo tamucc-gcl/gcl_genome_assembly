@@ -1,5 +1,45 @@
 # Optional assembly SV integration checkpoint
 
+## Latest checkpoint: bounded execution and close-out scope
+
+The returned plan selected CMat hap1 against CLim hap1, CLim hap2 and CMat hap2 (15 chromosomes each). CPla is not chromosome-scale. CBau and CTlk remain chromosome-scale but have split chromosome representations; CTlk hap2 additionally has a composite assignment. Skip reasons now distinguish these implementation limits from unrecognized naming. These restrictions do not alter graph eligibility.
+
+`--assembly_sv_queries Sde-CLim_110_hap1` selects one explicit query. Empty selects all eligible queries. Unknown/ineligible requests fail, while other eligible rows become `not_selected` in the plan. Selected task metadata stays unchanged when broadening selection, allowing the pilot pair to resume.
+
+After tests and input validation pass, execute the first full chromosome-set pair:
+
+```bash
+sbatch gcl_genome_assembly/run_assembly_checkpoint.sbatch \
+  data/assembly_samplesheet_original.csv data/hic_readsets.none.csv assembly \
+  --run_final_hifi_mapping true --run_assembly_sv true \
+  --assembly_sv_plan_only false --assembly_sv_queries Sde-CLim_110_hap1
+```
+
+In parallel, audit existing final HiFi BAM provenance using the already-tested environment's samtools (not a new mapping):
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_final_hifi_audit.sbatch \
+  "$PWD/comparisons/environments/syri-1.7.1" genome_assembly
+```
+
+Return its generated `comparisons/final-hifi-audit-*.tar.gz` and job log. It reads final FASTAs for checksums; no BAMs or FASTAs are archived. Successful provenance checks do not validate biological events or raw-read identities.
+
+After the SV run, collect compact reports:
+
+```bash
+stamp=$(date +%Y%m%d-%H%M%S)
+find genome_assembly/post_assembly/sv -type f \
+  \( -name 'sv_plan.*' -o -name 'sv_qc*' -o -name '*provenance.json' \
+     -o -name '*sha256' -o -name 'versions.tsv' -o -name 'syri.summary' \) \
+  > "comparisons/assembly-sv-${stamp}.files"
+tar -czf "comparisons/assembly-sv-${stamp}.tar.gz" \
+  -T "comparisons/assembly-sv-${stamp}.files"
+```
+
+Return that archive plus matching Nextflow/Slurm logs and pipeline trace for resource/cache review. Retain native calls, delta and BAM files on cluster. Do not mix older published pair outputs with proof of current execution; reconcile reports against this run's plan and trace.
+
+First-release acceptance: successful multi-chromosome alignment/calling, unchanged call preservation, correct coordinates/provenance, explicit skipped coverage and bounded resource use; then expand to all currently eligible pairs. Mark as assembly-derived calls with advisory QC. Later focused work: split/composite chromosome support, repeat/alternative-placement disambiguation, read-supported confidence filtering, and more informative rearrangement diagrams. Do not label this release biologically validated or imply that skipped assemblies have no SVs. Unified Markdown inclusion remains part of the broader report integration.
+
 2026-10-02. Implemented, statically reviewed, awaiting cluster tests. No local pipeline or analysis execution. Short-read work remains parked.
 
 ## Contract

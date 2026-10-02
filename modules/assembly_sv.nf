@@ -12,8 +12,13 @@ process ASSEMBLY_SV_PLAN {
     path 'sv_plan.tsv', emit: table
     path 'sv_plan.md', emit: report
     script:
+    def selected = (params.assembly_sv_queries ?: '').toString().split(',').collect { it.trim() }.findAll { it }
+    def selection_json = groovy.json.JsonOutput.toJson(selected)
     """
-    python3 ${planner} ${manifest}
+    cat > selection.json <<'SV_SELECTION'
+${selection_json}
+SV_SELECTION
+    python3 ${planner} ${manifest} --selection selection.json
     """
 }
 

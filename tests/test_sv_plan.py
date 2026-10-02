@@ -30,7 +30,8 @@ class SVPlanTests(unittest.TestCase):
 
     def test_composites_and_fragmented_skip(self):
         for field, value, reason in [
-                ('reference_contigs', ['chr1_1+chr2_1'], 'ambiguous_or_unharmonized_chromosome_names'),
+                ('reference_contigs', ['chr1_1+chr2_1'], 'composite_chromosome_assignment_not_supported'),
+                ('reference_contigs', ['chr1_1', 'chr1_2'], 'split_chromosome_representation_not_supported'),
                 ('chromosome_scale', False, 'not_chromosome_scale')]:
             data = self.data()
             data['assemblies'][1][field] = value
@@ -47,6 +48,16 @@ class SVPlanTests(unittest.TestCase):
         data = self.data()
         data['cohorts'][0]['missing'] = ['absent']
         self.assertFalse(plan(data)['pairs'])
+
+    def test_selection_preserves_pair_and_records_unselected(self):
+        data = self.data()
+        data['assemblies'].append(dict(data['assemblies'][1], id='query2'))
+        baseline = plan(data)['pairs'][0]
+        result = plan(data, ['query'])
+        self.assertEqual(result['pairs'], [baseline])
+        self.assertEqual(next(r for r in result['outcomes'] if r['query'] == 'query2')['status'], 'not_selected')
+        with self.assertRaises(ValueError):
+            plan(data, ['unknown'])
 
 
 if __name__ == '__main__':

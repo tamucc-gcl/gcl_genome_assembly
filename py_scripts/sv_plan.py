@@ -12,7 +12,17 @@ def chromosomes(row):
     return sorted(names) if names and all(re.fullmatch(r'chr[0-9]+_1', n) for n in names) and len(set(names)) == len(names) else []
 
 
-def plan(data):
+def chromosome_issue(row):
+    names = row.get('reference_contigs', [])
+    if any('+' in n for n in names):
+        return 'composite_chromosome_assignment_not_supported'
+    if names and all(re.fullmatch(r'chr[0-9]+_[0-9]+', n) for n in names):
+        if any(not n.endswith('_1') for n in names):
+            return 'split_chromosome_representation_not_supported'
+    return 'missing_or_unrecognized_chromosome_names'
+
+
+def plan(data, selected=None):
     assemblies = {a['id']: a for a in data['assemblies']}
     if len(assemblies) != len(data['assemblies']):
         raise ValueError('Duplicate assembly IDs')
@@ -38,8 +48,10 @@ def plan(data):
                 reason = 'unsupported_assembly_representation'
             elif not query.get('chromosome_scale') or not ref.get('chromosome_scale'):
                 reason = 'not_chromosome_scale'
-            elif not ref_chroms or not chromosomes(query):
-                reason = 'ambiguous_or_unharmonized_chromosome_names'
+            elif not ref_chroms:
+                reason = 'reference_' + chromosome_issue(ref)
+            elif not chromosomes(query):
+                reason = chromosome_issue(query)
             elif chromosomes(query) != ref_chroms:
                 reason = 'chromosome_sets_differ'
             row = dict(taxid=taxid, reference=ref['id'] if ref else '', query=query['id'],
@@ -48,14 +60,25 @@ def plan(data):
             if not reason:
                 pairs.append(dict(row, key='pair_' + query['id'].encode().hex(),
                     reference_fasta=ref['fasta'], query_fasta=query['fasta'], chromosomes=ref_chroms))
+    if selected:
+        selected = set(selected)
+        unavailable = selected - {p['query'] for p in pairs}
+        if unavailable:
+            raise ValueError('Requested queries are unknown or ineligible: ' + ', '.join(sorted(unavailable)))
+        pairs = [p for p in pairs if p['query'] in selected]
+        for row in rows:
+            if row['status'] == 'planned' and row['query'] not in selected:
+                row.update(status='not_selected', reason='outside_requested_query_set')
     return dict(schema_version=1, pairs=pairs, outcomes=rows)
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path)
+    p.add_argument('--selection', type=Path)
     a = p.parse_args()
-    result = plan(json.loads(a.manifest.read_text()))
+    selected = json.loads(a.selection.read_text()) if a.selection else []
+    result = plan(json.loads(a.manifest.read_text()), selected)
     Path('sv_plan.json').write_text(json.dumps(result, indent=2) + '\n')
     with open('sv_plan.tsv', 'w', newline='') as handle:
         w = csv.DictWriter(handle, fieldnames=['taxid', 'reference', 'query', 'status', 'reason'], delimiter='\t')
