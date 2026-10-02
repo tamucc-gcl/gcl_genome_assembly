@@ -2,6 +2,20 @@
 
 ## Current investigation: anchor uniqueness and resource cost
 
+Corrected jobs 1503144/1503145 completed all five eligible cases in each suite. Event labels and reported intervals match the previous maxmatch results reviewed: clean controls, INV, CPG/TDM, INVDP and TRANS, including the same extra 3 bp deletion in the translocation case. Nucmer took 0.10–0.18 seconds and approximately 19–25 MiB peak RSS on these small inputs; this is not evidence of chromosome-scale resource improvement. No observed loss on these fixtures justifies advancing to the real pilot, not general repeat sensitivity claims.
+
+After syncing, rerun the same chromosome pair with the new sixth argument (no environment changes):
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_sv_real_region.sbatch \
+  "$PWD/comparisons/environments/syri-1.7.1" \
+  genome_assembly/assembly/final/Sde-CMat_203_hap1.fasta \
+  genome_assembly/assembly/final/Sde-CBau_104_hap1.fasta \
+  chr15_1 chr15_1 mumreference
+```
+
+Keep the eight-hour/32 GB pilot request initially. While running, inspect `sstat -j JOBID.batch --format=JobID,AveCPU,MaxRSS -P`; after completion collect `sacct -j JOBID --format=JobID,State,Elapsed,AllocCPUS,TotalCPU,MaxRSS,ExitCode -P`. These are scheduler snapshots, not proof of specific algorithmic behavior. Return the archive, Slurm log and accounting. Retain the prior failed comparison; no production rerun is involved. The real runner preserves maxmatch as the default for old commands and records the selected mode explicitly.
+
 Correction after jobs 1503142/1503143: all eligible cases failed at command parsing because MUMmer 4.0.1 does not accept --mumreference. No alignment/caller sensitivity or resource conclusions can be drawn from those runs. In the pinned version, reference-unique anchors are the default when neither --maxmatch nor --mum is specified (verified in the v4.0.1 src/umd/nucmer_cmdline.yaggo source). The runner now maps its user-facing mumreference label to an empty anchor-option array, while maxmatch still supplies --maxmatch. The submission commands below remain unchanged. Repeat both small jobs after syncing; no environment changes needed.
 
 Real pilot 1502945 timed out during nucmer after eight hours, with an empty delta and no SyRI results. Slurm reported 121096712K MaxRSS (approximately 115.5 GiB), despite the 32 GB request. Its near-zero TotalCPU cannot establish idle behavior: signal-interrupted accounting may omit child CPU. The original zero exit_status was erroneous; the real runner now requires explicit completion and handles termination signals. No evidence of an OOM kill was supplied.

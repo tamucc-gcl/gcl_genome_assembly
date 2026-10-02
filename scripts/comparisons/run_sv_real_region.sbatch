@@ -13,6 +13,10 @@ ref="${2:?Reference FASTA}"
 query="${3:?Query FASTA}"
 refchr="${4:?Reference chromosome ID}"
 querychr="${5:?Query chromosome ID}"
+anchors="${6:-maxmatch}"
+case "$anchors" in maxmatch|mumreference) ;; *) echo 'Anchor mode must be maxmatch or mumreference' >&2; exit 2;; esac
+anchor_args=()
+if [[ "$anchors" = maxmatch ]]; then anchor_args=(--maxmatch); fi
 [[ "$envdir" = /* ]] || { echo 'Environment must be absolute' >&2; exit 2; }
 export PATH="$envdir/bin:$PATH"
 for exe in samtools nucmer delta-filter show-coords show-snps syri; do
@@ -33,6 +37,7 @@ check_chromosome "$query" "$querychr" || { echo 'Query ID missing/duplicated or 
 out="comparisons/sv-real-$(date +%Y%m%d-%H%M%S)-${SLURM_JOB_ID:-manual}"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
+printf '%s\n' "$anchors" > "$out/anchor_mode.txt"
 cp "$0" "$out/submitted_runner.sh"
 cp "$envdir"/conda-meta/*.json "$out/"
 printf 'role\tsource\toriginal_id\tcomparison_id\nreference\t%s\t%s\tchr1\nquery\t%s\t%s\tchr1\n' \
@@ -65,7 +70,7 @@ exec > >(tee -a commands.log) 2>&1
 set -x
 stage=alignment
 printf '%s\n' "$stage" > stage.txt
-/usr/bin/time -v -o alignment.resources.txt nucmer --threads "${SLURM_CPUS_PER_TASK:-4}" --maxmatch -c 100 -b 500 -l 50 reference.fa query.fa
+/usr/bin/time -v -o alignment.resources.txt nucmer --threads "${SLURM_CPUS_PER_TASK:-4}" "${anchor_args[@]}" -c 100 -b 500 -l 50 reference.fa query.fa
 stage=filtering
 printf '%s\n' "$stage" > stage.txt
 show-coords -THrd out.delta > out.raw.coords
