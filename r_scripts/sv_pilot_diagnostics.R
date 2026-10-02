@@ -17,6 +17,10 @@ calls <- read_tsv(file.path(source_dir, 'syri.out'), col_types = cols(.default =
 lengths <- read_tsv(file.path(out, 'sequence_lengths.tsv'), show_col_types = FALSE)
 stopifnot(n_distinct(coords$ref) == 1, n_distinct(coords$query) == 1)
 types <- c('INV', 'TRANS', 'INVTR', 'DUP', 'INVDP', 'CPG', 'CPL', 'TDM')
+type_names <- c(INV = 'Inversion', TRANS = 'Translocation',
+  INVTR = 'Inverted translocation', DUP = 'Duplication',
+  INVDP = 'Inverted duplication', CPG = 'Copy gain',
+  CPL = 'Copy loss', TDM = 'Tandem repeat')
 events <- calls |> filter(type %in% types) |>
   mutate(reference_span = abs(rend - rstart) + 1,
          query_span = abs(qend - qstart) + 1,
@@ -75,11 +79,22 @@ largest <- events |> group_by(type) |> slice_max(rank_span, n = 2, with_ties = F
 write_tsv(largest |> select(-refseq, -altseq), file.path(out, 'largest_candidates.tsv'))
 walk(seq_len(nrow(largest)), function(i) {
   event <- largest[i, ]
+  # Direct alignment children identify SyRI's assignment, not independent support.
+  assigned <- calls |> filter(parent == event$id, str_ends(type, 'AL'))
+  write_tsv(assigned |> select(-refseq, -altseq),
+    file.path(out, sprintf('candidate_%02d_assigned_blocks.tsv', i)))
   left <- max(0, min(event$rstart, event$rend) - 250000)
   right <- max(event$rstart, event$rend) + 250000
   bottom <- max(0, min(event$qstart, event$qend) - 250000)
   top <- max(event$qstart, event$qend) + 250000
   marked <- dot +
+    geom_segment(data = assigned,
+      aes(rstart / 1e6, qstart / 1e6, xend = rend / 1e6, yend = qend / 1e6),
+      inherit.aes = FALSE, colour = 'black', linewidth = 1.8) +
+    geom_segment(data = assigned,
+      aes(rstart / 1e6, qstart / 1e6, xend = rend / 1e6, yend = qend / 1e6,
+          colour = if_else(qstart <= qend, 'Forward', 'Reverse')),
+      inherit.aes = FALSE, linewidth = .9) +
     geom_rect(data = event, inherit.aes = FALSE,
       aes(xmin = pmin(rstart, rend) / 1e6, xmax = pmax(rstart, rend) / 1e6,
           ymin = pmin(qstart, qend) / 1e6, ymax = pmax(qstart, qend) / 1e6),
@@ -91,10 +106,23 @@ walk(seq_len(nrow(largest)), function(i) {
     xlim = c(max(0, min(event$rstart, event$rend) - pad), max(event$rstart, event$rend) + pad) / 1e6,
     ylim = c(max(0, min(event$qstart, event$qend) - pad), max(event$qstart, event$qend) + pad) / 1e6) +
     labs(title = 'Candidate detail')
-  plot <- (context + detail) + plot_layout(guides = 'collect') +
-    plot_annotation(title = paste(event$type, event$id),
-      subtitle = 'Assembly alignment blocks, not reads. Dashed box: reported reference/query intervals.')
-  ggsave(file.path(out, sprintf('candidate_%02d.png', i)), plot, width = 14, height = 7, dpi = 180)
+  # One-axis strips retain distant partners hidden by a two-axis local crop.
+  ref_partners <- marked + coord_cartesian(xlim = c(left, right) / 1e6,
+    ylim = c(0, lengths$bases[lengths$role == 'query']) / 1e6) +
+    labs(title = 'Reference interval + flanks: all query partners')
+  query_partners <- marked + coord_cartesian(
+    xlim = c(0, lengths$bases[lengths$role == 'reference']) / 1e6,
+    ylim = c(bottom, top) / 1e6) +
+    labs(title = 'Query interval + flanks: all reference partners')
+  status <- if (is.na(event$copy_status)) 'not specified' else event$copy_status
+  plot <- ((context + detail) / (ref_partners + query_partners)) +
+    plot_layout(guides = 'collect') +
+    plot_annotation(title = paste(type_names[[event$type]], paste0('(', event$type, ')'), event$id),
+      subtitle = paste('Assembly matches; dashed box: event. Black outline: direct SyRI alignment children.',
+        paste0('Copy status: ', status, '; direct assigned blocks: ', nrow(assigned)), sep = '\n'),
+      caption = paste('Bottom panels use unequal axis scales: compare locations, not slopes.',
+        'All partners are within this tested chromosome pair. No direct children does not mean no supporting alignment.'))
+  ggsave(file.path(out, sprintf('candidate_%02d.png', i)), plot, width = 16, height = 12, dpi = 180)
 })
 writeLines(c('# Chromosome-pair diagnostic report', '',
   'Exploratory alignment-based candidates, not validated biological events.',
@@ -104,6 +132,10 @@ writeLines(c('# Chromosome-pair diagnostic report', '',
   'Bins use each assembly’s own coordinates. SyRI NOTAL statistics are a different measure.',
   'Alignment-child rows are excluded from event counts. Native CPG/CPL/TDM classes are retained.',
   'Reported spans can overlap and are not net gained/lost bases. Candidate zooms show two largest regions per class.',
+  'Each candidate includes local context, detail, and two one-axis views retaining distant alignment partners.',
+  'Black outlines mark direct SyRI alignment children, not independent validation. Local CPG/CPL/TDM calls may have none.',
+  'Bottom panels have unequal axis scales. They show all partners in this chromosome pair, not the whole genome.',
+  'Copygain/copyloss identifies the query/reference side with the extra copy; it does not establish evolutionary direction.',
   '', '![Alignment overview](overview.png)', '', '![Event sizes](event_sizes.png)', '',
   '## Candidate zooms', '',
   sprintf('![Candidate %02d](candidate_%02d.png)', seq_len(nrow(largest)), seq_len(nrow(largest)))),
