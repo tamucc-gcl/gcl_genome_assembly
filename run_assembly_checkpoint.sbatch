@@ -67,6 +67,7 @@ nextflow -log "${PROJECT_ROOT}/logs/nextflow_${mode}_${SLURM_JOB_ID:-manual}.log
         --inspector_scaffold_assemblyerror_min_bp 2000000 \
         --inspector_scaffold_min_assembly_error_bp 25000 \
         --inspector_scaffold_max_assembly_error_bp 200000000 \
+        --run_final_hifi_mapping true \
         --pairwise_alignment_mode 'all' \
         --chimera_break false \
         --run_pangenome "$graph_enabled" \
