@@ -3,7 +3,7 @@
 import argparse
 import csv
 import gzip
-from chimera_intervals import intervals, compatible_gaps, verdict_for_interval
+from chimera_intervals import intervals, compatible_gaps, verdict_for_interval, arm_context
 
 FIELDS = ["assembly", "scaffold", "name", "cut_bp", "left_chrom", "right_chrom",
           "left_component", "right_component", "n_components", "n_transitions",
@@ -11,7 +11,10 @@ FIELDS = ["assembly", "scaffold", "name", "cut_bp", "left_chrom", "right_chrom",
           "reason", "span_bp", "vote", "candidate_verdict", "transition_lo",
           "transition_hi", "evidence_only", "chromosome_member", "location_status",
           "left_anchor_start", "left_anchor_end", "right_anchor_start", "right_anchor_end",
-          "minimum_anchor_bp", "compatible_gap_count"]
+          "minimum_anchor_bp", "compatible_gap_count", "left_arm_aligned_bp",
+          "right_arm_aligned_bp", "left_arm_fraction", "right_arm_fraction",
+          "assigned_union_bp", "arm_count", "arm_pattern", "structural_status",
+          "decision_scope"]
 
 def read_rows(path):
     with open(path) as handle:
@@ -78,6 +81,7 @@ def main():
             gap = matches[0][1] if unique else {}
             decision = verdict_for_interval(candidate, interval, len(changes)) if unique else "REVIEW"
             row = {k: "." for k in FIELDS}
+            row.update(arm_context(alns[sc], interval, minimum))
             row.update(assembly=a.assembly, scaffold=sc, name=candidate["name"], cut_bp=str(pos),
                        left_chrom=interval["left"], right_chrom=interval["right"],
                        n_transitions=str(len(changes)), agp_join_bp=str(pos) if unique else ".",
@@ -95,7 +99,10 @@ def main():
                        location_status="unique_supported_gap" if unique else "unresolved",
                        left_anchor_start=str(interval["left_start"]), left_anchor_end=str(interval["lo"]),
                        right_anchor_start=str(interval["hi"]), right_anchor_end=str(interval["right_end"]),
-                       minimum_anchor_bp=str(minimum), compatible_gap_count=str(len(matches)))
+                       minimum_anchor_bp=str(minimum), compatible_gap_count=str(len(matches)),
+                       structural_status="alignment_transition_requires_adjudication",
+                       decision_scope="single_transition_vote" if len(changes) == 1 else
+                                      "junction_vote_not_available")
             output.append(row)
     with open(a.out, "w") as handle:
         w = csv.DictWriter(handle, fieldnames=FIELDS, delimiter="\t", lineterminator="\n")

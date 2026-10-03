@@ -10,6 +10,18 @@ SCRIPT = Path(__file__).resolve().parents[1] / "py_scripts" / "chimera_evidence.
 
 
 class EvidenceReportingTests(unittest.TestCase):
+    def test_local_minimum_excludes_distant_minimum_and_incomplete_windows(self):
+        profile = [0, 10, 10, float("nan"), 4, 2, 4, 10, 10, 10]
+        result = self.module.local_profile(profile, 10, 50, 50, 10)
+        self.assertEqual(result["min_bp"], 50)
+        self.assertEqual(result["valid_bins"], 3)
+        self.assertEqual(result["min_over_flanks"], 0.2)
+
+    def test_local_missing_evidence_is_not_zero_support(self):
+        result = self.module.local_profile([float("nan")]*10, 10, 50, 50, 10)
+        self.assertEqual(result["status"], "no_complete_local_windows")
+        self.assertNotIn("min_value", result)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

@@ -1,50 +1,14 @@
 #!/usr/bin/env python3
-# ======================================================================================
-# chimera_evidence.py
-#
-# Independent evidence for ONE chimeric-scaffold candidate: Hi-C cross-contact profile,
-# interstitial and terminal telomere signal, nearest N-gap, and a refined cut point.
-#
-# WHAT THIS IS FOR
-# ----------------
-# harmonize_names.py detects composites and votes on them across haplotypes, which is the
-# only signal independent of how the scaffold was BUILT. That vote is the gate. This adds the
-# evidence that locates the cut precisely and lets a human confirm the call:
-#
-#   Hi-C depletion   locates the junction to ~100 kb, far better than the PAF's 1 Mb bins
-#   telomeres        independent of Hi-C; diagnostic of END-TO-END fusion specifically
-#   N-gap            the cut point that severs nothing
-#
-# THE HI-C CAVEAT, STATED ONCE
-# ----------------------------
-# Hi-C made the join, so it cannot independently justify breaking it. It is used to LOCATE,
-# not to justify. And it must be measured correctly: the first attempt on the chr5+chr9
-# scaffold returned 1.209 (elevated) from measuring at 35 Mb -- a 5 Mb-bin PAF estimate --
-# with edge-truncated windows. Scanned properly with full windows only, the minimum is at
-# 37.4 Mb with a ratio of 0.748. Depleted. A surprising number got explained rather than
-# re-checked, and a design decision was built on the artifact.
-#
-# So: FULL WINDOWS ONLY, and SCAN for the minimum rather than assuming its position.
-#
-# TELOMERE ABSENCE IS NOT EVIDENCE AGAINST
-# ----------------------------------------
-# A mid-arm fusion leaves no interstitial array. Measured: chr5_1+chr9_1 has arrays in BOTH
-# orientations over 37.6-43.7 Mb peaking at 148 while its own termini are near-silent --
-# two chromosome ends fused back to back. chr6_3+chr12_1 has nothing at its junction but
-# fwd=353 at position 0 -- an intact chromosome arm from its own telomere, joined to a
-# truncated partner. Both are real chimeras; only one has telomere corroboration.
-#
-# Dependencies: cooler, numpy, matplotlib.
-#
-# USAGE
-#   chimera_evidence.py --cool <per-scaffold .cool> --fasta <mini reference .fa> \
-#       --candidates <chimera_candidates.tsv> --assembly <id> --scaffold <name> \
-#       --telomere-motif CCCTAA --outdir . [--label <prefix>]
-# ======================================================================================
+"""Descriptive per-junction Hi-C, tidk and gap evidence.
+Hi-C was used in scaffolding and is corroboration, not independent validation.
+Telomere window counts do not establish a fusion. No metric here authorizes a cut.
+"""
 
 import argparse
 import os
 import sys
+import math
+import statistics
 
 import numpy as np
 
@@ -164,7 +128,7 @@ def summarise_profile(prof, res, n_low=5):
     # low region is common in sparse bins. Without this, which window counts as "the
     # minimum" varies between runs on the same data.
     order = np.argsort(np.where(ok, prof, np.inf), kind="stable")
-    lowest = [int(x) for x in order[:n_low]]
+    lowest = [int(x) for x in order if ok[x]][:n_low]
     mn = lowest[0]
     # The LONGEST contiguous run among the lowest windows -- not the run through whichever
     # one sorted first. With ties that choice is arbitrary even under a stable sort (the
@@ -185,6 +149,33 @@ def summarise_profile(prof, res, n_low=5):
         "n_low_contiguous": contiguous,
         "low_bp": [int(k) * res for k in sorted(lowest)],
     }
+
+
+def local_profile(prof, res, lo, hi, radius):
+    """Local minimum with an explicit search interval and flanking baseline.
+
+    Non-finite bins (including incomplete contact windows) are excluded. This
+    describes Hi-C corroboration; it never relocates or authorizes a cut.
+    """
+    if prof is None:
+        return {"status": "unavailable"}
+    valid = [(i*res, float(v)) for i, v in enumerate(prof) if math.isfinite(float(v))]
+    nearby = [(p, v) for p, v in valid if lo-radius <= p <= hi+radius]
+    background = [v for p, v in valid
+                  if lo-2*radius <= p < lo-radius or hi+radius < p <= hi+2*radius]
+    result = dict(search_lo=max(0, lo-radius), search_hi=hi+radius,
+                  valid_bins=len(nearby), background_bins=len(background))
+    if not nearby:
+        return dict(result, status="no_complete_local_windows")
+    pos, value = min(nearby, key=lambda item: (item[1], item[0]))
+    result.update(min_bp=pos, min_value=value,
+                  minimum_inside_transition="yes" if lo <= pos <= hi else "no")
+    if not background:
+        return dict(result, status="no_flanking_baseline")
+    baseline = statistics.median(background)
+    return dict(result, status="available" if baseline > 0 else "zero_flanking_baseline",
+                background_median=baseline,
+                min_over_flanks=value/baseline if baseline > 0 else "NA")
 
 
 # --------------------------------------------------------------------------------------
@@ -384,7 +375,11 @@ def main():
                         "bins, so +/-1 bin is expected -- the measured disagreements were "
                         "0.4 and 1.4 Mb.")
     p.add_argument("--gap-snap-window", type=int, default=500000)
+    p.add_argument("--local-hic-radius", type=int, default=2000000,
+                   help="Local Hi-C search flank in bp; diagnostic only, never gap snapping")
     a = p.parse_args()
+    if a.local_hic_radius <= 0:
+        p.error("Local Hi-C radius must be positive")
 
     os.makedirs(a.outdir, exist_ok=True)
     lab = a.label or ("%s.%s" % (a.assembly, a.scaffold.replace("+", "_")))
@@ -439,6 +434,9 @@ def main():
           if containing and not diagnostic_only else None)
     # Evidence evaluates the exact proposed position; it never moves a cut.
     cut_bp = target
+    transition_lo = int(row["transition_lo"]) if row.get("transition_lo", ".") != "." else cut_bp
+    transition_hi = int(row["transition_hi"]) if row.get("transition_hi", ".") != "." else cut_bp
+    local_hic = local_profile(prof, res, transition_lo, transition_hi, a.local_hic_radius)
     notes = ["diagnostic_midpoint_not_a_cut"] if diagnostic_only else []
     verdict = row.get("candidate_verdict", row.get("verdict", "?"))
     if hic is None:
@@ -471,6 +469,8 @@ def main():
         out.write("# Descriptive review evidence; neither Hi-C depletion nor telomere signal authorizes a cut.\n")
         out.write("# Hi-C minimum is scaffold-wide; evidence_position_bp is the position assessed here.\n")
         out.write("metric\tvalue\n")
+        for key, value in local_hic.items():
+            out.write("hic_local_%s\t%s\n" % (key, value))
         for k, v in (("assembly", a.assembly), ("scaffold", a.scaffold),
                      ("name", row.get("name", ".")), ("span_bp", span),
                      ("vote", row.get("vote", ".")),

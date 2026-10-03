@@ -270,10 +270,29 @@ def assess(a):
         writer.writeheader()
         for j in data["joins"]:
             writer.writerow(dict(j, source_sha256=data["source_sha256"], current_sha256=digest))
+    # Separate precise location recovery from biological adjudication. This table
+    # deliberately does not pretend that read evidence has already been assessed.
+    for decision, row in zip(transition_rows, [r for r in called if r.get("transition_lo", ".") != "."]):
+        decision.update(
+            coordinate_status=row.get("location_status", "unresolved"),
+            coordinate_reason=row.get("reason", "."),
+            cut_location_eligible=row.get("callable", "no"),
+            structural_status=row.get("structural_status", "alignment_transition_requires_adjudication"),
+            read_status="not_assessed_in_join_recovery",
+            action="REVIEW", action_reason="junction_evidence_adjudication_pending",
+            gap_origin=row.get("agp_source", "."),
+            decision_scope=row.get("decision_scope", "."))
+        for key in ("left_arm_aligned_bp", "right_arm_aligned_bp", "left_arm_fraction",
+                    "right_arm_fraction", "assigned_union_bp", "arm_count", "arm_pattern"):
+            decision[key] = row.get(key, ".")
     transition_fields = ["assembly", "scaffold", "transition_id", "transition_lo", "transition_hi",
                          "left_chrom", "right_chrom", "profile_allowed", "recovered_join_ids",
                          "recovered_join_count", "diagnostic_bp", "profile_status", "auto_cut",
-                         "assembly_sha256"]
+                         "assembly_sha256", "coordinate_status", "coordinate_reason",
+                         "cut_location_eligible", "structural_status", "read_status", "action",
+                         "action_reason", "gap_origin", "decision_scope", "left_arm_aligned_bp",
+                         "right_arm_aligned_bp", "left_arm_fraction", "right_arm_fraction",
+                         "assigned_union_bp", "arm_count", "arm_pattern"]
     with open(a.prefix+".transition_intervals.tsv", "w") as out:
         writer = csv.DictWriter(out, fieldnames=transition_fields, delimiter="\t", lineterminator="\n")
         writer.writeheader()

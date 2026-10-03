@@ -107,6 +107,10 @@ class OlderJoinTests(unittest.TestCase):
         transitions = rows("a.transition_intervals.tsv")[1]
         self.assertEqual(transitions[0]["recovered_join_ids"], "J00000000")
         self.assertEqual(transitions[0]["auto_cut"], "no")
+        self.assertEqual(transitions[0]["cut_location_eligible"], "yes")
+        self.assertEqual(transitions[0]["coordinate_status"], "unique_supported_gap")
+        self.assertEqual(transitions[0]["action"], "REVIEW")
+        self.assertEqual(transitions[0]["read_status"], "not_assessed_in_join_recovery")
 
     def test_replaced_gap_not_promoted_to_safe_join(self):
         self.assess_fixture("ACGT")
@@ -115,6 +119,7 @@ class OlderJoinTests(unittest.TestCase):
         self.assertTrue(all(r["callable"] == "no" and r["evidence_only"] == "yes" for r in calls))
         self.assertEqual(rows("a.older_join_audit.tsv")[1][0]["status"],
                          "unresolved_gap_changed_or_replaced")
+        self.assertEqual(rows("a.transition_intervals.tsv")[1][0]["cut_location_eligible"], "no")
 
 
 if __name__ == "__main__":

@@ -3,10 +3,27 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_scripts"))
-from chimera_intervals import regions, intervals, compatible_gaps, verdict_for_interval
+from chimera_intervals import regions, intervals, compatible_gaps, verdict_for_interval, arm_context
 
 
 class IntervalTests(unittest.TestCase):
+    def test_out_and_back_is_visible_without_promoting_a_cut(self):
+        alns = [(0, 1000, "chr1"), (1010, 1020, "chr2"), (1030, 2030, "chr1")]
+        changes = intervals(alns, 1)
+        context = arm_context(alns, changes[0], 1)
+        self.assertEqual(context["arm_pattern"], "out_and_back")
+        self.assertEqual(context["right_arm_aligned_bp"], 10)
+        self.assertLess(context["right_arm_fraction"], 0.01)
+        self.assertEqual(len(changes), 2)
+
+    def test_arm_support_is_union_not_bounding_span_or_duplicate_sum(self):
+        alns = [(0, 100, "chr1"), (0, 100, "chr1"), (200, 300, "chr1"),
+                (400, 600, "chr2")]
+        context = arm_context(alns, intervals(alns, 1)[0], 1)
+        self.assertEqual(context["left_arm_aligned_bp"], 200)
+        self.assertEqual(context["left_arm_fraction"], 0.5)
+        self.assertEqual(context["arm_pattern"], "chromosome_transition")
+
     def test_duplicate_alignments_do_not_add_support(self):
         self.assertEqual(regions([(0, 8, "chr1")]*5, 10), [])
 

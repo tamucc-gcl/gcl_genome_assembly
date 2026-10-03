@@ -38,6 +38,33 @@ def compatible_gaps(interval, gaps):
     # gaps are (midpoint, source record). No nearest-gap snapping.
     return [(pos, row) for pos, row in gaps if interval["lo"] <= pos <= interval["hi"]]
 
+
+def arm_context(alignments, interval, minimum):
+    """Descriptive arm support; no absolute chromosome-size gate or cut authorization.
+
+    Consecutive same-label anchors form an arm even across unaligned sequence.
+    Support is union aligned bases, not the arm's bounding span. All other arms
+    remain visible: an A-B-A excursion is not silently converted into an A-A join.
+    """
+    arms = []
+    for lo, hi, chrom in regions(alignments, minimum):
+        if arms and arms[-1]["chrom"] == chrom:
+            arms[-1]["end"] = hi
+            arms[-1]["bp"] += hi-lo
+        else:
+            arms.append(dict(start=lo, end=hi, chrom=chrom, bp=hi-lo))
+    total = sum(arm["bp"] for arm in arms)
+    for i, (left, right) in enumerate(zip(arms, arms[1:])):
+        if left["end"] != interval["lo"] or right["start"] != interval["hi"]:
+            continue
+        excursion = ((i > 0 and arms[i-1]["chrom"] == right["chrom"]) or
+                     (i+2 < len(arms) and arms[i+2]["chrom"] == left["chrom"]))
+        return dict(left_arm_aligned_bp=left["bp"], right_arm_aligned_bp=right["bp"],
+                    left_arm_fraction=left["bp"]/total, right_arm_fraction=right["bp"]/total,
+                    assigned_union_bp=total, arm_count=len(arms),
+                    arm_pattern="out_and_back" if excursion else "chromosome_transition")
+    raise ValueError("Transition has no matching unambiguous arms")
+
 def verdict_for_interval(candidate, interval, number):
     # Scaffold-wide votes cannot authorize one of several unadjudicated junctions.
     # Preserve only a single two-member candidate's conservative decision.
