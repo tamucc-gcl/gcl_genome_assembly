@@ -45,6 +45,10 @@ def main():
     dest = Path(a.outdir)
     dest.mkdir(parents=True, exist_ok=True)
     handles = {s: (dest / f"{a.label}.{s}.pairs").open("w") for s in sorted(want)}
+    # Keep alternative partners without mixing them into within-scaffold profiles.
+    partners = gzip.open(dest / f"{a.label}.alternative_partners.pairs.gz", "wt")
+    partners.write("## pairs format v1.0\n#sorted: none\n")
+    partners.write("#columns: readID chrom1 pos1 chrom2 pos2 strand1 strand2 pair_type\n")
     stats = Counter()
 
     def locate(chrom, pos):
@@ -77,6 +81,14 @@ def main():
                 v2, t2 = y
                 if v1[0] != v2[0]:
                     stats["skipped_cross_scaffold"] += 1
+                    if v1[0] in want or v2[0] in want:
+                        s1, s2 = f[5], f[6]
+                        if v1[5] == "-":
+                            s1 = {"+": "-", "-": "+"}.get(s1, s1)
+                        if v2[5] == "-":
+                            s2 = {"+": "-", "-": "+"}.get(s2, s2)
+                        partners.write(f"{f[0]}\t{v1[0]}\t{t1}\t{v2[0]}\t{t2}\t{s1}\t{s2}\t{f[7]}\n")
+                        stats["alternative_partner_pairs_written"] += 1
                     continue
                 sc = v1[0]
                 if sc not in want:
@@ -96,6 +108,7 @@ def main():
                 handles[sc].write(f"{f[0]}\t{sc}\t{t1}\t{sc}\t{t2}\t{s1}\t{s2}\t{f[7]}\n")
                 stats["pairs_written"] += 1
     finally:
+        partners.close()
         for handle in handles.values():
             handle.close()
     for sc in sorted(want):
@@ -104,7 +117,7 @@ def main():
         out.write("metric\tvalue\ncoordinate_stage\tpre_finishing\n")
         out.write("transform\tlast_round_AGP_only\n")
         for key in ("pairs_read", "pairs_written", "ambiguous_ends", "unmapped_ends",
-                    "skipped_cross_scaffold", "distance_checked", "swapped"):
+                    "skipped_cross_scaffold", "alternative_partner_pairs_written", "distance_checked", "swapped"):
             out.write(f"{key}\t{stats[key]}\n")
         out.write("distance_mismatches\t0\n")
         out.write("status\t" + ("projected" if stats["pairs_written"] else "no_supporting_pairs") + "\n")

@@ -13,6 +13,7 @@ process CHIMERA_JOINS {
     path(joins_script)
     path(coordinate_guard)
     path(interval_helper)
+    path(schema_script)
 
     output:
     tuple val(taxid), val(asm_id), path("${asm_id}.agp_joins.tsv"),      emit: agp_joins
@@ -21,9 +22,7 @@ process CHIMERA_JOINS {
     path("versions.tsv"),                                                emit: versions
 
     script:
-    // Read from the AGP rather than assumed: every round-2 gap on this cohort is
-    // `scaffold proximity_ligation`, 100 bp. A different scaffolder simply yields no matches
-    // and every candidate goes to REVIEW rather than being cut at a guessed position.
+    // Select configured scaffolding-gap types from the AGP; never guess a position.
     def gap_ev  = params.chimera_gap_evidence ?: 'proximity_ligation'
     def gap_len = params.chimera_gap_len ?: 100
     def minblk  = params.chimera_paf_min_block ?: 2000
@@ -48,17 +47,12 @@ process CHIMERA_JOINS {
         --require-evidence '${gap_ev}' \\
         --require-gap-len ${gap_len}
 
-    # The reference has no PAF -- it is not aligned against itself -- and cannot be chimeric
-    # with respect to its own coordinate system. A composite IN the reference is caught by
-    # harmonization's consensus vote instead. Emit an empty table so the join downstream
-    # still has a row for this assembly rather than dropping it.
+    # Missing/self-reference alignments are not an assessment of fusion status.
+    ALIGNMENT_STATUS=assessed
     if [ "${ref_paf.name}" = "NO_PAF" ] || [ ! -s "${ref_paf.name}" ]; then
-        echo "[CHIMERA_JOINS ${asm_id}] no reference PAF (this is the reference itself);" >&2
-        echo "  emitting an empty called table" >&2
-        printf '# no reference PAF: this assembly IS the reference\\n' \\
-            > ${asm_id}.chimeric_joins.tsv
-        printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\ttransition_lo\\ttransition_hi\\tevidence_only\\tchromosome_member\\tlocation_status\\tleft_anchor_start\\tleft_anchor_end\\tright_anchor_start\\tright_anchor_end\\tminimum_anchor_bp\\tcompatible_gap_count\\n' \\
-            >> ${asm_id}.chimeric_joins.tsv
+        ALIGNMENT_STATUS=unavailable
+        echo "[CHIMERA_JOINS ${asm_id}] no reference PAF: alignment transitions not assessed" >&2
+        python3 ${schema_script} --empty ${asm_id}.chimeric_joins.tsv
     else
         python3 ${joins_script} \\
             --joins ${asm_id}.agp_joins.tsv \\
@@ -77,7 +71,7 @@ process CHIMERA_JOINS {
 
     python3 ${coordinate_guard} --fasta ${assessment_fasta} --agp ${round1_agp} \\
         --table ${asm_id}.chimeric_joins.tsv --audit ${asm_id}.coordinate_audit.tsv \\
-        --round ${params.run_scaffold_round2 ? 'round2' : 'round1'}
+        --round ${params.run_scaffold_round2 ? 'round2' : 'round1'} --alignment-status \$ALIGNMENT_STATUS
     # Surface what was called, and what was NOT tested. A scaffold whose components could
     # none be assigned a chromosome is reported by the script as a warning -- it must not be
     # confused with a scaffold that was tested and came back clean.
@@ -103,8 +97,7 @@ process CHIMERA_JOINS {
     printf 'metric\\tvalue\\nstatus\\tstub_unvalidated\\n' > ${asm_id}.coordinate_audit.tsv
     printf 'assembly\\tfinal_object\\tfinal_cut\\tsource\\tlift\\tgap_len\\n' \\
       > ${asm_id}.agp_joins.tsv
-    printf 'assembly\\tscaffold\\tname\\tcut_bp\\tleft_chrom\\tright_chrom\\tleft_component\\tright_component\\tn_components\\tn_transitions\\tagp_join_bp\\tagp_join_distance\\tagp_source\\tgap_len\\tcallable\\treason\\tspan_bp\\tvote\\tcandidate_verdict\\ttransition_lo\\ttransition_hi\\tevidence_only\\tchromosome_member\\tlocation_status\\tleft_anchor_start\\tleft_anchor_end\\tright_anchor_start\\tright_anchor_end\\tminimum_anchor_bp\\tcompatible_gap_count\\n' \\
-      > ${asm_id}.chimeric_joins.tsv
+    python3 ${schema_script} --empty ${asm_id}.chimeric_joins.tsv
     printf 'process\\ttool\\tversion\\n' > versions.tsv
     """
 }

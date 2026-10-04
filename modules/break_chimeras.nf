@@ -1,58 +1,4 @@
-/*
-========================================================================================
-    BREAK CHIMERAS MODULE
-========================================================================================
-    Repo location: modules/break_chimeras.nf
-
-    Splits chimeric scaffolds at the detected junction and rewrites the harmonization name
-    map so each half gets the chromosome name it deserves.
-
-    WHERE IT SITS
-    -------------
-    Between HARMONIZE_SCAFFOLDS and FINALIZE_ASSEMBLY, and that is the only place it can go.
-    Harmonization emits a NAME MAP, not a renamed FASTA -- FINALIZE_ASSEMBLY applies the map.
-    So this is the last point at which the FASTA is still in original coordinates and the
-    composite is still one record, and the first at which the cross-haplotype concordance
-    vote exists to justify cutting it.
-
-    It rewrites both the FASTA (one record becomes two, `<scaffold>_sub_<start>_<end>`) and
-    the name map (one row becomes two, mapping those to chr5_1 and chr9_1), so
-    FINALIZE_ASSEMBLY works unchanged.
-
-    THREE MODES
-    -----------
-      params.chimera_break = false      pass through untouched; candidates already written
-                                        by harmonization are the reviewable artifact
-      params.chimera_break = '<path>'   break every row in that file -- the file IS the
-                                        instruction, so editing it is how you choose
-      params.chimera_break = 'auto'     break rows harmonization marked BREAK_CANDIDATE
-
-    `auto` gates on the CONCORDANCE VOTE alone, and that is deliberate rather than a
-    limitation accepted reluctantly. The vote is the only signal independent of how the
-    scaffold was BUILT. Hi-C cannot be used: measured on the chr5+chr9 fusion, cross-junction
-    contact came out at 1.209x matched distance -- ELEVATED, because the junction sits in
-    subtelomeric repeat that attracts spurious contacts. That is how YaHS made the error.
-    Testing a Hi-C-made join with Hi-C is circular and here it points the wrong way.
-
-    Interstitial telomere signal is a strong independent corroborator -- arrays in BOTH
-    orientations at 37.6-43.7 Mb on that scaffold while its own termini have almost none --
-    but tidk runs in FINAL_VIZ, downstream of here. CHIMERA_EVIDENCE adds it to the candidates
-    file afterwards for the reviewed path. Telomere ABSENCE must never veto a break: a mid-arm
-    fusion leaves none.
-
-    WHAT IT WILL DO ON THIS COHORT
-    ------------------------------
-    Two scaffolds, both in Sde-CTlk_104, both voted 1f/7s:
-      hap1  chr5_1+chr9_1   111.6 Mb   junction ~37 Mb
-      hap2  chr6_3+chr12_1   76.7 Mb
-    Sde-CPla_115's 135 composites are 1-14 Mb and fail the 20 Mb span floor -- correctly, a
-    2 Mb chimeric fragment is a fragmented assembly rather than a mis-joined chromosome, and
-    breaking it leaves two unplaced halves.
-
-    Input : tuple(meta, fasta, name_map), candidates, script
-    Output: tuple(meta, fasta, name_map) -- same shape in as out, so the DAG is unchanged
-========================================================================================
-*/
+/* Reviewed, FASTA-bound gap cuts before finishing. Concordance votes are diagnostic; automatic cutting is unavailable pending independent evidence calibration. */
 
 process BREAK_CHIMERAS {
     tag "${meta.id}"
@@ -76,7 +22,7 @@ process BREAK_CHIMERAS {
     path("versions.tsv"), emit: versions
 
     script:
-    // 'auto' gates on the verdict harmonization wrote; a path means break every row present
+    // File mode selects reviewed rows; Python also rejects auto if called directly.
     def mode    = (params.chimera_break?.toString() == 'auto') ? 'auto' : 'file'
     def minpiece = params.chimera_min_piece_bp ?: 1000000
     """

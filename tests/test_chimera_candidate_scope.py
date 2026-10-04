@@ -47,8 +47,10 @@ class CandidateScopeTests(unittest.TestCase):
     def test_unresolved_inference_produces_no_profile(self):
         self.assertEqual(self.call(member="unresolved"), [])
 
-    def test_non_candidate_produces_no_profile(self):
-        self.assertEqual(self.call(verdict="NOT_A_CANDIDATE"), [])
+    def test_recurrent_composite_still_gets_review_evidence(self):
+        row = self.call(verdict="NOT_A_CANDIDATE")[0]
+        self.assertEqual(row["candidate_verdict"], "REVIEW")
+        self.assertEqual(row["callable"], "yes")
 
     def test_upstream_gap_is_not_snapped_into_transition(self):
         row = self.call(gaps=(35,))[0]

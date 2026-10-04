@@ -33,15 +33,15 @@ workflow CHIMERA {
     def detect_on = capabilities.scaffold && capabilities.harmonize &&
                     params.harmonize_scaffold_names && params.chimera_detect != false
     def evidence_on = detect_on && params.chimera_evidence != false
-    if (params.chimera_break?.toString() == 'auto' && !detect_on)
-        error 'chimera_break=auto requires enabled chimera detection and a harmonization cohort'
+    if (params.chimera_break?.toString() == 'auto')
+        error 'chimera_break=auto is unavailable until junction evidence is calibrated; use chimera_break=false for diagnosis or a reviewed, FASTA-bound joins file for manual cuts'
     // The broken assemblies on their own, separate from pre_finalize (which mixes them with
     // the untouched and short-read-only ones). main.nf stages THIS as the 'chimera_broken'
     // QC checkpoint, so contiguity before and after a cut is comparable in the QC table.
     ch_broken   = Channel.empty()
 
     // OFF by default. Run 1 writes <species>.chimera_candidates.tsv and cuts nothing; you
-    // review it and pass it back, or set 'auto' to cut what the vote already flagged.
+    // review it and supply selected joins. Votes alone never authorize automatic cuts.
     //
     // When off the process is not instantiated and the original channel flows straight
     // through -- no pass-through task and no cache churn.
@@ -89,7 +89,8 @@ workflow CHIMERA {
             ch_agp_script.first(),
             ch_cj_script.first(),
             file("${projectDir}/py_scripts/chimera_coordinate_guard.py", checkIfExists: true),
-            file("${projectDir}/py_scripts/chimera_intervals.py", checkIfExists: true) )
+            file("${projectDir}/py_scripts/chimera_intervals.py", checkIfExists: true),
+            file("${projectDir}/py_scripts/chimera_schema.py", checkIfExists: true) )
         ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
         ch_chimeric_joins = CHIMERA_JOINS.out.called
         ch_evidence_calls = ch_chimeric_joins
@@ -107,7 +108,8 @@ workflow CHIMERA {
                 .combine(ch_chimera_candidates, by: 0)
                 .combine(ch_ref_name_map, by: 0)
             RECOVER_OLDER_JOINS(ch_recovery,
-                file("${projectDir}/py_scripts/recover_older_joins.py", checkIfExists: true))
+                file("${projectDir}/py_scripts/recover_older_joins.py", checkIfExists: true),
+                file("${projectDir}/py_scripts/chimera_schema.py", checkIfExists: true))
             ch_chimeric_joins = RECOVER_OLDER_JOINS.out.called
             ch_evidence_calls = ch_chimeric_joins
             ch_older_summaries = RECOVER_OLDER_JOINS.out.summary.map { taxid, id, report ->

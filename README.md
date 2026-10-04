@@ -383,6 +383,17 @@ chromosomes get the same name and orientation. Chromosome classification is by l
 (default) or a fixed threshold, with contained-haplotig demotion and an optional batch-wide
 consensus. Short-read and single-assembly species pass through untouched.
 
+Chimera diagnosis precedes finishing and uses inferred chromosome membership.
+Recurring chromosome composites still receive diagnostic evidence; the concordance
+vote does not establish an assembly error. `--chimera_break false` keeps diagnosis
+without edits. A reviewed, assessment-FASTA-bound joins file selects manual cuts;
+`--chimera_break auto` is unavailable until independent junction evidence is calibrated.
+Hi-C alternative-partner pairs are retained alongside the evidence. Fresh assembly
+tasks also publish raw hifiasm graphs/caches and intermediate YaHS AGPs; files lost
+from older scratch tasks remain unavailable. See
+[the foundation handoff](planning_docs/chimera-foundation-handoff.md) for regression,
+comparison-run and evidence-collection commands.
+
 `FINALIZE_ASSEMBLY` then writes the sorted, renamed FASTA plus a name map and `.fai`:
 
 - harmonized → `chrN_p` / `chrA_i+chrB_j` (composites) / `unplaced_n`; rename-and-reorient only,

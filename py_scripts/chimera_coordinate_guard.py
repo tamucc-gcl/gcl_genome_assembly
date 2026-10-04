@@ -5,6 +5,7 @@ import csv
 import hashlib
 import re
 from pathlib import Path
+from chimera_schema import read_table, write_called
 
 
 def fasta_records(path):
@@ -30,6 +31,7 @@ def main():
     p.add_argument("--table", required=True)
     p.add_argument("--audit", required=True)
     p.add_argument("--round", required=True)
+    p.add_argument("--alignment-status", choices=("assessed", "unavailable"), default="assessed")
     a = p.parse_args()
     lengths, gaps = {}, {}
     with open(a.agp) as handle:
@@ -61,26 +63,20 @@ def main():
             digest.update(chunk)
     checksum = digest.hexdigest()
     table = Path(a.table)
-    with table.open() as handle:
-        reader = csv.DictReader((line for line in handle if line.strip() and not line.startswith("#")), delimiter="\t")
-        fields = list(reader.fieldnames or [])
-        rows = list(reader)
+    fields, rows = read_table(table)
     if "assembly" not in fields:
         raise ValueError("Breakpoint table has no valid header")
-    fields += ["assembly_sha256", "coordinate_stage", "join_scope"]
-    with table.open("w") as out:
-        writer = csv.DictWriter(out, fieldnames=fields, delimiter="\t", lineterminator="\n")
-        writer.writeheader()
-        for row in rows:
-            row.update(assembly_sha256=checksum, coordinate_stage="pre_finishing",
-                       join_scope=a.round + "_only")
-            writer.writerow(row)
+    for row in rows:
+        row.update(assembly_sha256=checksum, coordinate_stage="pre_finishing",
+                   join_scope=a.round + "_only")
+    write_called(table, rows)
     with open(a.audit, "w") as out:
         out.write("metric\tvalue\n")
         out.write("coordinate_stage\tpre_finishing\n")
         out.write(f"assembly_sha256\t{checksum}\n")
         out.write(f"join_scope\t{a.round}_only\n")
         out.write("agp_fasta_check\tpassed\n")
+        out.write(f"alignment_transition_assessment\t{a.alignment_status}\n")
         out.write("older_join_provenance\t" +
                   ("unresolved_across_correction;not_tested_for_cuts" if a.round == "round2" else "not_applicable") + "\n")
 

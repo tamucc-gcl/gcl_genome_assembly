@@ -1560,10 +1560,10 @@ has_chimera_data <- !is.null(chim_cand) || !is.null(chim_join)
 if (has_chimera && has_chimera_data) {
   md <- c(md, sec_head("chimera"), "")
   md <- c(md,
-    paste("A scaffold spanning two reference chromosomes is a scaffolding error, not biology:",
-          "Hi-C proximity joined sequence from two different chromosomes. It matters beyond",
-          "contiguity because pangenome construction assigns each contig to a single",
-          "chromosome, so the smaller arm is absent from the graph entirely."), "")
+    paste("A scaffold assigned to multiple reference chromosomes requires junction review.",
+          "It may reflect an assembly error, a genuine rearrangement, or ambiguous repeat",
+          "alignment. Chromosome-partitioned graph construction can treat its arms differently;",
+          "neither a composite name nor the concordance vote establishes its biological status."), "")
 
   # ---- 7a: what was found, per assembly ----
   if (!is.null(chim_cand) && all(c("assembly", "verdict") %in% names(chim_cand))) {
@@ -1576,12 +1576,11 @@ if (has_chimera && has_chimera_data) {
       arrange(desc(.data$`Break Candidates`), desc(.data$Composites))
     md <- c(md, sprintf("### %d%s. Composite Scaffolds Detected", sec_n("chimera"), "a"), "",
             make_markdown_table(cand_tbl), "",
-            paste("A composite is only a BREAK CANDIDATE when the cross-haplotype vote says",
-                  "other haplotypes keep those two chromosomes separate, both arms clear the",
-                  "size floors, and this individual's OTHER haplotype does not carry the same",
-                  "junction. That last condition is what separates a scaffolding artifact from",
-                  "a polymorphic chromosomal fusion, which would be real biology; REVIEW means",
-                  "the vote could not separate them and nothing is cut automatically."), "")
+            paste("BREAK_CANDIDATE and REVIEW are screening priorities, not validated errors.",
+                  "Genuine heterozygous rearrangements can occur in one haplotype and",
+                  "repeat-driven errors can recur across individuals. Inferred chromosome",
+                  "composites remain eligible for diagnostic evidence regardless of recurrence.",
+                  "Automatic cutting is unavailable pending independent evidence calibration."), "")
   }
 
   # ---- 7b: the cuts, with their evidence ----
@@ -1639,9 +1638,9 @@ if (has_chimera && has_chimera_data) {
     # detection ran but nothing was cut -- say so explicitly rather than leaving a gap
     n_call <- sum(chim_join$callable == "yes", na.rm = TRUE)
     md <- c(md, sprintf("### %d%s. Applied Cuts", sec_n("chimera"), "b"), "",
-            sprintf(paste("No cuts were applied on this run. %d chimeric join%s identified;",
+            sprintf(paste("No cuts were applied on this run. %d reviewable gap location%s identified;",
                           "breaking is off by default and is enabled with",
-                          "`--chimera_break auto` or by supplying an edited joins file."),
+                          "a reviewed, FASTA-bound joins file. Automatic cutting is unavailable pending calibration."),
                     n_call, if (n_call == 1) " was" else "s were"), "")
   }
 }
@@ -1704,7 +1703,7 @@ if (sig_hic)   narr <- paste0(narr, " Contigs were scaffolded against Hi-C data 
 if (sig_mito)  narr <- paste0(narr, " Organelle genomes were assembled with MitoHiFi.")
 narr <- paste0(narr, " Assembly quality was assessed with BUSCO (per-sample lineage; see section 2), Merqury (consensus QV and k-mer completeness) and QUAST (contiguity), with read coverage from minimap2/SAMtools alignments; telomeric repeats were surveyed with tidk.")
 if (has_teloclip) narr <- paste0(narr, " Scaffold ends were extended into telomeric repeats with teloclip.")
-if (has_chimera) narr <- paste0(narr, " Scaffolds spanning two reference chromosomes were detected from the scaffolding AGPs and the reference alignment, gated on a cross-haplotype concordance vote, and confirmed against Hi-C cross-contact and interstitial telomeric repeat before any cut.")
+if (has_chimera) narr <- paste0(narr, " Inferred chromosome composites were screened for alignment transitions and scaffolding gaps. Concordance votes prioritize review; Hi-C, telomere and sequence diagnostics do not by themselves establish a misassembly. Applied cuts, when requested with a reviewed joins file, are recorded in the cut audit.")
 if (sig_syn)   narr <- paste0(narr, " Synteny was visualised from minimap2 alignments (gggenomes).")
 narr <- paste0(narr, " Per-step parameters and exact software versions are recorded in the pipeline's Nextflow execution reports.")
 

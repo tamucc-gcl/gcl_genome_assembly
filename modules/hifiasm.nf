@@ -31,6 +31,11 @@ process HIFIASM {
     tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.fasta"), emit: assemblies
     tuple val(meta), path("${meta.sample}.hifiasm.log"),                     emit: log
     tuple val(meta), path("${meta.sample}.{hap1,hap2,primary}.p_ctg.gfa"),   emit: gfa
+    // Optional on older cached tasks whose scratch-only files no longer exist.
+    // On fresh tasks retain raw unitig/contig graphs and overlap caches verbatim.
+    tuple val(meta), path("${meta.sample}*.gfa"), emit: raw_graphs, optional: true
+    tuple val(meta), path("${meta.sample}*.bin"), emit: overlap_caches, optional: true
+    tuple val(meta), path("${meta.sample}*.bed"), emit: graph_annotations, optional: true
     path "versions.tsv", emit: versions
 
     script:

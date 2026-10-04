@@ -75,6 +75,20 @@ class Coordinates(unittest.TestCase):
         self.fa.write_text(self.fa.read_text().replace("NNNNN", "AAAAA"))
         self.guard(ok=False)
 
+    def test_empty_reference_and_populated_tables_have_identical_stamped_headers(self):
+        self.guard()
+        populated_header = self.table.read_text().splitlines()[0]
+        self.run_script("chimera_schema.py", "--empty", self.table)
+        self.run_script("chimera_coordinate_guard.py", "--fasta", self.fa,
+            "--agp", self.agp, "--table", self.table, "--audit", self.d / "audit.tsv",
+            "--round", "round2", "--alignment-status", "unavailable")
+        self.assertEqual(self.table.read_text().splitlines()[0], populated_header)
+        self.assertIn("alignment_transition_assessment\tunavailable",
+                      (self.d / "audit.tsv").read_text())
+        self.guard()
+        fields = self.table.read_text().splitlines()[0].split("\t")
+        self.assertEqual(len(fields), len(set(fields)))
+
     def test_reviewed_break_table_rejects_changed_fasta(self):
         self.guard()
         self.fa.write_text(self.fa.read_text().replace("AAAAAAAAAA", "TAAAAAAAAA"))
@@ -120,9 +134,21 @@ class Coordinates(unittest.TestCase):
     def test_diagnostic_position_cannot_be_supplied_as_cut(self):
         self.cut_fixture(diagnostic="yes", ok=False)
 
-    def test_auto_skips_out_of_scope_scaffold(self):
-        self.cut_fixture(member="no", mode="auto")
-        self.assertNotIn("_sub_", (self.d / "out.fa").read_text())
+    def test_auto_rejects_even_a_scoped_vote_candidate(self):
+        result = self.cut_fixture(mode="auto", ok=False)
+        self.assertIn("private/heterozygous", result.stderr)
+        self.assertFalse((self.d / "out.fa").exists())
+
+    def test_cross_scaffold_partner_is_preserved_with_lifted_orientation(self):
+        self.pairs.write_text("r3\tA\t12\tA\t22\t+\t-\tUU\n")
+        self.lift()
+        import gzip
+        with gzip.open(self.d / "asm.alternative_partners.pairs.gz", "rt") as handle:
+            text = handle.read()
+        self.assertIn("r3\ts1\t24\ts2\t2\t-\t-\tUU", text)
+        self.assertEqual((self.d / "asm.s1.pairs").read_text(), "")
+        self.assertIn("alternative_partner_pairs_written\t1",
+                      (self.d / "asm.hic_pairs_audit.tsv").read_text())
 
     def test_valid_scoped_gap_can_be_cut(self):
         self.cut_fixture()

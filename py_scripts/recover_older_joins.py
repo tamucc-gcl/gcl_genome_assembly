@@ -3,6 +3,7 @@
 Coordinates are 0-based half-open internally. Every input join gets an audit row.
 Recovered joins are REVIEW only, never automatic cutting authorization.
 """
+from chimera_schema import read_table, write_called
 import argparse
 import csv
 import gzip
@@ -185,7 +186,7 @@ def assess(a):
             j.update(current_object=name, current_lo=lo, current_hi=hi, orientation=orient)
             by_target[name].append(j)
     digest = checksum(a.current)
-    fields, called = rows(a.native)
+    fields, called = read_table(a.native)
     fields += [k for k in ("transition_lo", "transition_hi", "evidence_only", "chromosome_member", "location_status") if k not in fields]
     if "assembly_sha256" not in fields:
         raise ValueError("Native table must carry current FASTA provenance")
@@ -214,7 +215,7 @@ def assess(a):
     # Exact recovery audits all old gaps but never creates an independent candidate.
     for ti, row in enumerate(called, 1):
         meta = candidates.get(row["scaffold"], {})
-        if meta.get("chromosome_member") != "yes" or meta.get("verdict") not in ("BREAK_CANDIDATE", "REVIEW"):
+        if meta.get("chromosome_member") != "yes" or "+" not in meta.get("name", ""):
             raise ValueError("Native call outside inferred chromosome candidate scope")
         if row.get("transition_lo", ".") == ".":
             continue
@@ -256,10 +257,7 @@ def assess(a):
 
     if set(by_target)-seen:
         raise ValueError("Flank alignment target absent from current FASTA")
-    with open(a.prefix+".review_joins.tsv", "w") as out:
-        writer = csv.DictWriter(out, fieldnames=fields, delimiter="\t", lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(called)
+    write_called(a.prefix+".review_joins.tsv", called)
     columns = ["join_id", "source_object", "source_lo", "source_hi", "status",
                "current_object", "current_lo", "current_hi", "orientation",
                "left_chrom", "right_chrom", "junction_assessment", "auto_cut", "evidence_profile",

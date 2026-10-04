@@ -22,6 +22,7 @@ process CHIMERA_EVIDENCE {
     tuple val(taxid), val(asm_id), path("${asm_id}.*.chimera_evidence.png"),
         emit: figures, optional: true
     path("${asm_id}.hic_pairs_audit.tsv"), emit: pairs_audit, optional: true
+    path("${asm_id}.alternative_partners.pairs.gz"), emit: alternative_partners, optional: true
     path("${asm_id}.*.tidk.log"), emit: telomere_logs, optional: true
     path("${asm_id}.*.telomere_windows.tsv"), emit: telomere_windows, optional: true
     path("versions.tsv"),                  emit: versions
@@ -65,8 +66,7 @@ process CHIMERA_EVIDENCE {
         HAVE_HIC=1
     else
         echo "[CHIMERA_EVIDENCE ${asm_id}] no contig-space pairs: telomere and N-gap" >&2
-        echo "  evidence only. Those are independent of Hi-C, which confirms rather than" >&2
-        echo "  justifies, so their absence weakens nothing about the decision." >&2
+        echo "  evidence only; Hi-C support is unavailable, not negative." >&2
     fi
 
     samtools faidx ${assembly_fasta}

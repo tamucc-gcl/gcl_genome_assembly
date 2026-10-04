@@ -10,6 +10,7 @@ process RECOVER_OLDER_JOINS {
           path(current, stageAs: 'current/*'), path(native_calls),
           path(ref_paf), path(candidates), path(ref_map)
     path resolver
+    path schema_script
     output:
     tuple val(taxid), val(asm_id), path("${asm_id}.review_joins.tsv"), emit: called
     tuple val(taxid), val(asm_id), path("${asm_id}.older_join_audit.tsv"), emit: audit

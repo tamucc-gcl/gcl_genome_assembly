@@ -1080,11 +1080,10 @@ def main():
     def concordance_split(x, y, rid):
         """The same vote, partitioned by whether the voter is `rid`'s SISTER haplotype.
 
-        n_f alone cannot tell an artifact from a POLYMORPHIC fusion: a real fusion in one
-        individual scores n_f = 1 (its sister) and n_s = 8, which is exactly an artifact's
-        signature. WHICH haplotype carries it is the discriminator, because each haplotype is
-        scaffolded independently -- so the same mis-join appearing in both haplotypes of one
-        individual is unlikely, while a real fusion in that individual should appear in both.
+        Recurrence is descriptive, not a biological discriminator. Genuine heterozygous
+        rearrangements can occur in only one haplotype; repeat-driven assembly errors can
+        recur in sisters or other individuals. These votes prioritize junction assessment
+        and never independently authorize an edit.
 
         Returns (n_f_sister, n_f_other, n_s).
         """

@@ -5,16 +5,7 @@ import csv
 import gzip
 from chimera_intervals import intervals, compatible_gaps, verdict_for_interval, arm_context
 
-FIELDS = ["assembly", "scaffold", "name", "cut_bp", "left_chrom", "right_chrom",
-          "left_component", "right_component", "n_components", "n_transitions",
-          "agp_join_bp", "agp_join_distance", "agp_source", "gap_len", "callable",
-          "reason", "span_bp", "vote", "candidate_verdict", "transition_lo",
-          "transition_hi", "evidence_only", "chromosome_member", "location_status",
-          "left_anchor_start", "left_anchor_end", "right_anchor_start", "right_anchor_end",
-          "minimum_anchor_bp", "compatible_gap_count", "left_arm_aligned_bp",
-          "right_arm_aligned_bp", "left_arm_fraction", "right_arm_fraction",
-          "assigned_union_bp", "arm_count", "arm_pattern", "structural_status",
-          "decision_scope"]
+from chimera_schema import JOIN_FIELDS as FIELDS
 
 def read_rows(path):
     with open(path) as handle:
@@ -37,7 +28,7 @@ def main():
     if any("chromosome_member" not in r for r in all_candidates):
         raise ValueError("Regenerate harmonization: chromosome membership is required")
     candidates = [r for r in all_candidates if r["chromosome_member"] == "yes"
-                  and r["verdict"] in ("BREAK_CANDIDATE", "REVIEW")]
+                  and "+" in r.get("name", "")]
     refmap = {}
     for r in read_rows(a.ref_name_map):
         n = r["new_name"]
@@ -80,6 +71,8 @@ def main():
             pos = matches[0][0] if unique else (interval["lo"]+interval["hi"])//2
             gap = matches[0][1] if unique else {}
             decision = verdict_for_interval(candidate, interval, len(changes)) if unique else "REVIEW"
+            if decision != 'BREAK_CANDIDATE':
+                decision = 'REVIEW'
             row = {k: "." for k in FIELDS}
             row.update(arm_context(alns[sc], interval, minimum))
             row.update(assembly=a.assembly, scaffold=sc, name=candidate["name"], cut_bp=str(pos),

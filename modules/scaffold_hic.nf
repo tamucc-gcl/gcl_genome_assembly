@@ -27,6 +27,9 @@ process SCAFFOLD_HIC {
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.agp"), emit: agp
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}_scaffolds_final.bin"), emit: bin
     tuple val(meta), path("${meta.id}${round && round != 'round1' ? '_' + round : ''}.yahs.log"), emit: log
+    // Preserve each intermediate scaffolding/correction AGP for join-origin tracing.
+    // Missing artifacts in old cache entries do not force an assembly rebuild.
+    tuple val(meta), val(round), path("${meta.id}_yahs${round && round != 'round1' ? '_' + round : ''}*.agp"), emit: intermediate_agps, optional: true
     path "versions.tsv", emit: versions
 
     script:
