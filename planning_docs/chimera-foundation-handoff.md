@@ -71,6 +71,39 @@ Optional retention outputs do not force recovery of missing files in old cached 
 
 ## Collect files for review
 
+### If reference scoring is killed with exit 137 on the current CR_CORE cluster
+
+The observed scheduler reserves cores without accounting for requested memory.
+Use the optional comparison override below for a controlled diagnostic: exclusive
+nodes, one harmonization task at a time, unchanged eight alignment threads, and a
+300 GB memory envelope within the normal nodes' reported capacity. This does not
+assert that the task needs 300 GB. It removes other scheduled jobs and supplies
+headroom so that actual usage can be measured. Successful execution alone will not
+distinguish node contention from a former per-task limit; inspect accounting and
+the cluster's kill logs before selecting production resource settings.
+
+```bash
+sbatch gcl_genome_assembly/run_assembly_checkpoint.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv assembly \
+  -c "$PWD/gcl_genome_assembly/scripts/comparisons/harmonize_isolated.config" \
+  --outdir "$PWD/comparisons/chimera-foundation-01" \
+  --chimera_break false \
+  --run_pangenome false --qc_mode none --run_post_assembly false \
+  --run_assembly_sv false \
+  --run_final_hifi_mapping false --chimera_hifi_context false
+```
+
+This override is for comparison runs only; keep production resource defaults.
+An exclusive task can wait until a whole node becomes available. The launcher
+already uses resume; do not remove existing results or work. After the run,
+replace JOB_ID below and return the accounting output with the evidence archive:
+
+```bash
+sacct -u "$USER" --starttime today \
+  --format=JobID,JobName%60,State,NodeList,Elapsed,ReqMem,MaxRSS,ExitCode -P \
+  > comparisons/chimera-foundation-01/assembly/chimeras/slurm-accounting-JOB_ID.txt
+```
+
 Replace JOB_ID with the diagnostic job number. The archive includes small evidence,
 coordinate audits, name maps, intermediate/final AGPs, input sheets and logs. Keep
 large pairs, FASTAs, graphs, binary caches and BAMs on the cluster.

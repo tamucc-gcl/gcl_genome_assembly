@@ -25,7 +25,8 @@ find -L "$results" -type f \( \
     -print0 > "$list"
 for entry in "$samples" "$readsets" scripts/run_assembly.sbatch \
     "logs/assembly-${job}.out" "logs/nextflow_assembly_${job}.log" \
-    gcl_genome_assembly/nextflow.config; do
+    gcl_genome_assembly/nextflow.config \
+    gcl_genome_assembly/scripts/comparisons/harmonize_isolated.config; do
     if [[ -f "$entry" ]]; then
         printf '%s\0' "$entry" >> "$list"
     else
