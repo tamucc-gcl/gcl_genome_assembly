@@ -19,7 +19,7 @@ class IntegrationTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                 run('tests/prepare_chimera_integration.py', '--out', root, '--scenario', scenario)
                 run('py_scripts/chimera_adjudicate.py', '--calls', root/'calls.tsv', '--assembly', 'synthetic',
-                    '--context', root/'context', '--out', root/'decisions')
+                    '--context', root/'context', '--out', root/'decisions', '--min-piece-bp',4)
                 actions = root/'manual-actions.tsv' if scenario=='manual' else root/'decisions/actions.tsv'
                 run('py_scripts/break_chimeras.py', '--fasta', root/'assessment.fa', '--name-map', root/'names.tsv',
                     '--actions', actions, '--assembly', 'synthetic', '--out-fasta', root/'output.fa',

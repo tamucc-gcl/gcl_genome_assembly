@@ -36,7 +36,7 @@ process HARMONIZE_SPECIES {
     tag "taxid_${taxid}"
     label 'harmonize_scaffolds'
 
-    publishDir "${params.outdir}/assembly/harmonization", mode: params.publish_dir_mode,
+    publishDir "${params.outdir}/assembly/${task.process.tokenize(':').last() == 'CHIMERA_REASSIGN_SPECIES' ? 'chimeras/reassignment' : 'harmonization'}", mode: params.publish_dir_mode,
         saveAs: { fn -> fn == 'versions.tsv' ? null : fn }
 
     input:

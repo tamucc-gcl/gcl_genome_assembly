@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'py_scripts'))
 from chimera_adjudicate import decide
-from chimera_sequence_context import narrow_spanning_molecules
+from chimera_controls import sam_measure
 
 
 class DecisionTests(unittest.TestCase):
@@ -30,15 +30,18 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(decide({'hifi_spanning_molecules':2})[:2], ('RETAIN', False))
         evidence = self.complete(); evidence['independent_discordant_individuals'] = 2
         self.assertFalse(decide(evidence)[1])
+        self.assertEqual(decide({'local_path_support':'supported_grid'})[:2],('RETAIN',False))
+        evidence=self.complete();evidence['review_only']=True
+        self.assertEqual(decide(evidence)[:2],('UNRESOLVED',False))
 
     def test_deletion_bracketing_does_not_count_as_continuity(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'reads.sam'
-            path.write_text('good\t0\tscaffold\t1\t60\t4000M\t*\t0\t0\t*\t*\n'
-                            'good\t0\tscaffold\t1\t60\t4000M\t*\t0\t0\t*\t*\n'
-                            'deletion\t0\tscaffold\t1\t60\t1500M1000D1500M\t*\t0\t0\t*\t*\n'
-                            'secondary\t256\tscaffold\t1\t60\t4000M\t*\t0\t0\t*\t*\n')
-            self.assertEqual(narrow_spanning_molecules(path, 1500, 2500), 1)
+            path.write_text('good\t0\tscaffold\t1\t60\t4000M\t*\t0\t0\t*\t*\tNM:i:0\n'
+                            'good\t0\tscaffold\t1\t60\t4000M\t*\t0\t0\t*\t*\tNM:i:0\n'
+                            'deletion\t0\tscaffold\t1\t60\t1500M1000D1500M\t*\t0\t0\t*\t*\tNM:i:0\n'
+                            'secondary\t256\tscaffold\t1\t60\t4000M\t*\t0\t0\t*\t*\tNM:i:0\n')
+            self.assertEqual(sam_measure(path, 1500, 2500)['spanning'], 1)
 
 
 if __name__ == '__main__':

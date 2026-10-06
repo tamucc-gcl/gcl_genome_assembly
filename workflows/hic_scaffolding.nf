@@ -32,6 +32,7 @@ workflow HIC_SCAFFOLDING {
     ch_pre_finish = Channel.empty()
     ch_evidence_agp = Channel.empty()
     ch_evidence_pairs = Channel.empty()
+    ch_evidence_inputs = Channel.empty()
     ch_final_scaffolds_round2 = Channel.empty()
     ch_scaffold_round2_agp = Channel.empty()
     ch_all_bam_metrics = Channel.empty()
@@ -312,9 +313,15 @@ workflow HIC_SCAFFOLDING {
     if (params.run_scaffold_round2) {
         ch_evidence_agp = ch_scaffold_round2_agp
         ch_evidence_pairs = FILTER_HIC_BAM_SCAFFOLD.out.pairs
+        ch_evidence_inputs = ch_hic_scaffold_mapping_input.map { m, fa, r1, r2, stage -> tuple(m.id, m, fa) }
+            .join(MAP_HIC_TO_SCAFFOLD.out.readsets.map { m, stage, readsets -> tuple(m.id, readsets) })
+            .map { id, m, fa, readsets -> tuple(m, fa, readsets) }
     } else if (!params.run_inspector_scaffolds && !params.run_decon_scaffolds) {
         ch_evidence_agp = ch_round1_agp
         ch_evidence_pairs = ch_contig_pairs
+        ch_evidence_inputs = ch_hic_mapping_input.map { m, fa, r1, r2, stage -> tuple(m.id, m, fa) }
+            .join(MAP_HIC_TO_ASSEMBLY.out.readsets.map { m, stage, readsets -> tuple(m.id, readsets) })
+            .map { id, m, fa, readsets -> tuple(m, fa, readsets) }
     } else {
         log.warn('[CHIMERA] Correction/decontamination without round-two scaffolding: AGP coordinates unavailable; candidate detection remains available, exact join evidence is withheld.')
     }
@@ -333,6 +340,7 @@ workflow HIC_SCAFFOLDING {
     decontaminated = ch_scaffold_decontaminated
     evidence_agp = ch_evidence_agp
     evidence_pairs = ch_evidence_pairs
+    evidence_inputs = ch_evidence_inputs
     bam_metrics = ch_all_bam_metrics
     pairs_metrics = ch_all_pairs_metrics
     versions = ch_versions

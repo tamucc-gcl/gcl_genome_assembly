@@ -80,6 +80,7 @@ workflow HARMONIZE_SCAFFOLDS {
 
     main:
     ch_versions = Channel.empty()
+    ch_quality = Channel.empty()
 
     // declared here rather than passed from main.nf: main.nf sits ~1.1 kB below Groovy's
     // 65,535-char compiled-unit limit, so lines there are the scarce resource
@@ -162,6 +163,7 @@ workflow HARMONIZE_SCAFFOLDS {
         }
 
         HARMONIZE_SPECIES( ch_harm_in, resolver, hargs )
+        ch_quality = HARMONIZE_SPECIES.out.chromosome_sets
         ch_versions = ch_versions.mix( HARMONIZE_SPECIES.out.versions )
         ch_report   = HARMONIZE_SPECIES.out.report
         // Taxid recovered from the FILENAME (<taxid>.harmonization_report.tsv) rather than
@@ -227,4 +229,5 @@ workflow HARMONIZE_SCAFFOLDS {
     ref_name_map   = ch_ref_name_map       // tuple(taxid, reference name_map)
     ref_pafs_by_id = ch_ref_paf_by_id      // tuple(assembly_id, ref.paf.gz)
     versions       = ch_versions
+    quality        = ch_quality
 }

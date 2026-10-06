@@ -45,6 +45,7 @@ workflow CONTIG_ASSEMBLY {
 
     main:
     ch_assemblies = Channel.empty()
+    ch_native_graphs = Channel.empty()
     ch_versions = Channel.empty()
     ch_reads
         .branch { meta, hifi, hic1, hic2, sr1, sr2 ->
@@ -65,6 +66,7 @@ workflow CONTIG_ASSEMBLY {
     )
 
     ch_assemblies = HIFIASM.out.assemblies
+    ch_native_graphs = HIFIASM.out.gfa
     ch_versions = ch_versions.mix(HIFIASM.out.versions)
     }
 
@@ -103,5 +105,6 @@ workflow CONTIG_ASSEMBLY {
 
     emit:
     assemblies = ch_assemblies
+    native_graphs = ch_native_graphs
     versions = ch_versions
 }

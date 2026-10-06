@@ -31,7 +31,7 @@ def main():
     key = hashlib.sha256(json.dumps({k:str(v) for k,v in row.items()}, sort_keys=True).encode()).hexdigest()[:20]
     context = out/'context'; context.mkdir(exist_ok=True)
     measurement = dict(assessment_sha256=digest, gap_start=4, gap_end=6, cut_bp=6,
-        verified_gap=True, independent_discordant_individuals=3, hifi_informative=True,
+        assessment_scaffold_length=10,verified_gap=True, independent_discordant_individuals=3, hifi_informative=True,
         hifi_spanning_molecules=0, hic_informative=True, hic_support_loss=True,
         matched_controls_pass=True, alternative_placements_checked=True, graph_contradiction=False)
     (context/'decision_measurements.json').write_text(json.dumps({key:measurement} if a.scenario=='eligible' else {}))

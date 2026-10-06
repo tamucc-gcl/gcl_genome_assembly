@@ -86,3 +86,8 @@ workflows/chimera.nf already separates detection/evidence/application and routes
 4. Validate conservative automatic gap eligibility against controls and accepted corrections, then expose it as opt-in. Keep automatic internal cuts disabled until their own validation is adequate.
 
 No pipeline application code or production settings were changed by this design document. The investigation scripts demonstrate measurements; they are not yet a general-purpose integrated adjudication process.
+
+
+## Implementation status: 2026-10-06
+
+Measured HiFi, per-library contact controls, qualified peer chromosome relationships, native graph evidence, source-bound automatic/manual actions, and post-cut cohort harmonization are implemented. Synthetic workflow integration passed on Crest. The next gate is the isolated real-data batch documented in [chimera-real-test.md](chimera-real-test.md); biological calibration and real workflow validation remain pending.

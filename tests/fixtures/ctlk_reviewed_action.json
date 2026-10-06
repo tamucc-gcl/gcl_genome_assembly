@@ -1,0 +1,16 @@
+[
+  {
+    "id": "ctlk-reviewed-gap-regression",
+    "assembly": "Sde-CTlk_104_hap1",
+    "coordinate_stage": "pre_finishing",
+    "assessment_sha256": "1fd4707ae4958ce31f7e95b5732e01d70686755c6a62a414b080fac24e4fd96a",
+    "scaffold": "scaffold_1",
+    "action": "UNJOIN_UNSUPPORTED",
+    "cut_bp": "63051325",
+    "gap_start": "63051225",
+    "gap_end": "63051325",
+    "decision_source": "review",
+    "evidence_packet_id": "ctlk-boundaries-1511285/H01",
+    "reason": "Previously reviewed conservative gap unjoin; isolated regression test, preserve terminal gap Ns"
+  }
+]

@@ -10,6 +10,6 @@ process CHIMERA_ADJUDICATE {
     tuple val(meta), path("${meta.id}.decisions"), emit: packets
     script:
     """
-    python3 ${script} --calls '${calls}' --assembly '${meta.id}' --context '${context}' --out '${meta.id}.decisions'
+    python3 ${script} --calls '${calls}' --assembly '${meta.id}' --context '${context}' --out '${meta.id}.decisions' --min-piece-bp ${params.chimera_min_piece_bp ?: 1000000}
     """
 }

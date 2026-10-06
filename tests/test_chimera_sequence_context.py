@@ -1,5 +1,7 @@
 import importlib.util
 from pathlib import Path
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
 import unittest
 
 spec = importlib.util.spec_from_file_location('sequence_context', Path(__file__).resolve().parents[1]/'py_scripts/chimera_sequence_context.py')

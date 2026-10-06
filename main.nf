@@ -476,7 +476,11 @@ workflow {
         HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id,
         HARMONIZE_SCAFFOLDS.out.chimera_candidates,
         HARMONIZE_SCAFFOLDS.out.ref_name_map,
+        HARMONIZE_SCAFFOLDS.out.reference_id,
+        HARMONIZE_SCAFFOLDS.out.quality,
         HIC_SCAFFOLDING.out.evidence_pairs,
+        HIC_SCAFFOLDING.out.evidence_inputs,
+        CONTIG_ASSEMBLY.out.native_graphs,
         ch_telo_by_taxid, HIC_SCAFFOLDING.out.round1, HIC_SCAFFOLDING.out.round1_agp,
         READ_PREPARATION.out.hifi, capabilities )
     ch_versions = ch_versions.mix(CHIMERA.out.versions)
