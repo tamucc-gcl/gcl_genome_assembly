@@ -25,7 +25,7 @@ finish() {
     rc=$?
     trap - EXIT
     printf '%s\n' "$rc" > "$out/exit_status.txt"
-    tar --exclude=work -czf "$out.review.tar.gz" -C "$(dirname "$out")" "$scenario"
+    tar --dereference --exclude=work -czf "$out.review.tar.gz" -C "$(dirname "$out")" "$scenario"
     exit "$rc"
 }
 trap finish EXIT
@@ -35,6 +35,7 @@ if [[ "$scenario" == manual ]]; then mode=file; fi
 cd "$out"
 nextflow run "$repo/tests/chimera_integration.nf" \
     --fixture "$out/fixture" --scenario "$scenario" --chimera_break "$mode" \
+    --chimera_min_piece_bp 4 --publish_dir_mode copy \
     --outdir "$out/results" -work-dir "$out/work" -with-trace "$out/trace.tsv" \
     -with-report "$out/execution.html"
 test -s "$out/results/verification/PASS.json"

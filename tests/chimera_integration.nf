@@ -1,6 +1,4 @@
 nextflow.enable.dsl=2
-include { CHIMERA_ADJUDICATE } from '../modules/chimera_adjudicate.nf'
-include { BREAK_CHIMERAS } from '../modules/break_chimeras.nf'
 
 params.fixture = null
 params.scenario = 'unresolved'
@@ -8,6 +6,10 @@ params.outdir = 'chimera-integration-output'
 params.publish_dir_mode = 'copy'
 params.chimera_break = 'auto'
 params.chimera_min_piece_bp = 4
+
+// Set defaults before including modules, which capture parameter values.
+include { CHIMERA_ADJUDICATE } from '../modules/chimera_adjudicate.nf'
+include { BREAK_CHIMERAS } from '../modules/break_chimeras.nf'
 
 process VERIFY_RESULT {
     publishDir "${params.outdir}/verification", mode: 'copy'
