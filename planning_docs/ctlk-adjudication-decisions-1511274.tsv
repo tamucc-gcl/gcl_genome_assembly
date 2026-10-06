@@ -1,0 +1,11 @@
+id	assembly	scaffold	start0	end0	decision	action_scope	reason
+H01	Sde-CTlk_104_hap1	scaffold_1	63051225	63051325	UNJOIN_UNSUPPORTED	RECOMMENDED_GAP_UNJOIN_NOT_EXECUTED	Independent chr9/chr7 block discordance; little localized Hi-C support in both libraries; preserve all component sequence
+J01	Sde-CTlk_104_hap1	scaffold_1	62618168	62941917	UNRESOLVED	NO_INTERNAL_CUT	Core within raw unitig; chromosome switch may be localized at adjacent H01 scaffold gap instead
+J02	Sde-CTlk_104_hap1	scaffold_1	95877814	96047526	UNRESOLVED	NO_INTERNAL_CUT	Unique flanks non-informative; raw graph mapping seam at h1tg000133l:4085098-4091627 warrants narrow review
+J05	Sde-CTlk_104_hap1	scaffold_5	35443804	35581476	UNRESOLVED	NO_INTERNAL_CUT	Chr4/14 composite confirmed; core spans raw unitig; unique breakpoint anchors inadequate
+J06	Sde-CTlk_104_hap2	scaffold_5	43055156	43233354	UNRESOLVED	NO_INTERNAL_CUT	Chr12/7 composite confirmed; core inside raw unitig; unique flank assay non-informative
+J07	Sde-CTlk_104_hap2	scaffold_7	39549503	39688365	UNRESOLVED	NO_INTERNAL_CUT	Chr14/4 composite confirmed; processed unitig continuity; raw segment boundary not a validated cut
+H02-final-gap	Sde-CTlk_104_hap1	scaffold_1	95221756	95221856	UNRESOLVED	MANUAL_GAP_REVIEW	Low narrow contacts but broad contacts and inadequate exact chromosome anchors
+H03	Sde-CTlk_104_hap2	scaffold_5	54123576	54123676	RETAIN	PROVISIONAL_GAP_ONLY	Available flank anchors chr7 on both sides; contacts comparison-like; does not retain entire composite
+H04	Sde-CTlk_104_hap2	scaffold_7	46160478	46160578	RETAIN	PROVISIONAL_GAP_ONLY	Substantial two-library contacts; not established as chromosome switch
+J03-J04	Sde-CTlk_104_hap1	scaffold_1	116057447	116171588	UNRESOLVED	LOCAL_INSERTION_REVIEW_NO_FUSION_CUT	Both surrounding chromosome blocks chr12; broad contacts do not validate individual insertion gaps
