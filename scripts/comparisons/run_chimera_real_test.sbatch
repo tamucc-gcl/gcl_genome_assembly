@@ -13,13 +13,6 @@ tool_env=${1:?Supply analysis conda environment}
 repo="${PWD}/gcl_genome_assembly"
 assessment="${2:-${PWD}/comparisons/chimera-foundation-01}"
 bam_root="${3:-${PWD}/genome_assembly/assembly/chimeras/sequence_context}"
-module load miniconda3
-module load nextflow/23.10.1
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "$tool_env"
-export PYTHONDONTWRITEBYTECODE=1
-for tool in python samtools minimap2 tidk nextflow; do command -v "$tool"; done
-python -c 'import numpy, matplotlib, cooler'
 scenarios=(auto manual)
 scenario=${scenarios[$SLURM_ARRAY_TASK_ID]}
 out="${PWD}/comparisons/chimera-real-${SLURM_ARRAY_JOB_ID}/${scenario}"
@@ -34,6 +27,24 @@ finish() {
     exit "$rc"
 }
 trap finish EXIT
+module load miniconda3
+module load nextflow/23.10.1
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$tool_env"
+export PYTHONDONTWRITEBYTECODE=1
+required_tools=(python samtools minimap2 nextflow)
+if [[ "$scenario" == auto ]]; then required_tools+=(tidk); fi
+missing=()
+for tool in "${required_tools[@]}"; do
+    if ! command -v "$tool"; then missing+=("$tool"); fi
+done
+if (( ${#missing[@]} )); then
+    printf 'ERROR: missing tools in environment %s: %s\n' "$tool_env" "${missing[*]}" >&2
+    printf 'Missing tools: %s\n' "${missing[*]}" > "$out/preflight_error.txt"
+    exit 1
+fi
+python -c 'import numpy, matplotlib, cooler'
+
 python "$repo/scripts/comparisons/prepare_chimera_real_test.py" \
     --assessment "$assessment" --bam-root "$bam_root" --species 373251 --sample Sde-CTlk_104 \
     --reviewed-template "$repo/tests/fixtures/ctlk_reviewed_action.json" --out "$out/inputs"
