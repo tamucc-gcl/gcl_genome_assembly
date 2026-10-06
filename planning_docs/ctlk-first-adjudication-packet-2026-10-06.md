@@ -61,3 +61,26 @@ No new sister/contact batch is requested yet: inspect the context inventory and 
 ## Terminal outcome of this first stage
 
 For each composite, identify whether the current uncertainty concerns chromosome assignment, an internal unitig/contig path, a physical scaffold adjacency, or more than one. Each implicated boundary receives a named test with available/missing input status. Preserve sequence and mark biological uncertainty separately from assembly action. No executable cut is justified simply by this packet.
+
+## Follow-up to returned context inventory
+
+The supplied context_inventory.json confirms only the standardized hap1/hap2 contig FASTAs/GFAs, a 28,955-byte hifiasm log, and versions.tsv in the published directory. No raw/processed unitig graphs or HiFi overlap caches were found there. This establishes absence from that directory, not loss from the task directory. The log itself has not yet been supplied locally, so its coverage/phase diagnostics are not verified.
+
+The retained foundation trace identifies CTlk hifiasm as cached task hash `b4/4c0468`, native job 1499288, originally submitted 23 September. Its cached provenance matters: the October foundation pass did not newly run hifiasm. The actual command/version of the September task is needed before attributing any output to current defaults.
+
+The collector now resolves just that sample's hifiasm task hashes from a trace. After sync, run this small follow-up from the cluster project root:
+
+```bash
+python3 gcl_genome_assembly/scripts/comparisons/inventory_hifiasm_context.py \
+  --results comparisons/chimera-foundation-01 \
+  --sample Sde-CTlk_104 \
+  --trace comparisons/chimera-foundation-01/pipeline/pipeline_trace.txt \
+  --work-root work \
+  --out comparisons/ctlk-hifiasm-context-02
+tar -czf comparisons/ctlk-hifiasm-context-02.tar.gz \
+  comparisons/ctlk-hifiasm-context-02
+```
+
+Return this small archive: it contains the inventory plus available small logs, versions, command and annotations, without copying large graphs or caches. If the trace used a different work root, substitute that actual root. Missing or ambiguous task paths are recorded; the collector will not choose among ambiguous matches or recursively search work. Tests are prepared in test_hifiasm_context_inventory.py but have not been executed locally.
+
+Static inspection of the existing assessment PAF rows adds one useful limitation: at the descriptive MAPQ>=20 and >=50 kb query-span screen, J05 has an 89,115 bp alignment in CMat hap1, but its query coordinates 47,363–136,478 do not span the full transition core (100,000–237,672 in that extracted window). J07 has a 51,938 bp alignment in that same target, but query 286,912–338,850 is downstream of its core (100,000–238,862). Neither validates the disputed chromosome boundary. J01 has several much longer alignments in current peers, but span/order/CIGAR and phase still need review; a long PAF span is not a verified uninterrupted bridge. This was inspection of retained rows, not a new mapping run or calibrated uniqueness test. Source targets must be resolved from sequence_comparisons/sources.tsv and the corresponding name maps, not from peer file indices alone.
