@@ -317,6 +317,7 @@ def hic_evidence(a, job, dest):
             raise ValueError('Hi-C source FASTA does not match AGP components')
     contacts = Contacts(job['selected'], assessment.lengths, a.contact_flank)
     audits = Counter()
+    print(f"Hi-C {assembly}: starting one pairs scan for {len(job['selected'])} selected intervals", flush=True)
     with gzip.open(pairs, 'rt') as handle:
         for line in handle:
             if line.startswith('#') or not line.strip():
@@ -325,6 +326,8 @@ def hic_evidence(a, job, dest):
             if len(f) < 8:
                 raise ValueError('Malformed pairs')
             audits['input_pairs'] += 1
+            if audits['input_pairs'] % 10000000 == 0:
+                print(f"Hi-C {assembly}: scanned {audits['input_pairs']:,} input pairs", flush=True)
             if f[7] != 'UU':
                 continue
             lib = library_for(f[0], rows)
@@ -334,7 +337,11 @@ def hic_evidence(a, job, dest):
                 audits['unmapped_or_ambiguous_pairs'] += 1
                 continue
             contacts.add(lib, x, y)
+    print(f"Hi-C {assembly}: scan complete ({audits['input_pairs']:,} input pairs); summarizing", flush=True)
     output, alternatives = [], []
+    partners_by_side = defaultdict(list)
+    for k, count in contacts.partners.items():
+        partners_by_side[k[:3]].append((k, count))
     libraries = sorted({r['library_id'] for r in rows} | set(contacts.total))
     for lib in libraries:
         for g in job['selected']:
@@ -344,7 +351,7 @@ def hic_evidence(a, job, dest):
                 right_window_bp=contacts.windows[g['id'], 'right'][2]-contacts.windows[g['id'], 'right'][1],
                 left_external_contacts=contacts.margin[lib,g['id'],'left'], right_external_contacts=contacts.margin[lib,g['id'],'right']))
             for side in ('left', 'right'):
-                partners = [(k, v) for k, v in contacts.partners.items() if k[:3] == (lib,g['id'],side)]
+                partners = partners_by_side[lib,g['id'],side]
                 for k, count in sorted(partners, key=lambda kv: (-kv[1], kv[0]))[:10]:
                     c, b = k[3:]
                     alternatives.append(dict(id=g['id'], library=lib, side=side, partner_scaffold=c,

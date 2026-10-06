@@ -16,3 +16,4 @@ __pycache__/
 
 # Generated comparison artifacts if collected inside this checkout
 /comparisons/
+/chat_handoffs

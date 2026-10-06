@@ -9,8 +9,8 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'py_scripts'))
 sys.path.insert(0,str(ROOT/'scripts/comparisons'))
-from junction_review import n_runs, unique_anchor, compare_anchors, recommend, apply_reviews
-from review_all_junctions import inventory, reuse_packets, specifications
+from junction_review import n_runs, unique_anchor, compare_anchors, recommend, apply_reviews, select_evidence_rows
+from review_all_junctions import inventory, reuse_packets, specifications, scope_evidence
 
 
 def hit(target='s',start=0,strand='+',mapq=60):
@@ -19,6 +19,43 @@ def hit(target='s',start=0,strand='+',mapq=60):
 
 
 class ReviewTests(unittest.TestCase):
+    def test_selection_is_bounded_and_sequence_bound(self):
+        rows = [dict(id=k, assembly='a', scaffold='s', start=i, end=i+1,
+                     assessment_sha256='hash', role='inventory')
+                for i, k in enumerate(('suspect', 'minor'))]
+        selected = select_evidence_rows(rows, [dict(rows[0], role='candidate_gap')])
+        self.assertEqual([r['id'] for r in selected], ['suspect'])
+        self.assertEqual(rows[0]['role'], 'inventory')
+        for change in ({'id':'missing'}, {'start':9}, {'assessment_sha256':'old'}, {'role':'inventory'}):
+            source = dict(rows[0], role='candidate_gap')
+            source.update(change)
+            with self.assertRaises(ValueError):
+                select_evidence_rows(rows, [source])
+        with self.assertRaises(ValueError): select_evidence_rows(rows, [])
+
+    def test_selected_packet_does_not_remove_boundary_context(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); packet = root/'packet'; (packet/'a').mkdir(parents=True)
+            (packet/'status.json').write_text(json.dumps(dict(status='SUCCESS',
+                assemblies=[dict(assembly='a', folder='a', assessment_sha256='hash')])))
+            (packet/'a/selected_gaps.tsv').write_text(
+                'id\tassembly\tscaffold\tstart\tend\trole\n'
+                'wanted\ta\ts\t10\t11\tcandidate_gap\n')
+            rows = [dict(id=k, assembly='a', scaffold='s', start=lo, end=lo+1,
+                         assessment_sha256='hash', role='inventory')
+                    for k, lo in [('wanted',10), ('intervening',20)]]
+            jobs = [dict(assembly='a', selected=rows, boundary_inventory=rows)]
+            args = SimpleNamespace(selection=[], selection_packet=[packet], registry=None, out=root)
+            selected = scope_evidence(args, jobs, rows)
+            self.assertEqual([r['id'] for r in selected], ['wanted'])
+            self.assertEqual(len(jobs[0]['boundary_inventory']), 2)
+            self.assertEqual(len(jobs[0]['selected']), 1)
+            status = json.loads((packet/'status.json').read_text())
+            status['assemblies'][0]['assessment_sha256'] = 'stale'
+            (packet/'status.json').write_text(json.dumps(status))
+            with self.assertRaises(ValueError): scope_evidence(args, jobs, rows)
+
     def test_ambiguous_and_short_hits_are_not_unique(self):
         self.assertIsNone(unique_anchor([hit(),hit('repeat')]))
         self.assertIsNone(unique_anchor([hit(mapq=255)]))

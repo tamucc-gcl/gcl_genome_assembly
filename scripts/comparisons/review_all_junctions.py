@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory all assessment scaffolds and test sister structure. Never write cuts."""
+"""Inventory assessment boundaries; measure only explicitly selected suspects/controls."""
 import argparse
 from collections import defaultdict, Counter
 import json
@@ -12,7 +12,7 @@ from chimera_origin import sha, table, agp_rows
 from assess_junction_batch import find_gaps, write_rows, verify_agp, hic_evidence
 from junction_assessment import stable_id, validate_registry
 from junction_focus import anchor_intervals
-from junction_review import n_runs, compare_anchors, recommend, apply_reviews
+from junction_review import n_runs, compare_anchors, recommend, apply_reviews, select_evidence_rows
 
 
 def specifications(a):
@@ -97,11 +97,35 @@ def inventory(a, specs):
                      decision='UNREVIEWED', reviewer='', reason='', evidence_for='', evidence_against='')
         rows += current
         jobs.append(dict(assembly=spec['assembly'], fasta=fasta, stages=spec['stages'],
-                         dest=dest, selected=current, digest=digest, spec=spec))
+                         dest=dest, selected=current, boundary_inventory=current, digest=digest, spec=spec))
     if len({r['id'] for r in rows}) != len(rows):
         raise ValueError('Duplicate inventory/registry identifiers')
     write_rows(a.out/'scaffold_inventory.tsv', audit)
     return jobs, rows
+
+
+def scope_evidence(a, jobs, rows):
+    selections = [r for path in a.selection for r in table(path)]
+    for packet in a.selection_packet:
+        status = json.loads((packet/'status.json').read_text())
+        if status.get('status') != 'SUCCESS':
+            raise ValueError('Selection packet must be a completed assessment packet')
+        for assembly in status['assemblies']:
+            # Existing assessment tables have exact coordinates but carry the digest
+            # in status.json rather than on each selected_gaps.tsv row.
+            for source in table(packet/assembly['folder']/'selected_gaps.tsv'):
+                if source['assembly'] != assembly['assembly']:
+                    raise ValueError('Selection packet assembly mismatch')
+                selections.append(dict(source, assessment_sha256=assembly['assessment_sha256']))
+    if a.registry:
+        selections.extend(dict(r, role='candidate_interval') for r in table(a.registry))
+    chosen = select_evidence_rows(rows, selections)
+    for job in jobs:
+        job['selected'] = [r for r in chosen if r['assembly'] == job['assembly']]
+        print(f"Evidence scope {job['assembly']}: {len(job['selected'])} selected / "
+              f"{len(job['boundary_inventory'])} inventoried boundaries", flush=True)
+    write_rows(a.out/'selected_junctions.tsv', chosen)
+    return chosen
 
 
 def reuse_packets(a, rows):
@@ -144,7 +168,7 @@ def sister_evidence(a, jobs):
                         if interval:
                             lo, hi = interval; seq = job['fasta'].fetch(r['scaffold'],lo,hi)
                             clo, chi = (lo,r['start']) if side=='left' else (r['end'],hi)
-                            other = sum(g['id'] != r['id'] and g['kind'] != 'flagged_interval' and g['scaffold']==r['scaffold'] and g['start'] < chi and clo < g['end'] for g in gaps)
+                            other = sum(g['id'] != r['id'] and g['kind'] != 'flagged_interval' and g['scaffold']==r['scaffold'] and g['start'] < chi and clo < g['end'] for g in job['boundary_inventory'])
                             w.update(start=lo,end=hi,status='clean' if set(seq)<=set('ACGT') and not other else 'ambiguous_or_other_boundary', other_boundaries=other)
                             out.write(f'>{key}\n{seq}\n')
                         windows.append(w); pair.append(w)
@@ -163,6 +187,7 @@ def sister_evidence(a, jobs):
                 if line.startswith('>'): keep = line[1:].strip() in wanted
                 if keep: out.write(line)
         hits = map_queries(a, job['fasta'], local, job['dest']/'sister') if local.stat().st_size else []
+        print(f"Sister mapping complete {job['assembly']}: {len(hits)} emitted alignments", flush=True)
         grouped = defaultdict(list)
         for h in hits: grouped[h['query']].append(h)
         for r in relevant:
@@ -182,6 +207,10 @@ def main():
     p.add_argument('--out',type=Path,required=True)
     p.add_argument('--manifest',type=Path)
     p.add_argument('--registry',type=Path)
+    p.add_argument('--selection',type=Path,action='append',default=[],
+                   help='Explicit id/assembly/scaffold/start/end/assessment_sha256/role TSV; repeatable')
+    p.add_argument('--selection-packet',type=Path,action='append',default=[],
+                   help='Completed junction-assessment packet supplying bounded selected gaps and controls')
     p.add_argument('--evidence-packet',type=Path,action='append',default=[])
     p.add_argument('--reviews',type=Path)
     p.add_argument('--inventory-only',action='store_true')
@@ -195,6 +224,9 @@ def main():
     p.add_argument('--samtools',default='samtools')
     p.add_argument('--minimap2',default='minimap2')
     a=p.parse_args()
+    if not a.inventory_only and not (a.selection or a.selection_packet or a.registry):
+        p.error('Evidence analysis requires --selection, --selection-packet or --registry; '
+                'use --inventory-only for unrestricted inventory')
     if min(a.anchor_size,a.contact_flank,a.threads,a.index_bases)<=0 or min(a.offsets)<0 or len(set(a.offsets))!=len(a.offsets):
         p.error('Positive sizes/threads and distinct nonnegative offsets required')
     a.out.mkdir(parents=True,exist_ok=False)
@@ -206,13 +238,16 @@ def main():
         run([a.minimap2,'--version'],stdout=a.out/'minimap2.version.txt')
     a.hic_input_map={r['assembly']:r for r in table(a.hic_inputs)} if a.hic_inputs else {}
     jobs,rows=inventory(a,specs)
+    write_rows(a.out/'junction_inventory.tsv',rows)
+    if not a.inventory_only:
+        rows=scope_evidence(a,jobs,rows)
     reuse_packets(a,rows)
     sisters=[] if a.inventory_only else sister_evidence(a,jobs)
     by_id=defaultdict(list)
     for s in sisters: by_id[s['id']].append(s)
     hic=[]
     for job in jobs:
-        status=hic_evidence(a,job,job['dest']) if a.hic and not a.inventory_only else dict(status='not_requested')
+        status=hic_evidence(a,job,job['dest']) if a.hic and not a.inventory_only and job['selected'] else dict(status='not_requested')
         hic.append(dict(assembly=job['assembly'],**status))
         for r in job['selected']: r['hic_status']=status['status']
     for r in rows:

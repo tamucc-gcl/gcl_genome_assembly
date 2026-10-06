@@ -3,6 +3,30 @@ import re
 from junction_focus import anchor_pair
 
 
+def select_evidence_rows(rows, selections):
+    """Select explicit, sequence-bound measurements without changing the full inventory."""
+    lookup = {r['id']: r for r in rows}
+    selected = {}
+    roles = {'candidate_gap', 'candidate_interval', 'nearby_control', 'matched_control'}
+    for source in selections:
+        ident = source.get('id')
+        if ident not in lookup:
+            raise ValueError(f'Selected junction absent from inventory: {ident}')
+        row = lookup[ident]
+        for key in ('assembly', 'scaffold', 'start', 'end', 'assessment_sha256'):
+            if str(source.get(key, '')) != str(row[key]):
+                raise ValueError(f'Selection coordinate/checksum mismatch: {ident} / {key}')
+        role = source.get('role')
+        if role not in roles:
+            raise ValueError(f'Selection needs an explicit candidate/control role: {ident}')
+        if ident in selected and selected[ident]['role'] != role:
+            raise ValueError(f'Conflicting selection roles: {ident}')
+        selected[ident] = dict(row, role=role)
+    if not selected:
+        raise ValueError('No junctions selected for evidence analysis')
+    return list(selected.values())
+
+
 def n_runs(sequence):
     return [(m.start(), m.end()) for m in re.finditer('N+', sequence.upper())]
 
