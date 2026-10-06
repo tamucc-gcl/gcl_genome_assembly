@@ -10,6 +10,7 @@ include { BREAK_CHIMERAS }   from '../modules/break_chimeras.nf'
 include { CHIMERA_JOINS }    from '../modules/chimera_joins.nf'
 include { CHIMERA_EVIDENCE } from '../modules/chimera_evidence.nf'
 include { CHIMERA_SEQUENCE_CONTEXT } from '../modules/chimera_sequence_context.nf'
+include { CHIMERA_ADJUDICATE } from '../modules/chimera_adjudicate.nf'
 
 workflow CHIMERA {
 
@@ -33,8 +34,10 @@ workflow CHIMERA {
     def detect_on = capabilities.scaffold && capabilities.harmonize &&
                     params.harmonize_scaffold_names && params.chimera_detect != false
     def evidence_on = detect_on && params.chimera_evidence != false
-    if (params.chimera_break?.toString() == 'auto')
-        error 'chimera_break=auto is unavailable until junction evidence is calibrated; use chimera_break=false for diagnosis or a reviewed, FASTA-bound joins file for manual cuts'
+    def auto_on = params.chimera_break?.toString() == 'auto'
+    if (auto_on && (!detect_on || !evidence_on))
+        error 'Automatic chimera assessment requires detection and evidence enabled'
+    ch_adjudicated_actions = Channel.empty()
     // The broken assemblies on their own, separate from pre_finalize (which mixes them with
     // the untouched and short-read-only ones). main.nf stages THIS as the 'chimera_broken'
     // QC checkpoint, so contiguity before and after a cut is comparable in the QC table.
@@ -119,7 +122,7 @@ workflow CHIMERA {
         }
 
         // Direct local peer comparison is diagnostic only, independent of cutting.
-        if (params.chimera_sequence_context) {
+        if (params.chimera_sequence_context || auto_on) {
             ch_context_cohort = ch_harmonized.collect(flat: false).map { records -> [records: records] }
             ch_context_reads = ch_hifi_reads.collect(flat: false)
                 .map { records -> records.collectEntries { m, fq -> [(m.sample.toString()): fq] } }
@@ -132,13 +135,19 @@ workflow CHIMERA {
                     def peers = cohort.records.findAll { pm, pf, pn -> pm.taxid.toString() == m.taxid.toString() && pm.id != m.id }
                     tuple(m.taxid.toString(), m, fa, calls,
                           peers.collect { it[0] }, peers ? peers.collect { it[1] } : [file("${projectDir}/assets/NO_PAF", checkIfExists: true)],
-                          params.chimera_hifi_context && reads[m.sample.toString()] ? reads[m.sample.toString()] : file("${projectDir}/assets/NO_PAIRS", checkIfExists: true))
+                          (params.chimera_hifi_context || auto_on) && reads[m.sample.toString()] ? reads[m.sample.toString()] : file("${projectDir}/assets/NO_PAIRS", checkIfExists: true))
                 }
                 .combine(ch_telo_by_taxid, by: 0)
                 .map { taxid, m, fa, calls, pm, pf, reads, motif -> tuple(m, fa, calls, pm, pf, reads, motif ?: 'CCCTAA') }
             CHIMERA_SEQUENCE_CONTEXT(ch_context_in,
                 file("${projectDir}/py_scripts/chimera_sequence_context.py", checkIfExists: true))
             ch_versions = ch_versions.mix(CHIMERA_SEQUENCE_CONTEXT.out.versions)
+            CHIMERA_ADJUDICATE(
+                ch_chimeric_joins.map { taxid, id, calls -> tuple(id.toString(), calls) }
+                    .join(CHIMERA_SEQUENCE_CONTEXT.out.context.map { m, context -> tuple(m.id.toString(), m, context) })
+                    .map { id, calls, m, context -> tuple(m, calls, context) },
+                file("${projectDir}/py_scripts/chimera_adjudicate.py", checkIfExists: true))
+            ch_adjudicated_actions = CHIMERA_ADJUDICATE.out.actions
         }
 
         // ---- supplementary evidence for each called join ----------------------------
@@ -183,17 +192,15 @@ workflow CHIMERA {
     }
 
     if( capabilities.scaffold && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false' ) {
-        ch_break_script = Channel.fromPath("${projectDir}/py_scripts/break_chimeras.py",
-                                          checkIfExists: true)
-        // 'auto' uses the joins CHIMERA_JOINS just called; a path uses that file, so an
-        // edited copy is how you choose which scaffolds to cut. Either way the input is the
-        // CALLED JOINS table, not the candidates: it carries cut_bp from the AGP and one row
-        // per chimeric join, so a scaffold with N of them yields N+1 pieces.
+        ch_break_script = Channel.value(['break_chimeras.py', 'chimera_actions.py']
+            .collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) })
+        // Auto consumes only adjudicated action rows, never detection votes. A path
+        // selects explicit reviewed actions in the same source-bound action format.
         ch_break_in = Channel.empty()
         if (params.chimera_break.toString() == 'auto') {
             // Left-side pass-through keeps every assembly when no join table was available.
             ch_break_in = ch_harmonized.map { meta, fa, nm -> tuple(meta.id, meta, fa, nm) }
-                .join(ch_chimeric_joins.map { taxid, id, f -> tuple(id, f) }, remainder: true)
+                .join(ch_adjudicated_actions.map { meta, f -> tuple(meta.id, f) }, remainder: true)
                 .filter { row -> row[1] != null }
                 .map { id, meta, fa, nm, cand ->
                     tuple(meta, fa, nm, cand ?: file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }

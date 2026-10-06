@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_scripts"))
 from chimera_schema import CALLED_FIELDS, read_table, write_called
-from break_chimeras import read_rows
+from break_chimeras import rows
 
 
 class CalledJoinContractTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class CalledJoinContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     read_table(path)
                 with self.assertRaises(ValueError):
-                    read_rows(str(path))
+                    rows(str(path))
 
 
 if __name__ == "__main__":

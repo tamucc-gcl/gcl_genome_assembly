@@ -1,0 +1,7 @@
+id	local_sequence_decision	chromosome_scale_decision	action
+H01	NOT_AN_INTERNAL_CUT	UNJOIN_UNSUPPORTED	Isolated gap-unjoin candidate passed exact sequence accounting; production unchanged
+J01	RETAIN_TESTED_LOCAL_PATH	UNRESOLVED	No internal cut; use adjacent H01 gap candidate
+J02	RETAIN_TESTED_LOCAL_PATH	UNRESOLVED	Reject cut at raw4085098-4091627; three MAPQ60 molecules span seam
+J05	RETAIN_TESTED_LOCAL_PATH	UNRESOLVED	No midpoint cut; all138 probes have passing molecules
+J06	RETAIN_TESTED_LOCAL_PATH	UNRESOLVED	No midpoint cut; all179 probes have passing molecules
+J07	RETAIN_TESTED_LOCAL_PATH	UNRESOLVED	No endpoint cut; endpoints have13and15 passing molecules

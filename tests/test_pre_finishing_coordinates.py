@@ -89,55 +89,36 @@ class Coordinates(unittest.TestCase):
         fields = self.table.read_text().splitlines()[0].split("\t")
         self.assertEqual(len(fields), len(set(fields)))
 
-    def test_reviewed_break_table_rejects_changed_fasta(self):
-        self.guard()
-        self.fa.write_text(self.fa.read_text().replace("AAAAAAAAAA", "TAAAAAAAAA"))
-        nm = self.d / "names.tsv"
-        nm.write_text("old_name\tnew_name\torient\torder\tlength\tclass\tref_span\tflags\n"
-                      "s1\tchr1_1\tfwd\t1\t25\tchromosome\t.\t.\n"
-                      "s2\tchr2_1\tfwd\t2\t10\tchromosome\t.\t.\n")
-        result = self.run_script("break_chimeras.py", "--fasta", self.fa,
-            "--name-map", nm, "--candidates", self.table, "--assembly", "asm",
-            "--out-fasta", self.d / "out.fa", "--out-name-map", self.d / "out.tsv",
-            "--mode", "file", "--min-piece-bp", "1", ok=False)
-        self.assertIn("does not match", result.stderr)
+    def test_reviewed_action_rejects_changed_fasta(self):
+        result = self.cut_fixture(checksum='stale', ok=False)
+        self.assertIn('does not match', result.stderr)
 
     def test_empty_support_is_reported(self):
         self.pairs.write_text("")
         self.lift()
         self.assertIn("no_supporting_pairs", (self.d / "asm.hic_pairs_audit.tsv").read_text())
 
-    def cut_fixture(self, member="yes", diagnostic="no", mode="file", ok=True):
+    def cut_fixture(self, mode='file', checksum=None, ok=True):
+        checksum = checksum or hashlib.sha256(self.fa.read_bytes()).hexdigest()
         self.table.write_text(
-            "assembly\tscaffold\tcut_bp\tleft_chrom\tright_chrom\tcallable\t"
-            "candidate_verdict\tchromosome_member\tevidence_only\tlocation_status\t"
-            "transition_lo\ttransition_hi\tagp_join_bp\n"
-            f"asm\ts1\t13\tchr1\tchr2\tyes\tBREAK_CANDIDATE\t{member}\t{diagnostic}\t"
-            "unique_supported_gap\t10\t15\t13\n")
-        self.guard()
-        nm = self.d / "names.tsv"
-        nm.write_text("old_name\tnew_name\tlength\tclass\tchromosome_member\n"
-                      f"s1\tchr1_1+chr2_1\t25\tcomposite\t{member}\n"
-                      "s2\tchr3_1\t10\tchromosome\tyes\n")
-        return self.run_script("break_chimeras.py", "--fasta", self.fa,
-            "--name-map", nm, "--candidates", self.table, "--assembly", "asm",
-            "--out-fasta", self.d / "out.fa", "--out-name-map", self.d / "out.tsv",
-            "--mode", mode, "--min-piece-bp", "1", ok=ok)
+            'id\tassembly\tscaffold\tcut_bp\taction\tgap_start\tgap_end\t'
+            'coordinate_stage\tassessment_sha256\tdecision_source\tevidence_packet_id\treason\n'
+            f'boundary\tasm\ts1\t13\tUNJOIN_UNSUPPORTED\t10\t15\t'
+            f'pre_finishing\t{checksum}\treview\tpacket\treviewed gap\n')
+        nm = self.d / 'names.tsv'
+        nm.write_text('old_name\tnew_name\tlength\tclass\torient\tflags\n'
+                      's1\tchr1+chr2\t25\tcomposite\t+\t.\n'
+                      's2\tchr3\t10\tchromosome\t+\t.\n')
+        return self.run_script('break_chimeras.py', '--fasta', self.fa,
+            '--name-map', nm, '--actions', self.table, '--assembly', 'asm',
+            '--out-fasta', self.d / 'out.fa', '--out-name-map', self.d / 'out.tsv',
+            '--audit', self.d / 'cut_audit.tsv',
+            '--mode', mode, '--min-piece-bp', '1', ok=ok)
 
-    def test_supplied_file_cannot_bypass_chromosome_scope(self):
-        result = self.cut_fixture(member="no", ok=False)
-        self.assertIn("Unsafe supplied breakpoint", result.stderr)
-
-    def test_supplied_file_cannot_bypass_unresolved_inference(self):
-        self.cut_fixture(member="unresolved", ok=False)
-
-    def test_diagnostic_position_cannot_be_supplied_as_cut(self):
-        self.cut_fixture(diagnostic="yes", ok=False)
-
-    def test_auto_rejects_even_a_scoped_vote_candidate(self):
-        result = self.cut_fixture(mode="auto", ok=False)
-        self.assertIn("private/heterozygous", result.stderr)
-        self.assertFalse((self.d / "out.fa").exists())
+    def test_auto_requires_decision_eligibility(self):
+        result = self.cut_fixture(mode='auto', ok=False)
+        self.assertIn('eligibility', result.stderr)
+        self.assertFalse((self.d / 'out.fa').exists())
 
     def test_cross_scaffold_partner_is_preserved_with_lifted_orientation(self):
         self.pairs.write_text("r3\tA\t12\tA\t22\t+\t-\tUU\n")

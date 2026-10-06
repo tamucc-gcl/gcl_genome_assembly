@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import re
 
 
 def eligible(rows):
@@ -17,6 +18,38 @@ def eligible(rows):
 def spans_interval(fields, lo, hi, flank=1000):
     """A single gapped PAF record brackets an interval; NOT a proof of continuity."""
     return int(fields[2]) <= lo - flank and int(fields[3]) >= hi + flank
+
+
+def narrow_spanning_molecules(path, lo, hi, flank=1000):
+    """Primary MAPQ30 molecules with uninterrupted aligned sequence over both anchors.
+
+    Reference deletions/skips over 50 bp veto a span. Broad bracketing alone is insufficient.
+    This is positive local support only; zero is not informative absence.
+    """
+    molecules = set()
+    with open(path) as handle:
+        for line in handle:
+            if line.startswith('@'):
+                continue
+            f = line.split('\t')
+            if len(f) < 11 or int(f[1]) & (4 | 256 | 2048) or int(f[4]) < 30:
+                continue
+            start = int(f[3])-1
+            position, blocks = start, []
+            bad = False
+            for length, operation in re.findall(r'(\d+)([MIDNSHP=X])', f[5]):
+                length = int(length)
+                if operation in 'M=X':
+                    blocks.append((position, position+length)); position += length
+                elif operation in 'DN':
+                    if length > 50 and position < hi+flank and position+length > lo-flank:
+                        bad = True
+                    position += length
+            left = sum(max(0, min(end, lo)-max(begin, lo-flank)) for begin, end in blocks)
+            right = sum(max(0, min(end, hi+flank)-max(begin, hi)) for begin, end in blocks)
+            if not bad and start <= lo-flank and position >= hi+flank and left >= flank and right >= flank:
+                molecules.add(f[0])
+    return len(molecules)
 
 
 def run(args, output=None):
@@ -61,6 +94,7 @@ def main():
         raise ValueError('Assessment exceeds diagnostic single-index budget')
     queries = out/'intervals.fa'
     intervals = {}
+    decision_measurements = {}
     with queries.open('w') as combined:
         for i, row in enumerate(rows):
             lo, hi = int(row['transition_lo']), int(row['transition_hi'])
@@ -75,6 +109,10 @@ def main():
             fa.write_text('>'+key+'\n'+seq+'\n')
             combined.write(fa.read_text())
             intervals[key] = dict(scaffold=chrom, start=start, end=end, lo=lo, hi=hi)
+            decision_id = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()[:20]
+            intervals[key]['decision_id'] = decision_id
+            decision_measurements[decision_id] = dict(assessment_sha256=digest.hexdigest(),
+                                                      coordinate_stage='pre_finishing')
     run(['tidk', 'search', '--string', a.motif, '--window', '100', '--output', 'intervals', '--dir', out/'tidk', queries])
     peers = json.loads(a.peers)
     summaries = {key: dict(same=set(), other=set()) for key in intervals}
@@ -111,7 +149,10 @@ def main():
         for key, interval in intervals.items():
             region = '%s:%d-%d' % (interval['scaffold'], interval['start']+1, interval['end'])
             run(['samtools', 'view', '-h', bam, region], out/(key+'.sam'))
+            decision_measurements[interval['decision_id']]['hifi_spanning_molecules'] = narrow_spanning_molecules(
+                out/(key+'.sam'), interval['lo'], interval['hi'])
             run(['samtools', 'depth', '-aa', '-q', '0', '-Q', '20', '-G', '0xF04', '-r', region, bam], out/(key+'.depth.tsv'))
+    (out/'decision_measurements.json').write_text(json.dumps(decision_measurements, indent=2)+'\n')
     for tool in ('samtools', 'minimap2', 'tidk'):
         run([tool, '--version'], out/(tool+'.version.txt'))
     local.unlink()
