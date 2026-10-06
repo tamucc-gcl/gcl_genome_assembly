@@ -277,7 +277,8 @@ def hifi(a, job, fa, regions):
         for i,r in enumerate(regions):
             lo=max(0,r['start']-100000); hi=min(fa.lengths[r['scaffold']],r['end']+100000)
             q=f'w{i}'; windows.append(dict(query=q,**r,lo=lo,hi=hi))
-            dest.write(f'>{q}\n{fa.fetch(r['scaffold'],lo,hi)}\n')
+            sequence = fa.fetch(r['scaffold'], lo, hi)
+            dest.write(f'>{q}\n{sequence}\n')
     references=[]; seen=set()
     with (a.out/'competitive.fa').open('w') as dest:
         for i,peer in enumerate(peers(a)):

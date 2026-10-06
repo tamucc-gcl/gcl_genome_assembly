@@ -1,5 +1,6 @@
 """Adversarial evidence tests; executed in the cluster batch before tools run."""
 import importlib.util
+import ast
 from pathlib import Path
 import sys
 import tempfile
@@ -8,6 +9,8 @@ import unittest
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts/comparisons'))
 spec=importlib.util.spec_from_file_location('ctlk_adjudication',ROOT/'scripts/comparisons/run_ctlk_adjudication.py')
+# Keep the cluster's Python 3.11 grammar even when checked with a newer Python.
+ast.parse(Path(spec.origin).read_text(), filename=spec.origin, feature_version=(3, 11))
 mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
 
 
