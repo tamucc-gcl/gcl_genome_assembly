@@ -55,7 +55,7 @@ workflow {
     def scripts = file("${projectDir}/../py_scripts")
     def meta = [id:'synthetic', sample:'synthetic', taxid:'synthetic']
     CHIMERA_REVIEW(Channel.of(tuple(meta, file("${root}/calls.tsv"), file("${root}/context"))),
-                      file("${scripts}/chimera_review.py"))
+                      Channel.value([file("${scripts}/chimera_review.py"), file("${scripts}/chimera_markdown.py")]))
     selected = Channel.of(tuple(meta, file("${root}/manual-actions.tsv")))
     BREAK_CHIMERAS(selected.map { m, actions -> tuple(m, file("${root}/assessment.fa"), file("${root}/names.tsv"), actions) },
                   Channel.value([file("${scripts}/break_chimeras.py"), file("${scripts}/chimera_actions.py")]))

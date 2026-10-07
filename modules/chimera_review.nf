@@ -10,7 +10,7 @@ process CHIMERA_REVIEW {
     tuple val(meta), path("${meta.id}.review"), emit: packets
     script:
     """
-    python3 ${script} --calls '${calls}' --assembly '${meta.id}' --context '${context}' --out '${meta.id}.review'
+    python3 chimera_review.py --calls '${calls}' --assembly '${meta.id}' --context '${context}' --out '${meta.id}.review'
     """
 }
 
@@ -22,9 +22,11 @@ process CHIMERA_REVIEW_INDEX {
     path(script)
     output:
     path('chimera_review.tsv'), emit: review_file
-    path('index.html'), emit: report
+    path('README.md'), emit: report
+    path('assembly_registry.tsv'), emit: registry
+    path('cut-instructions.md'), emit: instructions
     script:
-    def args = (tables instanceof List ? tables : [tables]).collect { "--table '${it}'" }.join(' ')
+    def args = (tables instanceof List ? tables : [tables]).collect { "--packet '${it}'" }.join(' ')
     """
     python3 ${script} ${args}
     """

@@ -1,0 +1,19 @@
+candidate	peer	sample	role	relationship	left_chrom	right_chrom	left_aligned_bp	right_aligned_bp	left_coverage	right_coverage	left_dominance	right_dominance
+d4d577eb413e028d9d5e	Sde-CBau_104_hap1	Sde-CBau_104	independent eligible	uninformative	chr12	chr7	86649	106918	0.10194	0.12578588235294116	0.9630463132869392	1.0
+d4d577eb413e028d9d5e	Sde-CBau_104_hap2	Sde-CBau_104	independent eligible	uninformative	chr12	chr7	97558	117070	0.11477411764705882	0.13772941176470588	0.8550400787224011	1.0
+d4d577eb413e028d9d5e	Sde-CLim_110_hap1	Sde-CLim_110	independent eligible	uninformative	chr12	chr7	102380	96662	0.12044705882352941	0.11372	0.9481148661848017	0.7096066706668598
+d4d577eb413e028d9d5e	Sde-CLim_110_hap2	Sde-CLim_110	independent eligible	uninformative	chr12	chr7	88660	107457	0.10430588235294118	0.12642	0.9415632754342432	0.8845770866486129
+d4d577eb413e028d9d5e	Sde-CMat_203_hap1	Sde-CMat_203	independent eligible	uninformative	chr12	chr7	81315	119516	0.09566470588235294	0.14060705882352942	0.9999754042919511	1.0
+d4d577eb413e028d9d5e	Sde-CMat_203_hap2	Sde-CMat_203	independent eligible	uninformative	chr12	chr7	106631	127549	0.12544823529411764	0.15005764705882352	0.8381802665266198	1.0
+d4d577eb413e028d9d5e	Sde-CPla_115_hap1	Sde-CPla_115	context only	uninformative	.	.	0	0	0.0	0.0	0.0	0.0
+d4d577eb413e028d9d5e	Sde-CPla_115_hap2	Sde-CPla_115	context only	uninformative	.	.	0	0	0.0	0.0	0.0	0.0
+d4d577eb413e028d9d5e	Sde-CTlk_104_hap1	Sde-CTlk_104	same individual	uninformative	.	.	0	0	0.0	0.0	0.0	0.0
+9beca40a2a260bd3c3db	Sde-CBau_104_hap1	Sde-CBau_104	independent eligible	different_chromosomes	chr14	chr4	111387	377695	0.1310435294117647	0.44434705882352943	0.9850431378886225	0.9661208117661075
+9beca40a2a260bd3c3db	Sde-CBau_104_hap2	Sde-CBau_104	independent eligible	different_chromosomes	chr14	chr4	106033	284708	0.12474470588235294	0.3349505882352941	1.0	1.0
+9beca40a2a260bd3c3db	Sde-CLim_110_hap1	Sde-CLim_110	independent eligible	uninformative	chr14	chr4	113697	61508	0.13376117647058824	0.07236235294117647	1.0	0.782093386226182
+9beca40a2a260bd3c3db	Sde-CLim_110_hap2	Sde-CLim_110	independent eligible	different_chromosomes	chr14	chr4	125553	338820	0.1477094117647059	0.39861176470588233	0.9140283386299013	1.0
+9beca40a2a260bd3c3db	Sde-CMat_203_hap1	Sde-CMat_203	independent eligible	different_chromosomes	chr14	chr4	106192	261335	0.12493176470588235	0.3074529411764706	0.9843114358897092	1.0
+9beca40a2a260bd3c3db	Sde-CMat_203_hap2	Sde-CMat_203	independent eligible	different_chromosomes	chr14	chr4	112742	113165	0.13263764705882353	0.13313529411764705	1.0	1.0
+9beca40a2a260bd3c3db	Sde-CPla_115_hap1	Sde-CPla_115	context only	uninformative	.	.	0	0	0.0	0.0	0.0	0.0
+9beca40a2a260bd3c3db	Sde-CPla_115_hap2	Sde-CPla_115	context only	uninformative	.	.	0	0	0.0	0.0	0.0	0.0
+9beca40a2a260bd3c3db	Sde-CTlk_104_hap1	Sde-CTlk_104	same individual	uninformative	chr2	chr2	0	790	0.0	0.0009294117647058824	0.0	1.0

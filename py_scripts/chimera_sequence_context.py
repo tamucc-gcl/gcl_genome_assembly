@@ -64,13 +64,15 @@ def main():
     out.mkdir()
     with open(a.calls) as handle:
         rows = eligible(list(csv.DictReader((x for x in handle if not x.startswith('#')), delimiter='\t')))
-    if not rows:
-        (out/'report.md').write_text('# Chimera sequence context\n\nNo eligible chromosome-scale candidate intervals.\n')
-        return
     digest = hashlib.sha256()
     with open(a.fasta, 'rb') as handle:
         for chunk in iter(lambda: handle.read(1024*1024), b''):
             digest.update(chunk)
+    if not rows:
+        (out/'report.md').write_text('# Chimera sequence context\n\nNo eligible chromosome-scale candidate intervals.\n')
+        (out/'provenance.json').write_text(json.dumps(dict(assembly=a.assembly,sample=a.sample,sha256=digest.hexdigest(),
+            coordinate_stage='pre_finishing',intervals={},hifi=bool(a.reads or a.bam)),indent=2)+'\n')
+        return
     if any(r.get('assembly_sha256') != digest.hexdigest() for r in rows):
         raise ValueError('Candidate assessment checksum does not match FASTA')
     # Index a local symlink; never write an index next to a published input.

@@ -196,8 +196,8 @@ workflow CHIMERA {
                 ch_chimeric_joins.map { taxid, id, calls -> tuple(id.toString(), calls) }
                     .join(CHIMERA_SEQUENCE_CONTEXT.out.context.map { m, context -> tuple(m.id.toString(), m, context) })
                     .map { id, calls, m, context -> tuple(m, calls, context) },
-                file("${projectDir}/py_scripts/chimera_review.py", checkIfExists: true))
-            CHIMERA_REVIEW_INDEX(CHIMERA_REVIEW.out.rows.map { m, rows -> rows }.toList(),
+                Channel.value(['chimera_review.py', 'chimera_markdown.py'].collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
+            CHIMERA_REVIEW_INDEX(CHIMERA_REVIEW.out.packets.map { m, packet -> packet }.toList(),
                 file("${projectDir}/py_scripts/chimera_review_index.py", checkIfExists: true))
         }
 

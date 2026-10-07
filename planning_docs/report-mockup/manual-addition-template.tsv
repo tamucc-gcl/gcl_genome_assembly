@@ -1,0 +1,2 @@
+selected	id	assembly	coordinate_stage	assessment_sha256	scaffold	action	cut_bp	gap_start	gap_end	decision_source	evidence_packet_id	reviewer	reason	localization_status	evidence_summary	report_path
+NO	manual-additional-001	Sde-CTlk_104_hap1	pre_finishing	1fd4707ae4958ce31f7e95b5732e01d70686755c6a62a414b080fac24e4fd96a	scaffold_1	BREAK_PROBABLE_MISJOIN				review	manual-additional-001			unlocalized	Example manually added row; supply evidence and exact coordinate before selection	cut-interface.md

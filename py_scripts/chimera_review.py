@@ -1,8 +1,9 @@
 """Create human evidence packets and editable, unselected review rows. No auto decisions."""
 import argparse,csv,hashlib,html,json
 from pathlib import Path
-FIELDS=['selected','id','assembly','coordinate_stage','assessment_sha256','scaffold','action','cut_bp','gap_start','gap_end',
-        'decision_source','evidence_packet_id','reviewer','reason','localization_status','evidence_summary','report_path']
+from chimera_markdown import render, decision_context
+FIELDS=['selected','id','assembly','coordinate_stage','assessment_sha256','scaffold','action','cut_bp','gap_start','gap_end','review_start','review_end','review_range','localization_explanation',
+        'decision_source','evidence_packet_id','reviewer','reason','localization_status','evidence_summary','report_path','source_candidate_id','chromosome_context','evidence_for_cut','evidence_against_cut','review_priority','evidence_limits']
 
 def write_table(path,rows):
     with path.open('w',newline='',encoding='utf-8') as h:
@@ -12,21 +13,38 @@ def generate(assembly,calls,context,out):
     out=Path(out);out.mkdir(parents=True,exist_ok=True);context=Path(context)
     provenance=json.loads((context/'provenance.json').read_text()) if (context/'provenance.json').exists() else {}
     measurements=json.loads((context/'decision_measurements.json').read_text()) if (context/'decision_measurements.json').exists() else {}
-    with open(calls) as h:records=list(csv.DictReader((l for l in h if not l.startswith('#')),delimiter='\t'))
+    with open(calls,encoding='utf-8') as h:records=list(csv.DictReader((l for l in h if not l.startswith('#')),delimiter='\t'))
     candidates={hashlib.sha256(json.dumps(r,sort_keys=True).encode()).hexdigest()[:20]:r for r in records}
     for key,m in measurements.items():
         if m.get('review_only'):candidates[key]=dict(scaffold=m['scaffold'],assembly_sha256=m['assessment_sha256'])
     rows=[];sections=[];flat=[]
     palette={('chr'+str(i+1)):color for i,color in enumerate(['#4477aa','#ee6677','#228833','#ccbb44','#66ccee','#aa3377','#bbbbbb','#332288','#88ccee','#44aa99','#117733','#999933','#ddcc77','#cc6677','#882255'])}
-    for key,c in candidates.items():
+    def location(item):
+        key,c=item;m=measurements.get(key,{})
+        interval=provenance.get('intervals',{}).get(m.get('packet_interval_id'),{})
+        scaffold=c['scaffold']
+        digits=''.join(x for x in scaffold if x.isdigit())
+        return (int(digits) if digits else 0,scaffold,int(m.get('cut_bp') or c.get('transition_lo') or interval.get('lo') or 0),key)
+    for number,(key,c) in enumerate(sorted(candidates.items(),key=location),1):
         m=measurements.get(key,{});gap=m.get('verified_gap') is True
         coordinate=m.get('cut_bp','') if gap else ''
         summary='Literal gap proposed for human review' if gap else 'Transition unlocalized; exact internal cut requires explicit review'
-        row=dict.fromkeys(FIELDS,'');row.update(selected='NO',id=key,assembly=assembly,coordinate_stage='pre_finishing',
+        display_id='C%02d'%number
+        row=dict.fromkeys(FIELDS,'');row.update(source_candidate_id=key,selected='NO',id=display_id,assembly=assembly,coordinate_stage='pre_finishing',
             assessment_sha256=c.get('assembly_sha256',m.get('assessment_sha256','')),scaffold=c['scaffold'],
             action='UNJOIN_UNSUPPORTED' if gap else 'UNRESOLVED',cut_bp=coordinate,gap_start=m.get('gap_start',''),gap_end=m.get('gap_end',''),
             decision_source='review',evidence_packet_id=assembly+'.sequence_context',localization_status='proposed_gap' if gap else 'unlocalized',
-            evidence_summary=summary,report_path=assembly+'.review/report.html#'+key)
+            evidence_summary=summary,report_path=assembly+'.review/report.md#candidate-'+display_id.lower())
+        row.update(decision_context(m,provenance.get('sample',assembly.rsplit('_hap',1)[0])))
+        interval=provenance.get('intervals',{}).get(m.get('packet_interval_id'),{})
+        lo=m.get('gap_start') if gap else c.get('transition_lo',interval.get('lo'))
+        hi=m.get('gap_end') if gap else c.get('transition_hi',interval.get('hi'))
+        row.update(review_start=lo if lo is not None else '',review_end=hi if hi is not None else '',
+                   review_range=('%s–%s'%(lo,hi)) if lo is not None and hi is not None else 'Interval unavailable')
+        row['localization_explanation']=('Verified all-N gap; an exact gap-end cut is available' if gap else
+            'Local HiFi continuity supports the sampled transition; chromosome assignments do not identify a failed seam' if m.get('local_path_support')=='supported_grid' else
+            'Repeat or ambiguous alignment obscures the seam; the chromosome-transition interval remains available for review' if m.get('repeat_obscured_localization') else
+            'Chromosome-transition interval is measured, but no unique failed seam or verified gap has been established inside it')
         rows.append(row);escaped=html.escape
         section='<section id="'+key+'"><h2>'+escaped(c['scaffold']+' / '+key)+'</h2><p>'+summary+'. Selected: NO. Proposed cut: '+str(coordinate or 'none')+'. All coordinates are 0-based on the original assessed FASTA.</p>'
         tracks=m.get('chromosome_tracks',[]);all_bins=[b for t in tracks for b in t['bins']];length=max((b['hi'] for b in all_bins),default=1)
@@ -57,7 +75,7 @@ def generate(assembly,calls,context,out):
         same=[sample for sample,pairs in by_individual.items() if len(pairs)==1 and next(iter(pairs))[0]=='same_chromosome']
         missing=[sample for sample,pairs in by_individual.items() if not pairs]
         conflicting=[sample for sample,pairs in by_individual.items() if len(pairs)>1]
-        row['evidence_summary']=summary+'; independent chromosome context: different='+str(len(different))+', same='+str(len(same))+', missing='+str(len(missing))+', conflicting='+str(len(conflicting))
+        row['evidence_summary']=row['review_priority']+'; '+row['chromosome_context']
         section+='<p><b>Independent chromosome context:</b> different chromosomes in '+escaped(', '.join(different) or 'none')+'; same chromosome in '+escaped(', '.join(same) or 'none')+'; missing in '+escaped(', '.join(missing) or 'none')+'; conflicting in '+escaped(', '.join(conflicting) or 'none')+'. Missing measurements neither support nor oppose a cut.</p>'
         table='<table><tr><th>Peer / role</th><th>Assessed left / right chromosome assignments</th><th>Aligned kb left/right</th><th>Chromosome context</th></tr>'
         for t,r in zip(tracks,[r for r in flat if r['candidate']==key]):
@@ -84,9 +102,7 @@ def generate(assembly,calls,context,out):
         with (out/'peer_track_summary.tsv').open('w',newline='',encoding='utf-8') as h:
             w=csv.DictWriter(h,fieldnames=list(flat[0]),delimiter='\t');w.writeheader();w.writerows(flat)
     (out/'measurements.json').write_text(json.dumps(measurements,indent=2),encoding='utf-8')
-    legend=' '.join('<span style="color:%s">■ %s</span>'%(v,k) for k,v in palette.items())
-    document='<!doctype html><meta charset="utf-8"><title>Chimera human review</title><style>body{font:15px system-ui;margin:30px;max-width:1400px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}svg,img{width:100%}svg{font:12px system-ui}pre{white-space:pre-wrap}section{margin:40px 0;border-top:2px solid #aaa}</style><h1>'+html.escape(assembly)+' chimera evidence review</h1><p>No automatic cutting. Every review row is selected=NO. Edit the merged review TSV, set selected=YES only for reviewed cuts, and supply reviewer and reason. Leave unlocalized coordinates blank until resolved. Same-individual haplotypes and context-only peers are not independent votes.</p><p>'+legend+'</p><p>The chromosome-track summaries are exploratory: qualifying MAPQ30, identity90% aligned bases are aggregated without double-counting; alternate placements are masked. Display bins need 10 kb assigned bases and 90% chromosome dominance. Side summaries need 100 kb assigned bases, 90% dominance, and three bins. These are evidence descriptions, not cutting permission. Record-wide identity and bounded alternatives limit the interpretation.</p>'+''.join(sections)
-    (out/'report.html').write_text(document,encoding='utf-8')
+    render(assembly, rows, measurements, provenance, sections, context, out)
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--assembly',required=True);p.add_argument('--calls',required=True);p.add_argument('--context',required=True);p.add_argument('--out',required=True);a=p.parse_args();generate(a.assembly,a.calls,a.context,a.out)

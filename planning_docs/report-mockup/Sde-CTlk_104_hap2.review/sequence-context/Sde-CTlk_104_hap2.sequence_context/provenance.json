@@ -1,0 +1,1704 @@
+{
+  "assembly": "Sde-CTlk_104_hap2",
+  "sample": "Sde-CTlk_104",
+  "sha256": "121ce840edf743fb0a1c9bcc39ef210c241a585bd9e2f6dac3758176bc12ff19",
+  "coordinate_stage": "pre_finishing",
+  "intervals": {
+    "candidate_1": {
+      "scaffold": "scaffold_5",
+      "start": 42205156,
+      "end": 44083354,
+      "lo": 43055156,
+      "hi": 43233354,
+      "decision_id": "d4d577eb413e028d9d5e",
+      "transition_lo": 43055156,
+      "transition_hi": 43233354,
+      "hifi": {
+        "left_molecules": 46,
+        "right_molecules": 13,
+        "spanning": 0,
+        "left_median_depth": 54.0,
+        "right_median_depth": 16.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 23,
+            "right_molecules": 15,
+            "spanning": 0,
+            "left_median_depth": 34.0,
+            "right_median_depth": 18.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 25,
+            "right_molecules": 6,
+            "spanning": 0,
+            "left_median_depth": 37.0,
+            "right_median_depth": 7.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 13,
+            "right_molecules": 0,
+            "spanning": 0,
+            "left_median_depth": 23.0,
+            "right_median_depth": 5.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 0.952
+          }
+        }
+      },
+      "key": "candidate_1",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "candidate_2": {
+      "scaffold": "scaffold_7",
+      "start": 38699503,
+      "end": 40538365,
+      "lo": 39549503,
+      "hi": 39688365,
+      "decision_id": "9beca40a2a260bd3c3db",
+      "transition_lo": 39549503,
+      "transition_hi": 39688365,
+      "hifi": {
+        "left_molecules": 22,
+        "right_molecules": 3,
+        "spanning": 0,
+        "left_median_depth": 32.0,
+        "right_median_depth": 6.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 8,
+            "right_molecules": 0,
+            "spanning": 0,
+            "left_median_depth": 32.0,
+            "right_median_depth": 0.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 0.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 14,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 14.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 33,
+            "right_molecules": 2,
+            "spanning": 0,
+            "left_median_depth": 50.0,
+            "right_median_depth": 8.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "candidate_2",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_b3ad6c4ac0225667772a": {
+      "scaffold": "scaffold_5",
+      "lo": 42750000,
+      "hi": 42750000,
+      "role": "continuous_control",
+      "start": 41900000,
+      "end": 43600000,
+      "hifi": {
+        "left_molecules": 22,
+        "right_molecules": 25,
+        "spanning": 18,
+        "left_median_depth": 36.0,
+        "right_median_depth": 39.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 19,
+            "right_molecules": 23,
+            "spanning": 0,
+            "left_median_depth": 44.0,
+            "right_median_depth": 37.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 25,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 40.0,
+            "right_median_depth": 36.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 5,
+            "right_molecules": 7,
+            "spanning": 0,
+            "left_median_depth": 30.0,
+            "right_median_depth": 15.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_b3ad6c4ac0225667772a",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_874b7a0ed021a004df85": {
+      "scaffold": "scaffold_5",
+      "lo": 42250000,
+      "hi": 42250000,
+      "role": "continuous_control",
+      "start": 41400000,
+      "end": 43100000,
+      "hifi": {
+        "left_molecules": 5,
+        "right_molecules": 20,
+        "spanning": 4,
+        "left_median_depth": 30.0,
+        "right_median_depth": 31.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 8,
+            "right_molecules": 18,
+            "spanning": 0,
+            "left_median_depth": 17.0,
+            "right_median_depth": 38.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 28,
+            "right_molecules": 26,
+            "spanning": 0,
+            "left_median_depth": 45.0,
+            "right_median_depth": 41.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 11,
+            "right_molecules": 25,
+            "spanning": 0,
+            "left_median_depth": 36.0,
+            "right_median_depth": 39.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_874b7a0ed021a004df85",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_d2018e0e887ce229d84f": {
+      "scaffold": "scaffold_5",
+      "lo": 44250000,
+      "hi": 44250000,
+      "role": "continuous_control",
+      "start": 43400000,
+      "end": 45100000,
+      "hifi": {
+        "left_molecules": 15,
+        "right_molecules": 11,
+        "spanning": 7,
+        "left_median_depth": 22.0,
+        "right_median_depth": 23.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 22,
+            "right_molecules": 17,
+            "spanning": 0,
+            "left_median_depth": 37.0,
+            "right_median_depth": 34.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 3,
+            "right_molecules": 2,
+            "spanning": 0,
+            "left_median_depth": 8.0,
+            "right_median_depth": 10.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 0.997
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 3,
+            "right_molecules": 16,
+            "spanning": 0,
+            "left_median_depth": 6.0,
+            "right_median_depth": 26.0,
+            "left_covered_fraction": 0.999,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_d2018e0e887ce229d84f",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_d31cf0d33699e4e24375": {
+      "scaffold": "scaffold_5",
+      "lo": 41750000,
+      "hi": 41750000,
+      "role": "continuous_control",
+      "start": 40900000,
+      "end": 42600000,
+      "hifi": {
+        "left_molecules": 11,
+        "right_molecules": 26,
+        "spanning": 7,
+        "left_median_depth": 36.0,
+        "right_median_depth": 36.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 17,
+            "right_molecules": 30,
+            "spanning": 0,
+            "left_median_depth": 33.0,
+            "right_median_depth": 40.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 18,
+            "right_molecules": 32,
+            "spanning": 0,
+            "left_median_depth": 34.0,
+            "right_median_depth": 44.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 19,
+            "right_molecules": 20,
+            "spanning": 0,
+            "left_median_depth": 31.5,
+            "right_median_depth": 31.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_d31cf0d33699e4e24375",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_93100c94682c58558aea": {
+      "scaffold": "scaffold_5",
+      "lo": 41250000,
+      "hi": 41250000,
+      "role": "continuous_control",
+      "start": 40400000,
+      "end": 42100000,
+      "hifi": {
+        "left_molecules": 19,
+        "right_molecules": 8,
+        "spanning": 6,
+        "left_median_depth": 31.5,
+        "right_median_depth": 32.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 31,
+            "right_molecules": 2,
+            "spanning": 0,
+            "left_median_depth": 40.0,
+            "right_median_depth": 19.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 20,
+            "right_molecules": 22,
+            "spanning": 0,
+            "left_median_depth": 32.0,
+            "right_median_depth": 38.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 26,
+            "right_molecules": 26,
+            "spanning": 0,
+            "left_median_depth": 38.0,
+            "right_median_depth": 36.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_93100c94682c58558aea",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_837ab7bae6c37c77e2a2": {
+      "scaffold": "scaffold_5",
+      "lo": 40750000,
+      "hi": 40750000,
+      "role": "continuous_control",
+      "start": 39900000,
+      "end": 41600000,
+      "hifi": {
+        "left_molecules": 26,
+        "right_molecules": 20,
+        "spanning": 16,
+        "left_median_depth": 38.0,
+        "right_median_depth": 37.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 14,
+            "right_molecules": 24,
+            "spanning": 0,
+            "left_median_depth": 31.0,
+            "right_median_depth": 35.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 21,
+            "right_molecules": 19,
+            "spanning": 0,
+            "left_median_depth": 39.0,
+            "right_median_depth": 33.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 5,
+            "right_molecules": 8,
+            "spanning": 0,
+            "left_median_depth": 15.0,
+            "right_median_depth": 32.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_837ab7bae6c37c77e2a2",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_7143e7f4eab159fe0898": {
+      "scaffold": "scaffold_5",
+      "lo": 40250000,
+      "hi": 40250000,
+      "role": "continuous_control",
+      "start": 39400000,
+      "end": 41100000,
+      "hifi": {
+        "left_molecules": 5,
+        "right_molecules": 5,
+        "spanning": 3,
+        "left_median_depth": 15.0,
+        "right_median_depth": 14.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 16,
+            "right_molecules": 12,
+            "spanning": 0,
+            "left_median_depth": 25.0,
+            "right_median_depth": 17.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 6,
+            "right_molecules": 21,
+            "spanning": 0,
+            "left_median_depth": 15.0,
+            "right_median_depth": 38.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 23,
+            "right_molecules": 20,
+            "spanning": 0,
+            "left_median_depth": 37.0,
+            "right_median_depth": 37.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_7143e7f4eab159fe0898",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_b78fce3e9fbd1aa25f2e": {
+      "scaffold": "scaffold_5",
+      "lo": 39750000,
+      "hi": 39750000,
+      "role": "continuous_control",
+      "start": 38900000,
+      "end": 40600000,
+      "hifi": {
+        "left_molecules": 23,
+        "right_molecules": 28,
+        "spanning": 20,
+        "left_median_depth": 37.0,
+        "right_median_depth": 37.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 21,
+            "right_molecules": 21,
+            "spanning": 0,
+            "left_median_depth": 36.0,
+            "right_median_depth": 28.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 27,
+            "right_molecules": 10,
+            "spanning": 0,
+            "left_median_depth": 37.0,
+            "right_median_depth": 15.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 5,
+            "spanning": 0,
+            "left_median_depth": 29.0,
+            "right_median_depth": 14.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_b78fce3e9fbd1aa25f2e",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_45793210820b7e7f7271": {
+      "scaffold": "scaffold_5",
+      "lo": 39250000,
+      "hi": 39250000,
+      "role": "continuous_control",
+      "start": 38400000,
+      "end": 40100000,
+      "hifi": {
+        "left_molecules": 12,
+        "right_molecules": 12,
+        "spanning": 9,
+        "left_median_depth": 29.0,
+        "right_median_depth": 29.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 10,
+            "right_molecules": 3,
+            "spanning": 0,
+            "left_median_depth": 15.0,
+            "right_median_depth": 7.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 7,
+            "right_molecules": 22,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 36.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 16,
+            "right_molecules": 28,
+            "spanning": 0,
+            "left_median_depth": 31.0,
+            "right_median_depth": 37.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_45793210820b7e7f7271",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_65ba78ec9e7df58ffd6b": {
+      "scaffold": "scaffold_5",
+      "lo": 38750000,
+      "hi": 38750000,
+      "role": "continuous_control",
+      "start": 37900000,
+      "end": 39600000,
+      "hifi": {
+        "left_molecules": 16,
+        "right_molecules": 21,
+        "spanning": 14,
+        "left_median_depth": 31.0,
+        "right_median_depth": 32.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 21,
+            "right_molecules": 14,
+            "spanning": 0,
+            "left_median_depth": 25.0,
+            "right_median_depth": 34.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 29,
+            "right_molecules": 10,
+            "spanning": 0,
+            "left_median_depth": 39.0,
+            "right_median_depth": 13.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 12,
+            "spanning": 0,
+            "left_median_depth": 16.0,
+            "right_median_depth": 29.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_65ba78ec9e7df58ffd6b",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_86fcf181556c7a874d48": {
+      "scaffold": "scaffold_5",
+      "lo": 38250000,
+      "hi": 38250000,
+      "role": "continuous_control",
+      "start": 37400000,
+      "end": 39100000,
+      "hifi": {
+        "left_molecules": 12,
+        "right_molecules": 13,
+        "spanning": 11,
+        "left_median_depth": 16.0,
+        "right_median_depth": 19.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 19,
+            "right_molecules": 18,
+            "spanning": 0,
+            "left_median_depth": 26.0,
+            "right_median_depth": 26.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 26,
+            "spanning": 0,
+            "left_median_depth": 23.0,
+            "right_median_depth": 41.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 22,
+            "right_molecules": 21,
+            "spanning": 0,
+            "left_median_depth": 40.0,
+            "right_median_depth": 32.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_86fcf181556c7a874d48",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_c5a6b135f80d2d1b9320": {
+      "scaffold": "scaffold_5",
+      "lo": 37750000,
+      "hi": 37750000,
+      "role": "continuous_control",
+      "start": 36900000,
+      "end": 38600000,
+      "hifi": {
+        "left_molecules": 22,
+        "right_molecules": 28,
+        "spanning": 19,
+        "left_median_depth": 40.0,
+        "right_median_depth": 43.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 18,
+            "spanning": 0,
+            "left_median_depth": 24.0,
+            "right_median_depth": 31.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 19,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 23.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 3,
+            "right_molecules": 13,
+            "spanning": 0,
+            "left_median_depth": 8.0,
+            "right_median_depth": 19.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_c5a6b135f80d2d1b9320",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_f933ddbea163f2bb2a9c": {
+      "scaffold": "scaffold_7",
+      "lo": 39250000,
+      "hi": 39250000,
+      "role": "continuous_control",
+      "start": 38400000,
+      "end": 40100000,
+      "hifi": {
+        "left_molecules": 16,
+        "right_molecules": 13,
+        "spanning": 11,
+        "left_median_depth": 26.0,
+        "right_median_depth": 27.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 15,
+            "right_molecules": 13,
+            "spanning": 0,
+            "left_median_depth": 30.0,
+            "right_median_depth": 38.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 8,
+            "right_molecules": 31,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 48.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 13,
+            "right_molecules": 0,
+            "spanning": 0,
+            "left_median_depth": 23.0,
+            "right_median_depth": 0.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 0.0
+          }
+        }
+      },
+      "key": "continuous_f933ddbea163f2bb2a9c",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_03227022d6c301269259": {
+      "scaffold": "scaffold_7",
+      "lo": 38750000,
+      "hi": 38750000,
+      "role": "continuous_control",
+      "start": 37900000,
+      "end": 39600000,
+      "hifi": {
+        "left_molecules": 13,
+        "right_molecules": 11,
+        "spanning": 9,
+        "left_median_depth": 23.0,
+        "right_median_depth": 29.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 10,
+            "right_molecules": 26,
+            "spanning": 0,
+            "left_median_depth": 17.0,
+            "right_median_depth": 36.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 22.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 3,
+            "right_molecules": 13,
+            "spanning": 0,
+            "left_median_depth": 7.0,
+            "right_median_depth": 27.0,
+            "left_covered_fraction": 0.998,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_03227022d6c301269259",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_02ceab8f20ff28bdd7c0": {
+      "scaffold": "scaffold_7",
+      "lo": 38250000,
+      "hi": 38250000,
+      "role": "continuous_control",
+      "start": 37400000,
+      "end": 39100000,
+      "hifi": {
+        "left_molecules": 3,
+        "right_molecules": 4,
+        "spanning": 1,
+        "left_median_depth": 7.0,
+        "right_median_depth": 9.0,
+        "left_covered_fraction": 0.998,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 14,
+            "right_molecules": 12,
+            "spanning": 0,
+            "left_median_depth": 18.0,
+            "right_median_depth": 18.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 10,
+            "right_molecules": 7,
+            "spanning": 0,
+            "left_median_depth": 25.0,
+            "right_median_depth": 16.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 10,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 18.0,
+            "right_median_depth": 29.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_02ceab8f20ff28bdd7c0",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_cc12566f663ca843b764": {
+      "scaffold": "scaffold_7",
+      "lo": 37250000,
+      "hi": 37250000,
+      "role": "continuous_control",
+      "start": 36400000,
+      "end": 38100000,
+      "hifi": {
+        "left_molecules": 0,
+        "right_molecules": 2,
+        "spanning": 0,
+        "left_median_depth": 8.0,
+        "right_median_depth": 7.0,
+        "left_covered_fraction": 0.951,
+        "right_covered_fraction": 0.986
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 5,
+            "right_molecules": 12,
+            "spanning": 0,
+            "left_median_depth": 24.0,
+            "right_median_depth": 13.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 8,
+            "right_molecules": 10,
+            "spanning": 0,
+            "left_median_depth": 19.0,
+            "right_median_depth": 21.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 7,
+            "right_molecules": 12,
+            "spanning": 0,
+            "left_median_depth": 19.0,
+            "right_median_depth": 19.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_cc12566f663ca843b764",
+      "peer_continuous_individuals": 1,
+      "peer_separate_individuals": 0
+    },
+    "continuous_8eb04177d9ffc4376739": {
+      "scaffold": "scaffold_7",
+      "lo": 36750000,
+      "hi": 36750000,
+      "role": "continuous_control",
+      "start": 35900000,
+      "end": 37600000,
+      "hifi": {
+        "left_molecules": 7,
+        "right_molecules": 4,
+        "spanning": 4,
+        "left_median_depth": 19.0,
+        "right_median_depth": 18.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 11,
+            "right_molecules": 10,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 24.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 5,
+            "right_molecules": 5,
+            "spanning": 0,
+            "left_median_depth": 16.0,
+            "right_median_depth": 18.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 26,
+            "right_molecules": 2,
+            "spanning": 0,
+            "left_median_depth": 31.0,
+            "right_median_depth": 7.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 0.986
+          }
+        }
+      },
+      "key": "continuous_8eb04177d9ffc4376739",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_5cb595ed765f2ff3b18c": {
+      "scaffold": "scaffold_7",
+      "lo": 35750000,
+      "hi": 35750000,
+      "role": "continuous_control",
+      "start": 34900000,
+      "end": 36600000,
+      "hifi": {
+        "left_molecules": 11,
+        "right_molecules": 21,
+        "spanning": 8,
+        "left_median_depth": 33.0,
+        "right_median_depth": 32.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 20,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 32.0,
+            "right_median_depth": 14.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 15,
+            "right_molecules": 3,
+            "spanning": 0,
+            "left_median_depth": 18.0,
+            "right_median_depth": 16.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 3,
+            "right_molecules": 23,
+            "spanning": 0,
+            "left_median_depth": 20.0,
+            "right_median_depth": 31.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_5cb595ed765f2ff3b18c",
+      "peer_continuous_individuals": 1,
+      "peer_separate_individuals": 0
+    },
+    "continuous_f0af4a3761a4e416bc82": {
+      "scaffold": "scaffold_7",
+      "lo": 34250000,
+      "hi": 34250000,
+      "role": "continuous_control",
+      "start": 33400000,
+      "end": 35100000,
+      "hifi": {
+        "left_molecules": 11,
+        "right_molecules": 11,
+        "spanning": 8,
+        "left_median_depth": 16.0,
+        "right_median_depth": 15.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 9,
+            "right_molecules": 18,
+            "spanning": 0,
+            "left_median_depth": 15.0,
+            "right_median_depth": 30.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 21,
+            "right_molecules": 19,
+            "spanning": 0,
+            "left_median_depth": 30.0,
+            "right_median_depth": 25.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 5,
+            "right_molecules": 9,
+            "spanning": 0,
+            "left_median_depth": 15.0,
+            "right_median_depth": 22.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_f0af4a3761a4e416bc82",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_615332ed9ebe11b9df69": {
+      "scaffold": "scaffold_7",
+      "lo": 33750000,
+      "hi": 33750000,
+      "role": "continuous_control",
+      "start": 32900000,
+      "end": 34600000,
+      "hifi": {
+        "left_molecules": 5,
+        "right_molecules": 11,
+        "spanning": 4,
+        "left_median_depth": 15.0,
+        "right_median_depth": 17.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 3,
+            "right_molecules": 15,
+            "spanning": 0,
+            "left_median_depth": 17.0,
+            "right_median_depth": 24.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 4,
+            "right_molecules": 9,
+            "spanning": 0,
+            "left_median_depth": 9.0,
+            "right_median_depth": 30.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 18,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 33.0,
+            "right_median_depth": 15.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_615332ed9ebe11b9df69",
+      "peer_continuous_individuals": 1,
+      "peer_separate_individuals": 0
+    },
+    "continuous_063bf387a5dadc42b66f": {
+      "scaffold": "scaffold_7",
+      "lo": 33250000,
+      "hi": 33250000,
+      "role": "continuous_control",
+      "start": 32400000,
+      "end": 34100000,
+      "hifi": {
+        "left_molecules": 18,
+        "right_molecules": 10,
+        "spanning": 4,
+        "left_median_depth": 33.0,
+        "right_median_depth": 34.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 20,
+            "right_molecules": 21,
+            "spanning": 0,
+            "left_median_depth": 25.0,
+            "right_median_depth": 38.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 22,
+            "right_molecules": 1,
+            "spanning": 0,
+            "left_median_depth": 33.0,
+            "right_median_depth": 9.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 4,
+            "right_molecules": 11,
+            "spanning": 0,
+            "left_median_depth": 16.0,
+            "right_median_depth": 17.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_063bf387a5dadc42b66f",
+      "peer_continuous_individuals": 3,
+      "peer_separate_individuals": 0
+    },
+    "continuous_b6d756238d326dfc4b25": {
+      "scaffold": "scaffold_7",
+      "lo": 46750000,
+      "hi": 46750000,
+      "role": "continuous_control",
+      "start": 45900000,
+      "end": 47600000,
+      "hifi": {
+        "left_molecules": 7,
+        "right_molecules": 4,
+        "spanning": 4,
+        "left_median_depth": 13.0,
+        "right_median_depth": 12.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 15,
+            "right_molecules": 17,
+            "spanning": 0,
+            "left_median_depth": 48.0,
+            "right_median_depth": 20.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 9,
+            "right_molecules": 24,
+            "spanning": 0,
+            "left_median_depth": 17.0,
+            "right_median_depth": 39.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 4,
+            "right_molecules": 28,
+            "spanning": 0,
+            "left_median_depth": 8.0,
+            "right_median_depth": 46.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_b6d756238d326dfc4b25",
+      "peer_continuous_individuals": 1,
+      "peer_separate_individuals": 0
+    },
+    "continuous_d1957037fe1b1f8eda6c": {
+      "scaffold": "scaffold_7",
+      "lo": 47250000,
+      "hi": 47250000,
+      "role": "continuous_control",
+      "start": 46400000,
+      "end": 48100000,
+      "hifi": {
+        "left_molecules": 30,
+        "right_molecules": 28,
+        "spanning": 20,
+        "left_median_depth": 49.0,
+        "right_median_depth": 46.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 12,
+            "right_molecules": 23,
+            "spanning": 0,
+            "left_median_depth": 19.0,
+            "right_median_depth": 33.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 29,
+            "right_molecules": 5,
+            "spanning": 0,
+            "left_median_depth": 39.0,
+            "right_median_depth": 26.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 7,
+            "right_molecules": 13,
+            "spanning": 0,
+            "left_median_depth": 13.0,
+            "right_median_depth": 24.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        }
+      },
+      "key": "continuous_d1957037fe1b1f8eda6c",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    },
+    "continuous_76c94c7411eebb2c3b81": {
+      "scaffold": "scaffold_7",
+      "lo": 47750000,
+      "hi": 47750000,
+      "role": "continuous_control",
+      "start": 46900000,
+      "end": 48600000,
+      "hifi": {
+        "left_molecules": 12,
+        "right_molecules": 13,
+        "spanning": 7,
+        "left_median_depth": 23.0,
+        "right_median_depth": 24.0,
+        "left_covered_fraction": 1.0,
+        "right_covered_fraction": 1.0
+      },
+      "farther_hifi": {
+        "100000": {
+          "informative": true,
+          "raw": {
+            "left_molecules": 16,
+            "right_molecules": 28,
+            "spanning": 0,
+            "left_median_depth": 30.0,
+            "right_median_depth": 41.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "250000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 6,
+            "right_molecules": 7,
+            "spanning": 0,
+            "left_median_depth": 27.0,
+            "right_median_depth": 17.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 1.0
+          }
+        },
+        "500000": {
+          "informative": false,
+          "raw": {
+            "left_molecules": 30,
+            "right_molecules": 0,
+            "spanning": 0,
+            "left_median_depth": 49.0,
+            "right_median_depth": 4.0,
+            "left_covered_fraction": 1.0,
+            "right_covered_fraction": 0.14
+          }
+        }
+      },
+      "key": "continuous_76c94c7411eebb2c3b81",
+      "peer_continuous_individuals": 0,
+      "peer_separate_individuals": 0
+    }
+  },
+  "peers": [
+    {
+      "id": "Sde-CBau_104_hap1",
+      "sample": "Sde-CBau_104",
+      "path": "peer01/Sde-CBau_104_hap1_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_3": "chr1",
+        "scaffold_1": "chr2",
+        "scaffold_2": "chr3",
+        "scaffold_10": "chr4",
+        "scaffold_15": "chr4",
+        "scaffold_5": "chr5",
+        "scaffold_4": "chr6",
+        "scaffold_16": "chr7",
+        "scaffold_17": "chr7",
+        "scaffold_6": "chr8",
+        "scaffold_7": "chr9",
+        "scaffold_8": "chr10",
+        "scaffold_9": "chr11",
+        "scaffold_11": "chr12",
+        "scaffold_12": "chr13",
+        "scaffold_14": "chr14",
+        "scaffold_13": "chr15"
+      }
+    },
+    {
+      "id": "Sde-CBau_104_hap2",
+      "sample": "Sde-CBau_104",
+      "path": "peer02/Sde-CBau_104_hap2_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_20": "chr1",
+        "scaffold_4": "chr1",
+        "scaffold_1": "chr2",
+        "scaffold_2": "chr3",
+        "scaffold_10": "chr4",
+        "scaffold_15": "chr4",
+        "scaffold_5": "chr5",
+        "scaffold_3": "chr6",
+        "scaffold_14": "chr7",
+        "scaffold_16": "chr7",
+        "scaffold_7": "chr8",
+        "scaffold_6": "chr9",
+        "scaffold_17": "chr10",
+        "scaffold_8": "chr10",
+        "scaffold_9": "chr11",
+        "scaffold_11": "chr12",
+        "scaffold_13": "chr13",
+        "scaffold_18": "chr14",
+        "scaffold_19": "chr14",
+        "scaffold_12": "chr15"
+      }
+    },
+    {
+      "id": "Sde-CLim_110_hap1",
+      "sample": "Sde-CLim_110",
+      "path": "peer03/Sde-CLim_110_hap1_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_3": "chr1",
+        "scaffold_1": "chr2",
+        "scaffold_4": "chr3",
+        "scaffold_8": "chr4",
+        "scaffold_2": "chr5",
+        "scaffold_7": "chr6",
+        "scaffold_10": "chr7",
+        "scaffold_5": "chr8",
+        "scaffold_6": "chr9",
+        "scaffold_9": "chr10",
+        "scaffold_11": "chr11",
+        "scaffold_12": "chr12",
+        "scaffold_13": "chr13",
+        "scaffold_14": "chr14",
+        "scaffold_15": "chr15"
+      }
+    },
+    {
+      "id": "Sde-CLim_110_hap2",
+      "sample": "Sde-CLim_110",
+      "path": "peer04/Sde-CLim_110_hap2_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_2": "chr1",
+        "scaffold_1": "chr2",
+        "scaffold_3": "chr3",
+        "scaffold_7": "chr4",
+        "scaffold_6": "chr5",
+        "scaffold_4": "chr6",
+        "scaffold_8": "chr7",
+        "scaffold_5": "chr8",
+        "scaffold_9": "chr9",
+        "scaffold_10": "chr10",
+        "scaffold_11": "chr11",
+        "scaffold_13": "chr12",
+        "scaffold_12": "chr13",
+        "scaffold_14": "chr14",
+        "scaffold_15": "chr15"
+      }
+    },
+    {
+      "id": "Sde-CMat_203_hap1",
+      "sample": "Sde-CMat_203",
+      "path": "peer05/Sde-CMat_203_hap1_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_1": "chr1",
+        "scaffold_2": "chr2",
+        "scaffold_3": "chr3",
+        "scaffold_4": "chr4",
+        "scaffold_5": "chr5",
+        "scaffold_6": "chr6",
+        "scaffold_7": "chr7",
+        "scaffold_8": "chr8",
+        "scaffold_9": "chr9",
+        "scaffold_10": "chr10",
+        "scaffold_11": "chr11",
+        "scaffold_12": "chr12",
+        "scaffold_13": "chr13",
+        "scaffold_14": "chr14",
+        "scaffold_15": "chr15"
+      }
+    },
+    {
+      "id": "Sde-CMat_203_hap2",
+      "sample": "Sde-CMat_203",
+      "path": "peer06/Sde-CMat_203_hap2_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_2": "chr1",
+        "scaffold_1": "chr2",
+        "scaffold_3": "chr3",
+        "scaffold_4": "chr4",
+        "scaffold_5": "chr5",
+        "scaffold_9": "chr6",
+        "scaffold_6": "chr7",
+        "scaffold_8": "chr8",
+        "scaffold_7": "chr9",
+        "scaffold_10": "chr10",
+        "scaffold_11": "chr11",
+        "scaffold_12": "chr12",
+        "scaffold_13": "chr13",
+        "scaffold_15": "chr14",
+        "scaffold_14": "chr15"
+      }
+    },
+    {
+      "id": "Sde-CPla_115_hap1",
+      "sample": "Sde-CPla_115",
+      "path": "peer07/Sde-CPla_115_hap1_round2_scaffolds.fa",
+      "auto_evidence": false,
+      "chromosome_labels": {}
+    },
+    {
+      "id": "Sde-CPla_115_hap2",
+      "sample": "Sde-CPla_115",
+      "path": "peer08/Sde-CPla_115_hap2_round2_scaffolds.fa",
+      "auto_evidence": false,
+      "chromosome_labels": {}
+    },
+    {
+      "id": "Sde-CTlk_104_hap1",
+      "sample": "Sde-CTlk_104",
+      "path": "peer09/Sde-CTlk_104_hap1_round2_scaffolds.fa",
+      "auto_evidence": true,
+      "chromosome_labels": {
+        "scaffold_2": "chr1",
+        "scaffold_9": "chr2",
+        "scaffold_10": "chr2",
+        "scaffold_3": "chr3",
+        "scaffold_13": "chr4",
+        "scaffold_6": "chr5",
+        "scaffold_4": "chr6",
+        "scaffold_11": "chr7",
+        "scaffold_8": "chr8",
+        "scaffold_7": "chr10",
+        "scaffold_14": "chr11",
+        "scaffold_12": "chr13",
+        "scaffold_15": "chr15"
+      }
+    }
+  ],
+  "hifi": true,
+  "reused_bam": "reused/hifi.bam"
+}

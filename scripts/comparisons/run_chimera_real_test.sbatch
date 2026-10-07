@@ -78,5 +78,5 @@ fi
 
 if [[ "$scenario" == evidence ]]; then
     test -s "$out/results/assembly/chimeras/review/chimera_review.tsv"
-    test -s "$out/results/assembly/chimeras/review/index.html"
+    test -s "$out/results/assembly/chimeras/review/README.md"
 fi

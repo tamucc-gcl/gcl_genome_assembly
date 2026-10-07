@@ -4,7 +4,7 @@ Automated cutting is deferred as of 2026-10-07. Both the pipeline and standalone
 
 Run 1 uses `--chimera_break false`, with chimera detection, sequence context, and evidence enabled. HiFi context is enabled by default; an exact retained BAM manifest avoids remapping. Explicitly disabling HiFi context leaves that evidence unavailable and must be visible in review. The pipeline publishes:
 
-- `assembly/chimeras/review/index.html`: review entrypoint.
+- `assembly/chimeras/review/README.md`: review entrypoint.
 - `assembly/chimeras/review/chimera_review.tsv`: one merged editable file.
 - Per-assembly reports with peer chromosome tracks, independent-individual summaries, per-library contacts, controls, HiFi measurements, graph context, IGV links, and measurement audits.
 
@@ -25,3 +25,5 @@ Validation rejects malformed selection values, selected unknown assembly IDs, st
 All coordinates are zero-based, half-open on the original assessed FASTA. A cut divides [0,cut_bp) and [cut_bp,length). For an all-N gap [gap_start,gap_end), cutting at gap_end preserves all gap Ns on the left. Every base is preserved; no sequence or gap trimming is inferred. Pieces initially get neutral names, then chromosome assignment is computed from corrected sequences. Evidence stays in original coordinates, with a coordinate lift and reconstruction audit for each applied cut. Do not attach original BAMs directly to corrected renamed FASTAs.
 
 The manual application and reassignment previously passed real-data H01 testing. The new report/index/manual-selector wiring is locally verified but requires its own Nextflow execution on Crest. The existing real test launcher now runs evidence-only and reviewed-manual cases; it no longer runs automatic cutting.
+
+The evidence pass now publishes Markdown per-assembly report.md packets, a cohort README.md, assembly_registry.tsv including zero-candidate assemblies, static chromosome-track SVGs and cut-instructions.md. The main report integration is deferred to its separate reporting update. User-added cuts need not match detected candidates; use the registry identity and original coordinates.
