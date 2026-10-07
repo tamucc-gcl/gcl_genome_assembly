@@ -1,0 +1,13 @@
+# CTlk real workflow review: job 1511302
+
+Both archived jobs exited 0. Auto completed 21 tasks; manual completed 24 tasks, with no failed tasks. Every cohort assembly passed exact sequence reconstruction verification.
+
+Manual applied exactly the reviewed hap1 scaffold_1 cut at 63,051,325 bp. Hap1 records increased 362 to 363; total sequence remained 953,570,870 bp. N50 changed 71,708,076 to 69,062,049 bp. Reassignment named the 63,051,325 bp left piece chr9_1 (chromosome) and the 75,395,654 bp right piece chr7_1+chr12_1 (composite). Hap2 remained 345 records, 1,065,350,476 bp, N50 82,879,935 bp. No pending assignments remained on the split pieces. This validates the manual application/reassignment route, not additional biological cuts.
+
+Auto made no cuts: all five hap1 and two hap2 transition intervals were unresolved. All action and review-proposal tables were empty. No comparison controls or nearby gap hypotheses were generated, so H01 was not assessed by the automatic evidence collector. Accordingly this run does not validate the automatic detector's sensitivity or establish that the joins should be retained.
+
+All peer boundary assays were uninformative. Examining archived PAFs confirmed broad intervals often lack two uniquely placed 50 kb flanks: this is missing usable evidence, not evidence of peer agreement. Graph mapping placed five transitions within single native primary paths and two hap1 transitions on different primary segments. Neither observation alone proves a biological fusion or a misjoin. Broad-interval spanning molecule counts are zero and cannot be interpreted as unsupported precise seams.
+
+The collector used only final-round AGP gap rows. Those rows do not expose gaps inherited inside source components. The implementation now streams literal N runs from the exact assessed FASTA, checks AGP gaps against them, and uses the literal gap catalogue for generic hypotheses and matched-control selection. No H01-specific detection rule or weakened peer uniqueness threshold was introduced. New tests cover N runs across FASTA lines and inherited nearby gap discovery; all 89 chimera tests pass.
+
+Next: sync source and rerun only the automatic array task with `sbatch --array=0 .../run_chimera_real_test.sbatch ctlk_analysis`. The successful manual regression need not be repeated for this collector-only change. Review literal_gap_catalog.tsv, gap_hypotheses.tsv, control_registry.json, peer_boundary_assays.tsv, and decisions before concluding auto eligibility. H01 can remain review-only even after discovery; discovery is distinct from automatic authorization.

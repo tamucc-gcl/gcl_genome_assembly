@@ -32,6 +32,30 @@ def agp(path):
     return gaps, placements, lengths
 
 
+def literal_gaps(path, minimum=10):
+    """Stream literal N runs, including gaps inherited inside AGP components."""
+    gaps=[]; chrom=None; offset=0; beginning=None
+    def finish():
+        if beginning is not None and offset-beginning>=minimum:
+            gaps.append(dict(scaffold=chrom,lo=beginning,hi=offset))
+    with open(path) as handle:
+        for line in handle:
+            if line.startswith('>'):
+                finish();chrom=line[1:].split()[0];offset=0;beginning=None
+                continue
+            seq=line.strip().upper()
+            if not seq:continue
+            if chrom is None:raise ValueError('FASTA sequence before header')
+            for match in re.finditer(r'N+|[^N]+',seq):
+                if match.group()[0]=='N':
+                    if beginning is None:beginning=offset
+                else:
+                    finish();beginning=None
+                offset+=len(match.group())
+    finish()
+    return gaps
+
+
 def select_controls(intervals, gaps, lengths, count=12, flank=250000):
     """Match gap length and complete flank geometry; avoid every suspect transition."""
     controls, links = {}, {}

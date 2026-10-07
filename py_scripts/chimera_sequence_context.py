@@ -104,6 +104,16 @@ def main():
     controls, links, placements = {}, {}, {}
     if a.agp:
         gaps, placements, agp_lengths = agp(a.agp)
+        from chimera_controls import literal_gaps
+        literal = literal_gaps(local)
+        # AGP describes only this scaffolding round: embedded source gaps remain real gaps.
+        for g in gaps:
+            if not any(x['scaffold']==g['scaffold'] and x['lo']<=g['lo'] and x['hi']>=g['hi'] for x in literal):
+                raise ValueError('AGP gap is absent from literal assessment N runs')
+        gaps = literal
+        with (out/'literal_gap_catalog.tsv').open('w') as catalog:
+            writer=csv.DictWriter(catalog,fieldnames=['scaffold','lo','hi'],delimiter='\t')
+            writer.writeheader();writer.writerows(gaps)
         if agp_lengths != sizes:
             raise ValueError('AGP object dictionary does not match assessment FASTA')
         hypotheses=nearby_hypotheses(intervals,gaps)
