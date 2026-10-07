@@ -200,11 +200,11 @@ def main():
                 if 'decision_id' in interval:
                     track=tracks(grouped[key],peer.get('chromosome_labels',{}))
                     tiles=bins(track,interval['end']-interval['start'])
-                    left=side_summary(track,tiles,0,interval['lo']-interval['start'])
-                    right=side_summary(track,tiles,interval['hi']-interval['start'],interval['end']-interval['start'])
-                    relation=('different_chromosomes' if left['chrom']!=right['chrom'] else 'same_chromosome') if left['qualified'] and right['qualified'] else 'uninformative'
+                    track_left=side_summary(track,tiles,0,interval['lo']-interval['start'])
+                    track_right=side_summary(track,tiles,interval['hi']-interval['start'],interval['end']-interval['start'])
+                    relation=('different_chromosomes' if track_left['chrom']!=track_right['chrom'] else 'same_chromosome') if track_left['qualified'] and track_right['qualified'] else 'uninformative'
                     track_rows[key].append(dict(peer=peer['id'],sample=peer['sample'],auto_evidence=peer.get('auto_evidence') is True,
-                        relationship=relation,left=left,right=right,bins=tiles))
+                        relationship=relation,left=track_left,right=track_right,bins=tiles))
                 labels=peer.get('chromosome_labels',{})
                 left_chrom=labels.get(left[5]) if left else None
                 right_chrom=labels.get(right[5]) if right else None

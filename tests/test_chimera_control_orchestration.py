@@ -49,11 +49,14 @@ class Orchestration(unittest.TestCase):
                     for side,start in (('left',1),('right',1101)):
                         for n in range(15):records.append('%s%d\t0\ts\t%d\t60\t1000M\t*\t0\t0\t*\t*\tNM:i:0\n'%(side,n,start))
                     Path(output).write_text(''.join(records))
+                elif args[0]=='minimap2' and '--version' not in args:
+                    records=fasta(args[-1])
+                    Path(output).write_text(''.join('%s\t%d\t0\t%d\t+\tsource\t2000\t0\t%d\t%d\t%d\t60\tcg:Z:%dM\n'%(name,len(seq),min(len(seq),2000),min(len(seq),2000),min(len(seq),2000),min(len(seq),2000),min(len(seq),2000)) for name,seq in records.items()))
                 elif output:
                     Path(output).write_text('Mock external tool output\n')
             out=root/'packet'
             argv=['context','--fasta',str(assessment),'--calls',str(calls),'--assembly','sample','--sample','individual',
-                  '--peers','[]','--motif','CCCTAA','--bam',str(root/'reads.bam'),'--bam-provenance',str(root/'bam.json'),
+                  '--peers',json.dumps([dict(id='peer',sample='other',path=str(source),chromosome_labels={'source':'chr1'},auto_evidence=True)]),'--motif','CCCTAA','--bam',str(root/'reads.bam'),'--bam-provenance',str(root/'bam.json'),
                   '--agp',str(root/'last.agp'),'--pairs',str(root/'pairs'),'--pairs-source',str(source),
                   '--libraries',str(root/'libraries.tsv'),'--out',str(out)]
             plot=MagicMock();fig=MagicMock();axes=MagicMock()
