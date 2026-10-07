@@ -83,9 +83,28 @@ def select_controls(intervals, gaps, lengths, count=12, flank=250000):
         links[key] = []
         for g in chosen:
             cid = 'control_'+hashlib.sha256(('%s:%d:%d' % (g['scaffold'],g['lo'],g['hi'])).encode()).hexdigest()[:20]
-            controls[cid] = dict(scaffold=g['scaffold'], lo=g['lo'], hi=g['hi'], gap=g, role='control')
+            controls[cid] = dict(scaffold=g['scaffold'], lo=g['lo'], hi=g['hi'], gap=g, role='gap_control')
             links[key].append(cid)
     return controls, links
+
+
+def continuous_controls(intervals,gaps,lengths,count=12,flank=250000):
+    """Deterministic, separated pseudo-junctions in literal gap-free sequence."""
+    controls={};links={}
+    excluded=list(intervals.values())+gaps
+    sites=[]
+    for chrom,length in sorted(lengths.items()):
+        for point in range(flank,length-flank,2*flank):
+            if any(x['scaffold']==chrom and x['lo']<point+flank and x['hi']>point-flank for x in excluded):continue
+            sites.append((chrom,point))
+    for key,interval in intervals.items():
+        ordered=sorted(sites,key=lambda x:(x[0]!=interval['scaffold'],abs(x[1]-(interval['lo']+interval['hi'])//2),x))
+        links[key]=[]
+        for chrom,point in ordered[:count]:
+            cid='continuous_'+hashlib.sha256(('%s:%d'%(chrom,point)).encode()).hexdigest()[:20]
+            controls[cid]=dict(scaffold=chrom,lo=point,hi=point,role='continuous_control')
+            links[key].append(cid)
+    return controls,links
 
 
 def nearby_hypotheses(intervals, gaps, radius=250000, maximum=8):
@@ -232,6 +251,38 @@ def peer_relationship(hits, lo, hi, anchor=50000, minimum_target=5000000):
     return 'uninformative', left, right
 
 
+def anchor_rejection(hits,lo,hi,minimum_target=5000000):
+    overlapping=[f for f in hits if int(f[2])<hi and int(f[3])>lo]
+    covered=[f for f in overlapping if max(0,min(hi,int(f[3]))-max(lo,int(f[2])))>=.9*(hi-lo)]
+    qualified=flank_placement(hits,lo,hi,minimum_target)
+    if qualified is not None:return 'accepted'
+    if not overlapping:return 'no_alignment'
+    if not covered:return 'insufficient_anchor_coverage'
+    if not any(int(f[6])>=minimum_target for f in covered):return 'short_target'
+    if not any(int(f[11])>=30 for f in covered):return 'low_mapq'
+    if not any(int(f[9])/max(1,int(f[10]))>=.9 for f in covered):return 'low_identity'
+    return 'ambiguous_or_insufficient_cigar_aligned_bases'
+
+
+def peer_anchor_trials(hits,lo,hi,query_length):
+    trials=[];informative=[]
+    for offset in (0,10000,50000):
+        for anchor in (5000,20000,50000):
+            left_lo=lo-offset-anchor;right_hi=hi+offset+anchor
+            if left_lo<0 or right_hi>query_length:continue
+            relation,left,right=peer_relationship(hits,lo-offset,hi+offset,anchor=anchor)
+            trial=dict(offset_bp=offset,anchor_bp=anchor,relationship=relation,
+                left_reason=anchor_rejection(hits,left_lo,lo-offset),
+                right_reason=anchor_rejection(hits,hi+offset,right_hi),
+                left_target=left[5] if left else '.',right_target=right[5] if right else '.')
+            trials.append(trial)
+            if relation!='uninformative':informative.append((relation,left,right))
+    identities={(r,l[5],rr[5],l[4],rr[4]) for r,l,rr in informative}
+    # Multiple distances must not silently choose different chromosome assignments.
+    selected=informative[0] if informative and len(identities)==1 else ('uninformative',None,None)
+    return selected,trials
+
+
 def scan_contacts(path, placements, intervals, libraries, flank=250000):
     """One pairs pass, preserving library identity and cross/within geometry."""
     windows=defaultdict(list)
@@ -306,9 +357,20 @@ def continuity_grid(path, lo, hi, anchor=1000, step=1000):
 
 def compare_controls(candidate, controls, counts, libraries):
     """Explicit heuristic thresholds; an informative control is never assumed intact."""
-    good=[c for c in controls if c.get('peer_continuous_individuals',0)>=3 and
-          informative_hifi(c['hifi']) and c['hifi']['spanning']>=2 and
-          all(.5<=c['hifi'][side+'_molecules']/max(1,candidate['hifi'][side+'_molecules'])<=2 for side in ('left','right'))]
+    continuous=[c for c in controls if c.get('role')=='continuous_control' and
+                informative_hifi(c['hifi']) and c['hifi']['spanning']>=2]
+    gaps=[c for c in controls if c.get('role')=='gap_control' and c.get('peer_continuous_individuals',0)>=3]
+    good=continuous+gaps
+    qualification=[]
+    for c in controls:
+        reasons=[]
+        if c.get('role')=='continuous_control':
+            if not informative_hifi(c['hifi']):reasons.append('uninformative_hifi_flanks')
+            if c['hifi']['spanning']<2:reasons.append('fewer_than_two_hifi_bridges')
+        elif c.get('role')=='gap_control':
+            if c.get('peer_continuous_individuals',0)<3:reasons.append('fewer_than_three_independent_continuous_peers')
+        else:reasons.append('unknown_control_population')
+        qualification.append(dict(id=c['key'],population=c.get('role'),qualified=not reasons,reasons=reasons))
     hifi_ok=informative_hifi(candidate['hifi'])
     results=[]
     for lib in sorted(libraries):
@@ -316,15 +378,16 @@ def compare_controls(candidate, controls, counts, libraries):
         matched=[c for c in good if min(counts[lib,c['key']].get('left_within',0),counts[lib,c['key']].get('right_within',0))>=100 and
                  .5 <= counts[lib,c['key']].get('left_within',0)/max(1,focal.get('left_within',0)) <=2 and
                  .5 <= counts[lib,c['key']].get('right_within',0)/max(1,focal.get('right_within',0)) <=2]
-        informative=min(focal.get('left_within',0),focal.get('right_within',0))>=100 and len(matched)>=5
+        population_counts={role:sum(c['role']==role for c in matched) for role in ('continuous_control','gap_control')}
+        informative=min(focal.get('left_within',0),focal.get('right_within',0))>=100 and all(n>=5 for n in population_counts.values())
         ratios=[contact_ratio(counts[lib,c['key']]) for c in matched]
         minimum=min(ratios) if ratios else 0
         # Add a three-count allowance so zero observations cannot imply perfect certainty.
         upper=(focal.get('cross',0)+3)/max(1,math.sqrt(focal.get('left_within',0)*focal.get('right_within',0)))
         loss=informative and minimum>0 and upper < .1*minimum
-        results.append(dict(library=lib, matched_controls=len(matched), informative=informative,
+        results.append(dict(library=lib, matched_controls=len(matched), control_populations=population_counts, informative=informative,
                             ratio=contact_ratio(focal), upper_count_allowance_ratio=upper,
                             minimum_control_ratio=minimum, support_loss=loss, raw_counts=dict(focal)))
-    return dict(hifi_informative=hifi_ok, matched_controls_pass=hifi_ok and len(good)>=5,
+    return dict(control_qualification=qualification,hifi_informative=hifi_ok, matched_controls_pass=hifi_ok and len(continuous)>=5 and len(gaps)>=5,
                 hic_informative=bool(results) and all(r['informative'] for r in results),
                 hic_support_loss=bool(results) and all(r['support_loss'] for r in results), libraries=results)

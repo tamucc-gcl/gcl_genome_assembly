@@ -1,0 +1,13 @@
+# Automatic real-data review: job 1511311
+
+Exit status 0; all 21 Nextflow tasks succeeded. Both CTlk assemblies remained unchanged and passed exact reconstruction verification.
+
+The generic detector now discovers H01, without its name or coordinates being supplied to detection. It identifies the literal scaffold_1 gap [63051225,63051325), generates hypothesis_0f89467f6b5b48aaaac6, measures it, and publishes a source-bound review proposal at cut_bp 63051325. This validates the inherited-gap discovery fix.
+
+H01 measured zero qualified HiFi spanning molecules, zero qualified left-anchor molecules and four right-anchor molecules; median depths 2 and 9. The lack of left mappability prevents treating zero spans as decisive absence. Library Ex2 has zero cross-gap pairs versus 157/4819 within-flank pairs; Ex3 has two cross-gap pairs versus 163/5565 within-flank pairs. Native graph anchors lie on h1tg000004l and h1tg000036l with no direct reported link. This is a primary-path screen, not exhaustive unitig graph support. All nine peer boundary assays are uninformative. Consequently automatic cutting is not justified by these measurements; the previously reviewed manual cut remains a separate route.
+
+Two other hap1 literal gaps were localized within existing transitions: [116057447,116057547) and [116171488,116171588). Both have only one qualified molecule at each immediate flank and zero spans; neither is auto eligible. The remaining broad transitions are unresolved; zero spans over broad intervals do not demonstrate failed narrow joins.
+
+Control selection produced 25 distinct gap controls (12 linked to H01), but none passed qualification. All 25 lack qualifying peer-continuity individuals; 24 have zero HiFi spans and one has one span. Therefore matched_controls=0 is an assay-calibration failure, not evidence of strong or weak candidate support.
+
+Next implementation should separate contact calibration from sequence bridging: sequence-continuous pseudo-junctions provide positive HiFi/contact controls, while real scaffold gaps provide a separately reported contact-control population. Artificial scaffold gaps cannot be presumed to have HiFi bridges. Peer anchors need explicit per-flank rejection reasons and tests at multiple distances from repeat-rich boundaries, preserving uniqueness/identity checks and accounting for breakpoint localization. Existing archived PAFs and measurements can be audited locally first; repeating unchanged cluster jobs would not resolve this design limitation. Automatic authorization of nearby gaps remains prohibited until localization and evidence criteria are validated.

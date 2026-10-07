@@ -10,7 +10,7 @@ import re
 from collections import defaultdict
 import xml.etree.ElementTree as ET
 from chimera_controls import (agp, select_controls, sam_measure, peer_relationship,
-                              scan_contacts, compare_controls, continuity_grid, nearby_hypotheses)
+                              scan_contacts, compare_controls, continuity_grid, nearby_hypotheses, continuous_controls, peer_anchor_trials)
 from chimera_graph_evidence import measure_graph
 
 
@@ -124,7 +124,10 @@ def main():
                 coordinate_stage='pre_finishing',review_only=True,source_candidates=interval['source_candidates'],packet_interval_id=key,
                 gap_start=interval['lo'],gap_end=interval['hi'],cut_bp=interval['hi'])
         intervals.update(hypotheses);candidate_keys+=list(hypotheses)
-        controls, links = select_controls(intervals, gaps, sizes)
+        controls, links = select_controls(intervals, gaps, sizes, count=48)
+        continuous,continuous_links=continuous_controls(intervals,gaps,sizes)
+        controls.update(continuous)
+        for key in intervals:links[key]=links.get(key,[])+continuous_links.get(key,[])
         for key in candidate_keys:
             interval=intervals[key]
             interval['transition_lo'],interval['transition_hi']=interval['lo'],interval['hi']
@@ -162,6 +165,7 @@ def main():
     summaries = {key: dict(same=set(), other=set()) for key in intervals}
     peer_assays = defaultdict(lambda: defaultdict(set))
     peer_rows=[]
+    anchor_rows=[]
     with (out/'peer_context.tsv').open('w') as handle:
         writer = csv.writer(handle, delimiter='\t')
         writer.writerow(['candidate', 'peer', 'sample', 'relationship', 'single_record_brackets_interval', 'mapq', 'target', 'target_start', 'target_end', 'target_length'])
@@ -186,7 +190,8 @@ def main():
                     summaries[f[0]][relationship].add(peer['sample'])
                 writer.writerow([f[0], peer['id'], peer['sample'], 'same_individual' if peer['sample'] == a.sample else 'other_individual', 'yes' if bracket else 'no', f[11], f[5], f[7], f[8], f[6]])
             for key, interval in intervals.items():
-                relationship,left,right=peer_relationship(grouped[key],interval['lo']-interval['start'],interval['hi']-interval['start'])
+                (relationship,left,right),trials=peer_anchor_trials(grouped[key],interval['lo']-interval['start'],interval['hi']-interval['start'],interval['end']-interval['start'])
+                anchor_rows.extend(dict(candidate=key,peer=peer['id'],**trial) for trial in trials)
                 labels=peer.get('chromosome_labels',{})
                 left_chrom=labels.get(left[5]) if left else None
                 right_chrom=labels.get(right[5]) if right else None
@@ -204,6 +209,9 @@ def main():
                     right_target_start=right[7] if right else '.',right_target_end=right[8] if right else '.',
                     left_strand=left[4] if left else '.',right_strand=right[4] if right else '.'))
             peer_local.unlink()
+    if anchor_rows:
+        with (out/'peer_anchor_trials.tsv').open('w') as handle:
+            writer=csv.DictWriter(handle,fieldnames=list(anchor_rows[0]),delimiter='\t');writer.writeheader();writer.writerows(anchor_rows)
     if peer_rows:
         with (out/'peer_boundary_assays.tsv').open('w') as handle:
             w=csv.DictWriter(handle,fieldnames=list(peer_rows[0]),delimiter='\t');w.writeheader();w.writerows(peer_rows)
@@ -282,17 +290,17 @@ def main():
             interval=intervals[key]
             ids=[key]+links.get(key,[])
             library_ids=sorted({r['library_id'] for r in libraries})
-            fig,axes=plt.subplots(len(library_ids)+1,1,figsize=(12,3*(len(library_ids)+1)),squeeze=False)
+            fig,axes=plt.subplots(len(library_ids)+1,1,figsize=(max(12,len(ids)*.35),3*(len(library_ids)+1)),squeeze=False)
             for index,library in enumerate(library_ids):
                 ax=axes[index,0]
                 for offset,field,color in ((-.25,'cross','tab:red'),(0,'left_within','tab:blue'),(.25,'right_within','tab:green')):
                     ax.bar([n+offset for n in range(len(ids))],[counts[library,c][field] for c in ids],width=.25,label=field,color=color)
-                ax.set_xticks(range(len(ids)),['candidate']+['control '+str(n+1) for n in range(len(ids)-1)],rotation=30)
+                ax.set_xticks(range(len(ids)),['candidate']+[('gap ' if intervals[c]['role']=='gap_control' else 'sequence ')+str(n+1) for n,c in enumerate(ids[1:])],rotation=30)
                 ax.set_ylabel('UU pairs in 250 kb flanks');ax.set_title(library);ax.legend()
             ax=axes[-1,0]
             for offset,field in ((-.25,'spanning'),(0,'left_molecules'),(.25,'right_molecules')):
                 ax.bar([n+offset for n in range(len(ids))],[intervals[c]['hifi'][field] for c in ids],width=.25,label=field)
-            ax.set_xticks(range(len(ids)),['candidate']+['control '+str(n+1) for n in range(len(ids)-1)],rotation=30)
+            ax.set_xticks(range(len(ids)),['candidate']+[('gap ' if intervals[c]['role']=='gap_control' else 'sequence ')+str(n+1) for n,c in enumerate(ids[1:])],rotation=30)
             ax.set_ylabel('Distinct MAPQ30 molecules');ax.legend()
             fig.suptitle('%s %s:%d-%d — raw candidate/control assays, not fusion probabilities' % (a.assembly,interval['scaffold'],interval['lo'],interval['hi']))
             fig.tight_layout();fig.savefig(out/(key+'.controls.png'),dpi=150);plt.close(fig)
@@ -310,7 +318,7 @@ def main():
     (out/'provenance.json').write_text(json.dumps(dict(assembly=a.assembly, sample=a.sample, sha256=digest.hexdigest(), coordinate_stage='pre_finishing', intervals=intervals, peers=peers, hifi=bool(a.reads or a.bam), reused_bam=a.bam or None), indent=2)+'\n')
     (out/'report.md').write_text(
         '# Chimera sequence context: '+a.assembly+'\n\n'
-        +str(len(candidate_keys))+' candidate intervals and '+str(len(controls))+' comparison gaps; '+str(len(peers))+' same-species peer assemblies.\n\n'
+        +str(len(candidate_keys))+' candidate intervals and '+str(len(controls))+' comparison sites; '+str(len(peers))+' same-species peer assemblies.\n\n'
         'HiFi mapping: '+('available' if a.reads or a.bam else 'not requested or no HiFi reads')+'.\n\n'
         'See peer_context.tsv for direct interval alignments and provenance.json for coordinate offsets. '
         'A single gapped alignment bracketing an interval is contextual support, not proof of basewise continuity. '
@@ -320,7 +328,7 @@ def main():
         'No diagnostic here authorizes a cut; candidate and cutting decisions remain separate.\n')
     with (out/'report.md').open('a') as report:
         report.write('\n## Boundary/control assays\n\nSee decision_measurements.json and control_registry.json for complete measured values and literal coordinates. '
-            'Automatic gap eligibility requires at least three usable independent individuals and five matched, supported controls; both libraries must be informative and show support loss. '
+            'Automatic gap eligibility requires at least three usable independent individuals and five matched controls from each separately qualified population; both libraries must be informative and show support loss. '
             'These thresholds are heuristic and require validation. Native graph placement status and its limits are recorded in the packet. '
             'IGV sessions point to the exact pre-finishing reference/BAM; paths need updating if the files are copied to a workstation.\n\n')
         for key in candidate_keys:

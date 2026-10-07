@@ -41,7 +41,8 @@ class Controls(unittest.TestCase):
     def test_both_libraries_and_matched_controls_required(self):
         hifi=dict(left_molecules=15,right_molecules=15,left_covered_fraction=1,right_covered_fraction=1,spanning=0)
         focal=dict(key='gap',hifi=hifi)
-        controls=[dict(key='c'+str(i),hifi=dict(hifi,spanning=3),peer_continuous_individuals=3) for i in range(5)]
+        controls=[dict(key='c'+str(i),hifi=dict(hifi,spanning=3),peer_continuous_individuals=3,role='continuous_control') for i in range(5)]
+        controls += [dict(key='g'+str(i),hifi=dict(hifi,spanning=0),peer_continuous_individuals=3,role='gap_control') for i in range(5)]
         counts=defaultdict(Counter)
         for lib in ('A','B'):
             counts[lib,'gap'].update(left_within=1000,right_within=1000,cross=0)
