@@ -10,7 +10,7 @@ include { BREAK_CHIMERAS }   from '../modules/break_chimeras.nf'
 include { CHIMERA_JOINS }    from '../modules/chimera_joins.nf'
 include { CHIMERA_EVIDENCE } from '../modules/chimera_evidence.nf'
 include { CHIMERA_SEQUENCE_CONTEXT } from '../modules/chimera_sequence_context.nf'
-include { CHIMERA_ADJUDICATE } from '../modules/chimera_adjudicate.nf'
+include { CHIMERA_REVIEW; CHIMERA_REVIEW_INDEX } from '../modules/chimera_review.nf'
 include { HARMONIZE_SPECIES as CHIMERA_REASSIGN_SPECIES } from '../modules/harmonize_species.nf'
 include { harmonizerArgs } from './harmonize_scaffolds.nf'
 
@@ -42,10 +42,8 @@ workflow CHIMERA {
     def detect_on = capabilities.scaffold && capabilities.harmonize &&
                     params.harmonize_scaffold_names && params.chimera_detect != false
     def evidence_on = detect_on && params.chimera_evidence != false
-    def auto_on = params.chimera_break?.toString() == 'auto'
-    if (auto_on && (!detect_on || !evidence_on))
-        error 'Automatic chimera assessment requires detection and evidence enabled'
-    ch_adjudicated_actions = Channel.empty()
+    if (params.chimera_break?.toString() == 'auto')
+        error 'Automated chimera cutting is deferred. Review the evidence and supply an edited chimera_review.tsv.'
     // The broken assemblies on their own, separate from pre_finalize (which mixes them with
     // the untouched and short-read-only ones). main.nf stages THIS as the 'chimera_broken'
     // QC checkpoint, so contiguity before and after a cut is comparable in the QC table.
@@ -130,7 +128,7 @@ workflow CHIMERA {
         }
 
         // Direct local peer comparison is diagnostic only, independent of cutting.
-        if (params.chimera_sequence_context || auto_on) {
+        if (params.chimera_sequence_context) {
             ch_context_quality = ch_peer_quality.toList().map { files ->
                 files.collectMany { quality ->
                     def lines = quality.readLines().findAll { it && !it.startsWith('#') }
@@ -182,7 +180,7 @@ workflow CHIMERA {
                     def nativeGraph = graphs[m.sample.toString()]?.find { it.name == m.sample.toString()+'.'+suffix+'.p_ctg.gfa' }
                     tuple(m.taxid.toString(), m, fa, calls,
                           peers.collect { it[0] }, peers ? peers.collect { it[1] } : [file("${projectDir}/assets/NO_PAF", checkIfExists: true)],
-                          !retained && (params.chimera_hifi_context || auto_on) && reads[m.sample.toString()] ? reads[m.sample.toString()] : absent,
+                          !retained && params.chimera_hifi_context && reads[m.sample.toString()] ? reads[m.sample.toString()] : absent,
                           assay.agp ?: absent, assay.pairs ?: absent, assay.source ?: absent, assay.libraries ?: absent,
                           retained ? [file(retained.bam,checkIfExists:true),file(retained.index,checkIfExists:true)] : [absent],
                           retained ? file(retained.provenance,checkIfExists:true) : absent, nativeGraph ?: absent)
@@ -191,15 +189,16 @@ workflow CHIMERA {
                 .map { taxid, m, fa, calls, pm, pf, reads, agp, pairs, source, libraries, bams, provenance, graph, motif ->
                     tuple(m, fa, calls, pm, pf, reads, motif ?: 'CCCTAA', agp, pairs, source, libraries, bams, provenance, graph) }
             CHIMERA_SEQUENCE_CONTEXT(ch_context_in,
-                Channel.value(['chimera_sequence_context.py', 'chimera_controls.py', 'chimera_graph_evidence.py', 'chimera_blocks.py'].collect {
+                Channel.value(['chimera_sequence_context.py', 'chimera_controls.py', 'chimera_graph_evidence.py', 'chimera_blocks.py', 'chimera_tracks.py'].collect {
                     file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
             ch_versions = ch_versions.mix(CHIMERA_SEQUENCE_CONTEXT.out.versions)
-            CHIMERA_ADJUDICATE(
+            CHIMERA_REVIEW(
                 ch_chimeric_joins.map { taxid, id, calls -> tuple(id.toString(), calls) }
                     .join(CHIMERA_SEQUENCE_CONTEXT.out.context.map { m, context -> tuple(m.id.toString(), m, context) })
                     .map { id, calls, m, context -> tuple(m, calls, context) },
-                file("${projectDir}/py_scripts/chimera_adjudicate.py", checkIfExists: true))
-            ch_adjudicated_actions = CHIMERA_ADJUDICATE.out.actions
+                file("${projectDir}/py_scripts/chimera_review.py", checkIfExists: true))
+            CHIMERA_REVIEW_INDEX(CHIMERA_REVIEW.out.rows.map { m, rows -> rows }.toList(),
+                file("${projectDir}/py_scripts/chimera_review_index.py", checkIfExists: true))
         }
 
         // ---- supplementary evidence for each called join ----------------------------
@@ -246,22 +245,30 @@ workflow CHIMERA {
     if( capabilities.scaffold && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false' ) {
         ch_break_script = Channel.value(['break_chimeras.py', 'chimera_actions.py']
             .collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) })
-        // Auto consumes only adjudicated action rows, never detection votes. A path
-        // selects explicit reviewed actions in the same source-bound action format.
-        ch_break_in = Channel.empty()
-        if (params.chimera_break.toString() == 'auto') {
-            // Left-side pass-through keeps every assembly when no join table was available.
-            ch_break_in = ch_harmonized.map { meta, fa, nm -> tuple(meta.id, meta, fa, nm) }
-                .join(ch_adjudicated_actions.map { meta, f -> tuple(meta.id, f) }, remainder: true)
-                .filter { row -> row[1] != null }
-                .map { id, meta, fa, nm, cand ->
-                    tuple(meta, fa, nm, cand ?: file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
-        } else {
-            ch_break_in = ch_harmonized.combine(
-                Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first())
-        }
+        // Review file is a staged input: changing it invalidates cutting/downstream tasks only.
+        ch_known_assemblies = ch_harmonized.map { m, fa, nm -> m.id.toString() }.toList().map { ids -> [known:ids] }
+        ch_review_file = Channel.fromPath(params.chimera_break.toString(), checkIfExists: true).first()
+            .combine(ch_known_assemblies)
+            .map { review, catalog ->
+                def lines = review.readLines().findAll { it && !it.startsWith('#') }
+                def header = lines[0].split('\t') as List
+                if (!header.contains('selected') || !header.contains('assembly')) error 'Review file requires selected and assembly columns'
+                lines.drop(1).each { line ->
+                    def values = line.split('\t',-1)
+                    def selection = values[header.indexOf('selected')]
+                    if (!(selection in ['YES','NO'])) error 'Every review row requires selected=YES or NO'
+                    if (selection=='YES' && !(values[header.indexOf('assembly')] in catalog.known))
+                        error 'Selected review row names an unknown assembly: '+values[header.indexOf('assembly')]
+                }
+                review }
+        ch_break_in = ch_harmonized.combine(ch_review_file)
         ch_break_in.branch { meta, fa, nm, cand ->
-            cut: nm.name != 'NO_HARMONIZE' && cand.name != 'NO_HARMONIZE'
+            def lines = cand.readLines().findAll { it && !it.startsWith('#') }
+            def header = lines[0].split('\t') as List
+            def selected = lines.drop(1).any { line ->
+                def row = line.split('\t',-1)
+                row[header.indexOf('selected')]=='YES' && row[header.indexOf('assembly')]==meta.id.toString() }
+            cut: nm.name != 'NO_HARMONIZE' && selected
             passthrough: true
         }.set { ch_break_routes }
         BREAK_CHIMERAS(ch_break_routes.cut, ch_break_script.first())

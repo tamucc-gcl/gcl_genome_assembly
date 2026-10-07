@@ -9,6 +9,7 @@ import subprocess
 import re
 from collections import defaultdict
 import xml.etree.ElementTree as ET
+from chimera_tracks import tracks, bins, side_summary
 from chimera_blocks import chromosome_blocks, summarize_blocks, farther_hifi, farther_regions, farther_contacts
 from chimera_controls import (agp, select_controls, sam_measure, peer_relationship,
                               scan_contacts, compare_controls, continuity_grid, nearby_hypotheses, continuous_controls, peer_anchor_trials)
@@ -168,6 +169,7 @@ def main():
     peer_rows=[]
     anchor_rows=[]
     block_rows=defaultdict(list)
+    track_rows=defaultdict(list)
     with (out/'peer_context.tsv').open('w') as handle:
         writer = csv.writer(handle, delimiter='\t')
         writer.writerow(['candidate', 'peer', 'sample', 'relationship', 'single_record_brackets_interval', 'mapq', 'target', 'target_start', 'target_end', 'target_length'])
@@ -195,6 +197,14 @@ def main():
                 (relationship,left,right),trials=peer_anchor_trials(grouped[key],interval['lo']-interval['start'],interval['hi']-interval['start'],interval['end']-interval['start'])
                 anchor_rows.extend(dict(candidate=key,peer=peer['id'],**trial) for trial in trials)
                 block_rows[key].append(chromosome_blocks(grouped[key],interval,peer,gaps if a.agp else []))
+                if 'decision_id' in interval:
+                    track=tracks(grouped[key],peer.get('chromosome_labels',{}))
+                    tiles=bins(track,interval['end']-interval['start'])
+                    left=side_summary(track,tiles,0,interval['lo']-interval['start'])
+                    right=side_summary(track,tiles,interval['hi']-interval['start'],interval['end']-interval['start'])
+                    relation=('different_chromosomes' if left['chrom']!=right['chrom'] else 'same_chromosome') if left['qualified'] and right['qualified'] else 'uninformative'
+                    track_rows[key].append(dict(peer=peer['id'],sample=peer['sample'],auto_evidence=peer.get('auto_evidence') is True,
+                        relationship=relation,left=left,right=right,bins=tiles))
                 labels=peer.get('chromosome_labels',{})
                 left_chrom=labels.get(left[5]) if left else None
                 right_chrom=labels.get(right[5]) if right else None
@@ -261,6 +271,8 @@ def main():
         interval['key']=key
         interval['peer_continuous_individuals']=sum(value=={'continuous_context'} for value in peer_assays[key].values())
         interval['peer_separate_individuals']=sum(value=={'different_chromosomes'} for value in peer_assays[key].values())
+    for key in candidate_keys:
+        decision_measurements[intervals[key]['decision_id']]['chromosome_tracks']=track_rows[key]
     graph_assays=measure_graph(a.native_graph,out,queries,intervals,run,a.threads) if a.native_graph else {}
     for key in candidate_keys:
         decision_measurements[intervals[key]['decision_id']].update(graph_assays.get(key,dict(graph_status='native_graph_unavailable',graph_contradiction=None)))

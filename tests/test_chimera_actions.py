@@ -12,7 +12,7 @@ from chimera_actions import validate_actions, split_sequences
 
 class ActionTests(unittest.TestCase):
     def row(self, **changes):
-        row = dict(id='discovered-boundary', assessment_sha256='hash', coordinate_stage='pre_finishing',
+        row = dict(selected='YES',reviewer='test-reviewer',localization_status='proposed_gap',id='discovered-boundary', assessment_sha256='hash', coordinate_stage='pre_finishing',
                    scaffold='composite', action='UNJOIN_UNSUPPORTED', cut_bp='6', gap_start='4', gap_end='6',
                    decision_source='review', evidence_packet_id='packet', reason='reviewed gap')
         row.update(changes)
@@ -75,12 +75,12 @@ class ActionTests(unittest.TestCase):
             self.assertEqual(rewritten[1]['class'], 'unplaced')
             self.assertEqual(rewritten[1]['orient'], '+')
             self.assertEqual(rewritten[2]['new_name'], 'chr4')
-            # Empty auto selections must successfully pass through every record.
+            # An empty reviewed table must pass through every record.
             actions.write_text('\t'.join(row)+'\n')
             subprocess.run([sys.executable, str(script), '--fasta', str(source), '--name-map', str(name_map),
                             '--actions', str(actions), '--assembly', 'assembly', '--out-fasta', str(output),
                             '--out-name-map', str(root/'output.tsv'), '--audit', str(root/'audit.tsv'),
-                            '--mode', 'auto', '--min-piece-bp', '4'], check=True)
+                            '--mode', 'file', '--min-piece-bp', '4'], check=True)
             verification = json.loads(Path(str(output)+'.verification.json').read_text())
             self.assertEqual(verification['output_records'], 2)
 

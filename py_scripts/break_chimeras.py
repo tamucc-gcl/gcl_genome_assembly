@@ -55,6 +55,8 @@ def main():
     p.add_argument('--mode', choices=('auto', 'file'), default='file')
     p.add_argument('--min-piece-bp', type=int, default=1000000)
     a = p.parse_args()
+    if a.mode == 'auto':
+        raise ValueError('Automated cutting is deferred; supply a reviewed file with selected=YES, reviewer and reason')
     if a.min_piece_bp < 1:
         raise ValueError('Minimum piece length must be positive')
     sequences, maps = fasta(a.fasta), rows(a.name_map)
@@ -70,6 +72,14 @@ def main():
     action_rows = rows(a.actions)
     if any(not r.get('assembly') for r in action_rows):
         raise ValueError('Every action must identify its assembly')
+    if a.mode == 'file':
+        if not {'selected','reviewer','localization_status'}.issubset(header):
+            raise ValueError('Review file requires selected, reviewer and localization_status columns')
+        if any(r['selected'] not in ('YES','NO') for r in action_rows):
+            raise ValueError('Every review row requires selected=YES or NO')
+        action_rows=[r for r in action_rows if r['selected']=='YES']
+        if any(not r.get('reviewer','').strip() or not r.get('reason','').strip() or r.get('decision_source')!='review' for r in action_rows):
+            raise ValueError('Every selected cut requires reviewer, reason and decision_source=review')
     selected_rows = [r for r in action_rows if r['assembly'] == a.assembly]
     selected = validate_actions(selected_rows, digest(a.fasta), sequences, a.min_piece_bp, a.mode)
     output, lift = split_sequences(sequences, selected)

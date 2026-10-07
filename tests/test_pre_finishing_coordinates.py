@@ -102,9 +102,9 @@ class Coordinates(unittest.TestCase):
         checksum = checksum or hashlib.sha256(self.fa.read_bytes()).hexdigest()
         self.table.write_text(
             'id\tassembly\tscaffold\tcut_bp\taction\tgap_start\tgap_end\t'
-            'coordinate_stage\tassessment_sha256\tdecision_source\tevidence_packet_id\treason\n'
+            'coordinate_stage\tassessment_sha256\tdecision_source\tevidence_packet_id\treason\tselected\treviewer\tlocalization_status\n'
             f'boundary\tasm\ts1\t13\tUNJOIN_UNSUPPORTED\t10\t15\t'
-            f'pre_finishing\t{checksum}\treview\tpacket\treviewed gap\n')
+            f'pre_finishing\t{checksum}\treview\tpacket\treviewed gap\tYES\ttest-reviewer\tproposed_gap\n')
         nm = self.d / 'names.tsv'
         nm.write_text('old_name\tnew_name\tlength\tclass\torient\tflags\n'
                       's1\tchr1+chr2\t25\tcomposite\t+\t.\n'
@@ -117,7 +117,7 @@ class Coordinates(unittest.TestCase):
 
     def test_auto_requires_decision_eligibility(self):
         result = self.cut_fixture(mode='auto', ok=False)
-        self.assertIn('eligibility', result.stderr)
+        self.assertIn('Automated cutting is deferred', result.stderr)
         self.assertFalse((self.d / 'out.fa').exists())
 
     def test_cross_scaffold_partner_is_preserved_with_lifted_orientation(self):

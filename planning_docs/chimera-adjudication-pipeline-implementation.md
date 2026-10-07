@@ -1,3 +1,5 @@
+> Current status, 2026-10-07: automated cutting is deferred. This document records the earlier experimental design. The supported process is [evidence-first manual review](chimera-action-interface.md).
+
 # Chimera evidence, adjudication and correction implementation
 
 ## CTlk result with H01 only

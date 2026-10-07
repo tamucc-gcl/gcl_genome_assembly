@@ -11,6 +11,9 @@
     "gap_end": "63051325",
     "decision_source": "review",
     "evidence_packet_id": "ctlk-boundaries-1511285/H01",
-    "reason": "Previously reviewed conservative gap unjoin; isolated regression test, preserve terminal gap Ns"
+    "reason": "Previously reviewed conservative gap unjoin; isolated regression test, preserve terminal gap Ns",
+    "selected": "YES",
+    "reviewer": "reviewed-H01-regression",
+    "localization_status": "proposed_gap"
   }
 ]

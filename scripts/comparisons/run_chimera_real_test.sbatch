@@ -13,7 +13,7 @@ tool_env=${1:?Supply analysis conda environment}
 repo="${PWD}/gcl_genome_assembly"
 assessment="${2:-${PWD}/comparisons/chimera-foundation-01}"
 bam_root="${3:-${PWD}/genome_assembly/assembly/chimeras/sequence_context}"
-scenarios=(auto manual)
+scenarios=(evidence manual)
 scenario=${scenarios[$SLURM_ARRAY_TASK_ID]}
 out="${PWD}/comparisons/chimera-real-${SLURM_ARRAY_JOB_ID}/${scenario}"
 mkdir -p "$out"
@@ -33,7 +33,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$tool_env"
 export PYTHONDONTWRITEBYTECODE=1
 required_tools=(python samtools minimap2 nextflow)
-if [[ "$scenario" == auto ]]; then required_tools+=(tidk); fi
+if [[ "$scenario" == evidence ]]; then required_tools+=(tidk); fi
 missing=()
 for tool in "${required_tools[@]}"; do
     if ! command -v "$tool"; then missing+=("$tool"); fi
@@ -48,7 +48,7 @@ python -c 'import numpy, matplotlib, cooler'
 python "$repo/scripts/comparisons/prepare_chimera_real_test.py" \
     --assessment "$assessment" --bam-root "$bam_root" --species 373251 --sample Sde-CTlk_104 \
     --reviewed-template "$repo/tests/fixtures/ctlk_reviewed_action.json" --out "$out/inputs"
-mode=auto
+mode=false
 context=true
 evidence=true
 if [[ "$scenario" == manual ]]; then
@@ -67,11 +67,16 @@ nextflow run "$repo/chimera_real_test.nf" \
 test -s "$out/results/verification/Sde-CTlk_104_hap1.verification.json"
 test -s "$out/results/verification/Sde-CTlk_104_hap2.verification.json"
 
-if [[ "$scenario" == auto ]]; then
+if [[ "$scenario" == evidence ]]; then
     for hap in hap1 hap2; do
         test -s "$out/results/assembly/chimeras/sequence_context/Sde-CTlk_104_${hap}.sequence_context/decision_measurements.json"
         test -s "$out/results/assembly/chimeras/sequence_context/Sde-CTlk_104_${hap}.sequence_context/chromosome_blocks.tsv"
         test -s "$out/results/assembly/chimeras/sequence_context/Sde-CTlk_104_${hap}.sequence_context/candidate_1.farther_contacts.png"
-        test -s "$out/results/assembly/chimeras/decisions/Sde-CTlk_104_${hap}.decisions/actions.tsv"
+        test -s "$out/results/assembly/chimeras/review/Sde-CTlk_104_${hap}.review/review.tsv"
     done
+fi
+
+if [[ "$scenario" == evidence ]]; then
+    test -s "$out/results/assembly/chimeras/review/chimera_review.tsv"
+    test -s "$out/results/assembly/chimeras/review/index.html"
 fi

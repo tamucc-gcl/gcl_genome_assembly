@@ -20,11 +20,13 @@ class IntegrationTests(unittest.TestCase):
                 run('tests/prepare_chimera_integration.py', '--out', root, '--scenario', scenario)
                 run('py_scripts/chimera_adjudicate.py', '--calls', root/'calls.tsv', '--assembly', 'synthetic',
                     '--context', root/'context', '--out', root/'decisions', '--min-piece-bp',4)
-                actions = root/'manual-actions.tsv' if scenario=='manual' else root/'decisions/actions.tsv'
+                actions = root/'manual-actions.tsv'
+                if scenario=='unresolved':
+                    actions.write_text(actions.read_text().splitlines()[0]+'\n')
                 run('py_scripts/break_chimeras.py', '--fasta', root/'assessment.fa', '--name-map', root/'names.tsv',
                     '--actions', actions, '--assembly', 'synthetic', '--out-fasta', root/'output.fa',
                     '--out-name-map', root/'output.tsv', '--audit', root/'audit.tsv',
-                    '--mode', 'file' if scenario=='manual' else 'auto', '--min-piece-bp', 4)
+                    '--mode', 'file', '--min-piece-bp', 4)
                 verify = json.loads((root/'output.fa.verification.json').read_text())
                 self.assertEqual(verify['output_records'], 2 if scenario=='unresolved' else 3)
                 self.assertEqual(verify['total_bp'], 14)

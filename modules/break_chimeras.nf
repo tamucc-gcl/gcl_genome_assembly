@@ -25,7 +25,7 @@ process BREAK_CHIMERAS {
 
     script:
     // Manual and automatic selections use the same action format and applicator.
-    def mode    = (params.chimera_break?.toString() == 'auto') ? 'auto' : 'file'
+    def mode = 'file'
     def minpiece = params.chimera_min_piece_bp ?: 1000000
     def entryScript = script instanceof List ? script.find { it.name == 'break_chimeras.py' } : script
     """

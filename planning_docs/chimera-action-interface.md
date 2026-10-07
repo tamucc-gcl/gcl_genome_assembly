@@ -1,21 +1,27 @@
-# Source-bound correction interface
+# Evidence-first manual chimera review
 
-The pipeline's reviewed-file route now accepts only the source-bound action format. This route preserves every base, including gap Ns, and assigns neutral identities to split pieces. It does not infer chromosome names from the parent composite. Split pieces initially receive `chromosome_assignment_pending`. The workflow then reruns chromosome harmonization on the corrected species cohort using the original reference, assigning pieces from their actual sequences.
+Automated cutting is deferred as of 2026-10-07. Both the pipeline and standalone applicator reject auto mode. Prototype automatic decision code remains experimental reference material and is not called by the production workflow. See [deferred automated cutting](chimera-automated-cutting-deferred.md).
 
-Use `--chimera_break /absolute/path/to/selected-actions.tsv` with the existing pipeline. Only rows for each assembly are applied. Every selected row must pass validation; malformed rows fail the task rather than being silently skipped.
+Run 1 uses `--chimera_break false`, with chimera detection, sequence context, and evidence enabled. HiFi context is enabled by default; an exact retained BAM manifest avoids remapping. Explicitly disabling HiFi context leaves that evidence unavailable and must be visible in review. The pipeline publishes:
 
-Required TSV columns:
+- `assembly/chimeras/review/index.html`: review entrypoint.
+- `assembly/chimeras/review/chimera_review.tsv`: one merged editable file.
+- Per-assembly reports with peer chromosome tracks, independent-individual summaries, per-library contacts, controls, HiFi measurements, graph context, IGV links, and measurement audits.
 
-`id assembly coordinate_stage assessment_sha256 scaffold action cut_bp gap_start gap_end decision_source evidence_packet_id reason`
+Every row starts with `selected=NO`, blank reviewer and blank reason. Copy the published TSV to an input location before editing. Preserve unselected rows and use them to record retained or unresolved decisions. A proposed coordinate is evidence for inspection, never permission to cut. Non-gap transitions remain unlocalized with blank cut coordinates.
 
-These are tab-separated columns. `coordinate_stage` is `pre_finishing`; `assessment_sha256` is the checksum of the literal assessed FASTA file. Coordinates are zero-based. `cut_bp` divides the sequence into `[0,cut_bp)` and `[cut_bp,length)`. `UNJOIN_UNSUPPORTED` requires a literal all-N interval `[gap_start,gap_end)` and permits either gap edge or an internal gap cut. Cutting at `gap_end` retains all gap Ns on the left piece.
+Required columns in the forward review file are:
 
-For an explicitly reviewed internal cut, use `BREAK_PROBABLE_MISJOIN`, add `reviewer`, and set `localization_status=localized`. Rationale and packet identity remain mandatory. Automatic internal cutting is rejected.
+`selected id assembly coordinate_stage assessment_sha256 scaffold action cut_bp gap_start gap_end decision_source evidence_packet_id reviewer reason localization_status`
 
-Each application writes a coordinate lift and verification JSON alongside the cut audit. The lift records each piece's exact original interval and sequence checksum. Verification reconstructs every parent and checks the written output. Original evidence coordinates remain pre-correction coordinates; existing BAMs must not be attached to renamed outputs without remapping or a validated coordinate transformation.
+Additional generated columns `evidence_summary` and `report_path` help review and are carried in the file. Selection must be exactly YES or NO. To approve a literal-gap cut, set selected=YES, keep action=UNJOIN_UNSUPPORTED, set reviewer and reason, and verify coordinates. To approve an internal cut, set action=BREAK_PROBABLE_MISJOIN, supply an exact cut_bp, and set localization_status=localized. Keep decision_source=review. Edit the cut rather than accepting an interval midpoint by default.
 
-The automatic applicator guard accepts only decision-stage actions carrying `auto_eligible=yes` and `policy_version=gap-v2`; those fields must never be hand-added to candidate votes. The workflow now supports unattended `--chimera_break auto`: it collects evidence, publishes decisions, and applies only eligible actions. The collectors now measure per-library Hi-C contacts, matched continuous-junction controls, HiFi flank coverage and narrow spans, peer chromosome relationships, and native graph context. Missing or uninformative assays block automatic eligibility. Nearby gap hypotheses are published for review and never automatically selected merely because they are near a reference transition. Positive local sequence support vetoes a cut but does not prove chromosome-scale fusion.
+Run 2 repeats the original pipeline launch with the same input assemblies, parameters, launch directory, and work directory, adding `--chimera_break /absolute/path/to/edited-review.tsv -resume`. Leave evidence settings unchanged so cached evidence tasks can be reused. Do not rerun from the finalized renamed FASTA. The review checksum binds to the original pre-finishing assessment FASTA.
 
-The thresholds are conservative heuristics, not calibrated probabilities. Real-data validation is the next step; see [the isolated CTlk test](chimera-real-test.md). Existing mappings can be reused with `--chimera_hifi_bam_manifest`, a JSON assembly-ID mapping to BAM, index, and provenance files. Reuse requires an exact assessment FASTA checksum and matching BAM reference dictionary. Each decision packet retains measurements, controls, plots, IGV sessions, and graph evidence for later review.
+The selected file is a staged input to cutting, so edits invalidate the cutting stage and its dependent tasks. Only assemblies with selected rows enter cutting. Other assemblies pass through. A species cohort containing actual cuts reruns chromosome harmonization using the same reference. The pipeline's downstream dependencies rerun as needed; -resume does not guarantee zero upstream reruns if inputs, tools, configuration, or scripts have changed.
 
-The repeat-obscured route and its validation limits are described in [chimera-repeat-obscured-route.md](chimera-repeat-obscured-route.md). Nearby proposals can now qualify only through independent block localization and calibrated farther-flank evidence.
+Validation rejects malformed selection values, selected unknown assembly IDs, stale assessment checksums, invalid/out-of-range coordinates, false gaps, duplicate/conflicting selected cuts, and cuts creating undersized pieces. Selected rows require reviewer and rationale. Unselected unresolved rows can contain blank coordinates and cannot cause a cut. Only the current review-file interface is supported; no legacy-file conversion is maintained.
+
+All coordinates are zero-based, half-open on the original assessed FASTA. A cut divides [0,cut_bp) and [cut_bp,length). For an all-N gap [gap_start,gap_end), cutting at gap_end preserves all gap Ns on the left. Every base is preserved; no sequence or gap trimming is inferred. Pieces initially get neutral names, then chromosome assignment is computed from corrected sequences. Evidence stays in original coordinates, with a coordinate lift and reconstruction audit for each applied cut. Do not attach original BAMs directly to corrected renamed FASTAs.
+
+The manual application and reassignment previously passed real-data H01 testing. The new report/index/manual-selector wiring is locally verified but requires its own Nextflow execution on Crest. The existing real test launcher now runs evidence-only and reviewed-manual cases; it no longer runs automatic cutting.
