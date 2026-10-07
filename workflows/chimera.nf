@@ -191,7 +191,7 @@ workflow CHIMERA {
                 .map { taxid, m, fa, calls, pm, pf, reads, agp, pairs, source, libraries, bams, provenance, graph, motif ->
                     tuple(m, fa, calls, pm, pf, reads, motif ?: 'CCCTAA', agp, pairs, source, libraries, bams, provenance, graph) }
             CHIMERA_SEQUENCE_CONTEXT(ch_context_in,
-                Channel.value(['chimera_sequence_context.py', 'chimera_controls.py', 'chimera_graph_evidence.py'].collect {
+                Channel.value(['chimera_sequence_context.py', 'chimera_controls.py', 'chimera_graph_evidence.py', 'chimera_blocks.py'].collect {
                     file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
             ch_versions = ch_versions.mix(CHIMERA_SEQUENCE_CONTEXT.out.versions)
             CHIMERA_ADJUDICATE(

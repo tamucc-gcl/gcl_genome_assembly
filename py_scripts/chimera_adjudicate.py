@@ -19,8 +19,23 @@ def decide(measurement):
                 'matched_controls_pass', 'alternative_placements_checked', 'graph_contradiction']
     if measurement.get('hifi_spanning_molecules', 0) >= 2 or measurement.get('local_path_support') == 'supported_grid' or measurement.get('graph_contradiction') is True:
         return 'RETAIN', False, 'local continuity contradicts a cut; chromosome-scale interpretation remains unresolved'
+    block=measurement.get('chromosome_blocks',{})
+    far=measurement.get('farther_contact_evidence',{})
+    repeat_checks={
+        'verified_literal_gap':measurement.get('verified_gap') is True,
+        'localized_chromosome_blocks':measurement.get('repeat_obscured_localization') is True and block.get('localized') is True,
+        'three_independent_individuals':len(block.get('independent_individuals',[]))>=3,
+        'two_distances_both_libraries':far.get('pass_all') is True,
+        'no_haplotype_conflict':measurement.get('haplotype_block_conflict') is False,
+        'alternatives_checked':measurement.get('alternative_placements_checked') is True,
+        'graph_not_contradictory':measurement.get('graph_contradiction') is False,
+        'no_qualified_hifi_bridge':measurement.get('hifi_spanning_molecules')==0,
+        'large_left_block':measurement.get('gap_start',0)>=5000000,
+        'large_right_block':measurement.get('assessment_scaffold_length',0)-measurement.get('gap_end',0)>=5000000}
+    if all(repeat_checks.values()):
+        return 'UNJOIN_UNSUPPORTED', True, 'repeat-obscured route: uniquely localized gap, independent chromosome blocks and distance-matched contact loss in both libraries without continuity contradiction'
     if measurement.get('review_only') is True:
-        return 'UNRESOLVED', False, 'nearby literal gap hypothesis requires review; the original transition does not uniquely localize this gap'
+        return 'UNRESOLVED', False, 'repeat-obscured route fails: '+', '.join(k for k,v in repeat_checks.items() if not v)
     missing = [key for key in required if key not in measurement]
     if missing:
         return 'UNRESOLVED', False, 'missing evidence: '+', '.join(missing)
@@ -35,7 +50,7 @@ def decide(measurement):
               measurement['graph_contradiction'] is False]
     if all(checks):
         return 'UNJOIN_UNSUPPORTED', True, 'verified gap; independent chromosome discordance and informative support loss without continuity contradiction'
-    return 'UNRESOLVED', False, 'evidence does not satisfy conservative gap-v1 eligibility'
+    return 'UNRESOLVED', False, 'evidence does not satisfy conservative gap-v2 eligibility'
 
 
 def write(path, rows, fields):
@@ -59,13 +74,17 @@ def main():
     evidence_path = Path(a.context)/'decision_measurements.json'
     measurements = json.loads(evidence_path.read_text()) if evidence_path.exists() else {}
     decisions, actions = [], []
-    for index, row in enumerate(calls):
-        key = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()[:20]
+    candidates=list(calls)
+    for key,m in measurements.items():
+        if m.get('review_only') is True:
+            candidates.append(dict(_measurement_key=key,scaffold=m['scaffold'],assembly_sha256=m['assessment_sha256']))
+    for index, row in enumerate(candidates):
+        key = row.get('_measurement_key') or hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()[:20]
         measurement = measurements.get(key, {})
         action, eligible, reason = decide(measurement)
         decision = dict(id=key, assembly=a.assembly, scaffold=row['scaffold'], action=action,
                         chromosome_scale_status='UNRESOLVED', auto_eligible='yes' if eligible else 'no',
-                        reason=reason, policy_version='gap-v1', evidence_packet_id=a.assembly+'.sequence_context')
+                        reason=reason, policy_version='gap-v2', evidence_packet_id=a.assembly+'.sequence_context')
         decisions.append(decision)
         if eligible:
             for field in ('gap_start', 'gap_end', 'cut_bp', 'assessment_sha256'):
@@ -77,7 +96,7 @@ def main():
                                 coordinate_stage='pre_finishing', assessment_sha256=row['assembly_sha256'],
                                 cut_bp=measurement['cut_bp'], gap_start=measurement['gap_start'], gap_end=measurement['gap_end'],
                                 decision_source='automatic', evidence_packet_id=decision['evidence_packet_id'],
-                                reason=reason, auto_eligible='yes', policy_version='gap-v1'))
+                                reason=reason, auto_eligible='yes', policy_version='gap-v2'))
     # Validate the selected cut set before application; close cuts can invalidate each other.
     unsafe=set()
     for scaffold in {r['scaffold'] for r in actions}:
@@ -95,19 +114,20 @@ def main():
     known={r['id'] for r in decisions}
     suggestions=[]
     for key,measurement in measurements.items():
-        if key not in known and measurement.get('review_only') is True:
+        if measurement.get('review_only') is True:
             action,eligible,reason=decide(measurement)
-            decisions.append(dict(id=key,assembly=a.assembly,scaffold=measurement['scaffold'],action=action,
-                chromosome_scale_status='UNRESOLVED',auto_eligible='no',reason=reason,policy_version='gap-v1',evidence_packet_id=a.assembly+'.sequence_context'))
+            if eligible and key not in unsafe:continue
+            if key in unsafe:
+                action='UNRESOLVED';reason='selected cut set lacks a valid source-length/minimum-piece guard'
             suggestions.append(dict(id=key,assembly=a.assembly,coordinate_stage='pre_finishing',assessment_sha256=measurement['assessment_sha256'],
                 scaffold=measurement['scaffold'],action=action,cut_bp=measurement.get('cut_bp','.'),gap_start=measurement.get('gap_start','.'),
                 gap_end=measurement.get('gap_end','.'),decision_source='proposal',evidence_packet_id=a.assembly+'.sequence_context',
-                reason=reason,auto_eligible='no',policy_version='gap-v1'))
+                reason=reason,auto_eligible='no',policy_version='gap-v2'))
     fields = ['id', 'assembly', 'scaffold', 'action', 'chromosome_scale_status', 'auto_eligible', 'reason', 'policy_version', 'evidence_packet_id']
     write(out/'decisions.tsv', decisions, fields)
     write(out/'actions.tsv', actions, ACTION_FIELDS)
     write(out/'review-proposals.tsv',suggestions,ACTION_FIELDS)
-    (out/'measurement_audit.json').write_text(json.dumps(dict(policy='gap-v1', measurements=measurements,
+    (out/'measurement_audit.json').write_text(json.dumps(dict(policy='gap-v2', measurements=measurements,
         measurement_status='available' if evidence_path.exists() else 'not_available',
         candidate_file_sha256=hashlib.sha256(Path(a.calls).read_bytes()).hexdigest()), indent=2)+'\n')
     table = ''.join('<tr>'+''.join('<td>'+html.escape(str(row[k]))+'</td>' for k in fields)+'</tr>' for row in decisions)
@@ -122,6 +142,7 @@ def main():
         content+='<pre>'+html.escape(json.dumps({k:v for k,v in measurement.items() if k!='continuity_grid'},indent=2))+'</pre>'
         content+='<p><a href="'+html.escape(context_link+packet+'.igv.xml',quote=True)+'">IGV session (pre-correction coordinates)</a></p>'
         content+='<img style="max-width:100%" src="'+html.escape(context_link+packet+'.controls.png',quote=True)+'" alt="Raw candidate/control measurements">'
+        content+='<img style="max-width:100%" src="'+html.escape(context_link+packet+'.farther_contacts.png',quote=True)+'" alt="Farther flank contact calibration">'
         details.append(content+'</details>')
     (out/'report.html').write_text('<!doctype html><meta charset="utf-8"><title>Chimera decisions</title>'
         '<h1>'+html.escape(a.assembly)+'</h1><p>Coordinates and evidence refer to the pre-finishing assembly. '

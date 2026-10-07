@@ -40,7 +40,7 @@ class ActionTests(unittest.TestCase):
             validate_actions([self.row()], 'hash', {'composite':'AAAANNCCCC'}, 4, 'auto')
         with self.assertRaises(ValueError):
             validate_actions([self.row(action='BREAK_PROBABLE_MISJOIN', reviewer='human', localization_status='localized',
-                                       auto_eligible='yes', policy_version='gap-v1')], 'hash', {'composite':'AAAANNCCCC'}, 4, 'auto')
+                                       auto_eligible='yes', policy_version='gap-v2')], 'hash', {'composite':'AAAANNCCCC'}, 4, 'auto')
 
     def test_collision(self):
         with self.assertRaises(ValueError):

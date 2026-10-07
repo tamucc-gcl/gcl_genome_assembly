@@ -35,7 +35,7 @@ def validate_actions(rows, checksum, sequences, minimum, mode):
                 raise ValueError('Internal cutting requires explicit review and localization')
         else:
             raise ValueError('Unsupported selected action')
-        if mode == 'auto' and (row.get('auto_eligible') != 'yes' or row.get('policy_version') != 'gap-v1'):
+        if mode == 'auto' and (row.get('auto_eligible') != 'yes' or row.get('policy_version') != 'gap-v2'):
             raise ValueError('Automatic action lacks decision-stage eligibility')
         if cut in selected.setdefault(scaffold, []):
             raise ValueError('Duplicate/conflicting cut')

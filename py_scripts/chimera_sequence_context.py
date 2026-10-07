@@ -9,6 +9,7 @@ import subprocess
 import re
 from collections import defaultdict
 import xml.etree.ElementTree as ET
+from chimera_blocks import chromosome_blocks, summarize_blocks, farther_hifi, farther_regions, farther_contacts
 from chimera_controls import (agp, select_controls, sam_measure, peer_relationship,
                               scan_contacts, compare_controls, continuity_grid, nearby_hypotheses, continuous_controls, peer_anchor_trials)
 from chimera_graph_evidence import measure_graph
@@ -87,7 +88,7 @@ def main():
             chrom = row['scaffold']
             if not 0 <= lo <= hi <= sizes[chrom]:
                 raise ValueError('Invalid assessment interval')
-            start, end = max(0, lo-100000), min(sizes[chrom], hi+100000)
+            start, end = max(0, lo-850000), min(sizes[chrom], hi+850000)
             key = 'candidate_%d' % (i+1)
             fa = out/(key+'.fa')
             run(['samtools', 'faidx', local, '%s:%d-%d' % (chrom, start+1, end)], fa)
@@ -136,7 +137,7 @@ def main():
                 interval['lo'],interval['hi']=interval['gap']['lo'],interval['gap']['hi']
         with queries.open('a') as combined:
             for key, interval in dict(controls,**hypotheses).items():
-                start, end = max(0, interval['lo']-100000), min(sizes[interval['scaffold']], interval['hi']+100000)
+                start, end = max(0, interval['lo']-850000), min(sizes[interval['scaffold']], interval['hi']+850000)
                 interval.update(start=start, end=end)
                 fa = out/(key+'.fa')
                 run(['samtools', 'faidx', local, '%s:%d-%d' % (interval['scaffold'], start+1, end)], fa)
@@ -166,6 +167,7 @@ def main():
     peer_assays = defaultdict(lambda: defaultdict(set))
     peer_rows=[]
     anchor_rows=[]
+    block_rows=defaultdict(list)
     with (out/'peer_context.tsv').open('w') as handle:
         writer = csv.writer(handle, delimiter='\t')
         writer.writerow(['candidate', 'peer', 'sample', 'relationship', 'single_record_brackets_interval', 'mapq', 'target', 'target_start', 'target_end', 'target_length'])
@@ -192,6 +194,7 @@ def main():
             for key, interval in intervals.items():
                 (relationship,left,right),trials=peer_anchor_trials(grouped[key],interval['lo']-interval['start'],interval['hi']-interval['start'],interval['end']-interval['start'])
                 anchor_rows.extend(dict(candidate=key,peer=peer['id'],**trial) for trial in trials)
+                block_rows[key].append(chromosome_blocks(grouped[key],interval,peer,gaps if a.agp else []))
                 labels=peer.get('chromosome_labels',{})
                 left_chrom=labels.get(left[5]) if left else None
                 right_chrom=labels.get(right[5]) if right else None
@@ -212,6 +215,15 @@ def main():
     if anchor_rows:
         with (out/'peer_anchor_trials.tsv').open('w') as handle:
             writer=csv.DictWriter(handle,fieldnames=list(anchor_rows[0]),delimiter='\t');writer.writeheader();writer.writerows(anchor_rows)
+    flat_blocks=[]
+    for key,assays in block_rows.items():
+        for assay in assays:
+            for trial in assay['trials']:
+                flat_blocks.append(dict(candidate=key,peer=assay['peer'],sample=assay['sample'],auto_evidence=assay['auto_evidence'],
+                    qualified=assay['qualified'],unique_gap_localization=assay['unique_gap_localization'],**trial))
+    if flat_blocks:
+        with (out/'chromosome_blocks.tsv').open('w') as handle:
+            writer=csv.DictWriter(handle,fieldnames=list(flat_blocks[0]),delimiter='\t');writer.writeheader();writer.writerows(flat_blocks)
     if peer_rows:
         with (out/'peer_boundary_assays.tsv').open('w') as handle:
             w=csv.DictWriter(handle,fieldnames=list(peer_rows[0]),delimiter='\t');w.writeheader();w.writerows(peer_rows)
@@ -237,11 +249,13 @@ def main():
             region = '%s:%d-%d' % (interval['scaffold'], interval['start']+1, interval['end'])
             run(['samtools', 'view', '-h', bam, region], out/(key+'.sam'))
             interval['hifi']=sam_measure(out/(key+'.sam'),interval['lo'],interval['hi'])
+            interval['farther_hifi']=farther_hifi(out/(key+'.sam'),interval)
             if 'decision_id' in interval:
                 decision_measurements[interval['decision_id']]['hifi_spanning_molecules'] = interval['hifi']['spanning']
                 if 'gap' not in interval:
                     grid=continuity_grid(out/(key+'.sam'),interval['lo'],interval['hi'])
                     decision_measurements[interval['decision_id']].update(local_path_support='supported_grid' if grid['minimum_molecules']>=2 else 'unresolved',continuity_grid=grid)
+            region='%s:%d-%d'%(interval['scaffold'],max(1,interval['lo']-100000+1),min(sizes[interval['scaffold']],interval['hi']+100000))
             run(['samtools', 'depth', '-aa', '-q', '0', '-Q', '20', '-G', '0xF04', '-r', region, bam], out/(key+'.depth.tsv'))
     for key, interval in intervals.items():
         interval['key']=key
@@ -263,7 +277,8 @@ def main():
                     f=line.split();pair_sizes[f[1]]=int(f[2])
         if pair_sizes != source_sizes: raise ValueError('Hi-C pairs dictionary differs from exact input FASTA')
         with open(a.libraries) as handle: libraries=list(csv.DictReader(handle,delimiter='\t'))
-        counts,totals,audit=scan_contacts(a.pairs,placements,intervals,libraries)
+        far_regions=farther_regions(intervals,sizes)
+        counts,totals,audit=scan_contacts(a.pairs,placements,dict(intervals,**far_regions),libraries)
         raw=[]
         for (library,key),value in counts.items():
             raw.append(dict(library=library,candidate=key,**{field:value[field] for field in ('cross','left_within','right_within','left_ends','right_ends')}))
@@ -273,6 +288,12 @@ def main():
         for key in candidate_keys:
             interval=intervals[key];measurement=decision_measurements[interval['decision_id']]
             comparison=compare_controls(interval,[intervals[c] for c in links.get(key,[])],counts,{r['library_id'] for r in libraries})
+            block=summarize_blocks(block_rows[key],a.sample)
+            far=farther_contacts(interval,[intervals[c] for c in links.get(key,[])],counts,{r['library_id'] for r in libraries},far_regions)
+            own_pairs={tuple(r['chromosome_pair']) for r in block_rows[key] if r['sample']==a.sample and r['qualified']}
+            measurement.update(chromosome_blocks=block,farther_contact_evidence=far,farther_hifi=interval['farther_hifi'],
+                haplotype_block_conflict=bool(own_pairs and block['chromosome_pair'] and own_pairs!={tuple(block['chromosome_pair'])}),
+                repeat_obscured_localization=block['localized'] and 'gap' in interval)
             measurement.update(comparison, independent_discordant_individuals=interval['peer_separate_individuals'],
                 verified_gap='gap' in interval, alternative_placements_checked=True,
                 control_ids=links.get(key,[]), hifi_raw=interval['hifi'],
@@ -304,6 +325,19 @@ def main():
             ax.set_ylabel('Distinct MAPQ30 molecules');ax.legend()
             fig.suptitle('%s %s:%d-%d — raw candidate/control assays, not fusion probabilities' % (a.assembly,interval['scaffold'],interval['lo'],interval['hi']))
             fig.tight_layout();fig.savefig(out/(key+'.controls.png'),dpi=150);plt.close(fig)
+        for key in candidate_keys:
+            measurement=decision_measurements[intervals[key]['decision_id']]
+            trials=measurement.get('farther_contact_evidence',{}).get('trials',[])
+            fig,axes=plt.subplots(len(library_ids),1,figsize=(10,3*len(library_ids)),squeeze=False)
+            for index,library in enumerate(library_ids):
+                values=[t for t in trials if t['library']==library]
+                ax=axes[index,0]
+                ax.bar([n-.2 for n in range(len(values))],[t['upper_count_allowance_ratio'] for t in values],width=.4,label='candidate ratio + count allowance')
+                ax.bar([n+.2 for n in range(len(values))],[.1*t['minimum_control_ratio'] for t in values],width=.4,label='10% of minimum matched-control ratio')
+                ax.set_xticks(range(len(values)),[str(t['offset_bp']//1000)+' kb; '+('informative' if t['informative'] else 'uninformative') for t in values],rotation=15)
+                ax.set_ylabel('Normalized cross-flank contact');ax.set_title(library);ax.legend()
+            fig.suptitle('%s %s - farther-flank assays; uninformative points cannot authorize a cut'%(a.assembly,key))
+            fig.tight_layout();fig.savefig(out/(key+'.farther_contacts.png'),dpi=150);plt.close(fig)
     if a.reads or a.bam:
         for key in candidate_keys:
             interval=intervals[key]
@@ -334,6 +368,7 @@ def main():
         for key in candidate_keys:
             report.write('### '+key+'\n\n')
             if (out/(key+'.controls.png')).exists():report.write('!['+key+' candidate/control measurements]('+key+'.controls.png)\n\n')
+            if (out/(key+'.farther_contacts.png')).exists():report.write('!['+key+' farther flank contacts]('+key+'.farther_contacts.png)\n\n')
             if (out/(key+'.igv.xml')).exists():report.write('[IGV session]('+key+'.igv.xml)\n\n')
         report.write('\n<details>\n<summary>Interval-level peer context</summary>\n\n'
                      'Counts below require MAPQ >=20 and a single alignment with 1-kb flanks. '
