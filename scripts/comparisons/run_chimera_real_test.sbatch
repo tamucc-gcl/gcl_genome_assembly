@@ -70,6 +70,8 @@ test -s "$out/results/verification/Sde-CTlk_104_hap2.verification.json"
 if [[ "$scenario" == auto ]]; then
     for hap in hap1 hap2; do
         test -s "$out/results/assembly/chimeras/sequence_context/Sde-CTlk_104_${hap}.sequence_context/decision_measurements.json"
+        test -s "$out/results/assembly/chimeras/sequence_context/Sde-CTlk_104_${hap}.sequence_context/chromosome_blocks.tsv"
+        test -s "$out/results/assembly/chimeras/sequence_context/Sde-CTlk_104_${hap}.sequence_context/candidate_1.farther_contacts.png"
         test -s "$out/results/assembly/chimeras/decisions/Sde-CTlk_104_${hap}.decisions/actions.tsv"
     done
 fi
