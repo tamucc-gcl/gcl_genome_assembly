@@ -287,19 +287,22 @@ def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, tit
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import cooler
-
-    c = cooler.Cooler(cool_path)
-    bins = c.bins()[:]
-    idx = np.where(bins["chrom"].astype(str).values == scaffold)[0]
-    i0, i1 = int(idx.min()), int(idx.max()) + 1
-    M = c.matrix(balance=False, sparse=False)[i0:i1, i0:i1].astype(float)
-    n = M.shape[0]
-    mb = n * res / 1e6
+    res=res or 100000
+    M=None
+    if cool_path:
+        import cooler
+        c = cooler.Cooler(cool_path)
+        bins = c.bins()[:]
+        idx = np.where(bins["chrom"].astype(str).values == scaffold)[0]
+        i0, i1 = int(idx.min()), int(idx.max()) + 1
+        M = c.matrix(balance=False, sparse=False)[i0:i1, i0:i1].astype(float)
+    n = M.shape[0] if M is not None else max(1,int(max((p for p,f,r in tw),default=cut_bp)/max(1,res))+1)
+    mb = n * max(1,res) / 1e6
 
     fig, ax = plt.subplots(3, 1, figsize=(9, 11),
                            gridspec_kw={"height_ratios": [4, 1.1, 1.1]})
-    ax[0].imshow(np.log10(M + 1), cmap="YlOrRd", extent=[0, mb, mb, 0])
+    if M is not None:ax[0].imshow(np.log10(M + 1), cmap="YlOrRd", extent=[0, mb, mb, 0])
+    else:ax[0].text(.5,.5,'Hi-C contact map unavailable',transform=ax[0].transAxes,ha='center')
     for v, col, lab in ((paf_bp, "tab:blue", "requested position"), (hic_bp, "tab:green", "Hi-C min"),
                         (cut_bp, "black", "evidence position")):
         if v is not None:
@@ -310,8 +313,10 @@ def figure(path, cool_path, scaffold, res, prof, paf_bp, hic_bp, cut_bp, tw, tit
     ax[0].legend(fontsize=7, loc="upper right")
 
     x = np.arange(n) * res / 1e6
-    ax[1].plot(x, prof, lw=0.7, color="tab:purple")
-    ax[1].axhline(np.nanmedian(prof), color="grey", lw=0.6, ls=":")
+    if prof is not None:
+        ax[1].plot(x, prof, lw=0.7, color="tab:purple")
+        ax[1].axhline(np.nanmedian(prof), color="grey", lw=0.6, ls=":")
+    else:ax[1].text(.5,.5,'Hi-C cross-contact profile unavailable',transform=ax[1].transAxes,ha='center')
     for v, col in ((paf_bp, "tab:blue"), (hic_bp, "tab:green"), (cut_bp, "black")):
         if v is not None:
             ax[1].axvline(v / 1e6, color=col, lw=0.8, ls="--")
@@ -512,7 +517,7 @@ def main():
         out.write("verdict\t%s\n" % verdict)
         out.write("notes\t%s\n" % (";".join(notes) or "."))
 
-    if prof is not None:
+    if prof is not None or tw:
         figure(op(".chimera_evidence.png"), a.cool, name, res, prof, paf_bp,
                hic["min_bp"] if hic else None, cut_bp, tw,
                "%s  %s\n%s  vote %s" % (a.assembly, row.get("name", a.scaffold),
@@ -520,8 +525,8 @@ def main():
                interval=(int(row["transition_lo"]), int(row["transition_hi"])) if diagnostic_only else None)
 
     with open(op(".chimera_evidence.tsv"), "a") as out:
-        out.write("figure_status\t%s\n" % ("generated" if prof is not None else "not_generated_no_hic_profile"))
-    if prof is not None and not os.path.isfile(op(".chimera_evidence.png")):
+        out.write("figure_status\t%s\n" % ("generated" if prof is not None or tw else "not_generated_no_hic_or_telomere_data"))
+    if (prof is not None or tw) and not os.path.isfile(op(".chimera_evidence.png")):
         raise RuntimeError("Expected evidence figure was not created")
 
     sys.stderr.write("[chimera_evidence] %s %s: evidence position %d, verdict %s%s\n"

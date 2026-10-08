@@ -35,7 +35,7 @@ def main():
         hifi_spanning_molecules=0, hic_informative=True, hic_support_loss=True,
         matched_controls_pass=True, alternative_placements_checked=True, graph_contradiction=False)
     (context/'decision_measurements.json').write_text(json.dumps({key:measurement} if a.scenario=='eligible' else {}))
-    action = dict(selected='NO' if a.scenario=='unresolved' else 'YES',reviewer='test-reviewer',localization_status='proposed_gap',id=key, assembly='synthetic', coordinate_stage='pre_finishing', assessment_sha256=digest,
+    action = dict(selected='NO' if a.scenario=='unresolved' else 'YES',review_disposition='PENDING' if a.scenario=='unresolved' else 'CUT',reviewer='test-reviewer',localization_status='proposed_gap',id=key, assembly='synthetic', coordinate_stage='pre_finishing', assessment_sha256=digest,
         scaffold='composite', action='UNJOIN_UNSUPPORTED', cut_bp=6, gap_start=4, gap_end=6,
         decision_source='review', evidence_packet_id='synthetic-fixture', reason='synthetic gap-edge control')
     table(out/'manual-actions.tsv', [action])

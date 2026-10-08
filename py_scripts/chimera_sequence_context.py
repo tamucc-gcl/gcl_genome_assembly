@@ -9,10 +9,10 @@ import subprocess
 import re
 from collections import defaultdict
 import xml.etree.ElementTree as ET
-from chimera_tracks import tracks, bins, side_summary
+from chimera_tracks import tracks, bins, side_summary, augment_peer_labels, chromosome_at
 from chimera_blocks import chromosome_blocks, summarize_blocks, farther_hifi, farther_regions, farther_contacts
 from chimera_controls import (agp, select_controls, sam_measure, peer_relationship,
-                              scan_contacts, compare_controls, continuity_grid, nearby_hypotheses, continuous_controls, peer_anchor_trials)
+                              scan_contacts, compare_controls, continuity_grid, nearby_hypotheses, continuous_controls, peer_anchor_trials, project_query, informative_hifi)
 from chimera_graph_evidence import measure_graph
 
 
@@ -166,6 +166,7 @@ def main():
                 w=csv.DictWriter(handle,fieldnames=list(nearby[0]),delimiter='\t');w.writeheader();w.writerows(nearby)
     run(['tidk', 'search', '--string', a.motif, '--window', '100', '--output', 'intervals', '--dir', out/'tidk', queries])
     peers = json.loads(a.peers)
+    for peer in peers:augment_peer_labels(peer)
     summaries = {key: dict(same=set(), other=set()) for key in intervals}
     peer_assays = defaultdict(lambda: defaultdict(set))
     peer_rows=[]
@@ -197,6 +198,10 @@ def main():
                 writer.writerow([f[0], peer['id'], peer['sample'], 'same_individual' if peer['sample'] == a.sample else 'other_individual', 'yes' if bracket else 'no', f[11], f[5], f[7], f[8], f[6]])
             for key, interval in intervals.items():
                 (relationship,left,right),trials=peer_anchor_trials(grouped[key],interval['lo']-interval['start'],interval['hi']-interval['start'],interval['end']-interval['start'])
+                selected_trial=next((t for t in trials if t['relationship']!='uninformative'),{})
+                offset=selected_trial.get('offset_bp',0);anchor=selected_trial.get('anchor_bp',0)
+                left_bp=project_query(left,interval['lo']-interval['start']-offset-anchor//2) if left else None
+                right_bp=project_query(right,interval['hi']-interval['start']+offset+anchor//2) if right else None
                 anchor_rows.extend(dict(candidate=key,peer=peer['id'],**trial) for trial in trials)
                 block_rows[key].append(chromosome_blocks(grouped[key],interval,peer,gaps if a.agp else []))
                 if 'decision_id' in interval:
@@ -207,10 +212,15 @@ def main():
                     relation=('different_chromosomes' if track_left['chrom']!=track_right['chrom'] else 'same_chromosome') if track_left['qualified'] and track_right['qualified'] else 'uninformative'
                     track_rows[key].append(dict(peer=peer['id'],sample=peer['sample'],auto_evidence=peer.get('auto_evidence') is True,
                         relationship=relation,left=track_left,right=track_right,bins=tiles,
+                        comparison_scope=peer.get('comparison_scope','eligible' if peer.get('auto_evidence') else 'context only'),
+                        placement_relationship=relationship,anchor_trials=trials,
+                        left_target=left[5] if left else None,right_target=right[5] if right else None,
+                        left_strand=left[4] if left else None,right_strand=right[4] if right else None,
+                        left_target_bp=left_bp,right_target_bp=right_bp,
                         bridge_segments=[b for b in track if b['lo']<interval['hi']-interval['start']+250000 and b['hi']>interval['lo']-interval['start']-250000]))
                 labels=peer.get('chromosome_labels',{})
-                left_chrom=labels.get(left[5]) if left else None
-                right_chrom=labels.get(right[5]) if right else None
+                left_chrom=chromosome_at(labels,left[5],left_bp) if left else None
+                right_chrom=chromosome_at(labels,right[5],right_bp) if right else None
                 if relationship=='separate_scaffolds':
                     relationship=('different_chromosomes' if left_chrom and right_chrom and left_chrom!=right_chrom else
                                   'fragmented_same_chromosome' if left_chrom and left_chrom==right_chrom else 'uninformative_chromosome_identity')
@@ -264,7 +274,8 @@ def main():
             interval['hifi']=sam_measure(out/(key+'.sam'),interval['lo'],interval['hi'])
             interval['farther_hifi']=farther_hifi(out/(key+'.sam'),interval)
             if 'decision_id' in interval:
-                decision_measurements[interval['decision_id']]['hifi_spanning_molecules'] = interval['hifi']['spanning']
+                decision_measurements[interval['decision_id']].update(hifi_spanning_molecules=interval['hifi']['spanning'],
+                    hifi_raw=interval['hifi'],hifi_informative=informative_hifi(interval['hifi']),farther_hifi=interval['farther_hifi'])
                 if 'gap' not in interval:
                     grid=continuity_grid(out/(key+'.sam'),interval['lo'],interval['hi'])
                     decision_measurements[interval['decision_id']].update(local_path_support='supported_grid' if grid['minimum_molecules']>=2 else 'unresolved',continuity_grid=grid)
@@ -276,6 +287,7 @@ def main():
         interval['peer_separate_individuals']=sum(value=={'different_chromosomes'} for value in peer_assays[key].values())
     for key in candidate_keys:
         decision_measurements[intervals[key]['decision_id']]['chromosome_tracks']=track_rows[key]
+        decision_measurements[intervals[key]['decision_id']]['chromosome_blocks']=summarize_blocks(block_rows[key],a.sample)
     graph_assays=measure_graph(a.native_graph,out,queries,intervals,run,a.threads) if a.native_graph else {}
     for key in candidate_keys:
         decision_measurements[intervals[key]['decision_id']].update(graph_assays.get(key,dict(graph_status='native_graph_unavailable',graph_contradiction=None)))

@@ -1,6 +1,34 @@
 """Diagnostic chromosome tracks; assignments never authorize cuts."""
 import re
+import gzip
 from collections import defaultdict,Counter
+
+
+def chromosome_at(labels, target, coordinate):
+    if coordinate is None:return None
+    value=labels.get(target)
+    if isinstance(value,str):return value
+    matches={b['chrom'] for b in (value or []) if b['lo']<=coordinate<b['hi']}
+    return next(iter(matches)) if len(matches)==1 else None
+
+
+def augment_peer_labels(peer):
+    """Label blocks inside composites from their own reference PAF, never whole composites."""
+    path=peer.get('reference_paf','')
+    if not path or path.split('/')[-1]=='NO_PAF':return
+    from chimera_intervals import regions
+    hits=defaultdict(list)
+    opener=gzip.open if path.endswith('.gz') else open
+    with opener(path,'rt',encoding='utf-8') as handle:
+        for line in handle:
+            f=line.rstrip().split('\t')
+            if len(f)<12:raise ValueError('Malformed peer reference PAF')
+            chrom=peer.get('reference_labels',{}).get(f[5].split('#')[-1])
+            if chrom and f[0] not in peer['chromosome_labels'] and int(f[11])>=20 and int(f[9])/max(1,int(f[10]))>=.9:
+                hits[f[0]].append((int(f[2]),int(f[3]),chrom))
+    for scaffold,values in hits.items():
+        peer['chromosome_labels'][scaffold]=[dict(lo=lo,hi=hi,chrom=chrom) for lo,hi,chrom in regions(values,100000)]
+    peer['block_label_source']='Own reference PAF; nonoverlapping >=100 kb chromosome anchors, MAPQ >=20, identity >=90%'
 
 def blocks(fields):
     cigar=next((x[5:] for x in fields[12:] if x.startswith('cg:Z:')),None)
@@ -28,6 +56,13 @@ def tracks(hits,labels,mode="locus_unique"):
     segments=[b for f in hits for b in blocks(f)]
     events=defaultdict(list)
     for i,b in enumerate(segments):events[b['lo']].append((i,1));events[b['hi']].append((i,-1))
+    for b in segments:
+        value=labels.get(b['target'])
+        if isinstance(value,list):
+            for label in value:
+                for target_edge in (label['lo'],label['hi']):
+                    q=b['lo']+target_edge-b['t'] if b['strand']=='+' else b['hi']-(target_edge-b['t'])
+                    if b['lo']<q<b['hi']:events[q]
     active=set();result=[];coordinates=sorted(events)
     for index,lo in enumerate(coordinates[:-1]):
         for i,change in events[lo]:
@@ -40,12 +75,13 @@ def tracks(hits,labels,mode="locus_unique"):
         if qualified:
             best=max(qualified,key=lambda b:(b['mapq'],b['identity']))
             mid=(lo+hi)//2
+            best_chrom=chromosome_at(labels,best['target'],position(best,mid))
             competing=[segments[i] for i in active if segments[i]['identity']>=.95*best['identity'] and
                 (segments[i]['target']!=best['target'] or segments[i]['strand']!=best['strand'] or abs(position(segments[i],mid)-position(best,mid))>1000)]
-            if competing and (mode=='locus_unique' or any(labels.get(b['target'])!=labels[best['target']] for b in competing)):
+            if competing and (mode=='locus_unique' or any(chromosome_at(labels,b['target'],position(b,mid))!=best_chrom for b in competing)):
                 status='ambiguous'
             else:
-                chrom=labels[best['target']];status='chromosome_assigned_locus_ambiguous' if competing else 'assigned'
+                chrom=best_chrom;status=('chromosome_assigned_locus_ambiguous' if competing else 'assigned') if chrom else 'unlabelled_target_block'
         result.append(dict(lo=lo,hi=hi,chrom=chrom,status=status))
     return result
 

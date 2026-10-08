@@ -320,6 +320,11 @@ def scan_contacts(path, placements, intervals, libraries, flank=250000):
                 for key,side in tags: counts[library,key][side+'_ends']+=1
             crossed={key for key,side in ends[0] if (key,'right' if side=='left' else 'left') in ends[1]}
             for key in crossed: counts[library,key]['cross']+=1
+    # The scan completed: absent counter entries are measured zeros, not missing assays.
+    for library in {r['library_id'] for r in libraries}:
+        for key in intervals:
+            for field in ('cross','left_within','right_within','left_ends','right_ends'):
+                counts[library,key].setdefault(field,0)
     return counts, total, audit
 
 

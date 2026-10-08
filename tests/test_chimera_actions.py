@@ -12,7 +12,7 @@ from chimera_actions import validate_actions, split_sequences
 
 class ActionTests(unittest.TestCase):
     def row(self, **changes):
-        row = dict(selected='YES',reviewer='test-reviewer',localization_status='proposed_gap',id='discovered-boundary', assessment_sha256='hash', coordinate_stage='pre_finishing',
+        row = dict(selected='YES',review_disposition='CUT',reviewer='test-reviewer',localization_status='proposed_gap',id='discovered-boundary', assessment_sha256='hash', coordinate_stage='pre_finishing',
                    scaffold='composite', action='UNJOIN_UNSUPPORTED', cut_bp='6', gap_start='4', gap_end='6',
                    decision_source='review', evidence_packet_id='packet', reason='reviewed gap')
         row.update(changes)

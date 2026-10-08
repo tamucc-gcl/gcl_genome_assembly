@@ -1,7 +1,8 @@
 """Chromosome-block and distance-matched evidence for repeat-obscured gap joins."""
 from collections import defaultdict
-from chimera_controls import flank_placement,informative_hifi,contact_ratio,sam_measure
+from chimera_controls import flank_placement,informative_hifi,contact_ratio,sam_measure,project_query
 import math
+from chimera_tracks import chromosome_at
 
 OFFSETS=(100000,250000,500000)
 
@@ -12,7 +13,8 @@ def chromosome_blocks(hits,interval,peer,gaps,anchor=50000):
         bounds=(lo-offset-anchor,lo-offset,hi+offset,hi+offset+anchor)
         if bounds[0]<0 or bounds[3]>interval['end']-interval['start']:continue
         left=flank_placement(hits,bounds[0],bounds[1]);right=flank_placement(hits,bounds[2],bounds[3])
-        lc=labels.get(left[5]) if left else None;rc=labels.get(right[5]) if right else None
+        lc=chromosome_at(labels,left[5],project_query(left,(bounds[0]+bounds[1])//2)) if left else None
+        rc=chromosome_at(labels,right[5],project_query(right,(bounds[2]+bounds[3])//2)) if right else None
         trials.append(dict(offset_bp=offset,left_chrom=lc,right_chrom=rc,
             left_target=left[5] if left else None,right_target=right[5] if right else None,
             usable=bool(lc and rc),left_edge=interval['lo']-offset,right_edge=interval['hi']+offset))

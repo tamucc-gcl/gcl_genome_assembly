@@ -102,9 +102,9 @@ class Coordinates(unittest.TestCase):
         checksum = checksum or hashlib.sha256(self.fa.read_bytes()).hexdigest()
         self.table.write_text(
             'id\tassembly\tscaffold\tcut_bp\taction\tgap_start\tgap_end\t'
-            'coordinate_stage\tassessment_sha256\tdecision_source\tevidence_packet_id\treason\tselected\treviewer\tlocalization_status\n'
+            'coordinate_stage\tassessment_sha256\tdecision_source\tevidence_packet_id\treason\tselected\treviewer\tlocalization_status\treview_disposition\n'
             f'boundary\tasm\ts1\t13\tUNJOIN_UNSUPPORTED\t10\t15\t'
-            f'pre_finishing\t{checksum}\treview\tpacket\treviewed gap\tYES\ttest-reviewer\tproposed_gap\n')
+            f'pre_finishing\t{checksum}\treview\tpacket\treviewed gap\tYES\ttest-reviewer\tproposed_gap\tCUT\n')
         nm = self.d / 'names.tsv'
         nm.write_text('old_name\tnew_name\tlength\tclass\torient\tflags\n'
                       's1\tchr1+chr2\t25\tcomposite\t+\t.\n'

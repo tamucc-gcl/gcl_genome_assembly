@@ -6,7 +6,7 @@ process CHIMERA_SEQUENCE_CONTEXT {
 
     input:
     tuple val(meta), path(fasta, stageAs: 'assessment/*'), path(calls),
-          val(peer_meta), path(peer_fastas, stageAs: 'peer??/*'), path(reads, stageAs: 'reads/*'), val(motif),
+          val(peer_meta), path(peer_fastas, stageAs: 'peer??/*'), path(peer_refs,stageAs:'peerref??/*'), path(reads, stageAs: 'reads/*'), val(motif),
           path(agp, stageAs: 'agp/*'), path(pairs, stageAs: 'pairs/*'),
           path(source, stageAs: 'source/*'), path(libraries, stageAs: 'libraries/*'),
           path(bams, stageAs:'reused/*'), path(bam_provenance, stageAs:'bam_provenance/*'), path(native_graph,stageAs:'graph/*')
@@ -18,7 +18,8 @@ process CHIMERA_SEQUENCE_CONTEXT {
 
     script:
     def paths = peer_fastas instanceof List ? peer_fastas : [peer_fastas]
-    def manifest = peer_meta.withIndex().collect { m, i -> [id: m.id, sample: m.sample, path: paths[i].toString(), auto_evidence:m.auto_evidence == true, chromosome_labels:m.chromosome_labels ?: [:]] }
+    def refs = peer_refs instanceof List ? peer_refs : [peer_refs]
+    def manifest = peer_meta.withIndex().collect { m, i -> [id: m.id, sample: m.sample, path: paths[i].toString(), auto_evidence:m.auto_evidence == true, chromosome_labels:m.chromosome_labels ?: [:], reference_paf:refs[i].toString(), reference_labels:m.reference_labels ?: [:], comparison_scope:m.comparison_scope] }
     def peers = groovy.json.JsonOutput.toJson(manifest).replace("'", "'\"'\"'")
     def readArg = reads.toString().tokenize('/').last() == 'NO_PAIRS' ? '' : "--reads '${reads}'"
     def assayArg = agp.toString().tokenize('/').last() == 'NO_PAIRS' ? '' : "--agp '${agp}' --pairs '${pairs}' --pairs-source '${source}' --libraries '${libraries}'"

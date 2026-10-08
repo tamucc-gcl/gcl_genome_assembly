@@ -70,6 +70,17 @@ def main():
     if not required.issubset(header):
         raise ValueError('Action table missing required columns: '+', '.join(sorted(required-set(header))))
     action_rows = rows(a.actions)
+    if 'review_disposition' not in header:
+        raise ValueError('Review file requires review_disposition=PENDING, RETAIN, CUT or DEFER')
+    if 'review_disposition' in header:
+        for row in action_rows:
+            disposition=row.get('review_disposition')
+            if disposition not in ('PENDING','RETAIN','CUT','DEFER'):
+                raise ValueError('Invalid human review disposition')
+            if (row.get('selected')=='YES') != (disposition=='CUT'):
+                raise ValueError('Cut selection and human review disposition disagree')
+            if disposition!='PENDING' and (not row.get('reviewer','').strip() or not row.get('reason','').strip()):
+                raise ValueError('Completed or deferred review requires reviewer and reason')
     if any(not r.get('assembly') for r in action_rows):
         raise ValueError('Every action must identify its assembly')
     if a.mode == 'file':

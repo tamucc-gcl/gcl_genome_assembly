@@ -56,7 +56,7 @@ class ManualReview(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);fa=root/'input.fa';fa.write_text('>s\nAAAANNCCCC\n')
             names=root/'names.tsv';names.write_text('old_name\tnew_name\torient\torder\tlength\tclass\tref_span\tflags\n'+'s\tchr1\t+\t1\t10\tchromosome\t.\t.\n')
-            row=dict(selected='NO',id='r',assembly='a',coordinate_stage='pre_finishing',assessment_sha256='stale',scaffold='s',action='UNRESOLVED',cut_bp='',gap_start='',gap_end='',decision_source='review',evidence_packet_id='p',reviewer='',reason='',localization_status='unlocalized')
+            row=dict(selected='NO',review_disposition='PENDING',id='r',assembly='a',coordinate_stage='pre_finishing',assessment_sha256='stale',scaffold='s',action='UNRESOLVED',cut_bp='',gap_start='',gap_end='',decision_source='review',evidence_packet_id='p',reviewer='',reason='',localization_status='unlocalized')
             path=root/'review.tsv'
             def write():
                 with path.open('w',newline='') as h:
@@ -64,5 +64,5 @@ class ManualReview(unittest.TestCase):
             script=Path(__file__).resolve().parents[1]/'py_scripts/break_chimeras.py'
             args=[sys.executable,str(script),'--fasta',str(fa),'--name-map',str(names),'--actions',str(path),'--assembly','a','--out-fasta',str(root/'out.fa'),'--out-name-map',str(root/'out.tsv'),'--audit',str(root/'audit.tsv'),'--min-piece-bp','4']
             write();subprocess.run(args,check=True,capture_output=True);self.assertEqual((root/'out.fa').read_bytes(),fa.read_bytes())
-            row.update(selected='YES');write();result=subprocess.run(args,capture_output=True,text=True)
+            row.update(selected='YES',review_disposition='CUT');write();result=subprocess.run(args,capture_output=True,text=True)
             self.assertNotEqual(result.returncode,0);self.assertIn('requires reviewer',result.stderr)

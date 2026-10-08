@@ -10,4 +10,10 @@ Sequence context now preserves exact chromosome-assigned alignment segments with
 
 When the bridge is adequately observed without a reversal, the verified gap becomes the preferred candidate and the source interval becomes supporting_measurement in the same transition group. The gap still requires human review. All selected fields remain NO. Automatic cutting remains deferred.
 
+Related source and gap measurements share a transition family even when bridge coverage is inadequate for precedence. Competing gaps cannot independently become preferred localizations. The report preserves detected chromosome identities, threshold-qualified confirmation and below-threshold observations separately, and shows native primary-contig continuity as opposing context rather than treating it as proof of correctness.
+
+Peer chromosome labels can describe unambiguous blocks inside composite scaffolds, using each peer's own reference alignment. Sister haplotypes supply context and never count as independent individuals. Eligibility and context-only reasons are reported. A completed contact scan records explicit zero counters; unavailable assays do not create artificial zero trials.
+
+GitHub-readable reports link detailed JSON instead of embedding it, include focused chromosome, HiFi and control plots, and incorporate available whole-scaffold contact-map and telomere panels after supplementary evidence completes. Review tables require review_disposition=PENDING/RETAIN/CUT/DEFER independently of selected=YES/NO. Selecting a cut requires CUT plus reviewer and reason; selection remains manual.
+
 Validation includes supported consolidation, reversal rejection, sparse bridge rejection and retention classification, plus the existing chimera test suite. The archived run can regenerate reports locally; exact bridge segments can be reconstructed from its published peer PAFs and chromosome labels without mapping reads again. New pipeline runs collect these segments directly.
