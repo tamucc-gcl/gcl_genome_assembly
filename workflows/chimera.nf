@@ -130,6 +130,7 @@ workflow CHIMERA {
         // Direct local peer comparison is diagnostic only, independent of cutting.
         if (params.chimera_sequence_context) {
             ch_context_quality = ch_peer_quality.toList().map { files ->
+                log.info "[CHIMERA INPUT] Comparison quality ready: ${files.size()} tables"
                 files.collectMany { quality ->
                     def lines = quality.readLines().findAll { it && !it.startsWith('#') }
                     def header = lines[0].split('\t') as List
@@ -138,7 +139,9 @@ workflow CHIMERA {
                         [(fields[header.indexOf('id')]): fields[header.indexOf('role')] == 'voter' &&
                             !fields[header.indexOf('role_reasons')].toLowerCase().contains('forced')] }
                 }.collectEntries() }
-            ch_context_cohort = ch_harmonized.toList().map { records -> [records:records] }
+            ch_context_cohort = ch_harmonized.toList().map { records ->
+                log.info "[CHIMERA INPUT] Assessment cohort ready: ${records.collect { it[0].id }}"
+                [records:records] }
                 .combine(ch_context_quality)
                 .map { cohort, quality -> [records: cohort.records.collect { m, fa, nm ->
                     def labels = [:]
@@ -154,19 +157,30 @@ workflow CHIMERA {
                     }
                     tuple(m + [auto_evidence: quality[m.id.toString()] == true, chromosome_labels:labels], fa, nm) }] }
             ch_context_reads = ch_hifi_reads.toList()
-                .map { records -> records.collectEntries { m, fq -> [(m.sample.toString()): fq] } }
+                .map { records ->
+                    log.info "[CHIMERA INPUT] HiFi reads ready: ${records.collect { it[0].sample }}"
+                    records.collectEntries { m, fq -> [(m.sample.toString()): fq] } }
             ch_context_graphs = ch_native_graphs.toList().map { records ->
+                log.info "[CHIMERA INPUT] Native graphs ready: ${records.collect { it[0].sample }}"
                 records.collectEntries { m, paths -> [(m.sample.toString()): paths instanceof List ? paths : [paths]] } }
             ch_context_assays = ch_hic_evidence_inputs
                 .map { m, fa, libraries -> tuple(m.id.toString(), fa, libraries) }
                 .join(ch_round1_agp.map { m, agp -> tuple(m.id.toString(), agp) })
                 .join(ch_contig_pairs_in.map { m, stage, pairs -> tuple(m.id.toString(), pairs) })
                 .toList()
-                .map { records -> records.collectEntries { id, source, libraries, agp, pairs ->
-                    [(id): [source:source, libraries:libraries, agp:agp, pairs:pairs]] } }
+                .map { records ->
+                    log.info "[CHIMERA INPUT] Hi-C assay collection closed: ${records.collect { it[0] }}"
+                    records.collectEntries { id, source, libraries, agp, pairs ->
+                        [(id): [source:source, libraries:libraries, agp:agp, pairs:pairs]] } }
             ch_context_in = ch_chimeric_joins
-                .map { taxid, id, calls -> tuple(id.toString(), calls) }
-                .join(ch_harmonized.map { m, fa, nm -> tuple(m.id.toString(), m, fa) })
+                .map { taxid, id, calls ->
+                    log.info "[CHIMERA INPUT] Candidate calls received: ${id}"
+                    tuple(id.toString(), calls) }
+                .join(ch_harmonized.map { m, fa, nm -> tuple(m.id.toString(), m, fa) }, remainder: true)
+                .filter { record -> record[1] != null }
+                .map { id, calls, m, fa ->
+                    if (m == null || fa == null) error "Chimera candidate calls have no matching assessed assembly: ${id}"
+                    tuple(id, calls, m, fa) }
                 .combine(ch_context_cohort)
                 .combine(ch_context_reads)
                 .combine(ch_context_assays)
@@ -185,9 +199,13 @@ workflow CHIMERA {
                           retained ? [file(retained.bam,checkIfExists:true),file(retained.index,checkIfExists:true)] : [absent],
                           retained ? file(retained.provenance,checkIfExists:true) : absent, nativeGraph ?: absent)
                 }
-                .combine(ch_telo_by_taxid, by: 0)
+                .combine(ch_telo_by_taxid.map { taxid, motif ->
+                    log.info "[CHIMERA INPUT] Motif received for taxid ${taxid}"
+                    tuple(taxid.toString(), motif) }, by: 0)
                 .map { taxid, m, fa, calls, pm, pf, reads, agp, pairs, source, libraries, bams, provenance, graph, motif ->
+                    log.info "[CHIMERA INPUT] Sequence-context task ready: ${m.id}"
                     tuple(m, fa, calls, pm, pf, reads, motif ?: 'CCCTAA', agp, pairs, source, libraries, bams, provenance, graph) }
+                .ifEmpty { error 'Chimera sequence context received no assessment inputs: inspect [CHIMERA INPUT] readiness messages and cohort/taxid joins' }
             CHIMERA_SEQUENCE_CONTEXT(ch_context_in,
                 Channel.value(['chimera_sequence_context.py', 'chimera_controls.py', 'chimera_graph_evidence.py', 'chimera_blocks.py', 'chimera_tracks.py'].collect {
                     file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
@@ -197,7 +215,17 @@ workflow CHIMERA {
                     .join(CHIMERA_SEQUENCE_CONTEXT.out.context.map { m, context -> tuple(m.id.toString(), m, context) })
                     .map { id, calls, m, context -> tuple(m, calls, context) },
                 Channel.value(['chimera_review.py', 'chimera_markdown.py'].collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
-            CHIMERA_REVIEW_INDEX(CHIMERA_REVIEW.out.packets.map { m, packet -> packet }.toList(),
+            ch_complete_review_packets = CHIMERA_REVIEW.out.packets.toList()
+                .map { packets -> [packets: packets] }
+                .combine(ch_context_cohort)
+                .map { bundle, cohort ->
+                    def packets = bundle.packets
+                    def expected = cohort.records.collect { it[0].id.toString() }.sort()
+                    def actual = packets.collect { it[0].id.toString() }.sort()
+                    if (expected != actual)
+                        error "Incomplete chimera review: expected ${expected}; produced ${actual}. Inspect [CHIMERA INPUT] readiness messages."
+                    packets.collect { it[1] } }
+            CHIMERA_REVIEW_INDEX(ch_complete_review_packets,
                 file("${projectDir}/py_scripts/chimera_review_index.py", checkIfExists: true))
         }
 

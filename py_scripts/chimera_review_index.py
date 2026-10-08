@@ -23,13 +23,18 @@ def main():
     with open('assembly_registry.tsv','w',newline='',encoding='utf-8') as h:
         w=csv.DictWriter(h,fieldnames=['assembly','assessment_sha256','coordinate_stage','candidate_count'],delimiter='\t');w.writeheader();w.writerows(registry)
     md=['# Chimera Detection and Review','','## Assessment summary','',
-        str(len(registry))+' assemblies assessed; '+str(len(rows))+' candidate boundaries in '+str(len({r['assembly'] for r in rows}))+' assemblies. Evidence generation applies no cuts. All review selections start at NO.','',
+        str(len(registry))+' assemblies assessed; '+str(len(rows))+' candidate boundaries in '+str(len({r['assembly'] for r in rows}))+' assemblies; '+str(sum(r['assessment_status']=='review_required' for r in rows))+' boundaries require review; '+str(sum(r['assessment_status']=='retention_supported' for r in rows))+' have evidence favoring retention. Evidence generation applies no cuts. All review selections start at NO.','',
         '[Editable review TSV](chimera_review.tsv) · [All assessment identities](assembly_registry.tsv) · [Cut instructions](cut-instructions.md)','','| Assembly | Candidate boundaries | Evidence |','| --- | ---: | --- |']
     for r in registry:md.append('| '+r['assembly']+' | '+str(r['candidate_count'])+' | [Report]('+r['assembly']+'.review/report.md) |')
-    md+=['','## Candidate boundaries','','| Candidate | Assembly | Scaffold | Chromosomes left → right | Region to review, bp | Exact cut, bp | Review priority | For cutting | Against cutting |','| --- | --- | --- | --- | --- | ---: | --- | --- | --- |']
+    md+=['','## Candidate boundaries','','| Candidate | Assembly | Scaffold | Chromosomes left → right | Region to review, bp | Exact cut, bp | Review priority | For cutting | Against cutting | Related measurement / bridge |','| --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- |']
     for r in rows:
-        vals=['['+r['id']+']('+r['report_path']+')',r['assembly'],r['scaffold'],r['chromosome_context'],r['review_range'],r['cut_bp'] or 'Not assigned',r['review_priority'],r['evidence_for_cut'],r['evidence_against_cut']]
+        if r['assessment_status']!='review_required':continue
+        vals=['['+r['id']+']('+r['report_path']+')',r['assembly'],r['scaffold'],r['chromosome_context'],r['review_range'],r['cut_bp'] or 'Not assigned',r['review_priority'],r['evidence_for_cut'],r['evidence_against_cut'],(r['related_candidate'] or 'None')+' / '+r['bridge_status']]
         md.append('| '+' | '.join(str(v).replace('|','&#124;').replace('\n',' ') for v in vals)+' |')
+    for status,title in [('retention_supported','Boundaries with evidence favoring retention'),('supporting_measurement','Supporting transition measurements')]:
+        md+=['','## '+title,'','| Assembly | Measurement | Transition | Preferred candidate | Bridge assessment |','| --- | --- | --- | --- | --- |']
+        for r in rows:
+            if r['assessment_status']==status:md.append('| '+' | '.join([r['assembly'],'['+r['id']+']('+r['report_path']+')',r['chromosome_context'],r['preferred_candidate'],r['bridge_status']])+' |')
     md+=['','IDs C01, C02, etc. are scoped to an assembly. Separate-chromosome assignments support reviewing a fusion; same-chromosome assignments oppose a fusion at that sampled boundary. No informative assignment means the measurement cannot decide; discordant within-individual assignments require investigation. Prioritize gap-cut review means a verified gap and at least two informative independent individuals with separate-chromosome assignments, without opposing or discordant chromosome assignments. This is a review aid, not a calibrated cut classifier.','','No detected candidate is not a guarantee of structural correctness. Review ranges are measured chromosome-transition intervals, not permission to cut at their midpoint. An exact coordinate is needed only when requesting a cut. No opposing evidence observed is not equivalent to positive evidence for cutting. Detailed reports distinguish independent chromosome context, local support and measurement limits.']
     Path('README.md').write_text('\n'.join(md)+'\n',encoding='utf-8')
     Path('cut-instructions.md').write_text("""# Specify manual cuts

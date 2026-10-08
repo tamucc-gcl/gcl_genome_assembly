@@ -206,7 +206,8 @@ def main():
                     track_right=side_summary(track,tiles,interval['hi']-interval['start'],interval['end']-interval['start'])
                     relation=('different_chromosomes' if track_left['chrom']!=track_right['chrom'] else 'same_chromosome') if track_left['qualified'] and track_right['qualified'] else 'uninformative'
                     track_rows[key].append(dict(peer=peer['id'],sample=peer['sample'],auto_evidence=peer.get('auto_evidence') is True,
-                        relationship=relation,left=track_left,right=track_right,bins=tiles))
+                        relationship=relation,left=track_left,right=track_right,bins=tiles,
+                        bridge_segments=[b for b in track if b['lo']<interval['hi']-interval['start']+250000 and b['hi']>interval['lo']-interval['start']-250000]))
                 labels=peer.get('chromosome_labels',{})
                 left_chrom=labels.get(left[5]) if left else None
                 right_chrom=labels.get(right[5]) if right else None

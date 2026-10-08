@@ -1,9 +1,9 @@
 """Create human evidence packets and editable, unselected review rows. No auto decisions."""
 import argparse,csv,hashlib,html,json
 from pathlib import Path
-from chimera_markdown import render, decision_context
+from chimera_markdown import render, decision_context, assess_transitions
 FIELDS=['selected','id','assembly','coordinate_stage','assessment_sha256','scaffold','action','cut_bp','gap_start','gap_end','review_start','review_end','review_range','localization_explanation',
-        'decision_source','evidence_packet_id','reviewer','reason','localization_status','evidence_summary','report_path','source_candidate_id','chromosome_context','evidence_for_cut','evidence_against_cut','review_priority','evidence_limits']
+        'decision_source','evidence_packet_id','reviewer','reason','localization_status','evidence_summary','report_path','source_candidate_id','chromosome_context','evidence_for_cut','evidence_against_cut','review_priority','evidence_limits','detected_transition','assessment_status','transition_id','preferred_candidate','bridge_status','related_candidate']
 
 def write_table(path,rows):
     with path.open('w',newline='',encoding='utf-8') as h:
@@ -97,6 +97,7 @@ def generate(assembly,calls,context,out):
         section+='<h3>Per-library contact measurements</h3>'+contacts+'</table><p>Control thresholds describe assay calibration, not permission to cut. Scaffolding Hi-C reads are corroboration, not an independent validation dataset.</p>'
         section+='<details><summary>Measured support, opposing and missing evidence</summary><pre>'+escaped(json.dumps(m,indent=2))+'</pre></details></section>'
         sections.append(section)
+    assess_transitions(rows,measurements,provenance,candidates)
     write_table(out/'review.tsv',rows)
     if flat:
         with (out/'peer_track_summary.tsv').open('w',newline='',encoding='utf-8') as h:

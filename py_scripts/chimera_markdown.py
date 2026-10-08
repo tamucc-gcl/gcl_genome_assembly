@@ -40,12 +40,17 @@ def decision_context(m, sample):
             text=individual+': '+str(left)+' → '+str(right)
             (separate if relationship=='different_chromosomes' else same).append(text)
             pairs.add(str(left)+' → '+str(right))
+    partial=[]
+    for t in m.get('chromosome_tracks',[]):
+        if t.get('auto_evidence') and t['sample']!=sample and t['relationship']=='uninformative' and t['left'].get('chrom') and t['right'].get('chrom'):
+            partial.append(t.get('peer',t['sample'])+': '+t['left']['chrom']+' → '+t['right']['chrom'])
     for_cut='Separate chromosomes: '+'; '.join(separate) if separate else 'No informative independent chromosome evidence supporting a break'
     against='Same chromosome: '+'; '.join(same) if same else 'No opposing chromosome evidence observed'
     spans=m.get('hifi_spanning_molecules')
     if spans and m.get('hifi_informative'):
         against+='; '+str(spans)+' qualified immediate spanning molecules'
     limits=[]
+    if partial:limits.append('Below-threshold chromosome assignments (not qualified votes): '+'; '.join(partial))
     if unclear:limits.append('No informative two-sided chromosome assignment: '+', '.join(unclear))
     if conflict:limits.append('Discordant haplotype assignments within individual: '+', '.join(conflict))
     if not m.get('hifi_informative'):limits.append('Immediate HiFi assay not informative; zero spanning reads is inconclusive')
@@ -65,6 +70,72 @@ def decision_context(m, sample):
         evidence_limits='; '.join(limits) or 'See local measurements and controls')
 
 
+def assess_transitions(rows, measurements, provenance, candidates):
+    """Persist event membership and bridge observations separately from cut selection."""
+    intervals=provenance.get('intervals', {})
+    for r in rows:
+        c=candidates[r['source_candidate_id']]
+        detected=(c.get('left_chrom'),c.get('right_chrom'))
+        r['detected_transition']=' → '.join(detected) if all(detected) else ''
+        if r['detected_transition'] and r['chromosome_context']=='Unresolved from qualified local alignments':
+            r['chromosome_context']=r['detected_transition']
+        r.update(assessment_status='review_required',transition_id=r['id'],preferred_candidate='',bridge_status='not_assessed',related_candidate='')
+        if r['review_priority']=='Evidence favors retaining this sampled boundary':
+            r['assessment_status']='retention_supported'
+            r['action']='RETAIN'
+    for gap in rows:
+        gm=measurements.get(gap['source_candidate_id'],{})
+        if not gm.get('verified_gap') or gap['assessment_status']=='retention_supported':continue
+        sources=set(gm.get('source_candidates',[]))
+        linked=[r for r in rows if r is not gap and r['scaffold']==gap['scaffold'] and
+                measurements.get(r['source_candidate_id'],{}).get('packet_interval_id') in sources]
+        # Multiple source transitions remain separate: a nearby gap is not a unique localization.
+        if len(linked)!=1:continue
+        source=linked[0];pair=source['detected_transition'].split(' → ')
+        if len(pair)!=2 or pair[0]==pair[1]:continue
+        if gap['chromosome_context']!=' → '.join(pair):continue
+        lo=min(int(source['review_end']),int(gap['review_start']))
+        hi=max(int(source['review_end']),int(gap['review_start']))
+        observations={};reversal=False
+        for r in (source,gap):
+            m=measurements.get(r['source_candidate_id'],{})
+            interval=intervals.get(m.get('packet_interval_id'),{})
+            if 'start' not in interval:continue
+            for track in m.get('chromosome_tracks',[]):
+                if not track.get('auto_evidence') or track['sample']==provenance.get('sample'):continue
+                tiles=observations.setdefault(track['peer'],{})
+                for b in track.get('bridge_segments',track.get('bins',[])):
+                    a=interval['start']+b['lo'];z=interval['start']+b['hi']
+                    if a<hi and z>lo and b.get('chrom'):
+                        tiles[(a,z)]=b['chrom']
+        sufficient=[];discordant_bp={}
+        for peer,tiles in observations.items():
+            ordered=sorted(tiles.items());seen_right=False;covered=[];bad_bp=0
+            for (a,z),chrom in ordered:
+                if chrom not in pair or (seen_right and chrom==pair[0]):bad_bp+=max(0,min(hi,z)-max(lo,a))
+                if chrom==pair[1]:seen_right=True
+                covered.append((max(lo,a),min(hi,z)))
+            end=lo;bp=0
+            for a,z in covered:
+                bp+=max(0,z-max(a,end));end=max(end,z)
+            discordant_bp[peer]=bad_bp
+            if bad_bp>=10000:reversal=True
+            if ordered and bp>=.5*max(1,hi-lo) and bad_bp==0:sufficient.append(peer)
+        status='reversal_or_other_chromosome_observed' if reversal else 'no_reversal_observed_adequate_coverage' if sufficient else 'insufficient_bridge_observability'
+        audit=dict(source=source['id'],gap=gap['id'],start=lo,end=hi,status=status,adequate_peers=sufficient,discordant_bp=discordant_bp,
+                   coverage_fraction_required=.5,discordant_bp_threshold=10000,
+                   peer_tiles={k:[dict(start=a,end=z,chrom=c) for (a,z),c in sorted(v.items())] for k,v in observations.items()})
+        gm['transition_bridge_assessment']=audit
+        source['related_candidate']=gap['id'];gap['related_candidate']=source['id']
+        source['bridge_status']=gap['bridge_status']=status
+        if status=='no_reversal_observed_adequate_coverage':
+            source['assessment_status']='supporting_measurement'
+            source['transition_id']=gap['transition_id']=source['id']
+            source['preferred_candidate']=gap['preferred_candidate']=gap['id']
+            gap['detected_transition']=source['detected_transition']
+    return rows
+
+
 def table(headers, rows):
     def cell(v):
         return str(v).replace('|', '&#124;').replace('\n', ' ')
@@ -77,11 +148,16 @@ def render(assembly, rows, measurements, provenance, sections, context, out):
     (out/'registry.json').write_text(json.dumps(dict(assembly=assembly, assessment_sha256=checksum,
         coordinate_stage='pre_finishing', candidate_count=len(rows)), indent=2), encoding='utf-8')
     md = ['# ' + assembly + ' — chimera evidence', '', '[Cohort report](../README.md) · [Cut instructions](../cut-instructions.md)', '',
-          '## Assessment summary', '', str(len(rows)) + ' candidate boundaries. All selections start at NO. Evidence generation applies no cuts.', '',
+          '## Assessment summary', '', str(len(rows)) + ' assessed boundaries; '+str(sum(r['assessment_status']=='review_required' for r in rows))+' require review; '+str(sum(r['assessment_status']=='retention_supported' for r in rows))+' have evidence favoring retention. All selections start at NO. Evidence generation applies no cuts.', '',
           'Locations use the original pre-finishing FASTA. A proposed gap cut is a verified position for review, not approval to break.', '', '## Candidate boundaries', '']
     md += ['IDs are scoped to this assembly; use assembly plus ID when referring to a decision. Review priorities organize measured evidence and do not approve cuts.', '']
     md += table(['Candidate', 'Scaffold', 'Chromosomes left → right', 'Region to review, bp', 'Exact cut, bp', 'Review priority', 'Evidence for cutting', 'Evidence against cutting'], [
-        ['['+r['id']+'](#candidate-'+r['id'].lower()+')', r['scaffold'], r['chromosome_context'], r['review_range'], r['cut_bp'] or 'Not assigned', r['review_priority'], r['evidence_for_cut'],r['evidence_against_cut']] for r in rows])
+        ['['+r['id']+'](#candidate-'+r['id'].lower()+')', r['scaffold'], r['chromosome_context'], r['review_range'], r['cut_bp'] or 'Not assigned', r['review_priority'], r['evidence_for_cut'],r['evidence_against_cut']] for r in rows if r.get('assessment_status')=='review_required'])
+    for status,title in [('retention_supported','Boundaries with evidence favoring retention'),('supporting_measurement','Supporting measurements of localized transitions')]:
+        md+=['','## '+title,'']
+        md+=table(['Measurement','Scaffold','Detected transition','Local chromosome context','Region','Preferred cut candidate','Bridge assessment'],[
+            [r['id'],r['scaffold'],r['detected_transition'],r['chromosome_context'],r['review_range'],r['preferred_candidate'],r['bridge_status']]
+            for r in rows if r['assessment_status']==status])
     for r, section in zip(rows, sections):
         key = r['id']; m = measurements.get(r['source_candidate_id'], {}); tracks = m.get('chromosome_tracks', [])
         md += ['', '## Candidate '+key, '', '**Scaffold:** '+r['scaffold']+'. **Region to review:** '+r['review_range']+' bp. **Exact cut:** '+str(r['cut_bp'] or 'Not assigned')+'. **Selected:** NO.', '',
@@ -89,7 +165,7 @@ def render(assembly, rows, measurements, provenance, sections, context, out):
                '**Gap interval:** '+str(r['gap_start'] or 'Unavailable')+'–'+str(r['gap_end'] or 'Unavailable')+'. **Proposed action:** '+r['action']+'.', '',
                '**Chromosomes left → right:** '+r['chromosome_context']+'.', '', '**Review priority:** '+r['review_priority']+'.', '',
                '**For cutting:** '+r['evidence_for_cut']+'.', '', '**Against cutting:** '+r['evidence_against_cut']+'.', '',
-               '**Limits on the decision:** '+r['evidence_limits']+'.', '', '### Across-assembly chromosome evidence', '']
+               '**Assessment:** '+r['assessment_status']+'. **Transition:** '+r['transition_id']+'. **Preferred candidate:** '+(r['preferred_candidate'] or 'Not assigned')+'. **Related measurement:** '+(r['related_candidate'] or 'None')+'. **Bridge:** '+r['bridge_status']+'.', '', '**Limits on the decision:** '+r['evidence_limits']+'.', '', '### Across-assembly chromosome evidence', '']
         values = []
         for t in tracks:
             role = 'Same individual' if t['sample'] == provenance.get('sample', assembly.rsplit('_hap', 1)[0]) else 'Independent comparison eligible' if t.get('auto_evidence') else 'Context only'
@@ -137,5 +213,5 @@ def render(assembly, rows, measurements, provenance, sections, context, out):
                '<details><summary>Full candidate measurements</summary>', '', '```json', json.dumps(m, indent=2), '```', '', '</details>']
     md += ['', '## Source identity and measurements', '', '**Assessment SHA-256:** `'+checksum+'`.', '',
            '[Raw measurements](measurements.json) · [Source provenance](../../sequence_context/'+assembly+'.sequence_context/provenance.json)', '',
-           'Track summaries use MAPQ ≥30, record identity ≥90%, ambiguity masking and coverage/dominance requirements. These exploratory measurements do not grant cutting permission.']
+           'Track summaries use MAPQ â‰¥30, record identity â‰¥90%, ambiguity masking and coverage/dominance requirements. These exploratory measurements do not grant cutting permission.']
     (out/'report.md').write_text('\n'.join(md)+'\n', encoding='utf-8')
