@@ -65,10 +65,10 @@ def cohort_labels(catalog,alignments):
             unlabelled=set(own['scope'])-set(own['chromosome_labels'])
             if not unlabelled:continue
             grouped=defaultdict(list)
-            for f in read_paf(pair['path'],reverse):
-                if f[0] in unlabelled:grouped[f[0]].append(f)
+            for f in read_paf(pair['path'],reverse,unlabelled):
+                grouped[f[0]].append(f)
             for scaffold,hits in grouped.items():
-                for block in tracks(hits,peer['chromosome_labels'],mode='chromosome',min_mapq=20,minimum_target=0):
+                for block in tracks(hits,peer['chromosome_labels'],mode='chromosome',min_mapq=20,minimum_target=0,compact=True):
                     if block['chrom']:observations[own_id][scaffold][peer['sample']].append((block['lo'],block['hi'],block['chrom']))
     for own_id,scaffolds in observations.items():
         own=catalog[own_id]
@@ -85,7 +85,10 @@ def cohort_labels(catalog,alignments):
                     if active[sample][chrom]==0:del active[sample][chrom]
                 votes=[next(iter(c)) for c in active.values() if len(c)==1]
                 if len(votes)>=minimum and len(set(votes))==1:
-                    labels.append(dict(lo=lo,hi=coordinates[i+1],chrom=votes[0],individuals=len(votes),source_individuals=sorted(sample for sample,c in active.items() if len(c)==1)))
+                    block=dict(lo=lo,hi=coordinates[i+1],chrom=votes[0],individuals=len(votes),source_individuals=sorted(sample for sample,c in active.items() if len(c)==1))
+                    if labels and labels[-1]['hi']==lo and all(labels[-1][k]==block[k] for k in ('chrom','individuals','source_individuals')):
+                        labels[-1]['hi']=block['hi']
+                    else:labels.append(block)
             own['chromosome_labels'][scaffold]=labels
         own['block_label_source']='CIGAR-projected cohort chromosomes; independent-individual agreement; conflicts and unmapped bases unlabelled'
     return catalog
@@ -108,13 +111,15 @@ def invert_paf(f):
     return out
 
 
-def read_paf(path,reverse=False):
+def read_paf(path,reverse=False,query_names=None):
     opener=gzip.open if str(path).endswith('.gz') else open
     with opener(path,'rt') as handle:
         for line in handle:
             if not line.strip():continue
             f=line.rstrip().split('\t')
             if len(f)<12:raise ValueError('Malformed cohort PAF')
+            # Discard out-of-scope records before expensive reverse CIGAR parsing.
+            if query_names is not None and f[5 if reverse else 0] not in query_names:continue
             yield invert_paf(f) if reverse else f
 
 

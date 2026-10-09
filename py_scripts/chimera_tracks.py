@@ -2,6 +2,46 @@
 import re
 import gzip
 from collections import defaultdict,Counter
+from bisect import bisect_left,bisect_right
+
+
+class LabelIndex:
+    """Disjoint chromosome runs and logarithmic coordinate/edge lookup.
+
+    Sweep overlapping input labels once. Conflicting chromosomes remain unassigned;
+    adjacent equivalent assignments merge without bridging unlabelled sequence.
+    """
+    def __init__(self, labels):
+        self.plain={};self.runs={};self.starts={};self.edges={};self.raw_edges={}
+        for target,value in labels.items():
+            if isinstance(value,str):
+                self.plain[target]=value;continue
+            events=defaultdict(Counter)
+            for b in value or []:
+                if b['hi']<=b['lo']:continue
+                events[b['lo']][b['chrom']]+=1;events[b['hi']][b['chrom']]-=1
+            coordinates=sorted(events);active=Counter();runs=[]
+            for i,lo in enumerate(coordinates[:-1]):
+                active.update(events[lo]);active=Counter({c:n for c,n in active.items() if n>0})
+                chrom=next(iter(active)) if len(active)==1 else None
+                hi=coordinates[i+1]
+                if chrom is not None:
+                    if runs and runs[-1][1]==lo and runs[-1][2]==chrom:runs[-1]=(runs[-1][0],hi,chrom)
+                    else:runs.append((lo,hi,chrom))
+            self.runs[target]=runs;self.starts[target]=[r[0] for r in runs]
+            self.edges[target]=sorted({edge for lo,hi,_ in runs for edge in (lo,hi)})
+            self.raw_edges[target]=coordinates
+
+    def at(self,target,coordinate):
+        if coordinate is None:return None
+        if target in self.plain:return self.plain[target]
+        i=bisect_right(self.starts.get(target,[]),coordinate)-1
+        runs=self.runs.get(target,[])
+        return runs[i][2] if i>=0 and coordinate<runs[i][1] else None
+
+    def inside(self,target,lo,hi,compact):
+        edges=(self.edges if compact else self.raw_edges).get(target,[])
+        return edges[bisect_right(edges,lo):bisect_left(edges,hi)]
 
 
 def chromosome_at(labels, target, coordinate):
@@ -34,7 +74,7 @@ def augment_peer_labels(peer):
         peer['chromosome_labels'][scaffold]=[dict(lo=lo,hi=hi,chrom=chrom) for lo,hi,chrom in pieces if support[chrom]>=100000]
     peer['block_label_source']='Own reference PAF; >=100 kb union support per chromosome; ambiguous/unmapped bases unlabelled; MAPQ >=20, identity >=90%'
 
-def blocks(fields):
+def blocks(fields,compact=False):
     cigar=next((x[5:] for x in fields[12:] if x.startswith('cg:Z:')),None)
     if not cigar:return []
     ops=re.findall(r'(\d+)([MIDNSHP=X])',cigar)
@@ -44,8 +84,12 @@ def blocks(fields):
         n=int(n)
         if op in 'M=X':
             lo,hi=(q,q+n) if fields[4]=='+' else (q-n,q)
-            result.append(dict(lo=lo,hi=hi,t=target,strand=fields[4],target=fields[5],length=int(fields[6]),
-                mapq=int(fields[11]),identity=int(fields[9])/max(1,int(fields[10]))))
+            if compact and result and result[-1]['t']+result[-1]['hi']-result[-1]['lo']==target and (
+                    result[-1]['hi']==lo if fields[4]=='+' else result[-1]['lo']==hi):
+                result[-1]['lo']=min(result[-1]['lo'],lo);result[-1]['hi']=max(result[-1]['hi'],hi)
+            else:
+                result.append(dict(lo=lo,hi=hi,t=target,strand=fields[4],target=fields[5],length=int(fields[6]),
+                    mapq=int(fields[11]),identity=int(fields[9])/max(1,int(fields[10]))))
         if op in 'MI=X':q+=n if fields[4]=='+' else -n
         if op in 'MDN=X':target+=n
     if q!=(int(fields[3]) if fields[4]=='+' else int(fields[2])) or target!=int(fields[8]):raise ValueError('CIGAR endpoint mismatch')
@@ -56,17 +100,15 @@ def position(block,query):
     return block['t']+(query-block['lo'] if block['strand']=='+' else block['hi']-1-query)
 
 
-def tracks(hits,labels,mode="locus_unique",min_mapq=30,minimum_target=5000000):
-    segments=[b for f in hits for b in blocks(f)]
+def tracks(hits,labels,mode="locus_unique",min_mapq=30,minimum_target=5000000,compact=False):
+    label_index=LabelIndex(labels)
+    segments=[b for f in hits for b in blocks(f,compact)]
     events=defaultdict(list)
     for i,b in enumerate(segments):events[b['lo']].append((i,1));events[b['hi']].append((i,-1))
     for b in segments:
-        value=labels.get(b['target'])
-        if isinstance(value,list):
-            for label in value:
-                for target_edge in (label['lo'],label['hi']):
-                    q=b['lo']+target_edge-b['t'] if b['strand']=='+' else b['hi']-(target_edge-b['t'])
-                    if b['lo']<q<b['hi']:events[q]
+        for target_edge in label_index.inside(b['target'],b['t'],b['t']+b['hi']-b['lo'],compact):
+            q=b['lo']+target_edge-b['t'] if b['strand']=='+' else b['hi']-(target_edge-b['t'])
+            events[q]
     active=set();result=[];coordinates=sorted(events)
     for index,lo in enumerate(coordinates[:-1]):
         for i,change in events[lo]:
@@ -79,14 +121,16 @@ def tracks(hits,labels,mode="locus_unique",min_mapq=30,minimum_target=5000000):
         if qualified:
             best=max(qualified,key=lambda b:(b['mapq'],b['identity']))
             mid=(lo+hi)//2
-            best_chrom=chromosome_at(labels,best['target'],position(best,mid))
+            best_chrom=label_index.at(best['target'],position(best,mid))
             competing=[segments[i] for i in active if segments[i]['identity']>=.95*best['identity'] and
                 (segments[i]['target']!=best['target'] or segments[i]['strand']!=best['strand'] or abs(position(segments[i],mid)-position(best,mid))>1000)]
-            if competing and (mode=='locus_unique' or any(chromosome_at(labels,b['target'],position(b,mid))!=best_chrom for b in competing)):
+            if competing and (mode=='locus_unique' or any(label_index.at(b['target'],position(b,mid))!=best_chrom for b in competing)):
                 status='ambiguous'
             else:
                 chrom=best_chrom;status=('chromosome_assigned_locus_ambiguous' if competing else 'assigned') if chrom else 'unlabelled_target_block'
-        result.append(dict(lo=lo,hi=hi,chrom=chrom,status=status))
+        if compact and result and result[-1]['hi']==lo and result[-1]['chrom']==chrom and result[-1]['status']==status:
+            result[-1]['hi']=hi
+        else:result.append(dict(lo=lo,hi=hi,chrom=chrom,status=status))
     return result
 
 

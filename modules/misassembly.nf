@@ -46,7 +46,7 @@ process MISASSEMBLY_DISCOVER {
     def manifest = pairs.withIndex().collect { p,i -> [a:p.a,b:p.b,path:paths[i].toString()] }
     def json = groovy.json.JsonOutput.toJson(manifest).replace("'", "'\"'\"'")
     """
-    python3 misassembly_discover.py discover --catalog '${catalog}' --assembly '${meta.id}' --fasta '${fasta}' --alignments '${json}' --minimum-arm-bp ${params.chimera_min_arm_bp} --out '${meta.id}.discovery'
+    python3 misassembly_discover.py discover --catalog '${catalog}' --assembly '${meta.id}' --fasta '${fasta}' --alignments '${json}' --minimum-arm-bp ${params.chimera_min_arm_bp} --workers ${task.cpus} --out '${meta.id}.discovery'
     """
 }
 
