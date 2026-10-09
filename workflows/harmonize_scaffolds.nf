@@ -90,10 +90,6 @@ workflow HARMONIZE_SCAFFOLDS {
         // pass-through: every assembly gets the sentinel, no barrier
         ch_out    = ch_assemblies.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
         ch_report = Channel.empty()
-        ch_report_by_taxid = Channel.empty()
-        ch_chimera_cand = Channel.empty()
-        ch_ref_name_map = Channel.empty()
-        ch_ref_paf_by_id = Channel.empty()
         ch_ref_id = Channel.empty()
         ch_ref_scores = Channel.empty()
     }
@@ -166,22 +162,6 @@ workflow HARMONIZE_SCAFFOLDS {
         ch_quality = HARMONIZE_SPECIES.out.chromosome_sets
         ch_versions = ch_versions.mix( HARMONIZE_SPECIES.out.versions )
         ch_report   = HARMONIZE_SPECIES.out.report
-        // Taxid recovered from the FILENAME (<taxid>.harmonization_report.tsv) rather than
-        // from a tupled emit, so modules/harmonize_species.nf stays byte-identical and no
-        // task hash can move. Keep this in the workflow: adding the emit to the process is
-        // tidier to read and was the first attempt, but it risks re-running harmonization
-        // and everything downstream of it, cactus included.
-        ch_chimera_cand = HARMONIZE_SPECIES.out.chimera_candidates
-
-
-        // and the reference alignments, re-keyed by assembly id the same way
-        ch_ref_paf_by_id = HARMONIZE_SPECIES.out.ref_pafs
-            .transpose()
-            .map { taxid, pf ->
-                tuple(pf.name.replaceFirst(/\.ref\.paf\.gz$/, ''), pf) }
-        ch_report_by_taxid = HARMONIZE_SPECIES.out.report
-            .map { f -> tuple(f.name.replaceFirst(/\..*$/, ''), f) }
-
         // re-key emitted name maps by assembly id (filename = <id>.harmonized_name_map.tsv)
         ch_name_map_by_id = HARMONIZE_SPECIES.out.name_maps
             .transpose()
@@ -194,20 +174,6 @@ workflow HARMONIZE_SCAFFOLDS {
         ch_lr_out = ch_lr_by_id
             .join( ch_name_map_by_id, remainder: true )
             .map { id, meta, fa, nm -> tuple(meta, fa, nm ?: file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
-
-        // The reference's own name map, picked out of the per-id set built just above.
-        // PLACED HERE because it consumes ch_name_map_by_id: a workflow body is ordinary
-        // Groovy, so a name must be assigned before it is read. Anchoring this next to the
-        // other chimera channels -- which is where it belongs conceptually -- put it 18 lines
-        // before its dependency and produced "No such variable: ch_name_map_by_id".
-        //
-        // It translates PAF targets (reference scaffold names) into CONSENSUS chromosomes.
-        // Every assembly needs the same one, so it is keyed per species.
-        ch_ref_name_map = HARMONIZE_SPECIES.out.reference_id
-            .map { taxid, ridf -> tuple(taxid, ridf.text.trim()) }
-            .combine( ch_name_map_by_id )
-            .filter { taxid, rid, nm_id, nm -> nm_id == rid }
-            .map { taxid, rid, nm_id, nm -> tuple(taxid, nm) }
 
         // short-read always sentinel
         ch_sr_out = ch_split.sr.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) }
@@ -222,12 +188,6 @@ workflow HARMONIZE_SCAFFOLDS {
     reference_id   = ch_ref_id
     reference_scores = ch_ref_scores
     report         = ch_report
-    report_by_taxid = ch_report_by_taxid   // tuple(taxid, report) for per-species joins
-    chimera_candidates = ch_chimera_cand   // tuple(taxid, chimera_candidates.tsv)
-    // The REFERENCE's name map: translates PAF targets (reference scaffold names) into
-    // CONSENSUS chromosomes. Every assembly needs the same one, so it is per species.
-    ref_name_map   = ch_ref_name_map       // tuple(taxid, reference name_map)
-    ref_pafs_by_id = ch_ref_paf_by_id      // tuple(assembly_id, ref.paf.gz)
     versions       = ch_versions
     quality        = ch_quality
 }

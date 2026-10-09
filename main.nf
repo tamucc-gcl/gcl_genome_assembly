@@ -473,15 +473,12 @@ workflow {
         HARMONIZE_SCAFFOLDS.out.assemblies,
         ch_shortread_finished,
         HIC_SCAFFOLDING.out.evidence_agp,
-        HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id,
-        HARMONIZE_SCAFFOLDS.out.chimera_candidates,
-        HARMONIZE_SCAFFOLDS.out.ref_name_map,
         HARMONIZE_SCAFFOLDS.out.reference_id,
         HARMONIZE_SCAFFOLDS.out.quality,
         HIC_SCAFFOLDING.out.evidence_pairs,
         HIC_SCAFFOLDING.out.evidence_inputs,
         CONTIG_ASSEMBLY.out.native_graphs,
-        ch_telo_by_taxid, HIC_SCAFFOLDING.out.round1, HIC_SCAFFOLDING.out.round1_agp,
+        ch_telo_by_taxid,
         READ_PREPARATION.out.hifi, capabilities )
     ch_versions = ch_versions.mix(CHIMERA.out.versions)
 
@@ -493,7 +490,6 @@ workflow {
     ch_versions = ch_versions.mix(ASSEMBLY_FINISHING.out.versions)
     ch_teloclip_stats_for_report = ASSEMBLY_FINISHING.out.teloclip_stats
     ch_pre_finalize = ASSEMBLY_FINISHING.out.assemblies
-    ch_chimeric_joins = CHIMERA.out.called
 
     FINALIZE_ASSEMBLY(ch_pre_finalize)
     COLLECT_NAME_MAPS(FINALIZE_ASSEMBLY.out.name_map.map { meta, nm -> nm }.collect())
@@ -756,10 +752,7 @@ workflow {
     // =========================================================================
     // ---- chimera tables for the report ---------------------------------------------
     // Built inside CHIMERA, which owns the channels they come from.
-    ch_chimera_candidates_rpt = CHIMERA.out.candidates_for_rpt
-    ch_chimera_joins_rpt      = CHIMERA.out.joins_for_rpt
-    ch_chimera_evidence_rpt   = CHIMERA.out.evidence_for_rpt
-    ch_chimera_figures_rpt    = CHIMERA.out.figures_for_rpt
+    ch_misassembly_registry_rpt = CHIMERA.out.registry
 
     // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
     if (qc_on && post_on) {
@@ -786,10 +779,7 @@ workflow {
         ch_teloclip_stats_for_report,
         ch_pangenome_report_for_report,
         ch_name_map_for_report,
-        ch_chimera_candidates_rpt,
-        ch_chimera_joins_rpt,
-        ch_chimera_evidence_rpt,
-        ch_chimera_figures_rpt,
+        ch_misassembly_registry_rpt,
         ch_versions,
         ch_summary_report_script
     )

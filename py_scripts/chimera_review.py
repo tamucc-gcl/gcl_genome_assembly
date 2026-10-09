@@ -6,10 +6,12 @@ import json
 import shutil
 from pathlib import Path
 from chimera_markdown import render, decision_context, assess_transitions
+from chimera_decisions import advise
 
 FIELDS=['selected','id','assembly','coordinate_stage','assessment_sha256','scaffold','action','cut_bp','gap_start','gap_end','review_start','review_end','review_range','localization_explanation',
         'decision_source','evidence_packet_id','reviewer','reason','localization_status','evidence_summary','report_path','source_candidate_id','chromosome_context','evidence_for_cut','evidence_against_cut','review_priority','evidence_limits',
-        'detected_transition','assessment_status','transition_id','preferred_candidate','bridge_status','related_candidate','review_disposition','structural_context','local_confirmation','partial_confirmation','sister_context']
+        'detected_transition','assessment_status','transition_id','preferred_candidate','bridge_status','related_candidate','review_disposition','structural_context','local_confirmation','partial_confirmation','sister_context',
+        'suggested_action','recommendation','recommendation_reason']
 
 
 def write_table(path,rows):
@@ -46,6 +48,7 @@ def generate(assembly,calls,context,out,coordinate_audit=None,supplement=None,na
     rows=[]
     for number,(key,c) in enumerate(sorted(candidates.items(),key=location),1):
         m=measurements.get(key,{});gap=m.get('verified_gap') is True
+        m['detector_context']={k:c[k] for k in ('arm_pattern','left_arm_aligned_bp','right_arm_aligned_bp','left_arm_fraction','right_arm_fraction') if k in c and c[k]!='.'}
         interval=intervals.get(m.get('packet_interval_id'),{})
         lo=m.get('gap_start') if gap else c.get('transition_lo',interval.get('lo'))
         hi=m.get('gap_end') if gap else c.get('transition_hi',interval.get('hi'))
@@ -67,6 +70,7 @@ def generate(assembly,calls,context,out,coordinate_audit=None,supplement=None,na
         rows.append(row)
     assess_transitions(rows,measurements,provenance,candidates)
     for row in rows:
+        row.update(advise(row,measurements.get(row['source_candidate_id'],{}),provenance.get('sample',assembly.rsplit('_hap',1)[0]))[0])
         row['evidence_summary']=row['review_priority']+'; detected '+(row['detected_transition'] or row['chromosome_context'])+'; '+row['local_confirmation']
     if supplement:
         dest=out/'scaffold_evidence';dest.mkdir(exist_ok=True)

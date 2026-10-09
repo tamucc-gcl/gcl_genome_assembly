@@ -27,8 +27,12 @@ def augment_peer_labels(peer):
             if chrom and f[0] not in peer['chromosome_labels'] and int(f[11])>=20 and int(f[9])/max(1,int(f[10]))>=.9:
                 hits[f[0]].append((int(f[2]),int(f[3]),chrom))
     for scaffold,values in hits.items():
-        peer['chromosome_labels'][scaffold]=[dict(lo=lo,hi=hi,chrom=chrom) for lo,hi,chrom in regions(values,100000)]
-    peer['block_label_source']='Own reference PAF; nonoverlapping >=100 kb chromosome anchors, MAPQ >=20, identity >=90%'
+        # Require 100 kb of union evidence per chromosome, not one uninterrupted
+        # 100 kb interval. Ambiguity and unaligned gaps remain explicitly unlabelled.
+        pieces=regions(values,1);support=Counter()
+        for lo,hi,chrom in pieces:support[chrom]+=hi-lo
+        peer['chromosome_labels'][scaffold]=[dict(lo=lo,hi=hi,chrom=chrom) for lo,hi,chrom in pieces if support[chrom]>=100000]
+    peer['block_label_source']='Own reference PAF; >=100 kb union support per chromosome; ambiguous/unmapped bases unlabelled; MAPQ >=20, identity >=90%'
 
 def blocks(fields):
     cigar=next((x[5:] for x in fields[12:] if x.startswith('cg:Z:')),None)
@@ -52,7 +56,7 @@ def position(block,query):
     return block['t']+(query-block['lo'] if block['strand']=='+' else block['hi']-1-query)
 
 
-def tracks(hits,labels,mode="locus_unique"):
+def tracks(hits,labels,mode="locus_unique",min_mapq=30,minimum_target=5000000):
     segments=[b for f in hits for b in blocks(f)]
     events=defaultdict(list)
     for i,b in enumerate(segments):events[b['lo']].append((i,1));events[b['hi']].append((i,-1))
@@ -69,8 +73,8 @@ def tracks(hits,labels,mode="locus_unique"):
             if change==1:active.add(i)
             else:active.discard(i)
         hi=coordinates[index+1]
-        qualified=[segments[i] for i in active if segments[i]['mapq']>=30 and segments[i]['identity']>=.9 and
-                   segments[i]['length']>=5000000 and segments[i]['target'] in labels]
+        qualified=[segments[i] for i in active if segments[i]['mapq']>=min_mapq and segments[i]['identity']>=.9 and
+                   segments[i]['length']>=minimum_target and segments[i]['target'] in labels]
         chrom=None;status='unaligned_or_filtered'
         if qualified:
             best=max(qualified,key=lambda b:(b['mapq'],b['identity']))

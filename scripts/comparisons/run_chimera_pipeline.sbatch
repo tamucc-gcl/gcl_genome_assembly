@@ -40,10 +40,10 @@ trap finish EXIT
 bash "$repo/run_assembly_checkpoint.sbatch" "$sample_sheet" "$hic_readsets" assembly \
     --outdir "$out/results" --publish_dir_mode copy \
     --chimera_detect true --chimera_break false \
-    --chimera_sequence_context true --chimera_evidence true --chimera_hifi_context true \
+    --chimera_plots true --chimera_hifi_context true \
     -with-trace "$out/trace.tsv" -with-report "$out/execution.html" \
     "${@:4}"
 
-test -s "$out/results/assembly/chimeras/review/README.md"
-test -s "$out/results/assembly/chimeras/review/assembly_registry.tsv"
-test -s "$out/results/assembly/chimeras/review/chimera_review.tsv"
+test -s "$out/results/assembly/chimeras/README.md"
+test -s "$out/results/assembly/chimeras/assembly_registry.tsv"
+test -s "$out/results/assembly/chimeras/review.tsv"

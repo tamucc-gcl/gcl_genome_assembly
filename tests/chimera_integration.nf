@@ -8,7 +8,6 @@ params.chimera_break = false
 params.chimera_min_piece_bp = 4
 
 // Set defaults before including modules, which capture parameter values.
-include { CHIMERA_REVIEW } from '../modules/chimera_review.nf'
 include { BREAK_CHIMERAS } from '../modules/break_chimeras.nf'
 
 process VERIFY_RESULT {
@@ -54,8 +53,6 @@ workflow {
     def root = file(params.fixture)
     def scripts = file("${projectDir}/../py_scripts")
     def meta = [id:'synthetic', sample:'synthetic', taxid:'synthetic']
-    CHIMERA_REVIEW(Channel.of(tuple(meta, file("${root}/calls.tsv"), file("${root}/context"))),
-                      Channel.value([file("${scripts}/chimera_review.py"), file("${scripts}/chimera_markdown.py")]))
     selected = Channel.of(tuple(meta, file("${root}/manual-actions.tsv")))
     BREAK_CHIMERAS(selected.map { m, actions -> tuple(m, file("${root}/assessment.fa"), file("${root}/names.tsv"), actions) },
                   Channel.value([file("${scripts}/break_chimeras.py"), file("${scripts}/chimera_actions.py")]))

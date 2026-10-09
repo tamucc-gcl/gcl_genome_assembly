@@ -1,309 +1,107 @@
-include { RECOVER_OLDER_JOINS } from '../modules/recover_older_joins.nf'
-include { CHIMERA_COORDINATE_SUMMARY } from '../modules/chimera_coordinate_summary.nf'
-/* Chimera assessment and optional cuts on the last-scaffold FASTA, before finishing.
- * The round1 parameter carries the LAST-round AGP; no two-round chain is used.
- * Pairs were mapped to that AGP's input. Older joins across corrections are unresolved.
- * Name assignments are applied only after finishing by FINALIZE_ASSEMBLY.
- */
-
-include { BREAK_CHIMERAS }   from '../modules/break_chimeras.nf'
-include { CHIMERA_JOINS }    from '../modules/chimera_joins.nf'
-include { CHIMERA_EVIDENCE } from '../modules/chimera_evidence.nf'
-include { CHIMERA_SEQUENCE_CONTEXT } from '../modules/chimera_sequence_context.nf'
-include { CHIMERA_REVIEW; CHIMERA_REVIEW_INDEX } from '../modules/chimera_review.nf'
+/* Cohort misassembly review before finishing. One source-bound manual cut interface. */
+include { MISASSEMBLY_CATALOG; MISASSEMBLY_ALIGN; MISASSEMBLY_DISCOVER; MISASSEMBLY_MAP_HIFI; MISASSEMBLY_ASSESS; MISASSEMBLY_REVIEW } from '../modules/misassembly.nf'
+include { BREAK_CHIMERAS } from '../modules/break_chimeras.nf'
 include { HARMONIZE_SPECIES as CHIMERA_REASSIGN_SPECIES } from '../modules/harmonize_species.nf'
 include { harmonizerArgs } from './harmonize_scaffolds.nf'
 
 workflow CHIMERA {
-
     take:
-    ch_harmonized                  //  HARMONIZE_SCAFFOLDS.out.assemblies    tuple(meta, fa, nm)
-    ch_shortread_finished          //  short-read-only assemblies            tuple(meta, fa)
-    ch_round1_agp                  // LAST-round AGP, paired with its own input mappings
-    ch_ref_pafs_by_id              //  HARMONIZE_SCAFFOLDS.out.ref_pafs_by_id
-    ch_chimera_candidates          //  HARMONIZE_SCAFFOLDS.out.chimera_candidates
-    ch_ref_name_map                //  HARMONIZE_SCAFFOLDS.out.ref_name_map
-    ch_reference_id                // same reference before and after correction
-    ch_peer_quality                // measured harmonization voter/passenger status
-    ch_contig_pairs_in             // pairs mapped to the LAST-round scaffolding input
-    ch_hic_evidence_inputs         // source FASTA and read-set/library identity
-    ch_native_graphs               // current native primary graphs, keyed by sample
-    ch_telo_by_taxid               //  per-taxid telomere motif              tuple(taxid, motif)
-
-    ch_original_scaffolds
-    ch_original_agp
+    ch_harmonized
+    ch_shortread_finished
+    ch_round1_agp
+    ch_reference_id
+    ch_peer_quality
+    ch_contig_pairs_in
+    ch_hic_evidence_inputs
+    ch_native_graphs
+    ch_telo_by_taxid
     ch_hifi_reads
     capabilities
 
     main:
+    def absent = file("${projectDir}/assets/NO_PAIRS",checkIfExists:true)
+    def noPaf = file("${projectDir}/assets/NO_PAF",checkIfExists:true)
+    def detect_on = capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_detect != false
+    if (params.chimera_break?.toString() == 'auto') error 'Automatic cutting is deferred; supply a reviewed review.tsv.'
+    def retainedBams = params.chimera_hifi_bam_manifest ? new groovy.json.JsonSlurper().parseText(file(params.chimera_hifi_bam_manifest,checkIfExists:true).text) : [:]
+    def helpers = { names -> Channel.value(names.collect { file("${projectDir}/py_scripts/${it}",checkIfExists:true) }) }
+    def core = ['misassembly_core.py','chimera_tracks.py','chimera_controls.py','chimera_intervals.py']
     ch_versions = Channel.empty()
-    def retainedBams = params.chimera_hifi_bam_manifest ?
-        new groovy.json.JsonSlurper().parseText(file(params.chimera_hifi_bam_manifest, checkIfExists:true).text) : [:]
-    def detect_on = capabilities.scaffold && capabilities.harmonize &&
-                    params.harmonize_scaffold_names && params.chimera_detect != false
-    def evidence_on = detect_on && params.chimera_evidence != false
-    if (params.chimera_break?.toString() == 'auto')
-        error 'Automated chimera cutting is deferred. Review the evidence and supply an edited chimera_review.tsv.'
-    // The broken assemblies on their own, separate from pre_finalize (which mixes them with
-    // the untouched and short-read-only ones). main.nf stages THIS as the 'chimera_broken'
-    // QC checkpoint, so contiguity before and after a cut is comparable in the QC table.
-    ch_broken   = Channel.empty()
+    ch_broken = Channel.empty()
+    ch_coordinate_report = Channel.value(noPaf)
+    ch_registry_report = Channel.value(noPaf)
+    ch_decision_report = Channel.value(noPaf)
+    ch_evidence_report = Channel.value(noPaf)
+    ch_review_input = Channel.empty()
+    ch_action_review = Channel.value(absent)
+    ch_cut_verifications = Channel.value([absent])
+    ch_pre_finalize = ch_harmonized.mix(ch_shortread_finished.map { m,fa -> tuple(m,fa,file("${projectDir}/assets/NO_HARMONIZE",checkIfExists:true)) })
 
-    // OFF by default. Run 1 writes <species>.chimera_candidates.tsv and cuts nothing; you
-    // review it and supply selected joins. Votes alone never authorize automatic cuts.
-    //
-    // When off the process is not instantiated and the original channel flows straight
-    // through -- no pass-through task and no cache churn.
-    // Assigned BEFORE the branch, then overridden inside it. A variable assigned only
-    // inside if/else blocks in a workflow body is not visible after them -- "No such
-    // variable: ch_pre_finalize". The same assign-then-override pattern is used for
-    // ch_hap_priv and ch_hap_cov in workflows/pangenome.nf.
-    //
-    // The FULL statement: the .mix() carries the short-read-only branch, which has no
-    // harmonization name map. An earlier anchor matched only the first line of this and
-    // inserted the chimera block between the two, orphaning the .mix() -- which Groovy
-    // accepts as a no-op expression, so nothing failed until an output of the never-invoked
-    // BREAK_CHIMERAS was read further down.
-    ch_pre_finalize = ch_harmonized
-        .mix( ch_shortread_finished.map { meta, fa -> tuple(meta, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) } )
-
-    // ---- which joins are chimeric, and exactly where ---------------------------------
-    // Detection runs whenever harmonization did, independently of chimera_break: the
-    // candidates and the called joins are the evidence a break is justified by, and they are
-    // worth having even on a run that cuts nothing.
-    ch_context_cohort = Channel.empty()
-    ch_review_supplement = Channel.value([files:[]])
-    ch_chimeric_joins = Channel.empty()
-    ch_evidence_calls = Channel.empty()
-    ch_older_summaries = Channel.empty()
-    if( detect_on ) {
-        ch_agp_script = Channel.fromPath("${projectDir}/py_scripts/agp_joins.py",
-                                        checkIfExists: true)
-        ch_cj_script  = Channel.fromPath("${projectDir}/py_scripts/chimera_joins.py",
-                                        checkIfExists: true)
-
-        // Optional PAFs are a lookup value, not an outer join with unknown empty arity.
-        ch_paf_lookup = ch_ref_pafs_by_id.toList()
-            .map { records -> records.collectEntries { id, pf -> [(id.toString()): pf] } }
-        CHIMERA_JOINS(
-            ch_round1_agp.map { meta, agp -> tuple(meta.taxid.toString(), meta.id, agp) }
-                .combine(ch_paf_lookup)
-                .map { taxid, id, agp, pafs ->
-                    tuple(taxid, id, agp,
-                        file("${projectDir}/assets/NO_ROUND2", checkIfExists: true),
-                        pafs[id.toString()] ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
-                .combine(ch_harmonized.map { meta, fa, nm -> tuple(meta.taxid.toString(), meta.id, fa) }, by: [0, 1])
-                .combine(ch_chimera_candidates, by: 0)
-                .combine(ch_ref_name_map, by: 0)
-                .map { taxid, id, r1, r2, paf, fa, cand, rnm ->
-                    tuple(taxid, id, r1, r2, paf, cand, rnm, fa) },
-            ch_agp_script.first(),
-            ch_cj_script.first(),
-            file("${projectDir}/py_scripts/chimera_coordinate_guard.py", checkIfExists: true),
-            file("${projectDir}/py_scripts/chimera_intervals.py", checkIfExists: true),
-            file("${projectDir}/py_scripts/chimera_schema.py", checkIfExists: true) )
-        ch_versions = ch_versions.mix(CHIMERA_JOINS.out.versions)
-        ch_chimeric_joins = CHIMERA_JOINS.out.called
-        ch_evidence_calls = ch_chimeric_joins
-        if (params.run_scaffold_round2 && params.chimera_recover_older) {
-            ch_original = ch_original_scaffolds.join(ch_original_agp)
-                .map { meta, fa, agp -> tuple(meta.id.toString(), fa, agp) }
-            ch_recovery = ch_chimeric_joins
-                .map { taxid, id, called -> tuple(id.toString(), taxid, called) }
-                .join(ch_original)
-                .join(ch_harmonized.map { meta, fa, nm -> tuple(meta.id.toString(), fa) })
-                .combine(ch_paf_lookup)
-                .map { id, taxid, called, oldfa, oldagp, current, pafs ->
-                    tuple(taxid, id, oldfa, oldagp, current, called,
-                          pafs[id.toString()] ?: file("${projectDir}/assets/NO_PAF", checkIfExists: true)) }
-                .combine(ch_chimera_candidates, by: 0)
-                .combine(ch_ref_name_map, by: 0)
-            RECOVER_OLDER_JOINS(ch_recovery,
-                file("${projectDir}/py_scripts/recover_older_joins.py", checkIfExists: true),
-                file("${projectDir}/py_scripts/chimera_schema.py", checkIfExists: true))
-            ch_chimeric_joins = RECOVER_OLDER_JOINS.out.called
-            ch_evidence_calls = ch_chimeric_joins
-            ch_older_summaries = RECOVER_OLDER_JOINS.out.summary.map { taxid, id, report ->
-                new groovy.json.JsonSlurper().parseText(report.text)
+    if (detect_on) {
+        ch_quality = ch_peer_quality.toList().map { files -> [quality:files.collectMany { f ->
+            def lines=f.readLines().findAll { it && !it.startsWith('#') }; def header=lines[0].split('\t') as List
+            lines.drop(1).collect { line -> def values=line.split('\t',-1)
+                [(values[header.indexOf('id')]):[eligible:values[header.indexOf('role')]=='voter' && !values[header.indexOf('role_reasons')].toLowerCase().contains('forced'),reason:values[header.indexOf('role_reasons')]]] }
+        }.collectEntries()] }
+        ch_cohort = ch_harmonized.toList().map { records -> [records:records.sort { it[0].id }] }
+            .combine(ch_quality)
+            .map { cohort,quality -> [records:cohort.records.collect { m,fa,nm ->
+                [meta:m,fasta:fa,name_map:nm,
+                 catalog:[id:m.id.toString(),sample:m.sample.toString(),taxid:m.taxid.toString(),eligible:quality.quality[m.id.toString()]?.eligible == true,
+                          role_reason:quality.quality[m.id.toString()]?.reason ?: 'quality unavailable']]
+            }] }
+        ch_pair_inputs = ch_cohort.flatMap { c ->
+            c.records.groupBy { it.meta.taxid.toString() }.collectMany { taxid,records ->
+                def pairs=[]
+                for (int i=0;i<records.size();i++) for (int j=i+1;j<records.size();j++)
+                    pairs << tuple([a:records[i].meta.id.toString(),b:records[j].meta.id.toString(),taxid:taxid,key:"${taxid}_pair_${i}_${j}"],records[i].fasta,records[j].fasta)
+                pairs
             }
-            ch_versions = ch_versions.mix(RECOVER_OLDER_JOINS.out.versions)
         }
-
-        // Direct local peer comparison is diagnostic only, independent of cutting.
-        if (params.chimera_sequence_context) {
-            ch_context_quality = ch_peer_quality.toList().map { files ->
-                log.info "[CHIMERA INPUT] Comparison quality ready: ${files.size()} tables"
-                files.collectMany { quality ->
-                    def lines = quality.readLines().findAll { it && !it.startsWith('#') }
-                    def header = lines[0].split('\t') as List
-                    lines.drop(1).collect { line ->
-                        def fields = line.split('\t', -1)
-                        [(fields[header.indexOf('id')]): [eligible:fields[header.indexOf('role')] == 'voter' &&
-                            !fields[header.indexOf('role_reasons')].toLowerCase().contains('forced'),
-                            role:fields[header.indexOf('role')], reason:fields[header.indexOf('role_reasons')]]] }
-                }.collectEntries() }
-            ch_context_cohort = ch_harmonized.toList().map { records ->
-                log.info "[CHIMERA INPUT] Assessment cohort ready: ${records.collect { it[0].id }}"
-                [records:records] }
-                .combine(ch_context_quality)
-                .combine(ch_paf_lookup)
-                .combine(ch_ref_name_map.map { taxid, nm -> tuple(taxid.toString(), nm) }.toList().map { records -> [maps:records] })
-                .map { cohort, quality, pafs, referenceMaps -> [records: cohort.records.collect { m, fa, nm ->
-                    def labels = [:]
-                    def referenceLabels = [:]
-                    def refMap = referenceMaps.maps.find { it[0] == m.taxid.toString() }?.getAt(1)
-                    if (refMap) {
-                        def lines = refMap.readLines().findAll { it && !it.startsWith('#') }
-                        def header = lines[0].split('\t') as List
-                        lines.drop(1).each { line ->
-                            def fields = line.split('\t', -1)
-                            def name = fields[header.indexOf('new_name')]
-                            if (name.startsWith('chr') && !name.contains('+'))
-                                referenceLabels[fields[header.indexOf('old_name')]] = name.split('_')[0]
-                        }
-                    }
-                    if (nm.name != 'NO_HARMONIZE') {
-                        def lines = nm.readLines().findAll { it && !it.startsWith('#') }
-                        def header = lines[0].split('\t') as List
-                        lines.drop(1).each { line ->
-                            def fields = line.split('\t', -1)
-                            def name = fields[header.indexOf('new_name')]
-                            if (name.startsWith('chr') && !name.contains('+'))
-                                labels[fields[header.indexOf('old_name')]] = name.split('_')[0]
-                        }
-                    }
-                    tuple(m + [auto_evidence: quality[m.id.toString()]?.eligible == true, chromosome_labels:labels,
-                        reference_labels:referenceLabels, comparison_scope:(quality[m.id.toString()]?.eligible == true ? 'independent eligible' : 'context only')+': '+(quality[m.id.toString()]?.reason ?: 'quality assessment unavailable')],
-                        fa, nm, pafs[m.id.toString()] ?: file("${projectDir}/assets/NO_PAF", checkIfExists:true)) }] }
-            ch_context_reads = ch_hifi_reads.toList()
-                .map { records ->
-                    log.info "[CHIMERA INPUT] HiFi reads ready: ${records.collect { it[0].sample }}"
-                    records.collectEntries { m, fq -> [(m.sample.toString()): fq] } }
-            ch_context_graphs = ch_native_graphs.toList().map { records ->
-                log.info "[CHIMERA INPUT] Native graphs ready: ${records.collect { it[0].sample }}"
-                records.collectEntries { m, paths -> [(m.sample.toString()): paths instanceof List ? paths : [paths]] } }
-            ch_context_assays = ch_hic_evidence_inputs
-                .map { m, fa, libraries -> tuple(m.id.toString(), fa, libraries) }
-                .join(ch_round1_agp.map { m, agp -> tuple(m.id.toString(), agp) })
-                .join(ch_contig_pairs_in.map { m, stage, pairs -> tuple(m.id.toString(), pairs) })
-                .toList()
-                .map { records ->
-                    log.info "[CHIMERA INPUT] Hi-C assay collection closed: ${records.collect { it[0] }}"
-                    records.collectEntries { id, source, libraries, agp, pairs ->
-                        [(id): [source:source, libraries:libraries, agp:agp, pairs:pairs]] } }
-            ch_context_in = ch_chimeric_joins
-                .map { taxid, id, calls ->
-                    log.info "[CHIMERA INPUT] Candidate calls received: ${id}"
-                    tuple(id.toString(), calls) }
-                .join(ch_harmonized.map { m, fa, nm -> tuple(m.id.toString(), m, fa) }, remainder: true)
-                .filter { record -> record[1] != null }
-                .map { id, calls, m, fa ->
-                    if (m == null || fa == null) error "Chimera candidate calls have no matching assessed assembly: ${id}"
-                    tuple(id, calls, m, fa) }
-                .combine(ch_context_cohort)
-                .combine(ch_context_reads)
-                .combine(ch_context_assays)
-                .combine(ch_context_graphs)
-                .map { id, calls, m, fa, cohort, reads, assays, graphs ->
-                    def peers = cohort.records.findAll { pm, pf, pn, rp -> pm.taxid.toString() == m.taxid.toString() && pm.id != m.id }
-                    def assay = assays[id] ?: [:]
-                    def absent = file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)
-                    def retained = retainedBams[id]
-                    def suffix = m.id.toString().startsWith(m.sample.toString()+'_') ? m.id.toString().substring(m.sample.toString().length()+1) : 'primary'
-                    def nativeGraph = graphs[m.sample.toString()]?.find { it.name == m.sample.toString()+'.'+suffix+'.p_ctg.gfa' }
-                    tuple(m.taxid.toString(), m, fa, calls,
-                          peers.collect { it[0] }, peers ? peers.collect { it[1] } : [file("${projectDir}/assets/NO_PAF", checkIfExists: true)],
-                          peers ? peers.collect { it[3] } : [file("${projectDir}/assets/NO_PAF", checkIfExists:true)],
-                          !retained && params.chimera_hifi_context && reads[m.sample.toString()] ? reads[m.sample.toString()] : absent,
-                          assay.agp ?: absent, assay.pairs ?: absent, assay.source ?: absent, assay.libraries ?: absent,
-                          retained ? [file(retained.bam,checkIfExists:true),file(retained.index,checkIfExists:true)] : [absent],
-                          retained ? file(retained.provenance,checkIfExists:true) : absent, nativeGraph ?: absent)
-                }
-                .combine(ch_telo_by_taxid.map { taxid, motif ->
-                    log.info "[CHIMERA INPUT] Motif received for taxid ${taxid}"
-                    tuple(taxid.toString(), motif) }, by: 0)
-                .map { taxid, m, fa, calls, pm, pf, peerRefs, reads, agp, pairs, source, libraries, bams, provenance, graph, motif ->
-                    log.info "[CHIMERA INPUT] Sequence-context task ready: ${m.id}"
-                    tuple(m, fa, calls, pm, pf, peerRefs, reads, motif ?: 'CCCTAA', agp, pairs, source, libraries, bams, provenance, graph) }
-                .ifEmpty { error 'Chimera sequence context received no assessment inputs: inspect [CHIMERA INPUT] readiness messages and cohort/taxid joins' }
-            CHIMERA_SEQUENCE_CONTEXT(ch_context_in,
-                Channel.value(['chimera_sequence_context.py', 'chimera_controls.py', 'chimera_graph_evidence.py', 'chimera_blocks.py', 'chimera_tracks.py', 'chimera_intervals.py'].collect {
-                    file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
-            ch_versions = ch_versions.mix(CHIMERA_SEQUENCE_CONTEXT.out.versions)
-
-        }
-
-        ch_review_supplement = Channel.value([files:[]])
-        // ---- supplementary evidence for each called join ----------------------------
-        // Telomere and N-gap evidence, plus a Hi-C cross-contact profile built by
-        // TRANSLATING last-round input pairs into current scaffold coordinates -- no
-        // re-alignment, and no dependence on a contact map that does not exist yet at this
-        // point in the DAG.
-        //
-        // Runs on a NON-BREAKING run by design: the evidence is what justifies a cut, so it
-        // must exist before one is made. After a break it would look for an interstitial
-        // array on a scaffold that no longer exists.
-        if( params.chimera_evidence != false ) {
-            ch_ce_hic_script = Channel.fromPath("${projectDir}/py_scripts/chimera_hic_pairs.py",
-                                               checkIfExists: true)
-            ch_ce_script     = Channel.fromPath("${projectDir}/py_scripts/chimera_evidence.py",
-                                               checkIfExists: true)
-
-            // Deduplicated pairs aligned to the last scaffolding input.
-            ch_contig_pairs = ch_contig_pairs_in
-                .map    { meta, stage, pairs_gz -> tuple(meta.id, pairs_gz) }
-
-            CHIMERA_EVIDENCE(
-                ch_evidence_calls
-                    .map { taxid, id, called -> tuple(id.toString(), taxid, called) }
-                    .join( ch_harmonized
-                               .map { meta, fa, nm -> tuple(meta.id.toString(), fa) } )
-                    .join( ch_round1_agp.map { meta, agp -> tuple(meta.id.toString(), agp) } )
-                    .combine(ch_contig_pairs.toList()
-                        .map { records -> records.collectEntries { id, pf -> [(id.toString()): pf] } })
-                    .map { id, taxid, called, fa, agp, pairs ->
-                        tuple(taxid, id, fa, called, agp,
-                              file("${projectDir}/assets/NO_ROUND2", checkIfExists: true),
-                              pairs[id.toString()] ?: file("${projectDir}/assets/NO_PAIRS", checkIfExists: true)) }
-                    // the motif is per species, so it attaches by key
-                    .combine( ch_telo_by_taxid, by: 0 )
-                    .map { taxid, id, fa, called, r1, r2, pairs, motif ->
-                        tuple(taxid, id, fa, called, r1, r2, pairs, motif) },
-                ch_ce_hic_script.first(),
-                ch_ce_script.first() )
-            ch_versions = ch_versions.mix(CHIMERA_EVIDENCE.out.versions)
-            ch_review_supplement = CHIMERA_EVIDENCE.out.figures.mix(CHIMERA_EVIDENCE.out.evidence)
-                .map { taxid, id, files -> files instanceof List ? files : [files] }
-                .flatten().toList().map { files -> [files:files] }
+        MISASSEMBLY_ALIGN(ch_pair_inputs)
+        ch_alignments = MISASSEMBLY_ALIGN.out.alignment.toList().map { records -> [records:records.sort { it[0].key }] }
+        MISASSEMBLY_CATALOG(ch_cohort.combine(ch_alignments).map { cohort,alignments ->
+            tuple(cohort.records.collect { it.catalog },cohort.records.collect { it.name_map },alignments.records.collect { it[0] },alignments.records ? alignments.records.collect { it[1] } : [noPaf]) },
+            helpers(core+['misassembly_discover.py']))
+        ch_discovery_input = ch_harmonized.combine(ch_alignments).combine(MISASSEMBLY_CATALOG.out.catalog.first())
+            .map { m,fa,nm,alignments,catalog ->
+                def own=alignments.records.findAll { it[0].a==m.id.toString() || it[0].b==m.id.toString() }
+                tuple(m,fa,catalog,own.collect { it[0] },own ? own.collect { it[1] } : [noPaf])
+            }
+        MISASSEMBLY_DISCOVER(ch_discovery_input,helpers(core+['misassembly_discover.py']))
+        ch_reads = ch_hifi_reads.toList().map { records -> [reads:records.collectEntries { m,fq -> [(m.sample.toString()):fq] }] }
+        ch_mapping_input = MISASSEMBLY_DISCOVER.out.discovery.join(ch_harmonized).combine(ch_reads)
+            .map { m,discovery,fa,nm,reads ->
+                def retained=params.chimera_hifi_context ? retainedBams[m.id.toString()] : null
+                tuple(m,fa,discovery.resolve('discovery.json'),!retained && params.chimera_hifi_context ? reads.reads[m.sample.toString()] ?: absent : absent,
+                    retained ? [file(retained.bam,checkIfExists:true),file(retained.index,checkIfExists:true)] : [absent],retained ? file(retained.provenance,checkIfExists:true) : absent)
+            }
+        MISASSEMBLY_MAP_HIFI(ch_mapping_input,helpers(core+['misassembly_map.py']))
+        ch_assays = ch_hic_evidence_inputs.map { m,fa,libraries -> tuple(m.id.toString(),fa,libraries) }
+            .join(ch_round1_agp.map { m,agp -> tuple(m.id.toString(),agp) })
+            .join(ch_contig_pairs_in.map { m,stage,pairs -> tuple(m.id.toString(),pairs) }).toList()
+            .map { records -> [assays:records.collectEntries { id,source,libraries,agp,pairs -> [(id):[source:source,libraries:libraries,agp:agp,pairs:pairs]] }] }
+        ch_agps = ch_round1_agp.toList().map { records -> [agps:records.collectEntries { m,agp -> [(m.id.toString()):agp] }] }
+        ch_graphs = ch_native_graphs.toList().map { records -> [graphs:records.collectEntries { m,graphs -> [(m.sample.toString()):graphs instanceof List ? graphs : [graphs]] }] }
+        ch_motifs = ch_telo_by_taxid.toList().map { records -> [motifs:records.collectEntries { taxid,motif -> [(taxid.toString()):motif] }] }
+        ch_assessment_input = MISASSEMBLY_DISCOVER.out.discovery.join(MISASSEMBLY_MAP_HIFI.out.mapping).join(ch_harmonized)
+            .combine(ch_assays).combine(ch_agps).combine(ch_graphs).combine(ch_motifs)
+            .map { m,discovery,mapping,fa,nm,assays,agps,graphs,motifs ->
+                def assay=assays.assays[m.id.toString()] ?: [:]
+                def suffix=m.id.toString().startsWith(m.sample.toString()+'_') ? m.id.toString().substring(m.sample.toString().length()+1) : 'primary'
+                def graph=graphs.graphs[m.sample.toString()]?.find { it.name==m.sample.toString()+'.'+suffix+'.p_ctg.gfa' }
+                tuple(m,fa,discovery.resolve('discovery.json'),mapping,agps.agps[m.id.toString()] ?: absent,
+                      assay.pairs ?: absent,assay.source ?: absent,assay.libraries ?: absent,graph ?: absent,motifs.motifs[m.taxid.toString()] ?: 'CCCTAA')
+            }
+        MISASSEMBLY_ASSESS(ch_assessment_input,helpers(core+['misassembly_assess.py','chimera_graph_evidence.py']))
+        ch_review_input = MISASSEMBLY_ASSESS.out.evidence.toList().map { packets -> [packets:packets] }.combine(ch_cohort).map { bundle,cohort ->
+            def packets=bundle.packets
+            def expected=cohort.records.collect { it.meta.id.toString() }.sort();def observed=packets.collect { it[0].id.toString() }.sort()
+            if(expected!=observed) error "Misassembly evidence incomplete: expected ${expected}; received ${observed}"
+            packets.sort { it[0].id }.collect { it[1] }
         }
     }
-
-        if (params.chimera_sequence_context && detect_on) {
-            CHIMERA_REVIEW(
-                ch_chimeric_joins.map { taxid, id, calls -> tuple(id.toString(), calls) }
-                    .join(CHIMERA_SEQUENCE_CONTEXT.out.context.map { m, context -> tuple(m.id.toString(), m, context) })
-                    .join(CHIMERA_JOINS.out.coordinate_audit.map { taxid, id, audit -> tuple(id.toString(), audit) })
-                    .join(ch_harmonized.map { m, fa, nm -> tuple(m.id.toString(), nm) })
-                    .combine(ch_review_supplement)
-                    .map { id, calls, m, context, audit, nm, supplement ->
-                        def files = supplement.files.findAll { it.name.startsWith(id+'.') }
-                        tuple(m, calls, context, audit, nm, files ?: [file("${projectDir}/assets/NO_PAIRS",checkIfExists:true)]) },
-                Channel.value(['chimera_review.py', 'chimera_markdown.py', 'chimera_report.py'].collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
-            ch_complete_review_packets = CHIMERA_REVIEW.out.packets.toList()
-                .map { packets -> [packets: packets] }
-                .combine(ch_context_cohort)
-                .map { bundle, cohort ->
-                    def packets = bundle.packets
-                    def expected = cohort.records.collect { it[0].id.toString() }.sort()
-                    def actual = packets.collect { it[0].id.toString() }.sort()
-                    if (expected != actual)
-                        error "Incomplete chimera review: expected ${expected}; produced ${actual}. Inspect [CHIMERA INPUT] readiness messages."
-                    packets.collect { it[1] } }
-            CHIMERA_REVIEW_INDEX(ch_complete_review_packets,
-                Channel.value(['chimera_review_index.py', 'chimera_report.py'].collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }))
-        }
-
-    if( capabilities.scaffold && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false' ) {
+    if( capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false' ) {
         ch_break_script = Channel.value(['break_chimeras.py', 'chimera_actions.py']
             .collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) })
         // Review file is a staged input: changing it invalidates cutting/downstream tasks only.
@@ -332,7 +130,9 @@ workflow CHIMERA {
             cut: nm.name != 'NO_HARMONIZE' && selected
             passthrough: true
         }.set { ch_break_routes }
-        BREAK_CHIMERAS(ch_break_routes.cut, ch_break_script.first())
+        BREAK_CHIMERAS(ch_break_routes.cut, ch_break_script)
+        ch_action_review = ch_review_file
+        ch_cut_verifications = BREAK_CHIMERAS.out.verification.toList().map { records -> records ? records.collect { it[1] } : [absent] }
         ch_versions = ch_versions.mix(BREAK_CHIMERAS.out.versions)
         ch_broken = BREAK_CHIMERAS.out.assemblies.map { m,fa,nm -> tuple(m.id.toString(),m,fa,nm) }
             .join(BREAK_CHIMERAS.out.verification.map { m,verification -> tuple(m.id.toString(),verification) })
@@ -370,64 +170,22 @@ workflow CHIMERA {
             .mix(ch_shortread_finished.map { m, fa -> tuple(m, fa, file("${projectDir}/assets/NO_HARMONIZE", checkIfExists: true)) })
     }
 
-    ch_name_map_files = ch_harmonized
-        .map { meta, fa, nm -> nm }
-
-    // ---- chimera tables for the report ---------------------------------------------
-    // Defaulted to sentinels BEFORE any branch: assigned only inside one, they would not be
-    // visible at the REPORTING call, which is the "No such variable" failure this workflow
-    // body has hit repeatedly.
-    ch_chimera_candidates_rpt = Channel.value(file('NO_CHIMERA_CANDIDATES'))
-    ch_chimera_joins_rpt      = Channel.value(file('NO_CHIMERA_JOINS'))
-    ch_chimera_evidence_rpt   = Channel.value(file('NO_CHIMERA_EVIDENCE'))
-    ch_chimera_figures_rpt    = Channel.value(file('NO_CHIMERA_FIGURES'))
 
     if (detect_on) {
-        ch_chimera_candidates_rpt = ch_chimera_candidates
-            .map { taxid, f -> f }
-            .first()
-            .ifEmpty(file('NO_CHIMERA_CANDIDATES'))
-        // one table per assembly -> one table for the report. keepHeader because every file
-        // carries the same header row.
-        ch_chimera_joins_rpt = ch_chimeric_joins
-            .map { taxid, id, f -> f }
-            .collectFile(name: 'all_chimeric_joins.tsv', keepHeader: true, skip: 1)
-            .ifEmpty(file('NO_CHIMERA_JOINS'))
+        MISASSEMBLY_REVIEW(ch_review_input,helpers(core+['misassembly_report.py']),ch_action_review,ch_cut_verifications)
+        ch_coordinate_report = MISASSEMBLY_REVIEW.out.coordinates
+        ch_registry_report = MISASSEMBLY_REVIEW.out.registry
+        ch_decision_report = MISASSEMBLY_REVIEW.out.decisions
+        ch_evidence_report = MISASSEMBLY_REVIEW.out.report
+        ch_versions = ch_versions.mix(MISASSEMBLY_REVIEW.out.versions)
     }
-    if (evidence_on) {
-        // each evidence file is ONE cut in metric/value long form, so they go as a list and
-        // the R side widens and stacks them
-        ch_chimera_evidence_rpt = CHIMERA_EVIDENCE.out.evidence
-            .map { taxid, id, files -> files }
-            .flatten()
-            .collect()
-            .ifEmpty([file('NO_CHIMERA_EVIDENCE')])
-        // the figures travel as their own channel: the R side cannot derive them from the
-        // evidence paths, because those stage as bare filenames with no sibling .png present
-        ch_chimera_figures_rpt = CHIMERA_EVIDENCE.out.figures
-            .map { taxid, id, files -> files }
-            .flatten()
-            .collect()
-            .ifEmpty([file('NO_CHIMERA_FIGURES')])
-    }
-
-
-    CHIMERA_COORDINATE_SUMMARY(
-        ch_harmonized.map { meta, fa, nm ->
-            [id: meta.id, hic: meta.hic, harmonized: nm.name != 'NO_HARMONIZE']
-        }.mix(ch_shortread_finished.map { meta, fa ->
-            [id: meta.id, hic: meta.hic, harmonized: false]
-        }).toList(),
-        ch_chimeric_joins.map { taxid, id, f -> id.toString() }.toList(), ch_older_summaries.toList())
 
     emit:
-    coordinate_report = CHIMERA_COORDINATE_SUMMARY.out.report
-    pre_finalize        = ch_pre_finalize          // tuple(meta, fasta, name_map)
-    broken              = ch_broken                // ONLY the cut assemblies, for QC_PHASE
-    called              = ch_chimeric_joins        // tuple(taxid, id, chimeric_joins.tsv)
-    candidates_for_rpt  = ch_chimera_candidates_rpt
-    joins_for_rpt       = ch_chimera_joins_rpt
-    evidence_for_rpt    = ch_chimera_evidence_rpt
-    figures_for_rpt     = ch_chimera_figures_rpt
-    versions            = ch_versions
+    coordinate_report = ch_coordinate_report
+    pre_finalize = ch_pre_finalize
+    broken = ch_broken
+    registry = ch_registry_report
+    decisions = ch_decision_report
+    report = ch_evidence_report
+    versions = ch_versions
 }

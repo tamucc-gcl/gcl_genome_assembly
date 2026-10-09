@@ -53,18 +53,15 @@ parser$add_argument("--expected_chrom_count", default = 0, type = "double", help
 parser$add_argument("--busco_fallback", default = "eukaryota_odb10", help = "Configured BUSCO fallback lineage (params.busco_lineage), for provenance flagging")
 # Chimeric scaffold detection. All optional, NO_* sentinels per this file's convention, so
 # the report builds unchanged on a run with chimera_detect off.
-parser$add_argument("--chimera_candidates", default = "NO_CHIMERA_CANDIDATES", help = "<taxid>.chimera_candidates.tsv: composite scaffolds and the cross-haplotype vote (or NO_CHIMERA_CANDIDATES)")
-parser$add_argument("--chimera_joins",      default = "NO_CHIMERA_JOINS",      help = "Collected *.chimeric_joins.tsv: which AGP joins separate two chromosomes (or NO_CHIMERA_JOINS)")
-parser$add_argument("--chimera_evidence",   default = "NO_CHIMERA_EVIDENCE",   help = "Collected *.chimera_evidence.tsv: per-cut Hi-C, telomere and N-gap evidence (or NO_CHIMERA_EVIDENCE)")
 # Passed explicitly rather than derived from the evidence paths: the evidence TSVs stage as
 # bare filenames, so a sibling .png computed from them does not exist in the task directory.
-parser$add_argument("--chimera_figures",    default = "NO_CHIMERA_FIGURES",    help = "Collected *.chimera_evidence.png, one per cut (or NO_CHIMERA_FIGURES)")
 parser$add_argument("--ran_purge_dups", default = "false", help = "Whether purge_dups ran (params.run_purge_dups)")
 parser$add_argument("--ran_decontam",   default = "false", help = "Whether FCS decontamination ran (params.decon.run_on_contigs)")
 parser$add_argument("--pangenome_report", default = "NO_PANGENOME", help = "Pangenome report fragment markdown (or NO_PANGENOME)")
 parser$add_argument("--name_map", default = "NO_NAMEMAP", help = "Harmonization name-map TSV (assembly/old_name/new_name) or NO_NAMEMAP")
 parser$add_argument("--versions", default = "NO_VERSIONS", help = "Software versions TSV (tool/version) or NO_VERSIONS")
 
+parser$add_argument("--misassembly_registry", default = "NO_PAF", help = "Current cohort misassembly assembly_registry.tsv")
 args <- parser$parse_args()
 # =====================================================================================
 #  Section numbering registry
@@ -78,9 +75,9 @@ args <- parser$parse_args()
 # without pairwise alignments.
 #
 # To add a section: one line here, then use sec_head() / sec_toc() where it is emitted.
-# Chimeric scaffold detection ran if it produced either a candidates table or a called-joins
-# table. Computed here, before the registry, because the registry needs it to number sections.
-has_chimera <- any(vapply(c(args$chimera_candidates, args$chimera_joins), function(p) {
+# Include chimera review when the workflow publishes its assembly registry.
+# Compute this before assigning section numbers.
+has_chimera <- any(vapply(c(args$misassembly_registry), function(p) {
   !grepl("^NO_", basename(p)) && file.exists(p) && file.size(p) > 0
 }, logical(1)))
 
@@ -1532,117 +1529,12 @@ read_tsv_safe <- function(p, sentinel) {
   if (inherits(out, "try-error") || nrow(out) == 0) NULL else out
 }
 
-chim_cand <- read_tsv_safe(args$chimera_candidates, "NO_CHIMERA_CANDIDATES")
-chim_join <- read_tsv_safe(args$chimera_joins,      "NO_CHIMERA_JOINS")
-chim_evid <- NULL
-if (!str_detect(basename(args$chimera_evidence), "NO_CHIMERA_EVIDENCE")) {
-  ev_files <- if (dir.exists(args$chimera_evidence)) {
-    list.files(args$chimera_evidence, pattern = "\\.chimera_evidence\\.tsv$", full.names = TRUE)
-  } else {
-    Filter(file.exists, str_split(args$chimera_evidence, "[,[:space:]]+")[[1]])
-  }
-  ev_files <- ev_files[file.exists(ev_files) & file.size(ev_files) > 0]
-  if (length(ev_files) > 0) {
-    # each evidence file is metric/value long-form for ONE cut; widen and stack
-    chim_evid <- bind_rows(lapply(ev_files, function(f) {
-      d <- try(suppressWarnings(read_tsv(f, comment = "#", show_col_types = FALSE,
-                                         progress = FALSE)), silent = TRUE)
-      if (inherits(d, "try-error") || !all(c("metric", "value") %in% names(d))) return(NULL)
-      w <- as_tibble(setNames(as.list(d$value), d$metric))
-      w$.evidence_file <- f
-      w
-    }))
-  }
-}
-# has_chimera was computed with the registry; only proceed if the data parsed
-has_chimera_data <- !is.null(chim_cand) || !is.null(chim_join)
-
-if (has_chimera && has_chimera_data) {
-  md <- c(md, sec_head("chimera"), "")
-  md <- c(md,
-    paste("A scaffold assigned to multiple reference chromosomes requires junction review.",
-          "It may reflect an assembly error, a genuine rearrangement, or ambiguous repeat",
-          "alignment. Chromosome-partitioned graph construction can treat its arms differently;",
-          "neither a composite name nor the concordance vote establishes its biological status."), "")
-
-  # ---- 7a: what was found, per assembly ----
-  if (!is.null(chim_cand) && all(c("assembly", "verdict") %in% names(chim_cand))) {
-    cand_tbl <- chim_cand %>%
-      group_by(Assembly = .data$assembly) %>%
-      summarise(Composites = n(),
-                `Break Candidates` = sum(.data$verdict == "BREAK_CANDIDATE", na.rm = TRUE),
-                Review = sum(.data$verdict == "REVIEW", na.rm = TRUE),
-                .groups = "drop") %>%
-      arrange(desc(.data$`Break Candidates`), desc(.data$Composites))
-    md <- c(md, sprintf("### %d%s. Composite Scaffolds Detected", sec_n("chimera"), "a"), "",
-            make_markdown_table(cand_tbl), "",
-            paste("BREAK_CANDIDATE and REVIEW are screening priorities, not validated errors.",
-                  "Genuine heterozygous rearrangements can occur in one haplotype and",
-                  "repeat-driven errors can recur across individuals. Inferred chromosome",
-                  "composites remain eligible for diagnostic evidence regardless of recurrence.",
-                  "Automatic cutting is unavailable pending independent evidence calibration."), "")
-  }
-
-  # ---- 7b: the cuts, with their evidence ----
-  if (!is.null(chim_evid) && "cut_bp" %in% names(chim_evid)) {
-    num <- function(x) suppressWarnings(as.numeric(x))
-    ev_tbl <- chim_evid %>%
-      transmute(
-        Assembly   = .data$assembly,
-        Scaffold   = if ("name" %in% names(chim_evid)) .data$name else .data$scaffold,
-        `Evidence position (bp)` = if ("evidence_position_bp" %in% names(chim_evid))
-                                     comma(num(.data$evidence_position_bp)) else comma(num(.data$cut_bp)),
-        Scope = if ("evidence_only" %in% names(chim_evid))
-                  ifelse(!is.na(.data$evidence_only) & .data$evidence_only == "yes",
-                         "Diagnostic interval; not a cut", "Join review") else "Join review",
-        `Hi-C Ratio` = if ("hic_ratio" %in% names(chim_evid))
-                         sprintf("%.3f", num(.data$hic_ratio)) else NA_character_,
-        `Low Windows` = if ("hic_n_low_contiguous" %in% names(chim_evid))
-                          .data$hic_n_low_contiguous else NA_character_,
-        `Telomere x bg` = if ("telomere_junction_over_background" %in% names(chim_evid))
-                            sprintf("%.1f", num(.data$telomere_junction_over_background)) else NA_character_,
-        Vote       = if ("vote" %in% names(chim_evid)) .data$vote else NA_character_) %>%
-      arrange(.data$Assembly, .data$Scaffold)
-    md <- c(md, sprintf("### %d%s. Junction and Transition Review Evidence", sec_n("chimera"), "b"), "",
-            make_markdown_table(ev_tbl), "",
-            paste("**Hi-C Ratio** describes contact across the evidence position relative to the",
-                  "scaffold median. Depletion, low-window clustering and telomere enrichment are",
-                  "descriptive signals; none establishes an assembly error or authorizes a cut.",
-                  "The same Hi-C data were used for scaffolding.",
-                  "Diagnostic interval midpoints are not inferred breakpoints and are not snapped to gaps.",
-                  "The transition interval and associated recovered joins are recorded in the detailed",
-                  "transition table. Missing full-window statistics remain unavailable."), "")
-
-    # ---- 7c: the figures ----
-    # From the explicit argument. Deriving them from the evidence paths does not work: those
-    # stage as bare filenames and their .png siblings are not in the task directory, so
-    # file.exists() was silently false and the subsection never appeared.
-    figs <- character()
-    if (!str_detect(basename(args$chimera_figures), "NO_CHIMERA_FIGURES")) {
-      figs <- if (dir.exists(args$chimera_figures)) {
-        list.files(args$chimera_figures, pattern = "\\.png$", full.names = TRUE)
-      } else {
-        Filter(nzchar, str_split(args$chimera_figures, "[,[:space:]]+")[[1]])
-      }
-      figs <- figs[file.exists(figs) & file.size(figs) > 0]
-    }
-    if (length(figs) > 0) {
-      md <- c(md, sprintf("### %d%s. Review Evidence Figures", sec_n("chimera"), "c"), "")
-      for (f in figs) {
-        stem <- str_replace(basename(f), "\\.chimera_evidence\\.png$", "")
-        md <- c(md, sprintf("**%s**", stem), "",
-                img_tag(file.path("chimeras", "evidence", basename(f)), stem), "")
-      }
-    }
-  } else if (!is.null(chim_join) && "callable" %in% names(chim_join)) {
-    # detection ran but nothing was cut -- say so explicitly rather than leaving a gap
-    n_call <- sum(chim_join$callable == "yes", na.rm = TRUE)
-    md <- c(md, sprintf("### %d%s. Applied Cuts", sec_n("chimera"), "b"), "",
-            sprintf(paste("No cuts were applied on this run. %d reviewable gap location%s identified;",
-                          "breaking is off by default and is enabled with",
-                          "a reviewed, FASTA-bound joins file. Automatic cutting is unavailable pending calibration."),
-                    n_call, if (n_call == 1) " was" else "s were"), "")
-  }
+chim_cand <- read_tsv_safe(args$misassembly_registry, "NO_PAF")
+if (has_chimera && !is.null(chim_cand) && all(c("assembly", "result") %in% names(chim_cand))) {
+  md <- c(md, sec_head("chimera"), "",
+          "The cohort-wide misassembly review reports evidence for cutting and retaining each detected transition. Decisions refer to original pre-finishing scaffold coordinates.", "",
+          make_markdown_table(chim_cand %>% transmute(Assembly = .data$assembly, Result = .data$result)), "",
+          "[Open the chimera evidence report and editable decisions](assembly/chimeras/README.md)", "")
 }
 
 pw_path <- args$pairwise_summary
@@ -1703,7 +1595,7 @@ if (sig_hic)   narr <- paste0(narr, " Contigs were scaffolded against Hi-C data 
 if (sig_mito)  narr <- paste0(narr, " Organelle genomes were assembled with MitoHiFi.")
 narr <- paste0(narr, " Assembly quality was assessed with BUSCO (per-sample lineage; see section 2), Merqury (consensus QV and k-mer completeness) and QUAST (contiguity), with read coverage from minimap2/SAMtools alignments; telomeric repeats were surveyed with tidk.")
 if (has_teloclip) narr <- paste0(narr, " Scaffold ends were extended into telomeric repeats with teloclip.")
-if (has_chimera) narr <- paste0(narr, " Inferred chromosome composites were screened for alignment transitions and scaffolding gaps. Concordance votes prioritize review; Hi-C, telomere and sequence diagnostics do not by themselves establish a misassembly. Applied cuts, when requested with a reviewed joins file, are recorded in the cut audit.")
+if (has_chimera) narr <- paste0(narr, " Assemblies were screened against their cohort for chromosome-scale transitions. The linked misassembly report combines read continuity, chromosome comparisons and contact evidence; manual cuts are source-bound and audited.")
 if (sig_syn)   narr <- paste0(narr, " Synteny was visualised from minimap2 alignments (gggenomes).")
 narr <- paste0(narr, " Per-step parameters and exact software versions are recorded in the pipeline's Nextflow execution reports.")
 

@@ -53,19 +53,9 @@ process HARMONIZE_SPECIES {
     path("*.chromosome_graph.tsv"),                      emit: chromosome_graph
     path("*.chromosome_components.tsv"),                 emit: chromosome_components
     path("*.presence_matrix.tsv"),                       emit: presence_matrix
-    // Composite scaffolds with the junction coordinate, the concordance vote and a verdict.
-    // Written on every run whatever the break mode -- it is the evidence a break is
-    // justified by, and a break that is not written down is one nobody can audit.
-    tuple val(taxid), path("*.chimera_candidates.tsv"),  emit: chimera_candidates, optional: true
     path("*.consensus_chromosome_map.tsv"),              emit: consensus_map
     path("versions.tsv"),                                emit: versions
     path("*.minimap2.log"),                              emit: logs, optional: true
-    // The reference alignments, already computed above and previously discarded.
-    // chimera_joins.py needs them to assign a reference chromosome to each AGP component,
-    // and PAIRWISE_ALIGNMENT's copies are behind run_post_assembly so they are absent on a
-    // detection-only run. The reference itself has none -- it is not aligned against
-    // itself -- hence optional.
-    tuple val(taxid), path("*.ref.paf.gz"),              emit: ref_pafs, optional: true
 
     script:
     def preset       = params.harmonize_minimap2_preset ?: 'asm5'

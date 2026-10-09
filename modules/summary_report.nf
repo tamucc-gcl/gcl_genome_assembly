@@ -40,10 +40,7 @@ process SUMMARY_REPORT {
     path(name_map)              // all_name_maps.tsv or NO_NAMEMAP  
     // Chimeric scaffold detection. Each optional with a NO_* fallback, so a run with
     // chimera_detect off passes sentinels and the report omits the section.
-    path(chimera_candidates)    // <taxid>.chimera_candidates.tsv or NO_CHIMERA_CANDIDATES
-    path(chimera_joins)         // concatenated *.chimeric_joins.tsv or NO_CHIMERA_JOINS
-    path(chimera_evidence)      // per-cut *.chimera_evidence.tsv (list) or NO_CHIMERA_EVIDENCE
-    path(chimera_figures)       // per-cut *.chimera_evidence.png (list) or NO_CHIMERA_FIGURES
+    path(misassembly_registry)  // assembly_registry.tsv or empty sentinel
     path(software_versions)
     path(summary_report_script) // R script to generate the summary report
 
@@ -80,10 +77,7 @@ process SUMMARY_REPORT {
         --ran_decontam ${params.run_decon_contigs ?: false} \\
         --pangenome_report ${pangenome_report} \\
         --name_map ${name_map} \\
-        --chimera_candidates ${chimera_candidates} \\
-        --chimera_joins ${chimera_joins} \\
-        --chimera_evidence "${chimera_evidence instanceof List ? chimera_evidence.join(',') : chimera_evidence}" \
-        --chimera_figures "${chimera_figures instanceof List ? chimera_figures.join(',') : chimera_figures}" \\
+        --misassembly_registry ${misassembly_registry} \\
         --versions ${software_versions} \\
         --output assembly_report.md
     """

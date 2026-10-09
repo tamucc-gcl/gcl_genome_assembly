@@ -283,7 +283,7 @@ def peer_anchor_trials(hits,lo,hi,query_length):
     return selected,trials
 
 
-def scan_contacts(path, placements, intervals, libraries, flank=250000):
+def scan_contacts(path, placements, intervals, libraries, flank=250000, on_pair=None):
     """One pairs pass, preserving library identity and cross/within geometry."""
     windows=defaultdict(list)
     counts=defaultdict(Counter)
@@ -312,6 +312,8 @@ def scan_contacts(path, placements, intervals, libraries, flank=250000):
             library=next(iter(ids)); total[library]+=1
             x,y=locate(f[1],int(f[2])-1),locate(f[3],int(f[4])-1)
             if x is None or y is None: audit['unliftable_pairs']+=1;continue
+            audit['liftable_pairs']+=1
+            if on_pair is not None:on_pair(library,x,y)
             ends=[]
             for chrom,pos in (x,y):
                 ends.append({(key,side) for key,side,start,end in windows[chrom,pos//flank] if start<=pos<end})
@@ -346,18 +348,36 @@ def continuity_grid(path, lo, hi, anchor=1000, step=1000):
             if line.startswith('@'):continue
             f=line.rstrip().split('\t')
             if not qualified_molecule(f) or f[0] in seen:continue
-            seen.add(f[0]);pos=int(f[3])-1;indices=set()
-            for n,op in re.findall(r'(\d+)([MIDNSHP=X])',f[5]):
-                n=int(n)
-                if op in 'M=X':
-                    begin=bisect.bisect_left(points,pos+anchor)
-                    end=bisect.bisect_right(points,pos+n-anchor)
-                    indices.update(range(begin,end));pos+=n
-                elif op in 'DN':pos+=n
+            seen.add(f[0]);indices=set()
+            # Small indels do not interrupt a molecule. Count a chain across the
+            # two flanks, never demand a single perfect 2 kb CIGAR match block.
+            for begin,finish in molecule_chains(f):
+                left=bisect.bisect_left(points,begin+anchor)
+                right=bisect.bisect_right(points,finish-anchor)
+                indices.update(range(left,right))
             for i in indices:counts[i]+=1
     return dict(step_bp=step,anchor_bp=anchor,minimum_molecules=min(counts),
                 supported_fraction=sum(n>=2 for n in counts)/len(counts),
                 probes=[dict(cut_bp=point,molecules=n) for point,n in zip(points,counts)])
+
+
+def molecule_chains(fields, maximum_indel=50):
+    """Reference spans connected by one molecule; large indels/skips split chains."""
+    pos=int(fields[3])-1;begin=None;finish=None;result=[]
+    for n,op in re.findall(r'(\d+)([MIDNSHP=X])',fields[5]):
+        n=int(n)
+        if op in 'M=X':
+            if begin is None:begin=pos
+            pos+=n;finish=pos
+        elif op in 'IDN':
+            if op=='N' or n>maximum_indel:
+                if begin is not None:result.append((begin,finish))
+                begin=finish=None
+            if op in 'DN':pos+=n
+        elif op in 'SH' and begin is not None:
+            result.append((begin,finish));begin=finish=None
+    if begin is not None:result.append((begin,finish))
+    return result
 
 
 def compare_controls(candidate, controls, counts, libraries):

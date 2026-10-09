@@ -383,16 +383,18 @@ chromosomes get the same name and orientation. Chromosome classification is by l
 (default) or a fixed threshold, with contained-haplotig demotion and an optional batch-wide
 consensus. Short-read and single-assembly species pass through untouched.
 
-Chimera diagnosis precedes finishing and uses inferred chromosome membership.
-Recurring chromosome composites still receive diagnostic evidence; the concordance
-vote does not establish an assembly error. `--chimera_break false` keeps diagnosis
-without edits. A reviewed, assessment-FASTA-bound joins file selects manual cuts;
-`--chimera_break auto` is unavailable until independent junction evidence is calibrated.
-Hi-C alternative-partner pairs are retained alongside the evidence. Fresh assembly
-tasks also publish raw hifiasm graphs/caches and intermediate YaHS AGPs; files lost
-from older scratch tasks remain unavailable. See
-[the foundation handoff](planning_docs/chimera-foundation-handoff.md) for regression,
-comparison-run and evidence-collection commands.
+Chimera review precedes finishing. All chromosome-scale assemblies, including the
+naming reference, are screened against the cohort. Pairwise alignments discover
+chromosome changes; independent individuals, local HiFi continuity, per-library
+Hi-C contacts and native contig context determine the suggested action.
+`--chimera_break false` produces evidence without edits. Start at
+`assembly/chimeras/README.md`; edit a copy of `review.tsv` and rerun with
+`--chimera_break /absolute/path/reviewed.tsv -resume` to apply approved cuts.
+The source checksum and original coordinates bind every cut to its assessment
+assembly. Chromosome reassignment and finishing then use corrected sequences.
+Automatic cutting remains deferred. See the
+[workflow and review guide](planning_docs/chimera-transition-assessment.md)
+for the evidence rules, output contract and complete Crest test command.
 
 `FINALIZE_ASSEMBLY` then writes the sorted, renamed FASTA plus a name map and `.fai`:
 
