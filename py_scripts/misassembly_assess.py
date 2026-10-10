@@ -5,17 +5,39 @@ import json
 import math
 import subprocess
 import tempfile
+import sys
+import time
+from collections import defaultdict
 from pathlib import Path
 from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth)
 from chimera_controls import agp,scan_contacts
 from chimera_graph_evidence import measure_graph
 
+_START=time.monotonic()
+
+
+def progress(message):
+    print(f'[assessment +{time.monotonic()-_START:.1f}s] {message}',file=sys.stderr,flush=True)
+
+
+def draw_chromosome_track(axis,blocks,row,colors):
+    """One collection per chromosome and peer, preserving every interval and gap."""
+    groups=defaultdict(list)
+    for block in blocks:
+        if block.get('chrom'):
+            groups[block['chrom']].append((block['lo']/1e6,(block['hi']-block['lo'])/1e6))
+    for chrom,intervals in groups.items():
+        axis.broken_barh(intervals,(row-.35,.7),facecolors=colors[chrom],edgecolors='none',linewidth=0)
+    return len(groups)
+
 
 def run(args,output=None):
     args=list(map(str,args))
+    started=time.monotonic();progress('Starting '+ ' '.join(args[:2]))
     if output:
         with open(output,'w') as handle:subprocess.run(args,stdout=handle,check=True)
     else:subprocess.run(args,check=True)
+    progress('Finished '+ ' '.join(args[:2])+f' in {time.monotonic()-started:.1f}s')
 
 
 def sequence(fasta,chrom,lo,hi):
@@ -28,6 +50,7 @@ def peer_tests(event,lo,hi):
 
 
 def plot_event(event,out):
+    started=time.monotonic();progress('Starting candidate plot '+event['id'])
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -35,9 +58,8 @@ def plot_event(event,out):
     labels=sorted({b['chrom'] for t in tracks for b in t['blocks'] if b.get('chrom')})
     palette=plt.get_cmap('tab10');colors={c:palette(i%10) for i,c in enumerate(labels)}
     fig,axes=plt.subplots(3,1,figsize=(12,max(8,4+.32*len(tracks))),sharex=True,gridspec_kw={'height_ratios':[max(2,len(tracks)*.25),1.5,1]})
-    for i,t in enumerate(tracks):
-        for b in t['blocks']:
-            if b.get('chrom'):axes[0].broken_barh([(b['lo']/1e6,(b['hi']-b['lo'])/1e6)],(i-.35,.7),facecolors=colors[b['chrom']])
+    collections=sum(draw_chromosome_track(axes[0],t['blocks'],i,colors) for i,t in enumerate(tracks))
+    progress(f"{event['id']}: {sum(sum(bool(b.get('chrom')) for b in t['blocks']) for t in tracks)} intervals in {collections} drawing collections")
     axes[0].set_yticks(range(len(tracks)),[t['peer'] for t in tracks]);axes[0].invert_yaxis()
     from matplotlib.patches import Patch
     axes[0].legend(handles=[Patch(color=colors[c],label=c) for c in labels],ncol=min(6,max(1,len(labels))),loc='upper center',bbox_to_anchor=(.5,1.25),fontsize=9)
@@ -62,9 +84,11 @@ def plot_event(event,out):
     axes[2].set_xlim(max(0,event['lo']-500000)/1e6,(event['hi']+500000)/1e6)
     fig.suptitle(event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'])
     fig.tight_layout();fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
+    progress(f"Finished candidate plot {event['id']} in {time.monotonic()-started:.1f}s")
 
 
 def plot_scaffold(chrom,matrix,telomeres,events,out,resolution=100000):
+    started=time.monotonic();progress('Starting scaffold plot '+chrom)
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -99,6 +123,7 @@ def plot_scaffold(chrom,matrix,telomeres,events,out,resolution=100000):
         axes[1].axvline(position,color='red',ls='--');axes[1].annotate(event['id'],(position,.9),xycoords=('data','axes fraction'),fontsize=9)
         axes[2].axvline(position,color='red',ls='--')
     fig.tight_layout();fig.savefig(out/'plots'/(chrom+'.scaffold.png'),dpi=150,facecolor='white');plt.close(fig)
+    progress(f'Finished scaffold plot {chrom} in {time.monotonic()-started:.1f}s')
 
 
 def main():
@@ -113,6 +138,7 @@ def main():
         mapping['index']=str((Path(a.mapping).resolve().parent/mapping['index']).resolve())
     if data['assessment_sha256']!=sha(a.fasta) or mapping['assessment_sha256']!=data['assessment_sha256']:raise ValueError('Assessment sources do not match')
     events=data['events'];data['mapping']=mapping
+    progress(f"{data['assembly']}: {len(events)} candidate events")
     data['assessment_fasta']=str(Path(a.fasta).resolve())
     if events and a.plots=='true':(out/'plots').mkdir()
     data['tools']={tool:subprocess.check_output([tool,'--version'],text=True).splitlines()[0] for tool in ('samtools','minimap2','tidk')}
@@ -157,6 +183,7 @@ def main():
                     target['start']=max(0,target['lo']-100000);target['end']=min(sizes[sc],target['hi']+100000)
                     intervals[target['id']]=dict(target,scaffold=sc)
                     handle.write('>'+target['id']+'\n'+sequence(fa,sc,target['start'],target['end'])+'\n')
+        progress('Building matched controls and chromosome context')
         controls,control_links=matched_control_sites(intervals,gaps,sizes)
         # Gap controls require independent same-chromosome context. Read-supported
         # continuous controls require both that context and a measured read chain.
@@ -164,6 +191,7 @@ def main():
             tests=[peer_test(dict(id=peer['peer'],sample=peer['sample'],eligible=peer['eligible']),peer['scaffolds'].get(control['scaffold'],[]),control['lo'],control['hi']) for peer in data.get('coarse_context',[])]
             control['context_individuals']=summarize_peers(tests,data['sample'],('__none__','__none__'))['continuous']
         for event in events:
+            progress('Starting HiFi assays '+event['id'])
             if mapping['status'] in ('mapped','reused'):
                 for target in [event]+event['cut_options']:
                     sam=work/(target['id']+'.sam');run(['samtools','view','-h',mapping['bam'],'%s:%d-%d'%(event['scaffold'],target['start']+1,target['end'])],sam)
@@ -177,6 +205,8 @@ def main():
                         target['flank_molecules']=[support_grid(sam,target['lo']-1000,target['lo']-1000)['minimum'],support_grid(sam,target['hi']+1000,target['hi']+1000)['minimum']]
                 # Failed reads cannot justify a cut; direct evidence is explicitly unavailable.
             else:event['hifi']=dict(state='unavailable')
+            progress('Finished HiFi assays '+event['id'])
+        progress('Starting read-supported control validation')
         usable_controls={}
         for key,control in controls.items():
             if len(control['context_individuals'])<2:continue
@@ -199,7 +229,9 @@ def main():
                 if x[0]==y[0] and x[0] in matrices:
                     matrix=matrices[x[0]];i,j=x[1]//100000,y[1]//100000;matrix[i,j]+=1
                     if i!=j:matrix[j,i]+=1
+            progress(f'Starting Hi-C scan: {len(intervals)} locations, {len(usable_controls)} controls')
             counts,totals,audit=scan_contacts(a.pairs,placements,dict(intervals,**usable_controls),libraries,on_pair=capture)
+            progress('Finished Hi-C scan')
             data['hic_audit']=dict(audit=audit,libraries=totals,source_sha256=sha(a.source),agp_sha256=sha(a.agp))
             for event in events:
                 for target in [event]+event['cut_options']:
@@ -231,11 +263,13 @@ def main():
     # Publish only evidence used by the report and decisions. No SAMs, duplicate FASTAs,
     # speculative IGV sessions, recovered historical joins or diagnostic HTML files.
     data.pop('coarse_context',None)
+    progress('Writing evidence JSON and tables')
     (out/'evidence.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
     if support_rows:write_table(out/'read_support.tsv',support_rows,['event','mapq','position','molecules'])
     if contact_rows:write_table(out/'contact_support.tsv',contact_rows,['event','location','library','cross','left_within','right_within','ratio','matched_controls','calibrated','contact_loss'])
     if block_rows:write_table(out/'chromosome_blocks.tsv',block_rows,['event','peer','lo','hi','chrom','status'])
     if telomere_rows:write_table(out/'telomeres.tsv',telomere_rows,['scaffold','start','count'])
+    progress('Assessment complete')
 
 
 if __name__=='__main__':main()
