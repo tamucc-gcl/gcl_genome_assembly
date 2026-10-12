@@ -137,8 +137,8 @@ sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
   --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-pipeline-1517368/results/assembly/chimeras/mapping_manifest.json"
 ```
 
-The launcher already uses `-resume` and `--publish_dir_mode link`, avoiding
-duplicate copies of cached BAMs, FASTQs and assembly files. The review archive
+The launcher uses `-resume` and `--publish_dir_mode symlink`, publishing cached
+files and entire output directories through symbolic links. The review archive
 dereferences links and remains self-contained. Read the new
 `comparisons/chimera-refined-review/results/assembly/chimeras/README.md` and
 per-assembly reports. Existing assemblies and pair alignments are cache-eligible;
@@ -201,3 +201,16 @@ and keeps cutting disabled. Neighborhood read assays and expanded control
 measurements must run on Crest; replaying an archived packet cannot create
 those measurements. Review its new evidence before choosing any cuts or
 continuing the wider pipeline improvement pass.
+
+## Publication correction (2026-10-12)
+
+Crest run 1532235 still launched with a later `--publish_dir_mode copy`,
+overriding the checkpoint launcher's earlier `link` setting. Its 962 queued
+publication operations therefore did not test the local link-mode repair.
+The comparison launcher now explicitly requests `symlink`, which publishes
+both files and directories without copying their contents. Nextflow 23.10.1
+verification: `tests/publication_mode_check.nf` publishes an individual file
+and a directory containing 1,000 files, asserting both are symbolic links and
+the nested contents are readable. The review archive still dereferences links.
+Verify the final publication argument in the Crest launch log after syncing;
+an explicit trailing `--publish_dir_mode symlink` also overrides older launchers.

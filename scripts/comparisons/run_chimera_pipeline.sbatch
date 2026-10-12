@@ -37,10 +37,11 @@ trap finish EXIT
 # This is the normal main.nf launch, with its full sample/read channels, process
 # environments and SLURM resource requests. Reuse the production launch/cache
 # and work paths; publish this test's outputs in a separate results directory.
-# Link cached outputs rather than copying large BAMs/FASTQs on every rerun.
+# Symbolically link cached files AND directories rather than copying them.
+# Nextflow's `link` mode means hard links and still uses its transfer executor.
 # The review archive above dereferences links so it remains self-contained.
 bash "$repo/run_assembly_checkpoint.sbatch" "$sample_sheet" "$hic_readsets" assembly \
-    --outdir "$out/results" --publish_dir_mode link \
+    --outdir "$out/results" --publish_dir_mode symlink \
     --chimera_detect true --chimera_break false \
     --chimera_plots true --chimera_hifi_context true \
     -with-trace "$out/trace.tsv" -with-report "$out/execution.html" \
