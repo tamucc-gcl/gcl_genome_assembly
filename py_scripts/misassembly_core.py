@@ -13,7 +13,7 @@ from pathlib import Path
 from chimera_tracks import tracks
 from chimera_controls import molecule_chains, qualified_molecule
 
-POLICY='cohort-review-v2'
+POLICY='cohort-review-v3'
 
 
 def sha(path):
@@ -313,7 +313,9 @@ def cut_prerequisites(option):
     if not observed_flanks(option):failures.append('Both adjacent HiFi neighborhoods have not established sufficient read observability.')
     if option.get('native_continuity'):failures.append('A native contig path continues across the gap.')
     if option.get('association',{}).get('status')!='confirmed':failures.append('Association between this gap and the chromosome transition is unresolved or contradicted.')
-    if sum(c['loss'] for c in option.get('contacts',[]))<2:failures.append('Calibrated Hi-C contact loss is not established in two libraries.')
+    contacts=option.get('contacts',[])
+    if not any(c['calibrated'] and c['loss'] for c in contacts):failures.append('No available Hi-C library establishes contact loss against suitable controls.')
+    if any(c['calibrated'] and not c['loss'] for c in contacts):failures.append('Another measured Hi-C library does not corroborate contact loss; review the library disagreement.')
     return failures
 
 
@@ -487,21 +489,29 @@ def recommend(event):
     peers=event['peers'];grid=event.get('hifi',{});options=event.get('cut_options',[])
     event.pop('recommended_cut',None)
     for option in options:option['unmet_cut_prerequisites']=cut_prerequisites(option)
-    event['evidence_conflicts']=['HiFi continuity versus calibrated Hi-C loss in '+c['library'] for c in event.get('contacts',[]) if c['loss'] and grid.get('state') in ('continuous','mostly_continuous')]
-    if len(event['evidence_conflicts'])>=2:
-        return 'REVIEW','HiFi supports local continuity, but two Hi-C libraries show calibrated contact loss; keep intact pending review of this conflict.'
+    supported=grid.get('state') in ('continuous','mostly_continuous')
+    strict=event.get('hifi_strict',{})
+    contacts=event.get('contacts',[])
+    losses=[c['library'] for c in contacts if c['calibrated'] and c['loss']]
+    nonlosses=[c['library'] for c in contacts if c['calibrated'] and not c['loss']]
+    event['evidence_conflicts']=['HiFi continuity versus measured Hi-C contact loss in '+library for library in losses] if supported else []
+    if losses and nonlosses:event['evidence_conflicts'].append('Hi-C libraries disagree: contact loss in '+', '.join(losses)+'; no demonstrated loss in '+', '.join(nonlosses))
+    if supported and strict.get('state') not in ('continuous','mostly_continuous'):
+        event['evidence_conflicts'].append('MAPQ-20 continuity is not confirmed by the stricter MAPQ-30 read check')
+    if event['evidence_conflicts']:
+        return 'REVIEW','Keep intact pending review: '+ '; '.join(event['evidence_conflicts'])+'.'
     if len(peers['continuous'])>=2 and not peers['separate'] and not peers['conflicting']:
         return 'RETAIN','Other individuals support one chromosome on both sides.'
     eligible=[c for c in options if not c['unmet_cut_prerequisites']]
     if len(eligible)==1:
         event['recommended_cut']=eligible[0]
-        return 'CUT','Independent chromosome separation and contact loss in two libraries support this exact gap cut.'
+        return 'CUT','Independent chromosome separation, observable HiFi flanks without gap-spanning support, and contact loss in the available Hi-C evidence support this exact gap cut.'
     if any(c.get('spanning',0)>=2 and c['lo']<=event['lo']<=event['hi']<=c['hi'] for c in options):
         return 'RETAIN','At least two HiFi molecules directly span the verified gap containing this transition.'
     if any(len(c['peers']['separate'])>=2 and not c['peers']['continuous'] and not c['peers']['conflicting'] and
            c.get('spanning')==0 and observed_flanks(c) and c.get('association',{}).get('status')=='confirmed' and not c.get('native_continuity') for c in options):
         return 'SUSPECT','A nearby chromosome-consistent gap has observable read support on both sides but no spanning HiFi molecule; its contact evidence needs review.'
-    if grid.get('state') in ('continuous','mostly_continuous'):
+    if supported:
         return 'RETAIN','Local HiFi molecules support continuity across the transition'+(' with short weak pockets.' if grid['state']=='mostly_continuous' else '.')
     if peers['conflicting'] or peers['continuous']:return 'REVIEW','Chromosome comparisons conflict; leave intact while reviewing the conflicting evidence.'
     if len(peers['separate'])>=2 or len(event.get('independent_individuals',[]))>=2:

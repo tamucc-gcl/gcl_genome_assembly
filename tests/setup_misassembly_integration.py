@@ -2,7 +2,8 @@
 from pathlib import Path
 import sys,hashlib
 root=Path('/tmp/chimera-nxf-runtime');root.mkdir(exist_ok=True)
-evidence='evidence' in sys.argv or 'manual' in sys.argv
+single='single' in sys.argv
+evidence='evidence' in sys.argv or 'manual' in sys.argv or single
 manual='manual' in sys.argv
 (root/'a.fa').write_text('>s\n'+'A'*3000+('N'*100 if evidence else '')+'C'*3000+'\n')
 (root/'b.fa').write_text('>x\n'+'A'*3000+'\n>y\n'+'C'*3000+'\n')
@@ -26,6 +27,7 @@ params.chimera_hifi_context=false
 params.chimera_min_arm_bp=1000
 params.fixture_manual=false
 params.fixture_evidence=false
+params.fixture_single=false
 params.harmonize_scaffold_names=true
 conda.enabled=false
 trace.enabled=true
@@ -51,8 +53,11 @@ env.PATH='/tmp/chimera-nxf-runtime/bin:/usr/local/bin:/usr/bin:/bin'
 
 (root/'reads.fq').write_text('@r\nA\n+\nI\n')
 (root/'a.agp').write_text('s\t1\t3000\t1\tW\tx\t1\t3000\t+\ns\t3001\t3100\t2\tN\t100\tscaffold\tyes\tproximity_ligation\ns\t3101\t6100\t3\tW\ty\t1\t3000\t+\n')
-(root/'lib.tsv').write_text('library_id\tqname_prefix\nA\tA_\nB\tB_\n')
-(root/'a.pairs').write_text(''.join(f'{lib}_{chrom}_{i}\t{chrom}\t1\t{chrom}\t101\t+\t-\tUU\n' for lib in ('A','B') for chrom in ('x','y') for i in range(100)))
+libraries=('A',) if single else ('A','B')
+(root/'lib.tsv').write_text('library_id\tqname_prefix\n'+''.join(f'{lib}\t{lib}_\n' for lib in libraries))
+(root/'a.pairs').write_text(''.join(f'{lib}_{chrom}_{i}\t{chrom}\t1\t{chrom}\t101\t+\t-\tUU\n' for lib in libraries for chrom in ('x','y') for i in range(100)))
+if single:
+    with (root/'check.config').open('a') as handle:handle.write('\nparams.fixture_single=true\n')
 if evidence:
     with (root/'check.config').open('a') as handle:handle.write('\nparams.fixture_evidence=true\nparams.chimera_hifi_context=true\n')
 if manual:

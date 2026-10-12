@@ -34,7 +34,7 @@ workflow {
             def data=new groovy.json.JsonSlurper().parseText(report.parent.resolve('assemblies/sample_hap1/evidence.json').text)
             assert data.events[0].cut_options[0].spanning==2
             assert data.events[0].recommendation=='RETAIN'
-            assert data.events[0].contacts.size()==2
+            assert data.events[0].contacts.size()==(params.fixture_single ? 1 : 2)
             assert data.events[0].contacts.every { it.raw_counts.cross==0 && it.raw_counts.left_within==100 && it.raw_counts.right_within==100 && !it.calibrated }
             assert file(data.mapping.bam).exists()
         }

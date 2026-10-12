@@ -18,7 +18,7 @@ def mdtable(headers,rows):
 
 
 def advice(event):
-    return {'CUT':'Recommend cutting at the specified gap','RETAIN':'Retain — evidence supports continuity','SUSPECT':'Suspect misjoin — review the evidence','REVIEW':'Review — evidence is incomplete or conflicting'}[event['recommendation']]
+    return {'CUT':'Recommend cutting at the specified gap','RETAIN':'Keep intact — local continuity supported','SUSPECT':'Suspect misjoin — review the evidence','REVIEW':'Review — keep intact pending a decision'}[event['recommendation']]
 
 
 
@@ -47,8 +47,8 @@ def result_summary(data):
     retained=len(data['events'])-active
     if data['status']=='no_chromosome_scope':return 'Chromosome-scale classification unresolved' if data.get('scope_unresolved') else 'No chromosome-scale scaffolds identified'
     if data['status']!='assessed':return 'Not assessed — no informative cohort comparisons'
-    if active:return str(active)+' candidate(s) need review'+('; '+str(retained)+' boundaries retained' if retained else '')
-    return 'No candidates need review; '+str(retained)+' boundaries retained' if retained else 'No potential chimeras detected'
+    if data['events']:return str(len(data['events']))+' chromosome transition(s) detected; '+str(active)+' need review; '+str(retained)+' provisionally keep intact'
+    return 'No potential chimeras detected'
 
 def event_card(event,assembly,cohort=False):
     md=['### '+(assembly+' · ' if cohort else '')+event['id']+' — '+event['left']+' → '+event['right'],'',
@@ -84,7 +84,7 @@ def event_card(event,assembly,cohort=False):
             if option.get('contacts'):
                 md+=['**'+option['id']+' — contact evidence at this exact gap**','']+mdtable(['Library','Cross / within-left / within-right','Matched controls','Finding'],[
                     [t['library'],str(t['raw_counts']['cross'])+' / '+str(t['raw_counts']['left_within'])+' / '+str(t['raw_counts']['right_within']),control_summary(t),
-                     'Supports cutting: contact loss' if t['loss'] else 'No demonstrated loss' if t['calibrated'] else 'Comparison not calibrated'] for t in option['contacts']])+['']
+                     'Supports cutting: contact loss' if t['loss'] else 'No demonstrated loss' if t['calibrated'] else 'Unable to judge contact loss'] for t in option['contacts']])+['']
             failures=option.get('unmet_cut_prerequisites',[])
             if failures:md+=['**Why this gap has no cut recommendation:**','']+['- '+reason for reason in failures]+['']
             association=option.get('association',{})
@@ -97,9 +97,13 @@ def event_card(event,assembly,cohort=False):
         md+=['**Hi-C measurements at the transition**','']+mdtable(['Library','Cross / within-left / within-right pairs','Matched controls','Interpretation'],[
             [t['library'],str(t['raw_counts']['cross'])+' / '+str(t['raw_counts']['left_within'])+' / '+str(t['raw_counts']['right_within']),control_summary(t),
              'Contact loss' if t['loss'] else 'No clear contact loss' if t['calibrated'] else 'Too few usable contacts or matched controls'] for t in event['contacts']])
-        md+=['','Hi-C contributed to scaffolding and is corroborating evidence. Calibration requires at least 100 within-side pairs on each flank and five controls whose flank counts each match within a factor of ten. The control table lists measurements and exclusions. Measured zero counts are shown as 0; unavailable measurements are not zeros.','']
+        md+=['','Hi-C contributed to scaffolding and is corroborating evidence. A usable comparison needs at least 100 within-side pairs on each flank and five control boundaries whose flank counts each match within a factor of ten. Without these controls, low cross-boundary counts cannot be judged against an expected baseline: this is neither support for retaining nor a demonstrated contact loss. One library can provide this evidence; additional libraries are checked for disagreement. The control table lists measurements and exclusions. Measured zero counts are shown as 0; unavailable measurements are not zeros.','']
     if event.get('hifi_strict',{}).get('probes'):
-        strict=event['hifi_strict'];md+=['**Stricter read check:** '+format(100*strict['supported_fraction'],'.1f')+'% of positions supported at MAPQ ≥30. A difference between tiers can indicate mapping ambiguity; it is not automatically a break.','']
+        strict=event['hifi_strict']
+        finding='Local continuity is supported.' if strict['state'] in ('continuous','mostly_continuous') else 'Local continuity is not established at this confidence level; review possible mapping ambiguity.'
+        md+=['**Stricter read check:** '+format(100*strict['supported_fraction'],'.1f')+'% of positions supported at MAPQ ≥30; minimum '+str(strict['minimum'])+' molecules. '+finding,'']
+        if strict.get('weak_runs'):
+            md+=mdtable(['Weak interval in stricter check (bp)','Minimum spanning molecules'],[[bp(w['start'])+'–'+bp(w['end']),w['minimum']] for w in strict['weak_runs']])+['','These intervals identify weak read support, not selected cuts.','']
     if event.get('hifi_all_primary',{}).get('probes'):
         md+=['**Mapping ambiguity check:** '+format(100*event['hifi_all_primary']['supported_fraction'],'.1f')+'% of positions are crossed when low-confidence primary placements are also included. This helps distinguish absent reads from uncertain placement; these reads do not authorize cutting or establish continuity.','']
     if grid.get('weak_points'):
@@ -160,7 +164,7 @@ def main():
         mapping=data['mapping']
         if mapping.get('bam'):manifest[assembly]=dict(bam=mapping['bam'],index=mapping['index'],fasta=data.get('assessment_fasta'),provenance=str((packet/'evidence.json').resolve()))
         result=result_summary(data)
-        registry.append(dict(assembly=assembly,assessment_sha256=data['assessment_sha256'],assessment_fasta=data.get('assessment_fasta',''),coordinate_stage='pre_finishing',assessment_status=data['status'],review_candidates=sum(e['recommendation']!='RETAIN' for e in data['events']),retained_boundaries=sum(e['recommendation']=='RETAIN' for e in data['events']),rejected_screens=sum(v.get('kind')=='rejected_peer_transition' for v in data.get('minor_signals',[])),result=result))
+        registry.append(dict(assembly=assembly,assessment_sha256=data['assessment_sha256'],assessment_fasta=data.get('assessment_fasta',''),coordinate_stage='pre_finishing',assessment_status=data['status'],detected_transitions=len(data['events']),review_candidates=sum(e['recommendation']!='RETAIN' for e in data['events']),retained_boundaries=sum(e['recommendation']=='RETAIN' for e in data['events']),rejected_screens=sum(v.get('kind')=='rejected_peer_transition' for v in data.get('minor_signals',[])),result=result))
         md=['# '+assembly+' — misassembly review','','[All assemblies](../../README.md) · [Manual decisions](../../cut-instructions.md)','', '**'+result+'.**','']
         if data.get('assessment_fasta'):md+=['Coordinates and read mappings refer to this original assessment FASTA: `'+data['assessment_fasta']+'`.','']
         if data.get('screening_coverage'):
@@ -171,16 +175,12 @@ def main():
                 fractions=[r['assigned_fraction'] for r in useful if r['assigned_fraction'] is not None]
                 screen.append([scaffold,len(individuals),format(100*max(fractions),'.1f')+'%' if fractions else 'Unavailable'])
             md+=['<details>','<summary>What was screened</summary>','']+mdtable(['Chromosome-scale scaffold','Individuals with chromosome assignments','Best assigned fraction'],screen)+['','An absence of detected transitions applies to the usable comparisons above. Unmapped sequence is not evidence of continuity.','</details>','']
-        retained_section=False
         for event in sorted(data['events'],key=lambda e:e['recommendation']=='RETAIN'):
-            if event['recommendation']=='RETAIN' and not retained_section:
-                md+=['<details>','<summary>Boundaries retained after assessment</summary>',''];retained_section=True
             md+=['<a name="'+event['id'].lower()+'"></a>','']+event_card(event,assembly)
             if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity, HiFi support, Hi-C support and telomeres](plots/'+event['id']+'.png)','','Pale chromosome colors show the local assignment agreed by independent individuals; ambiguous regions remain neutral. Orange marks the assessed transition range; dashed red lines mark gap cut options. Spanning molecules are HiFi reads. The Hi-C curves show binned contact support per library, not calibrated cut recommendations. Telomere counts are shown in the bottom panel. Gaps in curves mean unavailable measurements.','']
             md+=['<details>','<summary>Peer chromosome assignments</summary>','']+mdtable(['Assembly','Left → right','Local assignment','Role'],[
                 [t['peer'],str(t['left']['chrom'] or '?')+' → '+str(t['right']['chrom'] or '?'),'Confirmed' if t['qualified'] else 'Partial or ambiguous',
                  'Sister haplotype' if t['sample']==data['sample'] else 'Independent individual' if t['eligible'] else 'Context only'] for t in event['peer_tests']])+['','</details>','']
-        if retained_section:md+=['</details>','']
         rejected=[v for v in data.get('minor_signals',[]) if v.get('kind')=='rejected_peer_transition']
         if rejected:
             md+=['<details>','<summary>Rejected chromosome-fusion screens ('+str(len(rejected))+')</summary>','']+mdtable(
@@ -213,22 +213,19 @@ def main():
     Path('mapping_manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
     write_table('versions.tsv',versions,['process','tool','version'])
     all_events=[(d,e) for d in all_data for e in d['events']]
-    events=[(d,e) for d,e in all_events if e['recommendation']!='RETAIN']
-    retained=[(d,e) for d,e in all_events if e['recommendation']=='RETAIN']
+    events=sorted(all_events,key=lambda pair:pair[1]['recommendation']=='RETAIN')
     counts={k:sum(e['recommendation']==k for _,e in all_events) for k in ('CUT','RETAIN','SUSPECT','REVIEW')}
-    md=['# Chimera and misassembly review','',str(len(all_data))+' assemblies included; '+str(sum(d['status']=='assessed' for d in all_data))+' have usable cohort comparisons. **'+str(counts['CUT'])+' recommended cuts; '+str(counts['RETAIN'])+' supported retentions; '+str(counts['SUSPECT'])+' suspect transitions; '+str(counts['REVIEW'])+' other reviews.**','',
-        'No cuts are selected automatically. [Editable decisions](review.tsv) · [Cut instructions](cut-instructions.md)','',
+    md=['# Chimera and misassembly review','',str(len(all_data))+' assemblies included; '+str(sum(d['status']=='assessed' for d in all_data))+' have usable cohort comparisons. **'+str(len(events))+' chromosome transitions detected: '+str(counts['CUT'])+' recommended cuts; '+str(counts['SUSPECT'])+' suspect misjoins; '+str(counts['REVIEW'])+' conflicting or incomplete assessments; '+str(counts['RETAIN'])+' provisionally keep intact.**','',
+        'Detected chromosome transitions remain listed even when local evidence favors keeping the sequence intact. Local continuity does not prove biological chromosome fusion. Cut options begin unselected. [Editable decisions](review.tsv) · [Cut instructions](cut-instructions.md)','',
         '## Assembly overview','']+mdtable(['Assembly','Result','Evidence'],[[r['assembly'],r['result'],'[Report](assemblies/'+r['assembly']+'/report.md)'] for r in registry])
     if reviewed:
         md+=['','## Submitted manual decisions','',str(sum(r.get('selected')=='YES' for r in reviewed))+' cuts selected; '+str(sum(len(v['selected_actions']) for v in applied))+' actions verified by exact sequence reconstruction. These evidence measurements describe the original pre-finishing assemblies. Corrected assemblies are reassigned and finished downstream.','']
     if events:
-        md+=['','## Suggested actions','']+mdtable(['Assembly / event','Chromosomes','Suggested action','Cut or transition range'],[
+        md+=['','## Detected chromosome transitions and suggested actions','']+mdtable(['Assembly / event','Chromosomes','Suggested action','Cut or transition range'],[
             ['['+d['assembly']+' '+e['id']+'](assemblies/'+d['assembly']+'/report.md#'+e['id'].lower()+')',e['left']+' → '+e['right'],advice(e),
              bp(e['recommended_cut']['cut_bp'])+' bp on '+e['scaffold'] if e.get('recommended_cut') else e['scaffold']+': '+bp(e['lo'])+'–'+bp(e['hi'])+' bp'] for d,e in events])
         md+=['','## Evidence for each decision','']
         for d,e in events:md+=event_card(e,d['assembly'],cohort=True)
-    if retained:
-        md+=['','<details>','<summary>Boundaries retained after assessment ('+str(len(retained))+')</summary>','']+mdtable(['Assembly / event','Chromosomes','Reason'],[['['+d['assembly']+' '+e['id']+'](assemblies/'+d['assembly']+'/report.md#'+e['id'].lower()+')',e['left']+' → '+e['right'],e['reason']] for d,e in retained])+['','</details>','']
     md+=['## Scope and reproducibility','',
          'Discovery compares all chromosome-scale scaffolds with the other assemblies, including screening the selected naming reference. The assigned-sequence arm threshold is recorded in each evidence packet; short islands remain in the audit. Individuals, not haplotypes, supply independent votes.', '',
          'HiFi continuity uses a grid of 1 kb probes with 1 kb flanks at MAPQ 20 and 30. Indels up to 50 bp are tolerated; larger indels and skipped regions interrupt support. Known scaffold N gaps are assessed separately. Retention can be supported by continuous or ≥95% supported regions with weak pockets no longer than 3 kb. These are explicit review heuristics, not proof of evolutionary fusion.', '',

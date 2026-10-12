@@ -18,7 +18,7 @@ A species without usable chromosome assignments or informative independent compa
 
 | Action | Meaning |
 | --- | --- |
-| CUT | Recommend one exact verified gap for human approval. At least two independent individuals separate its flanks; there are no qualified same-chromosome or conflicting votes; both immediate HiFi flanks are observed but fewer than two molecules span the gap; no continuous native path opposes unjoining; intervening chromosome context is consistent; two libraries show calibrated contact loss. |
+| CUT | Recommend one exact verified gap for human approval. At least two independent individuals separate its flanks; there are no qualified same-chromosome or conflicting votes; both adjacent HiFi neighborhoods are observed but fewer than two molecules span the gap; no continuous native path opposes unjoining; intervening chromosome context is consistent; at least one available Hi-C library shows contact loss against suitable controls, with no calibrated library disagreeing. |
 | RETAIN | Local HiFi supports continuity, or at least two independent individuals support same-chromosome context without contrary local votes. Broad intervals with at least 95% supported probes and no weak pocket longer than 3 kb can support retention; an independently supported exact gap-cut recommendation takes precedence. |
 | SUSPECT | Chromosome separation has independent support, but the exact unsupported adjacency has not been established. The report gives the transition range, weak read-support intervals and any exact gap alternatives. |
 | REVIEW | Evidence is incomplete or conflicting. The report identifies which measurements are missing or contradictory. |
@@ -214,3 +214,40 @@ and a directory containing 1,000 files, asserting both are symbolic links and
 the nested contents are readable. The review archive still dereferences links.
 Verify the final publication argument in the Crest launch log after syncing;
 an explicit trailing `--publish_dir_mode symlink` also overrides older launchers.
+
+## Single-library decisions and visible transitions (2026-10-12)
+
+Policy `cohort-review-v3` works with one Hi-C library. A cut recommendation requires
+at least one available library with contact loss against suitable controls, plus
+the existing independent chromosome, exact gap, adjacent read-observability and
+native-path requirements. A calibrated library without demonstrated loss prevents
+an unqualified cut recommendation; an uncalibrated extra library is unavailable
+evidence rather than a veto. Manual selection remains mandatory for applying cuts.
+
+Any calibrated Hi-C loss conflicting with HiFi continuity triggers REVIEW, including
+loss in just one library. MAPQ-20 continuity that is not confirmed at MAPQ 30 also
+triggers REVIEW. Conflicting calibrated library results trigger REVIEW regardless
+of the read-continuity verdict. No thresholds for contact/control qualification
+were relaxed.
+
+All detected chromosome transitions now appear in the main action table and both
+main/per-assembly evidence sections. Counts distinguish detection from provisional
+retention. Same-chromosome false screens remain in the collapsed rejection audit.
+Reports explain why contact loss cannot be judged when controls are unavailable,
+and explicitly list weak intervals from the stricter read check.
+
+Validation: 297 tests passed; the Nextflow 23.10.1 cohort integration passed with
+one Hi-C library using external-tool doubles. Replaying the actual repaired-symlink
+measurements gives hap1 C01 SUSPECT, C02/C03 RETAIN, C04 REVIEW, and hap2 C01/C02
+REVIEW. All regenerated report file links resolve. This replay changes policy and
+presentation, not measured evidence, and applies no cuts.
+
+After syncing, validate the updated production workflow with:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/chimera-review-policy-v3 \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-evidence-repaired-symlink/results/assembly/chimeras/mapping_manifest.json" \
+  --publish_dir_mode symlink
+```

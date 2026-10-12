@@ -86,7 +86,7 @@ class MisassemblyTests(unittest.TestCase):
 
     def test_cut_needs_observable_flanks_and_unique_option(self):
         peers=dict(separate=['a','b'],continuous=[],conflicting=[])
-        option=dict(id='G1',peers=peers,spanning=0,flank_molecules=[5,5],flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(loss=True),dict(loss=True)])
+        option=dict(id='G1',peers=peers,spanning=0,flank_molecules=[5,5],flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(calibrated=True,loss=True),dict(calibrated=True,loss=True)])
         event=dict(peers=peers,cut_options=[option],hifi=dict(state='patchy'))
         self.assertEqual(recommend(event)[0],'CUT')
         option['flank_support'][0]['observable']=False
@@ -95,7 +95,7 @@ class MisassemblyTests(unittest.TestCase):
         self.assertEqual(recommend(event)[0],'SUSPECT')
 
     def test_supported_sequence_retained_despite_chromosome_change(self):
-        event=dict(peers=dict(separate=['a','b'],continuous=[],conflicting=[]),hifi=dict(state='mostly_continuous'))
+        event=dict(peers=dict(separate=['a','b'],continuous=[],conflicting=[]),hifi=dict(state='mostly_continuous'),hifi_strict=dict(state='mostly_continuous'))
         self.assertEqual(recommend(event)[0],'RETAIN')
 
     def test_known_gap_spanning_reads_can_support_retention(self):

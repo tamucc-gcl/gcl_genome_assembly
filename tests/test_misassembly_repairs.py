@@ -95,12 +95,47 @@ class EvidenceRepairTests(unittest.TestCase):
         self.assertEqual(len(links['G']),2)
 
     def test_two_library_loss_and_read_continuity_is_explicit_conflict(self):
-        event=dict(peers=dict(separate=['a','b'],continuous=[],conflicting=[]),hifi=dict(state='continuous'),contacts=[dict(library='A',loss=True),dict(library='B',loss=True)])
+        event=dict(peers=dict(separate=['a','b'],continuous=[],conflicting=[]),hifi=dict(state='continuous'),hifi_strict=dict(state='continuous'),contacts=[dict(library='A',calibrated=True,loss=True),dict(library='B',calibrated=True,loss=True)])
         self.assertEqual(recommend(event)[0],'REVIEW')
         self.assertEqual(len(event['evidence_conflicts']),2)
         event['contacts'].pop()
-        self.assertEqual(recommend(event)[0],'RETAIN')
+        self.assertEqual(recommend(event)[0],'REVIEW')
         self.assertEqual(len(event['evidence_conflicts']),1)
+
+    def test_one_library_can_support_a_cut_without_auto_selection(self):
+        peers=dict(separate=['a','b'],continuous=[],conflicting=[])
+        option=dict(id='G1',peers=peers,spanning=0,flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(library='A',calibrated=True,loss=True)])
+        event=dict(peers=peers,hifi=dict(state='patchy'),cut_options=[option])
+        self.assertEqual(recommend(event)[0],'CUT')
+        self.assertEqual(event['recommended_cut']['id'],'G1')
+        option['contacts'].append(dict(library='B',calibrated=False,loss=False))
+        self.assertEqual(recommend(event)[0],'CUT')
+        option['contacts'][-1]['calibrated']=True
+        self.assertNotEqual(recommend(event)[0],'CUT')
+        self.assertTrue(any('disagreement' in v for v in option['unmet_cut_prerequisites']))
+        option['contacts']=[]
+        self.assertNotEqual(recommend(event)[0],'CUT')
+        self.assertTrue(any('No available Hi-C' in v for v in option['unmet_cut_prerequisites']))
+
+    def test_stricter_read_check_can_prevent_retention(self):
+        event=dict(peers=dict(separate=['a','b'],continuous=[],conflicting=[]),hifi=dict(state='continuous'),hifi_strict=dict(state='patchy'))
+        self.assertEqual(recommend(event)[0],'REVIEW')
+        self.assertIn('MAPQ-30',event['reason'] if 'reason' in event else event['evidence_conflicts'][0])
+        event['hifi_strict']=dict(state='continuous')
+        self.assertEqual(recommend(event)[0],'RETAIN')
+
+    def test_retained_transitions_stay_visible_in_overview_and_reports(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);packet=root/'packet';packet.mkdir()
+            event=dict(id='C01',scaffold='s',lo=100,hi=200,left='chr1',right='chr2',recommendation='RETAIN',reason='Local reads support continuity.',peers=dict(separate=['a','b'],continuous=[],conflicting=[]),cut_options=[],peer_tests=[])
+            data=dict(assembly='fixture',sample='fixture',assessment_sha256='fixture',status='assessed',mapping=dict(status='unavailable'),events=[event])
+            (packet/'evidence.json').write_text(json.dumps(data))
+            subprocess.run([sys.executable,str(ROOT/'py_scripts/misassembly_report.py'),'--packet',str(packet)],cwd=root,check=True,capture_output=True)
+            main=(root/'README.md').read_text(encoding='utf-8');detail=(root/'assemblies/fixture/report.md').read_text(encoding='utf-8')
+            self.assertIn('1 chromosome transition(s) detected; 0 need review; 1 provisionally keep intact',main)
+            self.assertIn('fixture C01',main)
+            self.assertIn('### C01',detail)
+            self.assertNotIn('Boundaries retained after assessment',detail)
 
     def test_empty_packet_publishes_only_existing_evidence_links(self):
         with tempfile.TemporaryDirectory() as temp:

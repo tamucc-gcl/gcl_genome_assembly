@@ -115,7 +115,7 @@ class PlotBatchingTests(unittest.TestCase):
     def test_supported_regional_read_scan_does_not_hide_unsupported_nearby_gap(self):
         peers=dict(separate=['a','b'],continuous=[],conflicting=[])
         gap=dict(id='G1',lo=1010,hi=1020,spanning=0,flank_molecules=[5,5],peers=peers,flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[])
-        event=dict(lo=1000,hi=1005,peers=peers,cut_options=[gap],hifi=dict(state='continuous'))
+        event=dict(lo=1000,hi=1005,peers=peers,cut_options=[gap],hifi=dict(state='continuous'),hifi_strict=dict(state='continuous'))
         self.assertEqual(recommend(event)[0],'SUSPECT')
         gap['flank_support'][0]['observable']=False
         self.assertEqual(recommend(event)[0],'RETAIN')
