@@ -9,7 +9,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth,consensus_regions,coarse_tracks,gap_association,flank_support)
+from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth,consensus_regions,coarse_tracks,gap_association,flank_support,regional_hypotheses,assess_alternative,rank_alternatives,qualified_molecule,molecule_chains)
 from chimera_controls import agp,scan_contacts,literal_gaps
 from chimera_graph_evidence import measure_graph
 
@@ -49,6 +49,27 @@ def peer_tests(event,lo,hi):
     return [peer_test(dict(id=t['peer'],sample=t['sample'],eligible=t['eligible']),t['blocks'],lo,hi) for t in event['peer_tracks']]
 
 
+def bridge_records(sam,locations):
+    """Audit actual primary bridge reads and competing placements in this window."""
+    rows=[];secondary=set();seen=set()
+    with open(sam) as handle:
+        for line in handle:
+            if line.startswith('@'):continue
+            f=line.rstrip().split('\t')
+            if len(f)<11:continue
+            flag=int(f[1])
+            if flag&(256|2048):secondary.add(f[0]);continue
+            copy=list(f);copy[4]='30'
+            if flag&(4|512|1024) or f[0] in seen or not qualified_molecule(copy):continue
+            seen.add(f[0]);chains=molecule_chains(f)
+            for location in locations:
+                point=location['probe_bp']
+                if any(lo<=point-1000 and hi>=point+1000 for lo,hi in chains):
+                    rows.append(dict(location=location['id'],probe_bp=point,read=f[0],mapq=int(f[4]),alignment_start=int(f[3])-1,cigar=f[5]))
+    for row in rows:row['competing_placement_in_window']=row['read'] in secondary
+    return rows
+
+
 def assessment_gaps(fasta,current_gaps):
     """Recover N runs inherited inside components, without duplicating AGP gaps."""
     from bisect import bisect_right
@@ -67,15 +88,20 @@ def assessment_gaps(fasta,current_gaps):
     return [dict(g,origin='current_agp' if (g['scaffold'],g['lo'],g['hi']) in current_runs else 'inherited_sequence_gap') for g in literal]
 
 
-def chromosome_colors(labels):
-    """Stable chromosome colors across assemblies; no ten-chromosome wraparound."""
+def chromosome_colors(labels,focal=()):
+    """Contrast the focal pair consistently across its two haplotype orientations."""
     import colorsys
     import hashlib
     result={}
     for label in labels:
         number=label.removeprefix('chr').split('_')[0]
         seed=int(number) if number.isdigit() else int(hashlib.sha256(label.encode()).hexdigest()[:8],16)
-        result[label]=colorsys.hsv_to_rgb((seed*.61803398875)%1,.60,.78)
+        result[label]=colorsys.hsv_to_rgb((seed*.61803398875)%1,.25 if focal else .60,.65 if focal else .78)
+    def order(label):
+        number=label.removeprefix('chr').split('_')[0]
+        return (0,int(number)) if number.isdigit() else (1,label)
+    for label,color in zip(sorted(set(focal),key=order),('#0072B2','#D55E00')):
+        result[label]=color
     return result
 
 
@@ -109,14 +135,20 @@ def plot_event(event,out):
     grid=event.get('hifi',{});tracks=event['peer_tracks']
     regions=event.get('chromosome_regions',[])
     labels=sorted({b['chrom'] for t in tracks for b in t['blocks'] if b.get('chrom')}|{r['chrom'] for r in regions})
-    colors=chromosome_colors(labels)
+    focal=sorted(set((event['left'],event['right'])),key=lambda c: (not c.removeprefix('chr').isdigit(),int(c.removeprefix('chr')) if c.removeprefix('chr').isdigit() else c))
+    labels=sorted(set(labels)|set(focal))
+    colors=chromosome_colors(labels,focal)
     fig,axes=plt.subplots(5,1,figsize=(12,max(12,8+.32*len(tracks))),sharex=True,
                          gridspec_kw={'height_ratios':[max(2,len(tracks)*.25),1.5,1,1.3,1]})
     collections=sum(draw_chromosome_track(axes[0],t['blocks'],i,colors) for i,t in enumerate(tracks))
     progress(f"{event['id']}: {sum(sum(bool(b.get('chrom')) for b in t['blocks']) for t in tracks)} intervals in {collections} drawing collections")
     axes[0].set_yticks(range(len(tracks)),[t['peer'] for t in tracks]);axes[0].invert_yaxis()
-    fig.legend(handles=[Patch(color=colors[c],label=c) for c in labels],ncol=min(8,max(1,len(labels))),
-               loc='upper center',bbox_to_anchor=(.5,.965),fontsize=9,frameon=False)
+    fig.legend(handles=[Patch(color=colors[c],label=c) for c in focal],ncol=len(focal),
+               title='Chromosomes in this transition',loc='upper center',bbox_to_anchor=(.5,.973),fontsize=10,frameon=False)
+    other=[c for c in labels if c not in focal]
+    if other:
+        fig.legend(handles=[Patch(color=colors[c],label=c) for c in other],ncol=min(8,len(other)),
+                   title='Other chromosome assignments',loc='upper center',bbox_to_anchor=(.5,.927),fontsize=8,title_fontsize=8,frameon=False)
     axes[0].set_title('Chromosome assignments; blank regions have no usable assignment',fontsize=10)
     ambiguous_axes=[]
     for name,color,label,style in [('hifi','#2166ac','MAPQ ≥20','-'),('hifi_strict','#b35806','MAPQ ≥30','-')]:
@@ -157,11 +189,15 @@ def plot_event(event,out):
         ax.set_facecolor('white')
         ax.axvspan(event['lo']/1e6,event['hi']/1e6,color='orange',alpha=.12,zorder=0)
         for cut in event['cut_options']:ax.axvline(cut['cut_bp']/1e6,color='#b2182b',ls='--')
+        for location in event.get('alternatives',[])[:6]:
+            ax.axvspan(location['lo']/1e6,location['hi']/1e6,facecolor='#762a83',alpha=.08,zorder=0)
         ax.grid(alpha=.15)
+    for location in event.get('alternatives',[])[:6]:
+        axes[0].annotate(location['id'],(location['probe_bp']/1e6,1),xycoords=('data','axes fraction'),fontsize=7,rotation=90,va='bottom',color='#762a83')
     for ax in axes[1:]:ax.set_ylim(bottom=0)
     axes[-1].set_xlim(max(0,event['lo']-500000)/1e6,(event['hi']+500000)/1e6)
     fig.suptitle(event.get('assembly','Assessment')+' · '+event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'],y=.995)
-    fig.tight_layout(rect=(0,0,1,.92));fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
+    fig.tight_layout(rect=(0,0,1,.86 if other else .92));fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
     progress(f"Finished candidate plot {event['id']} in {time.monotonic()-started:.1f}s")
 
 
@@ -206,7 +242,7 @@ def main():
     data['assessment_fasta']=str(Path(a.fasta).resolve())
     if events and a.plots=='true':(out/'plots').mkdir()
     data['tools']={tool:subprocess.check_output([tool,'--version'],text=True).splitlines()[0] for tool in ('samtools','minimap2','tidk')}
-    support_rows=[];contact_rows=[];block_rows=[];telomere_rows=[]
+    support_rows=[];contact_rows=[];block_rows=[];telomere_rows=[];bridge_rows=[]
     with tempfile.TemporaryDirectory(prefix='misassembly-',dir='.') as temp:
         work=Path(temp).resolve();fa=work/'assessment.fa';fa.symlink_to(Path(a.fasta).resolve());run(['samtools','faidx',fa])
         sizes={f[0]:int(f[1]) for f in (l.split('\t') for l in Path(str(fa)+'.fai').read_text().splitlines())}
@@ -230,22 +266,16 @@ def main():
                     option['peer_tests']=peer_tests(event,option['lo'],option['hi']);option['peers']=summarize_peers(option['peer_tests'],data['sample'],(event['left'],event['right']))
                     option['association']=gap_association(event,option,data['sample'])
                     event['cut_options'].append(option)
-                for target in [event]+event['cut_options']:
+                for target in [event]+event['cut_options']+event.get('alternatives',[]):
                     flank=500000 if target is event else 100000
                     target['start']=max(0,target['lo']-flank);target['end']=min(sizes[sc],target['hi']+flank)
                     intervals[target['id']]=dict(target,scaffold=sc)
                     handle.write('>'+target['id']+'\n'+sequence(fa,sc,target['start'],target['end'])+'\n')
         progress('Building matched controls and chromosome context')
-        controls,control_links=matched_control_sites(intervals,gaps,sizes)
-        # Gap controls require independent same-chromosome context. Read-supported
-        # continuous controls require both that context and a measured read chain.
-        for control in controls.values():
-            tests=[peer_test(dict(id=peer['peer'],sample=peer['sample'],eligible=peer['eligible']),peer['scaffolds'].get(control['scaffold'],[]),control['lo'],control['hi']) for peer in data.get('coarse_context',[])]
-            control['context_individuals']=summarize_peers(tests,data['sample'],('__none__','__none__'))['continuous']
         for event in events:
             progress('Starting HiFi assays '+event['id'])
             if mapping['status'] in ('mapped','reused'):
-                for target in [event]+event['cut_options']:
+                for target in [event]+event['cut_options']+event.get('alternatives',[]):
                     sam=work/(target['id']+'.sam');run(['samtools','view','-h',mapping['bam'],'%s:%d-%d'%(event['scaffold'],target['start']+1,target['end'])],sam)
                     if target is event:
                         target['depth']=read_depth(sam,target['start'],target['end']);target['depth_all_primary']=read_depth(sam,target['start'],target['end'],mapq=0)
@@ -259,7 +289,29 @@ def main():
                         target['flank_molecules']=[support_grid(sam,target['lo']-1000,target['lo']-1000)['minimum'],support_grid(sam,target['hi']+1000,target['hi']+1000)['minimum']]
                 # Failed reads cannot justify a cut; direct evidence is explicitly unavailable.
             else:event['hifi']=dict(state='unavailable')
+            event['alternatives']=[]
+            if mapping['status'] in ('mapped','reused'):
+                event['alternatives']=regional_hypotheses(event)
+                for target in event['alternatives']:
+                    assess_alternative(event,target,data['sample'])
+                    target['start']=max(0,target['lo']-100000);target['end']=min(sizes[event['scaffold']],target['hi']+100000)
+                    target['contact_probe_bp']=target['probe_bp']
+                    intervals[target['id']]=dict(target,lo=target['probe_bp'],hi=target['probe_bp'])
+                    with queries.open('a') as handle:handle.write('>'+target['id']+'\n'+sequence(fa,event['scaffold'],target['start'],target['end'])+'\n')
+                actual=bridge_records(work/(event['id']+'.sam'),event['alternatives'])
+                bridge_rows.extend(actual)
+                for target in event['alternatives']:
+                    reads=[r for r in actual if r['location']==target['id']]
+                    target['bridge_counts']={str(tier):sum(r['mapq']>=tier for r in reads) for tier in (0,20,30)}
+                    target['bridges_with_competing_placements']=sum(r['competing_placement_in_window'] for r in reads)
             progress('Finished HiFi assays '+event['id'])
+        controls,control_links=matched_control_sites(intervals,gaps,sizes)
+        # Gap controls require independent same-chromosome context. Read-supported
+        # continuous controls require both that context and a measured read chain.
+        for control in controls.values():
+            tests=[peer_test(dict(id=peer['peer'],sample=peer['sample'],eligible=peer['eligible']),peer['scaffolds'].get(control['scaffold'],[]),control['lo'],control['hi']) for peer in data.get('coarse_context',[])]
+            control['context_individuals']=summarize_peers(tests,data['sample'],('__none__','__none__'))['continuous']
+
         progress('Starting read-supported control validation')
         for key,control in controls.items():
             rejection=''
@@ -295,9 +347,9 @@ def main():
             profiles={sc:{library:contact_profile(values[sc]) for library,values in library_matrices.items()} for sc in matrices}
             data['hic_audit']=dict(audit=audit,libraries=totals,source_sha256=sha(a.source),agp_sha256=sha(a.agp))
             for event in events:
-                for target in [event]+event['cut_options']:
+                for target in [event]+event['cut_options']+event.get('alternatives',[]):
                     target['contacts']=[]
-                    population='continuous_control' if target is event else 'gap_control'
+                    population='continuous_control' if target is event or target.get('kind')=='regional_read_loss' else 'gap_control'
                     for library in sorted({r['library_id'] for r in libraries}):
                         result=contact_result(counts[library,target['id']],[dict(counts[library,key],id=key,context_rejection=controls[key]['context_rejection']) for key in control_links[target['id']]])
                         result.update(library=library,control_population=population);target['contacts'].append(result)
@@ -305,7 +357,7 @@ def main():
         if a.graph and events:
             graph=measure_graph(a.graph,work,queries,intervals,run,a.threads)
             for event in events:
-                for target in [event]+event['cut_options']:target.update(graph.get(target['id'],{}))
+                for target in [event]+event['cut_options']+event.get('alternatives',[]):target.update(graph.get(target['id'],{}))
         if events and a.plots=='true':
             all_fa=work/'scaffolds.fa'
             with all_fa.open('w') as handle:
@@ -316,6 +368,7 @@ def main():
                     if 'id' in r and 'window' in r:telomere_rows.append(dict(scaffold=r['id'],start=max(0,int(r['window'])-1000),count=int(r['forward_repeat_number'])+int(r['reverse_repeat_number'])))
         for event in events:
             event['assembly']=data['assembly']
+            rank_alternatives(event)
             event['recommendation'],event['reason']=recommend(event)
             for t in event['peer_tracks']:block_rows.extend(dict(event=event['id'],peer=t['peer'],**b) for b in t['blocks'])
             if a.plots=='true':
@@ -333,9 +386,12 @@ def main():
     progress('Writing evidence JSON and tables')
     (out/'evidence.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
     if support_rows:write_table(out/'read_support.tsv',support_rows,['event','mapq','position','molecules'])
-    control_rows=[dict(location=target['id'],library=result['library'],control=row['id'],scaffold=data['control_registry'][row['id']]['scaffold'],start=data['control_registry'][row['id']]['lo'],end=data['control_registry'][row['id']]['hi'],**{k:row.get(k,'') for k in ('cross','left_within','right_within','ratio','accepted','rejection')}) for event in events for target in [event]+event['cut_options'] for result in target.get('contacts',[]) for row in result.get('control_audit',[])]
+    control_rows=[dict(location=target['id'],library=result['library'],control=row['id'],scaffold=data['control_registry'][row['id']]['scaffold'],start=data['control_registry'][row['id']]['lo'],end=data['control_registry'][row['id']]['hi'],**{k:row.get(k,'') for k in ('cross','left_within','right_within','ratio','accepted','rejection')}) for event in events for target in [event]+event['cut_options']+event.get('alternatives',[]) for result in target.get('contacts',[]) for row in result.get('control_audit',[])]
     if control_rows:write_table(out/'control_support.tsv',control_rows,['location','library','control','scaffold','start','end','cross','left_within','right_within','ratio','accepted','rejection'])
     if contact_rows:write_table(out/'contact_support.tsv',contact_rows,['event','location','library','cross','left_within','right_within','ratio','matched_controls','calibrated','contact_loss'])
+    if any(e.get('alternatives') for e in events):write_table(out/'bridging_reads.tsv',bridge_rows,['location','probe_bp','read','mapq','alignment_start','cigar','competing_placement_in_window'])
+    alternative_rows=[dict(event=event['id'],**{k:t.get(k,'') for k in ('id','rank','lo','hi','probe_bp','distance_bp','assessment','reason','ambiguity_restores_support')},mapq20_min=t['hifi']['minimum'],mapq30_min=t['hifi_strict']['minimum'],all_primary_min=t['hifi_all_primary']['minimum']) for event in events for t in event.get('alternatives',[])]
+    if alternative_rows:write_table(out/'alternative_locations.tsv',alternative_rows,['event','id','rank','lo','hi','probe_bp','distance_bp','mapq20_min','mapq30_min','all_primary_min','ambiguity_restores_support','assessment','reason'])
     if block_rows:write_table(out/'chromosome_blocks.tsv',block_rows,['event','peer','lo','hi','chrom','status'])
     if telomere_rows:write_table(out/'telomeres.tsv',telomere_rows,['scaffold','start','count'])
     progress('Assessment complete')

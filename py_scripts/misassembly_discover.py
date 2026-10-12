@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict
 from pathlib import Path
-from misassembly_core import label_catalog,cohort_labels,independent_labels,read_paf,discover,sha,POLICY,coarse_tracks
+from misassembly_core import label_catalog,cohort_labels,independent_labels,read_paf,discover,sha,POLICY,coarse_tracks,clip_block
 from chimera_tracks import tracks
 
 
@@ -77,7 +77,7 @@ def main():
     events,minor=discover(peer_tracks,own['sample'],a.minimum_arm_bp)
     for event in events:
         event['peer_tracks']=[dict(peer=peer['id'],sample=peer['sample'],eligible=peer['eligible'],
-                blocks=[dict(b,lo=max(0,event['lo']-1000000,b['lo']),hi=min(event['hi']+1000000,b['hi'])) for b in mapped.get(event['scaffold'],[])
+                blocks=[clip_block(b,max(0,event['lo']-1000000),event['hi']+1000000) for b in mapped.get(event['scaffold'],[])
                         if b['lo']<event['hi']+1000000 and b['hi']>event['lo']-1000000]) for peer,mapped in peer_tracks]
     status='assessed' if scope and peer_tracks else 'no_chromosome_scope' if not scope else 'no_peer_alignments'
     informative=[peer['id'] for peer,mapped in peer_tracks if peer['eligible'] and peer['sample']!=own['sample'] and

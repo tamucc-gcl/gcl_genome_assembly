@@ -71,7 +71,11 @@ workflow {
         'PASS: full cohort workflow published both assemblies, including naming reference without self-PAF'
     }
     CHIMERA.out.decisions.view { decisions ->
-        assert decisions.readLines().size()==(params.fixture_manual ? 3 : 2)
+        def lines=decisions.readLines()
+        def fields=lines[0].split('\t').toList()
+        def records=lines.drop(1).collect { line -> def values=line.split('\t',-1); fields.withIndex().collectEntries { name,index -> [(name):values[index]] } }
+        assert records.count { it.location_kind!='alternative_region' }==(params.fixture_manual ? 2 : 1)
+        assert records.every { it.location_kind!='alternative_region' || (it.selected=='NO' && !it.cut_bp && it.assay_probe_bp) }
         assert decisions.text.contains('chr1') && decisions.text.contains('chr2')
         'PASS: general discovery found the synthetic chromosome change; review row emitted unselected'
     }
@@ -84,7 +88,9 @@ workflow {
         if(params.fixture_evidence) {
             def data=new groovy.json.JsonSlurper().parseText(report.parent.resolve('assemblies/sample_hap1/evidence.json').text)
             assert data.events[0].cut_options[0].spanning==2
-            assert data.events[0].recommendation=='RETAIN'
+            assert data.events[0].recommendation=='REVIEW'
+            assert data.events[0].localization_warning
+            assert data.events[0].alternatives
             assert data.events[0].contacts.size()==(params.fixture_single ? 1 : 2)
             assert data.events[0].contacts.every { it.raw_counts.cross==0 && it.raw_counts.left_within==100 && it.raw_counts.right_within==100 && !it.calibrated }
             assert file(data.mapping.bam).exists()

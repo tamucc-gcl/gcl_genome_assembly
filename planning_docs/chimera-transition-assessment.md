@@ -312,3 +312,52 @@ finalization and final read mapping. The run summary regenerates because it reco
 the invocation name. The direct-JAR local harness now passes official Java module
 options into its child JVM so its asynchronous cache writer persists entries.
 Full biological validation still requires the production Crest run above.
+
+Regional evidence improvements (2026-10-12)
+-----------------------------------------
+
+Policy cohort-regional-review-v4 retains the original arm-transition bracket if
+fine localization lacks two independent, qualified chromosome-flank observations.
+Clipped projected blocks retain their original alignment density. The chr7/chr12
+screen is supported by approximately 13–15 Mb of chr7 sequence in each independent
+haplotype comparison; the old narrow placement relied on a small assignment island.
+
+Assessment searches the entire transition bracket plus 500 kb on each side for
+MAPQ20 losses and sustained MAPQ30 losses. Overlapping regions are merged, up to
+24 are directly assayed, and omitted regions and assay-edge censoring are reported.
+Each has independent chromosome context, all three HiFi placement tiers, actual
+bridging-read identities with observed competing placements, and separately
+calibrated per-library Hi-C counts. Alternatives have ranked review rows and blank
+cut coordinates; their assay probes are never selected cuts. Nearby sustained
+losses prevent local continuity from being interpreted as validation of the join.
+
+Focal chromosomes use contrasting blue/orange consistently across haplotypes;
+other chromosomes use muted colors and a separate legend. The report and plots
+distinguish the original transition bracket, ranked alternative regions and exact
+gap options. Manual cuts remain explicitly reviewed, source-bound selections.
+
+Validation: 311 general Python tests pass, including regional losses, placement
+ambiguity, missing measurements, fine-assignment islands, read-level bridge audits,
+alignment-density clipping and manual decision safety. Nextflow integration tests
+cover one-library evidence and two-library manual cutting through finishing,
+renaming and final read mapping, including cache resume. Tool doubles test wiring;
+biological accuracy is assessed with the full Crest rerun below.
+
+The saved CTlk profiles nominate the chr4/14 low-confidence region around
+35.217–35.496 Mb, the 42.831 Mb weak point, and the hap2 support loss around
+39.864–39.894 Mb. All-primary placements restore support in the first and last
+regions. Fresh alternative-site contact measurements are required before any
+new interpretation; old nominal-boundary measurements are not transferred.
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/chimera-regional-review \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-production-final/results/assembly/chimeras/mapping_manifest.json"
+```
+
+The manifest reuses source-validated BAMs from the last real run; it is optional
+in a fresh production run. Pairwise alignment and unchanged upstream assembly
+processes resume from the normal cache. Discovery, assessment and reporting
+regenerate. Outputs use symbolic links, and the launcher writes a self-contained
+comparisons/chimera-regional-review.review.tar.gz for reassessment.

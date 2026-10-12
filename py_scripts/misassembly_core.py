@@ -13,7 +13,7 @@ from pathlib import Path
 from chimera_tracks import tracks
 from chimera_controls import molecule_chains, qualified_molecule
 
-POLICY='cohort-review-v3'
+POLICY='cohort-regional-review-v4'
 
 
 def sha(path):
@@ -180,14 +180,26 @@ def discover(peer_tracks,sample,minimum=1000000,cluster_distance=250000):
             transition=min(matches,key=lambda t:abs(t['lo']-group['lo'])+abs(t['hi']-group['hi']))
             group['screening_range']=dict(lo=group['lo'],hi=group['hi'])
             lo,hi=transition['lo'],transition['hi'];resolution=width
-            focused=[dict(t,blocks=[dict(b,lo=max(b['lo'],max(0,lo-2*width)),hi=min(b['hi'],hi+2*width)) for b in t['blocks'] if b['hi']>max(0,lo-2*width) and b['lo']<hi+2*width]) for t in local]
+            focused=[dict(t,blocks=[clip_block(b,max(0,lo-2*width),hi+2*width) for b in t['blocks'] if b['hi']>max(0,lo-2*width) and b['lo']<hi+2*width]) for t in local]
             fine=consensus_regions(focused,sample,max(1,width//100))
             left=[r for r in fine if r['chrom']==group['left'] and r['lo']<=hi]
             right=[r for r in fine if r['chrom']==group['right'] and r['hi']>=lo]
             if left and right:
                 left_end=max(r['hi'] for r in left)
                 right_start=min(r['lo'] for r in right if r['hi']>=left_end) if any(r['hi']>=left_end for r in right) else hi
-                if left_end<=right_start:lo,hi=left_end,right_start;resolution=max(1,width//100)
+                if left_end<=right_start:
+                    tests=[peer_test(dict(id=t['peer'],sample=t['sample'],eligible=t['eligible']),t['blocks'],left_end,right_start) for t in local]
+                    votes=summarize_peers(tests,sample,(group['left'],group['right']))
+                    if len(votes['separate'])>=2 and not votes['continuous'] and not votes['conflicting']:
+                        lo,hi=left_end,right_start;resolution=max(1,width//100)
+                    else:
+                        lo,hi=group['screening_range']['lo'],group['screening_range']['hi']
+                        group['localization_warning']='Narrow assignment islands lack two independent supporting chromosome flanks; retaining the original arm-transition bracket.'
+            final_tests=[peer_test(dict(id=t['peer'],sample=t['sample'],eligible=t['eligible']),t['blocks'],lo,hi) for t in local]
+            final_votes=summarize_peers(final_tests,sample,(group['left'],group['right']))
+            if len(final_votes['separate'])<2 or final_votes['continuous'] or final_votes['conflicting']:
+                lo,hi=group['screening_range']['lo'],group['screening_range']['hi'];resolution=width
+                group['localization_warning']='The narrow boundary lacks two independent supporting chromosome flanks; retaining the original arm-transition bracket.'
             group.update(lo=lo,hi=hi,localization='Independent-individual regional chromosome transition',localization_resolution_bp=resolution)
         else:
             screening=screen_transition_flanks(group,local,sample)
@@ -213,6 +225,15 @@ def summarize_side(track,lo,hi,minimum=50000):
         if b.get('chrom'):counts[b['chrom']]+=max(0,min(hi,b['hi'])-max(lo,b['lo']))*b.get('aligned_bp',b['hi']-b['lo'])/max(1,b['hi']-b['lo'])
     total=sum(counts.values());identity,n=max(counts.items(),key=lambda v:v[1]) if counts else (None,0)
     return dict(chrom=identity,aligned_bp=total,dominance=n/max(1,total),qualified=total>=minimum and n/max(1,total)>=.9)
+
+
+def clip_block(block,lo,hi):
+    """Preserve alignment density when clipping a projected interval."""
+    start,end=max(lo,block['lo']),min(hi,block['hi'])
+    result=dict(block,lo=start,hi=end)
+    if 'aligned_bp' in block:
+        result['aligned_bp']=block['aligned_bp']*max(0,end-start)/max(1,block['hi']-block['lo'])
+    return result
 
 
 def coarse_tracks(track,width=100000):
@@ -275,7 +296,7 @@ def gap_association(event,option,sample):
     opposing={r['sample'] for r in evidence if r['observable'] and not r['consistent']}
     resolution=event.get('localization_resolution_bp',0)
     nearby=option['lo']<=event['hi']+resolution and option['hi']>=event['lo']-resolution
-    localized=event.get('localization')=='Independent-individual regional chromosome transition'
+    localized=event.get('localization')=='Independent-individual regional chromosome transition' and not event.get('localization_warning')
     if len(opposing)>=2:status='contradicted';reason='Two independent individuals show a different intervening chromosome order.'
     elif opposing:status='unresolved';reason='An intervening chromosome assignment conflicts; independent confirmation is incomplete.'
     elif len(supporting)>=2:status='confirmed';reason='Two independent individuals support a consistent intervening chromosome order.'
@@ -486,6 +507,79 @@ def matched_control_sites(intervals,gaps,lengths,flank=250000,count=96):
     return controls,links
 
 
+def regional_hypotheses(event,maximum=24):
+    """Nominate regional support losses; their minima are assay sites, never cuts."""
+    ranges=[]
+    for tier,key in ((20,'hifi_profile'),(30,'hifi_strict_profile')):
+        probes=event.get(key,{}).get('probes',[]);runs=[]
+        for p in probes:
+            if p['molecules']>=2:continue
+            if runs and p['position']==runs[-1][-1]['position']+1000:runs[-1].append(p)
+            else:runs.append([p])
+        for run in runs:
+            if tier==30 and len(run)<5:continue
+            ranges.append(dict(lo=run[0]['position'],hi=min(event.get('end',run[-1]['position']+1000),run[-1]['position']+1000),tiers=[tier]))
+    merged=[]
+    for r in sorted(ranges,key=lambda r:r['lo']):
+        if merged and r['lo']<=merged[-1]['hi']:
+            merged[-1]['hi']=max(merged[-1]['hi'],r['hi']);merged[-1]['tiers']=sorted(set(merged[-1]['tiers']+r['tiers']))
+        else:merged.append(dict(r))
+    nominal=(event['lo']+event['hi'])//2
+    for r in merged:
+        points=[p for p in event.get('hifi_profile',{}).get('probes',[]) if r['lo']<=p['position']<r['hi']]
+        if not points:continue
+        r['probe_bp']=min(points,key=lambda p:(p['molecules'],abs(p['position']-nominal)))['position']
+        r['distance_bp']=max(0,event['lo']-r['hi'],r['lo']-event['hi'])
+        r['minimum']=min(p['molecules'] for p in points)
+        r['edge_censored']=r['lo']<=event.get('start',0)+1000 or r['hi']>=event.get('end',r['hi']+2000)-1000
+    merged=[r for r in merged if 'probe_bp' in r]
+    merged.sort(key=lambda r:(r['minimum'],r['distance_bp'],-(r['hi']-r['lo']),r['lo']))
+    event['unassessed_alternative_count']=max(0,len(merged)-maximum)
+    return [dict(r,id=event['id']+'R%02d'%(i+1),kind='regional_read_loss',scaffold=event['scaffold']) for i,r in enumerate(merged[:maximum])]
+
+
+def profile_interval(event,key,lo,hi):
+    """Summarize measured probes without rereading the regional SAM for every site."""
+    probes=[p for p in event.get(key,{}).get('probes',[]) if lo<=p['position']<=hi]
+    return dict(minimum=min((p['molecules'] for p in probes),default=None),
+                supported_fraction=sum(p['molecules']>=2 for p in probes)/len(probes) if probes else None,probes=probes)
+
+
+def assess_alternative(event,target,sample):
+    target['peer_tests']=[peer_test(dict(id=t['peer'],sample=t['sample'],eligible=t['eligible']),t['blocks'],target['lo'],target['hi']) for t in event['peer_tracks']]
+    target['peers']=summarize_peers(target['peer_tests'],sample,(event['left'],event['right']))
+    for key in ('hifi','hifi_strict','hifi_all_primary'):
+        target[key]=profile_interval(event,key+'_profile',target['lo'],target['hi'])
+    target['association']=gap_association(event,target,sample)
+    target['ambiguity_restores_support']=target['hifi_all_primary']['minimum'] is not None and target['hifi_all_primary']['minimum']>=2 and target['hifi_strict']['minimum'] is not None and target['hifi_strict']['minimum']<2
+    p=target['probe_bp']
+    target['flank_support']=[]
+    for side,lo,hi in (('left',max(event['start'],p-10000),p-1000),('right',p+1000,min(event['end'],p+10000))):
+        summary=profile_interval(event,'hifi_profile',lo,hi)
+        target['flank_support'].append(dict(side=side,**summary,observable=len(summary['probes'])>=5 and summary['supported_fraction']>=.8))
+
+
+def rank_alternatives(event):
+    event.setdefault('alternatives',[])
+    for t in event.get('alternatives',[]):
+        contacts=t.get('contacts',[]);losses=[c['library'] for c in contacts if c['calibrated'] and c['loss']]
+        nonloss=[c['library'] for c in contacts if c['calibrated'] and not c['loss']]
+        t['contact_losses']=losses
+        t['rank_score']=2*min(3,len(t['peers']['separate']))+2*bool(losses)+2*(t['hifi']['minimum']==0)+int(observed_flanks(t))-2*bool(t['peers']['continuous'])-2*t['ambiguity_restores_support']
+        t['assessment']='Review alternative boundary' if t['association']['status']=='confirmed' and t['peers']['separate'] else 'Nearby support loss; chromosome association unresolved'
+        if t['peers']['continuous']:t['assessment']='Same-chromosome flanks oppose this fusion location'
+        t['reason']='; '.join(filter(None,[str(len(t['peers']['separate']))+' independent separating individuals',
+            'contact loss: '+', '.join(losses) if losses else 'no calibrated contact loss',
+            'libraries disagree' if losses and nonloss else '',
+            'low-confidence placements restore continuity' if t['ambiguity_restores_support'] else '',
+            'support loss reaches the assay edge; full extent is unresolved' if t.get('edge_censored') else '',
+            'read observability on both flanks' if observed_flanks(t) else 'adjacent read support incomplete']))
+        t['cut_bp']=None
+    event['alternatives'].sort(key=lambda t:(-t['rank_score'],t['distance_bp'],t['lo']))
+    for i,t in enumerate(event['alternatives'],1):t['rank']=i
+    event['regional_concerns']=any(t['hi']-t['lo']>=5000 and not (event['lo']<=t['lo'] and t['hi']<=event['hi']) for t in event['alternatives'])
+
+
 def recommend(event):
     peers=event['peers'];grid=event.get('hifi',{});options=event.get('cut_options',[])
     event.pop('recommended_cut',None)
@@ -501,6 +595,10 @@ def recommend(event):
         event['evidence_conflicts'].append('MAPQ-20 continuity is not confirmed by the stricter MAPQ-30 read check')
     if event['evidence_conflicts']:
         return 'REVIEW','Keep intact pending review: '+ '; '.join(event['evidence_conflicts'])+'.'
+    if event.get('localization_warning'):
+        return 'REVIEW','Chromosome-scale composite supported, but its boundary remains broad; nearby read continuity does not localize or validate the whole join.'
+    if event.get('regional_concerns'):
+        return 'REVIEW','Continuity at the original interval does not resolve nearby sustained read-support losses; review the ranked alternative locations.'
     if len(peers['continuous'])>=2 and not peers['separate'] and not peers['conflicting']:
         return 'RETAIN','Other individuals support one chromosome on both sides.'
     eligible=[c for c in options if not c['unmet_cut_prerequisites']]
