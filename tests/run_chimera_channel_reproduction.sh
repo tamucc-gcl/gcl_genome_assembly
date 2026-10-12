@@ -33,17 +33,30 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf ]]; then
     extra=(-c "$runtime/check.config")
     [[ "${3:-}" == resume ]] && extra+=(-resume)
     script="$repo/.misassembly-wiring.nf"
-    launch="$repo/comparisons/misassembly-validation/nxf-launch"
+    # Keep the Nextflow cache on Linux: its database locks require native filesystem semantics.
+    launch="$runtime/nxf-launch"
+    mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
 else
     script=reproduction.nf
 fi
 runtime_java=$(find "$runtime" -path '*/bin/java' -type f -print -quit)
+# Match Nextflow 23.10.1's launcher permissions on Java 17. Missing these can
+# silently prevent its asynchronous Kryo cache writer from persisting task entries.
+java_opens=()
+for package in java.lang java.io java.nio java.net java.util java.util.concurrent.locks \
+    java.util.concurrent.atomic java.nio.file.spi sun.nio.ch sun.nio.fs \
+    sun.net.www.protocol.http sun.net.www.protocol.https sun.net.www.protocol.ftp \
+    sun.net.www.protocol.file jdk.internal.misc jdk.internal.vm java.util.regex; do
+    java_opens+=("--add-opens=java.base/$package=ALL-UNNAMED")
+done
 run_nextflow() {
+# The executable JAR can start a child JVM; pass options through to that JVM too.
+JAVA_TOOL_OPTIONS="${java_opens[*]} --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED" \
 "$runtime_java" --add-exports java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED \
     --add-opens java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED \
-    --add-opens java.base/java.lang=ALL-UNNAMED -jar "$runtime/nextflow.jar" run "$script" "${extra[@]}" -ansi-log false
+    "${java_opens[@]}" -jar "$runtime/nextflow.jar" run "$script" "${extra[@]}" -cache true -ansi-log false
 }
 if ! run_nextflow; then
     find work -name .command.err -mmin -10 -exec sh -c 'echo "$1"; tail -20 "$1"' sh {} \;
@@ -58,5 +71,7 @@ if [[ "${3:-}" == cache ]]; then
     grep -q 'Cached process > CHIMERA:MISASSEMBLY_ALIGN' cache-resume.log
     grep -q 'Cached process > CHIMERA:BREAK_CHIMERAS' cache-resume.log
     grep -q 'Cached process > CHIMERA:CHIMERA_REASSIGN_SPECIES' cache-resume.log
-    echo 'PASS: discovery, evidence, cutting and reassignment resume from cache'
+    grep -q 'Cached process > FINALIZE_ASSEMBLY' cache-resume.log
+    grep -q 'Cached process > FINAL_READ_EVIDENCE:MAP_HIFI_FINAL' cache-resume.log
+    echo 'PASS: discovery, evidence, cutting, reassignment, finishing and final read mapping resume from cache'
 fi

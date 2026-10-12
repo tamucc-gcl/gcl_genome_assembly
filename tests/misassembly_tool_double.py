@@ -19,18 +19,42 @@ if tool=='date':
     if args==['+%s%3N']:print(time.time_ns()//1000000)
     else:sys.exit(subprocess.call(['/usr/bin/date',*args]))
 elif tool=='samtools' and args[0]=='faidx':
-    path=Path(args[1]);records=fasta(path)
+    path=Path(args[3] if args[1]=='-r' else args[1]);records=fasta(path)
     if len(args)==2:Path(str(path)+'.fai').write_text(''.join(f'{n}\t{len(s)}\t0\t0\t0\n' for n,s in records.items()))
+    elif args[1]=='-r':
+        for name in Path(args[2]).read_text().splitlines():print('>'+name);print(records[name])
+    elif args[2] in records:print('>'+args[2]);print(records[args[2]])
     else:
         n,region=args[2].rsplit(':',1);lo,hi=map(int,region.split('-'));print('>'+args[2]);print(records[n][lo-1:hi])
 elif tool=='samtools' and args[0]=='sort':Path(args[args.index('-o')+1]).write_text(sys.stdin.read())
-elif tool=='samtools' and args[0]=='index':Path(args[1]+'.bai').touch()
+elif tool=='samtools' and args[0]=='index':Path(args[-1]+'.bai').touch()
 elif tool=='samtools' and args[0]=='quickcheck':assert Path(args[1]).read_text().startswith('@SQ')
 elif tool=='samtools' and args[0]=='idxstats':
     for line in Path(args[1]).read_text().splitlines():
         if line.startswith('@SQ'):
             f=line.split('\t');print(f[1][3:]+'\t'+f[2][3:]+'\t2\t0')
-elif tool=='samtools' and args[0]=='view':print(Path(args[2]).read_text(),end='')
+elif tool=='samtools' and args[0]=='view':
+    if '-c' in args:print(sum(not line.startswith('@') for line in Path(args[-1]).read_text().splitlines()))
+    elif args[-1].endswith('.bam'):print(Path(args[-1]).read_text(),end='')
+    elif args[2].endswith('.bam'):print(Path(args[2]).read_text(),end='')
+    else:print(sys.stdin.read(),end='')
+elif tool=='tgsgapcloser':
+    if '-h' in args:print('Version : 1.0')
+    else:
+        prefix=args[args.index('--output')+1]
+        Path(prefix+'.scaff_seqs').write_text(Path(args[args.index('--scaff')+1]).read_text())
+        Path(prefix+'.gap_fill_detail').write_text('Integration double: sequence preserved\n')
+elif tool=='seqkit':
+    if args[0]=='stats':print('integration stats')
+    else:
+        seq=sys.stdin.read().splitlines();print(seq[0]);print(''.join(seq[1:]).translate(str.maketrans('ACGTN','TGCAN'))[::-1])
+elif tool=='teloclip':
+    if args[0]=='filter':print(sys.stdin.read(),end='')
+    elif args[0]=='extend':
+        records=fasta(args[2])
+        Path(args[args.index('--output-fasta')+1]).write_text(''.join('>'+n+'\n'+s+'TT\n' for n,s in records.items()))
+        Path(args[args.index('--stats-report')+1]).write_text(''.join(f'### {n}\n  Original length: {len(s)}\n  Right extension: +2bp\n' for n,s in records.items()))
+    else:raise RuntimeError('Unexpected teloclip call')
 elif tool=='minimap2' and '-ax' in args:
     for name,seq in fasta(args[-2]).items():
         print(f'@SQ\tSN:{name}\tLN:{len(seq)}')

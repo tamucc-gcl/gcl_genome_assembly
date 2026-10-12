@@ -10,6 +10,7 @@ process ASSEMBLY_RUN_SUMMARY {
     val completed
     path coordinate_report
     path eligibility_report
+    path chimera_report
 
     output:
     path 'assembly_run_summary.md', emit: report
@@ -28,6 +29,13 @@ process ASSEMBLY_RUN_SUMMARY {
     }.join('\n')
     def state = expected.any { r -> r.status == 'invalid' || (r.status == 'accepted' && (bySample[r.sample] ?: []).size() != r.expected) }
         ? 'Incomplete: inspect sample statuses and execution logs.' : 'All accepted samples have their expected finalized assemblies.'
+    def chimeraSection = chimera_report.name == 'README.md' ? '''
+## Chimera review
+
+[Review detected chromosome joins, evidence and suggested actions](assembly/chimeras/README.md).
+
+The review includes an editable cut file and instructions for applying selected manual cuts in a subsequent pipeline run.
+''' : ''
     """
     cat > assembly_run_summary.md <<'ASSEMBLY_REPORT'
 # Assembly run summary
@@ -56,6 +64,7 @@ ${rows}
 ${artifacts}
 
 </details>
+${chimeraSection}
 ASSEMBLY_REPORT
     cat ${coordinate_report} >> assembly_run_summary.md
     cat ${eligibility_report} >> assembly_run_summary.md

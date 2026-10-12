@@ -1,8 +1,13 @@
 nextflow.enable.dsl=2
 include { CHIMERA } from '__REPO__/workflows/chimera.nf'
+include { ASSEMBLY_FINISHING } from '__REPO__/workflows/assembly_finishing.nf'
+include { FINALIZE_ASSEMBLY } from '__REPO__/modules/finalize_assembly.nf'
+include { COLLECT_NAME_MAPS } from '__REPO__/modules/collect_name_maps.nf'
+include { ASSEMBLY_RUN_SUMMARY } from '__REPO__/modules/assembly_run_summary.nf'
+include { FINAL_READ_EVIDENCE } from '__REPO__/workflows/final_read_evidence.nf'
 workflow {
     def root='/tmp/chimera-nxf-runtime'
-    def first=[id:'sample_hap1',sample:'sample',taxid:'1',assembler:'hifiasm']
+    def first=[id:'sample_hap1',sample:'sample',taxid:'1',assembler:'hifiasm',hic:true]
     def second=[id:'reference_hap1',sample:'reference',taxid:'1',assembler:'hifiasm']
     CHIMERA(
         Channel.of(tuple(first,file(root+'/a.fa'),file(root+'/names.tsv')),tuple(second,file(root+'/b.fa'),file(root+'/b.names.tsv'))),
@@ -13,6 +18,52 @@ workflow {
         Channel.empty(),Channel.empty(),
         params.fixture_evidence ? Channel.of(tuple([sample:'sample'],file(root+'/reads.fq'))) : Channel.empty(),
         [harmonize:true,scaffold:false])
+    ASSEMBLY_FINISHING(CHIMERA.out.pre_finalize,
+        Channel.of(tuple([sample:'sample'],file(root+'/reads.fq')),tuple([sample:'reference'],file(root+'/reads.fq'))),
+        Channel.of(tuple('1','TTAGGG')), [scaffold:true,hifiasm:true])
+    FINALIZE_ASSEMBLY(ASSEMBLY_FINISHING.out.assemblies)
+    FINAL_READ_EVIDENCE(FINALIZE_ASSEMBLY.out.assembly,
+        Channel.of(tuple([sample:'sample'],file(root+'/reads.fq')),tuple([sample:'reference'],file(root+'/reads.fq'))),
+        false,Channel.empty())
+    FINAL_READ_EVIDENCE.out.reference_digest.join(FINALIZE_ASSEMBLY.out.assembly).toList().view { outputs ->
+        assert outputs.size()==2
+        outputs.each { meta, digest, fa ->
+            def actual=java.security.MessageDigest.getInstance('SHA-256').digest(fa.bytes).encodeHex().toString()
+            assert digest.text.split()[0]==actual
+        }
+        'PASS: final HiFi mapping is bound to the finished, renamed assembly sequence'
+    }
+    COLLECT_NAME_MAPS(FINALIZE_ASSEMBLY.out.name_map.map { meta, nm -> nm }.collect())
+    COLLECT_NAME_MAPS.out.map.view { map ->
+        assert map.text.contains('sample_hap1') && map.text.contains('reference_hap1')
+        if(params.fixture_manual) assert map.text.contains('s_sub_')
+        'PASS: cohort name-map collection uses finalized cut identities'
+    }
+    ASSEMBLY_RUN_SUMMARY(Channel.value([[sample:'sample',status:'accepted',expected:1,reason:'fixture'],[sample:'reference',status:'accepted',expected:1,reason:'fixture']]),
+        FINALIZE_ASSEMBLY.out.assembly.map { meta, fa -> [sample:meta.sample,id:meta.id,name:fa.name] }.collect(flat:false),
+        CHIMERA.out.coordinate_report,Channel.value(file(root+'/quality.tsv')),CHIMERA.out.report)
+    ASSEMBLY_RUN_SUMMARY.out.report.view { report ->
+        assert report.text.contains('(assembly/chimeras/README.md)')
+        assert report.text.contains('All accepted samples have their expected finalized assemblies.')
+        'PASS: production run summary links the generated chimera review'
+    }
+    FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.name_map).join(FINALIZE_ASSEMBLY.out.fai)
+        .toList().view { outputs ->
+            assert outputs.size()==2
+            outputs.each { meta, fa, nm, fai ->
+                def lengths=fai.readLines().collectEntries { line -> def cols=line.split('\t'); [(cols[0]):cols[1].toInteger()] }
+                def rows=nm.readLines().drop(1).collect { it.split('\t') }
+                assert rows.size()==lengths.size()
+                rows.each { row -> assert lengths[row[1]]==row[2].toInteger() }
+                if(meta.id=='sample_hap1') {
+                    assert lengths.size()==(params.fixture_manual ? 2 : 1)
+                    assert lengths.values().sum()==(params.fixture_evidence ? 6100 : 6000)+(params.fixture_manual ? 4 : 2)
+                    if(params.fixture_manual) assert rows.every { it[0].startsWith('s_sub_') }
+                    else assert rows[0][0]=='s'
+                }
+            }
+            'PASS: real finishing and finalization preserve cut pieces, refreshed chromosome names and finished lengths'
+        }
     CHIMERA.out.registry.view { registry ->
         assert registry.readLines().size()==3
         assert registry.text.contains('sample_hap1')

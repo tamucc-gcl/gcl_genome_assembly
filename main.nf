@@ -515,7 +515,7 @@ workflow {
         file("${projectDir}/py_scripts/harmonize_names.py", checkIfExists: true))
     ASSEMBLY_RUN_SUMMARY(ch_input_status,
         ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false),
-        CHIMERA.out.coordinate_report, ASSEMBLY_ELIGIBILITY.out.report)
+        CHIMERA.out.coordinate_report, ASSEMBLY_ELIGIBILITY.out.report, CHIMERA.out.report)
 
     /*
     ========================================================================================

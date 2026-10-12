@@ -24,7 +24,7 @@ finish() {
     fi
     # Package reports and evidence, not the full assembly output tree.
     files=(exit_status.txt)
-    for name in nextflow.log trace.tsv results/assembly_report.md results/assembly/chimeras; do
+    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
@@ -50,3 +50,4 @@ bash "$repo/run_assembly_checkpoint.sbatch" "$sample_sheet" "$hic_readsets" asse
 test -s "$out/results/assembly/chimeras/README.md"
 test -s "$out/results/assembly/chimeras/assembly_registry.tsv"
 test -s "$out/results/assembly/chimeras/review.tsv"
+test -s "$out/results/assembly_run_summary.md"

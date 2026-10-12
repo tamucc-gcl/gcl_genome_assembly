@@ -251,3 +251,64 @@ sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
   --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-evidence-repaired-symlink/results/assembly/chimeras/mapping_manifest.json" \
   --publish_dir_mode symlink
 ```
+
+## Final report and manual-interface corrections
+
+The final reporting pass preserves the v3 biological classifications and uses
+the existing evidence. Sister haplotypes are compared both through independently
+detected chromosome-pair transitions and through local flank measurements. A shared
+chromosome pair is explicitly not treated as proof of identical junctions.
+
+The review file now retains `event_id`, `event_assessment`, `event_reason` and the
+parent recommendation separately from `option_advice` and `option_association`.
+Unassociated nearby gaps are labelled as not suggested cuts in the report, overview
+and review file. Exact gap options are visible alongside the transition interval.
+Neighboring read support is distinguished from absent support across an actual gap.
+The false library-disagreement message is removed when all measured libraries show
+no demonstrated contact loss.
+
+Validation: 301 tests pass, including generated manual gap cuts, manually added
+internal cuts, and sequence reconstruction. The actual v3 packet regenerates with
+six unselected decision rows, unchanged classifications and no broken links or
+candidate anchors. This completes the identified report/interface fixes. Cut
+selection and verification are the next phase; automation remains deferred.
+
+Production validation now runs the same CHIMERA, ASSEMBLY_FINISHING,
+FINALIZE_ASSEMBLY, COLLECT_NAME_MAPS, ASSEMBLY_RUN_SUMMARY and FINAL_READ_EVIDENCE
+modules used by main.nf. Small synthetic fixtures and explicit external-tool
+doubles verify software interfaces; they do not validate mapping accuracy or
+biological recommendations. Finishing deliberately changes sequence lengths so
+stale final name maps fail the test. Manual selections must survive reassignment,
+finishing, final naming and the final mapping reference digest.
+
+The production run summary links the generated chimera review when detection is
+enabled. Disabled detection omits that section. The normal pipeline launcher
+packages this summary with the review archive and checks that it was published.
+
+After syncing, run from the production project root:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/chimera-production-final \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-review-policy-v3/results/assembly/chimeras/mapping_manifest.json"
+```
+
+This launches main.nf with production SLURM resources, resume enabled, the existing
+production work directory, retained source-validated chimera HiFi BAMs, a separate
+output directory and symlink publication. It generates evidence and review files;
+cuts remain unselected. Review results/assembly/chimeras/README.md and review.tsv.
+Keep edited decisions outside generated outputs. A subsequent production run may
+supply --chimera_break /absolute/path/to/reviewed.tsv to apply explicitly selected
+cuts and rerun affected reassignment, finishing, naming and final mappings.
+Automation remains deferred.
+
+Validation of the production integration (2026-10-12): all 301 Python tests pass.
+Nextflow 23.10.1 integration passes for one-library evidence and two-library manual
+cut application through finishing, final naming, name-map collection, linked run
+summary and final HiFi reference digests. A second manual invocation reuses cached
+alignment, discovery, mapping, assessment, cutting, reassignment, finishing,
+finalization and final read mapping. The run summary regenerates because it records
+the invocation name. The direct-JAR local harness now passes official Java module
+options into its child JVM so its asynchronous cache writer persists entries.
+Full biological validation still requires the production Crest run above.

@@ -7,19 +7,20 @@ evidence='evidence' in sys.argv or 'manual' in sys.argv or single
 manual='manual' in sys.argv
 (root/'a.fa').write_text('>s\n'+'A'*3000+('N'*100 if evidence else '')+'C'*3000+'\n')
 (root/'b.fa').write_text('>x\n'+'A'*3000+'\n>y\n'+'C'*3000+'\n')
-(root/'names.tsv').write_text('old_name\tnew_name\tchromosome_member\torient\tlength\tclass\ns\tchr1+chr2\tyes\t+\t'+str(6100 if evidence else 6000)+'\tchromosome\n')
-(root/'b.names.tsv').write_text('old_name\tnew_name\tchromosome_member\torient\tlength\tclass\nx\tchr1\tyes\t+\t3000\tchromosome\ny\tchr2\tyes\t+\t3000\tchromosome\n')
+(root/'names.tsv').write_text('old_name\tnew_name\torient\torder\tlength\tclass\tchromosome_member\ns\tchr1+chr2\tfwd\t1\t'+str(6100 if evidence else 6000)+'\tcomposite\tyes\n')
+(root/'b.names.tsv').write_text('old_name\tnew_name\torient\torder\tlength\tclass\tchromosome_member\nx\tchr1\tfwd\t1\t3000\tchromosome\tyes\ny\tchr2\tfwd\t2\t3000\tchromosome\tyes\n')
 (root/'quality.tsv').write_text('id\trole\trole_reasons\nsample_hap1\tvoter\tqualified\nreference_hap1\tvoter\tqualified\n')
 bin=root/'bin';bin.mkdir(exist_ok=True)
 shim=bin/'tools.py'
 shim.write_text((Path(__file__).parent/'misassembly_tool_double.py').read_text())
 shim.chmod(0o755)
-for name in ('samtools','minimap2','tidk','date'):
+for name in ('samtools','minimap2','tidk','date','seqkit','tgsgapcloser','teloclip'):
     path=bin/name
     if path.is_symlink():path.unlink()
     path.symlink_to(shim)
 (root/'check.config').write_text('''params.outdir='/tmp/chimera-nxf-runtime/new-published'
-params.publish_dir_mode='copy'
+params.publish_dir_mode='symlink'
+params.run_teloclip_extend=true
 params.chimera_detect=true
 params.chimera_break=false
 params.chimera_plots=false

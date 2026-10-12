@@ -315,7 +315,8 @@ def cut_prerequisites(option):
     if option.get('association',{}).get('status')!='confirmed':failures.append('Association between this gap and the chromosome transition is unresolved or contradicted.')
     contacts=option.get('contacts',[])
     if not any(c['calibrated'] and c['loss'] for c in contacts):failures.append('No available Hi-C library establishes contact loss against suitable controls.')
-    if any(c['calibrated'] and not c['loss'] for c in contacts):failures.append('Another measured Hi-C library does not corroborate contact loss; review the library disagreement.')
+    if any(c['calibrated'] and c['loss'] for c in contacts) and any(c['calibrated'] and not c['loss'] for c in contacts):
+        failures.append('Measured Hi-C libraries disagree about contact loss; review the library disagreement.')
     return failures
 
 
