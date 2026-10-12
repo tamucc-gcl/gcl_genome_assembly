@@ -137,9 +137,67 @@ sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
   --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-pipeline-1517368/results/assembly/chimeras/mapping_manifest.json"
 ```
 
-The launcher already uses `-resume`. Read the new
+The launcher already uses `-resume` and `--publish_dir_mode link`, avoiding
+duplicate copies of cached BAMs, FASTQs and assembly files. The review archive
+dereferences links and remains self-contained. Read the new
 `comparisons/chimera-refined-review/results/assembly/chimeras/README.md` and
 per-assembly reports. Existing assemblies and pair alignments are cache-eligible;
 discovery, local assessment, plotting and review rerun. Retained BAM validation
 runs without remapping HiFi reads. Every cut remains unselected until manual
 approval through `review.tsv`.
+
+
+## Evidence repair validation (2026-10-12)
+
+Policy `cohort-review-v2` fixes the issues found in the refined-review packet.
+A single-individual fusion screen is rejected when at least two independent
+individuals have qualified same-chromosome flanks and outnumber the separate
+and conflicting local votes. Missing consensus bins cannot prevent this
+classification. A real cohort transition or independently conflicting evidence
+remains reviewable. Rejected screens retain original observations and local
+votes in the audit, with a collapsed human-readable table.
+
+Gap association has three states: confirmed, unresolved, contradicted. A
+cohort-localized gap within the recorded spatial resolution can be associated
+without inventing sequence homology through an N gap. Actual contradictory
+intervening orders are retained separately. Association does not authorize a
+cut. Every gap lists all unmet cut prerequisites.
+
+Immediate read probes remain recorded. Adjacent flank observability now uses
+10 kb neighborhoods, sampled at 1 kb with 1 kb anchors, requiring at least five
+probes, median support of two molecules and at least 80% supported probes.
+This is an explicit review heuristic; it does not convert missing read support
+into proof of a misassembly. Boundary-only weak observations are exported as
+sampled positions, rather than zero-width weak intervals.
+
+Control pools include up to 96 spatially separated sites, selected across
+scaffolds before filling remaining slots. All selected controls are counted in
+the same per-library Hi-C scan, including controls rejected for chromosome
+context or read continuity. `control_registry`, `control_links`, and per-target
+`control_audit` retain geometry, context, counts and rejection reasons.
+`control_support.tsv` exposes these measurements for review. The calibration
+requirements remain 100 within-side pairs per flank, five controls and a
+factor-of-ten coverage match on each flank. No threshold was relaxed to force
+an outcome.
+
+Two calibrated Hi-C libraries opposing measured read continuity produce an
+explicit REVIEW conflict. A single-library disagreement is recorded even when
+read continuity supports retention. Retained boundaries are collapsed and
+excluded from the actionable candidate count. No absent evidence file gets a
+report link. Figures name their assembly and display ambiguous read/depth
+measurements on separate, labelled right axes.
+
+To validate the repaired evidence on Crest after syncing code:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/chimera-evidence-repaired \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-refined-review/results/assembly/chimeras/mapping_manifest.json"
+```
+
+The existing launcher resumes the production cache, links published outputs,
+and keeps cutting disabled. Neighborhood read assays and expanded control
+measurements must run on Crest; replaying an archived packet cannot create
+those measurements. Review its new evidence before choosing any cuts or
+continuing the wider pipeline improvement pass.

@@ -9,7 +9,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth,consensus_regions,coarse_tracks)
+from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth,consensus_regions,coarse_tracks,gap_association,flank_support)
 from chimera_controls import agp,scan_contacts,literal_gaps
 from chimera_graph_evidence import measure_graph
 
@@ -118,16 +118,28 @@ def plot_event(event,out):
     fig.legend(handles=[Patch(color=colors[c],label=c) for c in labels],ncol=min(8,max(1,len(labels))),
                loc='upper center',bbox_to_anchor=(.5,.965),fontsize=9,frameon=False)
     axes[0].set_title('Chromosome assignments; blank regions have no usable assignment',fontsize=10)
-    for name,color,label,style in [('hifi','#2166ac','MAPQ ≥20','-'),('hifi_strict','#b35806','MAPQ ≥30','-'),
-                                  ('hifi_all_primary','gray','All primary placements (includes ambiguous)',':')]:
+    ambiguous_axes=[]
+    for name,color,label,style in [('hifi','#2166ac','MAPQ ≥20','-'),('hifi_strict','#b35806','MAPQ ≥30','-')]:
         probes=event.get(name+'_profile',event.get(name,{})).get('probes',[])
         if probes:axes[1].plot([p['position']/1e6 for p in probes],[p['molecules'] for p in probes],color=color,label=label,ls=style,lw=1)
     axes[1].axhline(2,color='gray',ls=':');axes[1].set_ylabel('HiFi spanning molecules')
-    if grid.get('probes'):axes[1].legend(fontsize=8)
+    ambiguous=event.get('hifi_all_primary_profile',event.get('hifi_all_primary',{})).get('probes',[])
+    if ambiguous:
+        extra=axes[1].twinx();extra.plot([p['position']/1e6 for p in ambiguous],[p['molecules'] for p in ambiguous],color='gray',alpha=.6,ls=':',label='All primary placements · right axis')
+        extra.set_ylabel('All primary molecules',color='gray',fontsize=8);extra.tick_params(axis='y',colors='gray',labelsize=8);extra.set_ylim(bottom=0);ambiguous_axes.append(extra)
+    if grid.get('probes'):
+        handles,legend=axes[1].get_legend_handles_labels()
+        for extra in ambiguous_axes:
+            h,l=extra.get_legend_handles_labels();handles+=h;legend+=l
+        axes[1].legend(handles,legend,fontsize=8)
     else:axes[1].text(.5,.5,'HiFi evidence unavailable',ha='center',transform=axes[1].transAxes)
-    for name,color,label in [('depth_all_primary','gray','All primary placements'),('depth','#238b45','MAPQ ≥20')]:
-        if event.get(name):axes[2].plot([(p['start']+p['end'])/2e6 for p in event[name]],[p['depth'] for p in event[name]],color=color,label=label,lw=1)
-    if event.get('depth'):axes[2].legend(fontsize=8)
+    if event.get('depth'):
+        axes[2].plot([(p['start']+p['end'])/2e6 for p in event['depth']],[p['depth'] for p in event['depth']],color='#238b45',label='MAPQ ≥20',lw=1)
+    if event.get('depth_all_primary'):
+        extra=axes[2].twinx();extra.plot([(p['start']+p['end'])/2e6 for p in event['depth_all_primary']],[p['depth'] for p in event['depth_all_primary']],color='gray',alpha=.6,ls=':',label='All primary depth · right axis')
+        extra.set_ylabel('All primary depth',color='gray',fontsize=8);extra.tick_params(axis='y',colors='gray',labelsize=8);extra.set_ylim(bottom=0)
+        handles,legend=axes[2].get_legend_handles_labels();h,l=extra.get_legend_handles_labels();axes[2].legend(handles+h,legend+l,fontsize=8)
+    elif event.get('depth'):axes[2].legend(fontsize=8)
     axes[2].set_ylabel('Mean HiFi depth')
     profiles=event.get('contact_profiles',{})
     for library,rows in sorted(profiles.items()):
@@ -148,7 +160,7 @@ def plot_event(event,out):
         ax.grid(alpha=.15)
     for ax in axes[1:]:ax.set_ylim(bottom=0)
     axes[-1].set_xlim(max(0,event['lo']-500000)/1e6,(event['hi']+500000)/1e6)
-    fig.suptitle(event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'],y=.995)
+    fig.suptitle(event.get('assembly','Assessment')+' · '+event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'],y=.995)
     fig.tight_layout(rect=(0,0,1,.92));fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
     progress(f"Finished candidate plot {event['id']} in {time.monotonic()-started:.1f}s")
 
@@ -171,7 +183,8 @@ def plot_scaffold(chrom,matrix,events,out,resolution=100000):
             axis.axvline(position,color='cyan',ls='--',lw=.8);axis.axhline(position,color='cyan',ls='--',lw=.8)
             axis.annotate(event['id'],(position,1),xycoords=('data','axes fraction'),fontsize=9,rotation=90,va='bottom')
     else:axis.text(.5,.5,'Hi-C mappings unavailable',ha='center',transform=axis.transAxes)
-    axis.set_title(chrom+' · contact map',pad=28)
+    assembly=next((e.get('assembly','Assessment') for e in events if e['scaffold']==chrom),'Assessment')
+    axis.set_title(assembly+' · '+chrom+' · contact map',pad=28)
     axis.set_ylabel('Scaffold position (Mb)');axis.set_xlabel('Scaffold position (Mb)')
     fig.tight_layout();fig.savefig(out/'plots'/(chrom+'.contacts.png'),dpi=150,facecolor='white');plt.close(fig)
     progress(f'Finished contact map {chrom} in {time.monotonic()-started:.1f}s')
@@ -215,21 +228,7 @@ def main():
                     if set(sequence(fa,sc,gap['lo'],gap['hi']).upper())!={'N'}:raise ValueError('AGP gap is not literal N sequence')
                     option=dict(scaffold=sc,lo=gap['lo'],hi=gap['hi'],cut_bp=gap['hi'],origin=gap['origin'],id=key+'G%02d'%(len(event['cut_options'])+1))
                     option['peer_tests']=peer_tests(event,option['lo'],option['hi']);option['peers']=summarize_peers(option['peer_tests'],data['sample'],(event['left'],event['right']))
-                    # A nearby gap is an alternative hypothesis. It must not jump
-                    # over a reversal or a third chromosome to become a recommendation.
-                    bridge_lo=min(lo,option['lo']);bridge_hi=max(hi,option['hi'])
-                    bridge=[]
-                    for t in event['peer_tracks']:
-                        if not t['eligible'] or t['sample']==data['sample']:continue
-                        blocks=[b for b in coarse_tracks(t['blocks'],1000) if b['lo']<bridge_hi and b['hi']>bridge_lo]
-                        bases=sum(max(0,min(bridge_hi,b['hi'])-max(bridge_lo,b['lo']))*b['aligned_bp']/max(1,b['hi']-b['lo']) for b in blocks)
-                        order=[]
-                        for b in blocks:
-                            if not order or order[-1]!=b['chrom']:order.append(b['chrom'])
-                        valid=order in ([event['left']],[event['right']],[event['left'],event['right']])
-                        bridge.append(dict(peer=t['peer'],sample=t['sample'],assigned_bp=bases,order=order,consistent=valid,observable=bases>=.5*max(1,bridge_hi-bridge_lo)))
-                    option['bridge']=bridge
-                    option['bridge_consistent']=(lo<=option['lo'] and option['hi']<=hi or len({b['sample'] for b in bridge if b['observable'] and b['consistent']})>=2) and not any(b['observable'] and not b['consistent'] for b in bridge)
+                    option['association']=gap_association(event,option,data['sample'])
                     event['cut_options'].append(option)
                 for target in [event]+event['cut_options']:
                     flank=500000 if target is event else 100000
@@ -256,19 +255,23 @@ def main():
                             target[tier+'_profile']=support_grid(sam,target['start'],target['end'],mapq=target[tier]['mapq'])
                     else:
                         target['spanning']=gap_spanning(sam,target['lo'],target['hi'])
+                        target['flank_support']=flank_support(sam,target['lo'],target['hi'],sizes[event['scaffold']])
                         target['flank_molecules']=[support_grid(sam,target['lo']-1000,target['lo']-1000)['minimum'],support_grid(sam,target['hi']+1000,target['hi']+1000)['minimum']]
                 # Failed reads cannot justify a cut; direct evidence is explicitly unavailable.
             else:event['hifi']=dict(state='unavailable')
             progress('Finished HiFi assays '+event['id'])
         progress('Starting read-supported control validation')
-        usable_controls={}
         for key,control in controls.items():
-            if len(control['context_individuals'])<2:continue
-            if control['role']=='continuous_control':
-                if mapping['status'] not in ('mapped','reused'):continue
-                sam=work/(key+'.sam');run(['samtools','view','-h',mapping['bam'],'%s:%d-%d'%(control['scaffold'],control['lo']-2000+1,control['hi']+2000)],sam)
-                if support_grid(sam,control['lo'],control['hi'])['minimum']<2:continue
-            usable_controls[key]=control
+            rejection=''
+            if len(control['context_individuals'])<2:rejection='insufficient_independent_same_chromosome_context'
+            elif control['role']=='continuous_control':
+                if mapping['status'] not in ('mapped','reused'):rejection='hifi_mapping_unavailable'
+                else:
+                    sam=work/(key+'.sam');run(['samtools','view','-h',mapping['bam'],'%s:%d-%d'%(control['scaffold'],control['lo']-2000+1,control['hi']+2000)],sam)
+                    control['minimum_spanning']=support_grid(sam,control['lo'],control['hi'])['minimum']
+                    if control['minimum_spanning']<2:rejection='continuous_control_without_hifi_continuity'
+            control['context_rejection']=rejection
+            control['eligible']=not rejection
         matrices={};library_matrices={};profiles={}
         if a.pairs and events:
             if not all((a.source,a.libraries,a.agp)):raise ValueError('Hi-C evidence requires its source FASTA, last AGP and library identities')
@@ -286,8 +289,8 @@ def main():
                     for matrix in (matrices[x[0]],library_matrices[library][x[0]]):
                         matrix[i,j]+=1
                         if i!=j:matrix[j,i]+=1
-            progress(f'Starting Hi-C scan: {len(intervals)} locations, {len(usable_controls)} controls')
-            counts,totals,audit=scan_contacts(a.pairs,placements,dict(intervals,**usable_controls),libraries,on_pair=capture)
+            progress(f'Starting Hi-C scan: {len(intervals)} locations, {len(controls)} controls (including auditable exclusions)')
+            counts,totals,audit=scan_contacts(a.pairs,placements,dict(intervals,**controls),libraries,on_pair=capture)
             progress('Finished Hi-C scan')
             profiles={sc:{library:contact_profile(values[sc]) for library,values in library_matrices.items()} for sc in matrices}
             data['hic_audit']=dict(audit=audit,libraries=totals,source_sha256=sha(a.source),agp_sha256=sha(a.agp))
@@ -296,7 +299,7 @@ def main():
                     target['contacts']=[]
                     population='continuous_control' if target is event else 'gap_control'
                     for library in sorted({r['library_id'] for r in libraries}):
-                        result=contact_result(counts[library,target['id']],[dict(counts[library,key],id=key) for key in control_links[target['id']] if key in usable_controls])
+                        result=contact_result(counts[library,target['id']],[dict(counts[library,key],id=key,context_rejection=controls[key]['context_rejection']) for key in control_links[target['id']]])
                         result.update(library=library,control_population=population);target['contacts'].append(result)
                         contact_rows.append(dict(event=event['id'],location=target['id'],library=library,**result['raw_counts'],ratio=result['ratio'],matched_controls=result['matched_controls'],calibrated=result['calibrated'],contact_loss=result['loss']))
         if a.graph and events:
@@ -312,6 +315,7 @@ def main():
                 for r in table(path):
                     if 'id' in r and 'window' in r:telomere_rows.append(dict(scaffold=r['id'],start=max(0,int(r['window'])-1000),count=int(r['forward_repeat_number'])+int(r['reverse_repeat_number'])))
         for event in events:
+            event['assembly']=data['assembly']
             event['recommendation'],event['reason']=recommend(event)
             for t in event['peer_tracks']:block_rows.extend(dict(event=event['id'],peer=t['peer'],**b) for b in t['blocks'])
             if a.plots=='true':
@@ -321,13 +325,16 @@ def main():
                 plot_event(event,out)
         if a.plots=='true':
             for sc in sorted({e['scaffold'] for e in events}):plot_scaffold(sc,matrices.get(sc),events,out)
-        data['control_registry']=usable_controls
+        data['control_registry']=controls
+        data['control_links']=control_links
     # Publish only evidence used by the report and decisions. No SAMs, duplicate FASTAs,
     # speculative IGV sessions, recovered historical joins or diagnostic HTML files.
     data.pop('coarse_context',None)
     progress('Writing evidence JSON and tables')
     (out/'evidence.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
     if support_rows:write_table(out/'read_support.tsv',support_rows,['event','mapq','position','molecules'])
+    control_rows=[dict(location=target['id'],library=result['library'],control=row['id'],scaffold=data['control_registry'][row['id']]['scaffold'],start=data['control_registry'][row['id']]['lo'],end=data['control_registry'][row['id']]['hi'],**{k:row.get(k,'') for k in ('cross','left_within','right_within','ratio','accepted','rejection')}) for event in events for target in [event]+event['cut_options'] for result in target.get('contacts',[]) for row in result.get('control_audit',[])]
+    if control_rows:write_table(out/'control_support.tsv',control_rows,['location','library','control','scaffold','start','end','cross','left_within','right_within','ratio','accepted','rejection'])
     if contact_rows:write_table(out/'contact_support.tsv',contact_rows,['event','location','library','cross','left_within','right_within','ratio','matched_controls','calibrated','contact_loss'])
     if block_rows:write_table(out/'chromosome_blocks.tsv',block_rows,['event','peer','lo','hi','chrom','status'])
     if telomere_rows:write_table(out/'telomeres.tsv',telomere_rows,['scaffold','start','count'])

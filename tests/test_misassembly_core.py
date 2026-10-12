@@ -86,12 +86,12 @@ class MisassemblyTests(unittest.TestCase):
 
     def test_cut_needs_observable_flanks_and_unique_option(self):
         peers=dict(separate=['a','b'],continuous=[],conflicting=[])
-        option=dict(id='G1',peers=peers,spanning=0,flank_molecules=[5,5],contacts=[dict(loss=True),dict(loss=True)])
+        option=dict(id='G1',peers=peers,spanning=0,flank_molecules=[5,5],flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(loss=True),dict(loss=True)])
         event=dict(peers=peers,cut_options=[option],hifi=dict(state='patchy'))
         self.assertEqual(recommend(event)[0],'CUT')
-        option['flank_molecules']=[0,5]
+        option['flank_support'][0]['observable']=False
         self.assertEqual(recommend(event)[0],'SUSPECT')
-        option['flank_molecules']=[5,5];event['cut_options']=[option,dict(option,id='G2')]
+        option['flank_support'][0]['observable']=True;event['cut_options']=[option,dict(option,id='G2')]
         self.assertEqual(recommend(event)[0],'SUSPECT')
 
     def test_supported_sequence_retained_despite_chromosome_change(self):

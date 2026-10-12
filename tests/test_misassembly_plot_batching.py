@@ -99,12 +99,25 @@ class PlotBatchingTests(unittest.TestCase):
             self.assertEqual(len(figures[1].axes),2) # Matrix axis and its colorbar only.
         self.assertFalse(plt.get_fignums())
 
+    def test_ambiguous_spike_does_not_set_primary_read_scale(self):
+        event=dict(assembly='assembly_hap1',id='C01',scaffold='s',lo=400000,hi=401000,left='chr1',right='chr2',peer_tracks=[],cut_options=[],
+                   hifi=dict(probes=[dict(position=400000,molecules=10),dict(position=401000,molecules=8)]),
+                   hifi_all_primary=dict(probes=[dict(position=400000,molecules=400),dict(position=401000,molecules=8)]),
+                   depth=[dict(start=400000,end=401000,depth=10)],depth_all_primary=[dict(start=400000,end=401000,depth=400)])
+        figures=[]
+        with tempfile.TemporaryDirectory() as tmp,patch('matplotlib.figure.Figure.savefig',lambda fig,*a,**kw:figures.append(fig)):
+            out=Path(tmp);(out/'plots').mkdir();plot_event(event,out)
+        self.assertLess(figures[0].axes[1].get_ylim()[1],20)
+        self.assertGreater(figures[0].axes[5].get_ylim()[1],400)
+        self.assertLess(figures[0].axes[2].get_ylim()[1],20)
+        self.assertIn('assembly_hap1',figures[0]._suptitle.get_text())
+
     def test_supported_regional_read_scan_does_not_hide_unsupported_nearby_gap(self):
         peers=dict(separate=['a','b'],continuous=[],conflicting=[])
-        gap=dict(id='G1',lo=1010,hi=1020,spanning=0,flank_molecules=[5,5],peers=peers,contacts=[],bridge_consistent=True)
+        gap=dict(id='G1',lo=1010,hi=1020,spanning=0,flank_molecules=[5,5],peers=peers,flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[])
         event=dict(lo=1000,hi=1005,peers=peers,cut_options=[gap],hifi=dict(state='continuous'))
         self.assertEqual(recommend(event)[0],'SUSPECT')
-        gap['flank_molecules']=[0,5]
+        gap['flank_support'][0]['observable']=False
         self.assertEqual(recommend(event)[0],'RETAIN')
 
 
