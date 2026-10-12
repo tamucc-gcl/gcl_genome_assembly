@@ -6,9 +6,9 @@ The active workflow is `workflows/chimera.nf`, implemented by `modules/misassemb
 
 1. Align every unordered pair of same-species assemblies, with CIGAR retained. These jobs run independently through the normal SLURM executor. Ten assemblies produce 45 pair jobs, each requesting 8 CPUs and 32 GB.
 2. Build chromosome labels from the current harmonized name maps. Resolve blocks inside composites against plainly labelled cohort chromosomes using these new alignments. Both haplotypes of one individual supply one vote. Composite labels never label other composites recursively. Conflicting and unmapped bases remain unassigned. A focal individual's propagated label cannot count as independent confirmation of itself.
-3. Screen every chromosome-scale assembly, including the naming reference, for transitions between chromosome-sized arms. The default minimum is 1 Mb of assigned sequence per arm (`chimera_min_arm_bp`). Small labelled islands are audited rather than promoted into chromosome-fusion decisions. Nearby measurements of the same ordered transition are grouped into one event.
+3. Screen every chromosome-scale assembly, including the naming reference, for transitions between chromosome-sized arms. The default minimum is 1 Mb of assigned sequence per arm (`chimera_min_arm_bp`). Small labelled islands are audited rather than promoted into chromosome-fusion decisions. Chromosome-arm discovery uses regional dominance to tolerate small conflicting label islands. Independent-individual consensus refines the transition using 100 kb regions followed by 1 kb regions. Conflicting haplotypes cannot supply two votes. Peer-only transitions contradicted by continuous local cohort identity remain in the audit rather than the review list. Nearby measurements of the same ordered transition are grouped into one event; their union is a screening range, not the final localized interval.
 4. Map the individual's HiFi reads once for each assembly with an event. Assemblies without events do not get a redundant mapping. Read continuity tolerates indels up to 50 bp, counts each primary molecule once, and is measured at 1 kb probes with 1 kb flanks. MAPQ 20 is the primary assay; MAPQ 30 and all primary placements provide sensitivity and ambiguity checks. Depth is measured separately from continuity.
-5. Test verified current AGP gaps in and within 250 kb of each transition as explicit alternatives. Preserve the distinction between a detected transition and a nearby possible cut. Inspect intervening chromosome assignments before associating a gap with the transition. Assess direct gap-spanning HiFi molecules, immediately adjacent flank observability, per-library Hi-C counts, and native primary-contig placement.
+5. Scan literal N runs in the assessment FASTA, recovering both current AGP gaps and gaps inherited inside scaffold components. Test verified gaps in and within 250 kb of each transition as explicit alternatives. Preserve the distinction between a detected transition and a nearby possible cut. Inspect intervening chromosome assignments before associating a gap with the transition. Assess direct gap-spanning HiFi molecules, immediately adjacent flank observability, per-library Hi-C counts, and native primary-contig placement.
 6. Measure Hi-C using the pairs' actual source FASTA, matching last-scaffolding AGP and read-library identities. Compare gap assays with length-matched gaps and sequence assays with controls of the same separation. Controls require independent same-chromosome context; sequence controls also need measured HiFi continuity. Coverage matching and control counts are retained. Measured zeros are not missing measurements.
 7. Publish a Markdown review and one editable decision file. Finishing may run concurrently in evidence-only mode because it uses the unchanged source assemblies. This report consistently uses pre-finishing coordinates.
 
@@ -97,4 +97,49 @@ Candidate chromosome plots now batch all intervals of each chromosome/peer into 
 
 Assessment now logs elapsed stage times to `.command.err`, including external commands, per-event read assays, Hi-C scanning, candidate/scaffold rendering and evidence writing. The previous CTlk jobs cannot identify elapsed times for individual internal stages. The broad discovered ranges (7–43 Mb) need biological/localization review separately; drawing efficiency does not validate them.
 
-Before syncing code into an active run, stop the controller and remaining retry (for the reported run: `scancel 1517362 1514762`). Sync this checkout and use the normal full-run launch above with `-resume`. Only the assessment helper has changed in this update; completed discovery, pairwise alignment and HiFi mapping tasks remain eligible for cache reuse. Assessment/report tasks will rerun with the corrected renderer.
+That rendering-only revision changed the assessment helper and left discovery and mapping cache inputs unchanged. The newer boundary-refinement revision below changes discovery inputs too; follow its explicit retained-BAM instructions.
+
+## Candidate figures and refined-boundary rerun (2026-10-12)
+
+The main candidate figure has five aligned panels: peer chromosome assignments,
+HiFi spanning molecules, HiFi depth, separate per-library Hi-C contact-support
+profiles, and telomere motif counts. Pale chromosome-colored backgrounds on the
+four measurement panels use local independent-individual agreement. Unassigned
+and conflicting regions stay neutral. Orange marks the assessed transition;
+dashed red lines mark available gap cuts. Chromosome colors remain consistent
+between figures.
+
+The separate `plots/scaffold_*.contacts.png` figures contain only the pooled
+contact matrix. The Hi-C profiles use 100 kb bins and 300 kb flanks. They provide
+spatial context; cut recommendations use the separately recorded exact-gap
+assays and matched controls. Zero contact support with observable flanks is
+plotted as zero; unobservable support is a gap in the curve. Plot profiles and
+regional shading records are retained in `evidence.json`; exact measured gap
+contacts remain in `contact_support.tsv`.
+
+Local replay of the archived 1517368 chromosome tracks narrowed the CTlk hap1
+chr9→chr7 bracket to 63,044,000–63,051,000 bp, without supplying a known cut
+coordinate. The literal gap must still be recovered from the actual assessment
+FASTA and assayed on Crest. No new biological cut recommendation is established
+by this local replay.
+
+After syncing the checkout, launch from the same production directory. This
+runs the full architecture and uses its existing cache. Pass the previous
+published mapping manifest explicitly because discovery and its helper inputs
+have changed; `-resume` alone cannot guarantee that the mapping process is
+reused. The mapper checks source checksum, sample, stage and BAM dictionary
+before accepting a retained BAM.
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/chimera-refined-review \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-pipeline-1517368/results/assembly/chimeras/mapping_manifest.json"
+```
+
+The launcher already uses `-resume`. Read the new
+`comparisons/chimera-refined-review/results/assembly/chimeras/README.md` and
+per-assembly reports. Existing assemblies and pair alignments are cache-eligible;
+discovery, local assessment, plotting and review rerun. Retained BAM validation
+runs without remapping HiFi reads. Every cut remains unselected until manual
+approval through `review.tsv`.

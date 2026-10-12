@@ -9,8 +9,8 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth)
-from chimera_controls import agp,scan_contacts
+from misassembly_core import (sha,table,write_table,peer_test,summarize_peers,support_grid,gap_spanning,contact_result,recommend,POLICY,matched_control_sites,read_depth,consensus_regions,coarse_tracks)
+from chimera_controls import agp,scan_contacts,literal_gaps
 from chimera_graph_evidence import measure_graph
 
 _START=time.monotonic()
@@ -49,81 +49,132 @@ def peer_tests(event,lo,hi):
     return [peer_test(dict(id=t['peer'],sample=t['sample'],eligible=t['eligible']),t['blocks'],lo,hi) for t in event['peer_tracks']]
 
 
+def assessment_gaps(fasta,current_gaps):
+    """Recover N runs inherited inside components, without duplicating AGP gaps."""
+    from bisect import bisect_right
+    minimum=min([10]+[g['hi']-g['lo'] for g in current_gaps])
+    literal=literal_gaps(fasta,minimum=minimum)
+    by_scaffold=defaultdict(list)
+    for gap in literal:by_scaffold[gap['scaffold']].append(gap)
+    starts={sc:[g['lo'] for g in gaps] for sc,gaps in by_scaffold.items()}
+    current_runs=set()
+    for gap in current_gaps:
+        index=bisect_right(starts.get(gap['scaffold'],[]),gap['lo'])-1
+        enclosing=by_scaffold[gap['scaffold']][index] if index>=0 else None
+        if enclosing is None or gap['hi']>enclosing['hi']:
+            raise ValueError('Current AGP gap does not match literal N sequence')
+        current_runs.add((enclosing['scaffold'],enclosing['lo'],enclosing['hi']))
+    return [dict(g,origin='current_agp' if (g['scaffold'],g['lo'],g['hi']) in current_runs else 'inherited_sequence_gap') for g in literal]
+
+
+def chromosome_colors(labels):
+    """Stable chromosome colors across assemblies; no ten-chromosome wraparound."""
+    import colorsys
+    import hashlib
+    result={}
+    for label in labels:
+        number=label.removeprefix('chr').split('_')[0]
+        seed=int(number) if number.isdigit() else int(hashlib.sha256(label.encode()).hexdigest()[:8],16)
+        result[label]=colorsys.hsv_to_rgb((seed*.61803398875)%1,.60,.78)
+    return result
+
+
+def contact_profile(matrix,resolution=100000,flank_bins=3):
+    """Binned cross-boundary support; not the calibrated local gap assay."""
+    import numpy as np
+    rows=[]
+    for i in range(flank_bins,len(matrix)-flank_bins+1):
+        left=matrix[i-flank_bins:i,i-flank_bins:i];right=matrix[i:i+flank_bins,i:i+flank_bins]
+        left_within=float((left.sum()+np.trace(left))/2)
+        right_within=float((right.sum()+np.trace(right))/2)
+        cross=float(matrix[i-flank_bins:i,i:i+flank_bins].sum())
+        ratio=cross/math.sqrt(left_within*right_within) if min(left_within,right_within)>0 else None
+        rows.append(dict(position=i*resolution,ratio=ratio,cross=cross,left_within=left_within,right_within=right_within))
+    return rows
+
+
+def shade_chromosomes(axes,regions,colors):
+    """Only shade assigned regions; do not fill ambiguous/unmapped intervals."""
+    for axis in axes:
+        for region in regions:
+            axis.axvspan(region['lo']/1e6,region['hi']/1e6,facecolor=colors[region['chrom']],alpha=.10,zorder=0)
+
+
 def plot_event(event,out):
     started=time.monotonic();progress('Starting candidate plot '+event['id'])
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    grid=event.get('hifi',{});tracks=event['peer_tracks'];colors={}
-    labels=sorted({b['chrom'] for t in tracks for b in t['blocks'] if b.get('chrom')})
-    palette=plt.get_cmap('tab10');colors={c:palette(i%10) for i,c in enumerate(labels)}
-    fig,axes=plt.subplots(3,1,figsize=(12,max(8,4+.32*len(tracks))),sharex=True,gridspec_kw={'height_ratios':[max(2,len(tracks)*.25),1.5,1]})
+    from matplotlib.patches import Patch
+    grid=event.get('hifi',{});tracks=event['peer_tracks']
+    regions=event.get('chromosome_regions',[])
+    labels=sorted({b['chrom'] for t in tracks for b in t['blocks'] if b.get('chrom')}|{r['chrom'] for r in regions})
+    colors=chromosome_colors(labels)
+    fig,axes=plt.subplots(5,1,figsize=(12,max(12,8+.32*len(tracks))),sharex=True,
+                         gridspec_kw={'height_ratios':[max(2,len(tracks)*.25),1.5,1,1.3,1]})
     collections=sum(draw_chromosome_track(axes[0],t['blocks'],i,colors) for i,t in enumerate(tracks))
     progress(f"{event['id']}: {sum(sum(bool(b.get('chrom')) for b in t['blocks']) for t in tracks)} intervals in {collections} drawing collections")
     axes[0].set_yticks(range(len(tracks)),[t['peer'] for t in tracks]);axes[0].invert_yaxis()
-    from matplotlib.patches import Patch
-    axes[0].legend(handles=[Patch(color=colors[c],label=c) for c in labels],ncol=min(6,max(1,len(labels))),loc='upper center',bbox_to_anchor=(.5,1.25),fontsize=9)
-    axes[0].set_title('Chromosome assignments; blank regions have no usable assignment')
-    if grid.get('probes'):axes[1].plot([p['position']/1e6 for p in grid['probes']],[p['molecules'] for p in grid['probes']],color='#2166ac',label='MAPQ ≥20')
-    strict=event.get('hifi_strict',{})
-    if strict.get('probes'):axes[1].plot([p['position']/1e6 for p in strict['probes']],[p['molecules'] for p in strict['probes']],alpha=.6,label='MAPQ ≥30')
-    ambiguous=event.get('hifi_all_primary',{})
-    if ambiguous.get('probes'):axes[1].plot([p['position']/1e6 for p in ambiguous['probes']],[p['molecules'] for p in ambiguous['probes']],color='gray',alpha=.6,ls=':',label='All primary placements (includes ambiguous)')
-    axes[1].axhline(2,color='gray',ls=':');axes[1].set_ylabel('Spanning molecules\nat each local position')
-    if grid.get('probes'):axes[1].legend()
+    fig.legend(handles=[Patch(color=colors[c],label=c) for c in labels],ncol=min(8,max(1,len(labels))),
+               loc='upper center',bbox_to_anchor=(.5,.965),fontsize=9,frameon=False)
+    axes[0].set_title('Chromosome assignments; blank regions have no usable assignment',fontsize=10)
+    for name,color,label,style in [('hifi','#2166ac','MAPQ ≥20','-'),('hifi_strict','#b35806','MAPQ ≥30','-'),
+                                  ('hifi_all_primary','gray','All primary placements (includes ambiguous)',':')]:
+        probes=event.get(name+'_profile',event.get(name,{})).get('probes',[])
+        if probes:axes[1].plot([p['position']/1e6 for p in probes],[p['molecules'] for p in probes],color=color,label=label,ls=style,lw=1)
+    axes[1].axhline(2,color='gray',ls=':');axes[1].set_ylabel('HiFi spanning molecules')
+    if grid.get('probes'):axes[1].legend(fontsize=8)
     else:axes[1].text(.5,.5,'HiFi evidence unavailable',ha='center',transform=axes[1].transAxes)
+    for name,color,label in [('depth_all_primary','gray','All primary placements'),('depth','#238b45','MAPQ ≥20')]:
+        if event.get(name):axes[2].plot([(p['start']+p['end'])/2e6 for p in event[name]],[p['depth'] for p in event[name]],color=color,label=label,lw=1)
+    if event.get('depth'):axes[2].legend(fontsize=8)
+    axes[2].set_ylabel('Mean HiFi depth')
+    profiles=event.get('contact_profiles',{})
+    for library,rows in sorted(profiles.items()):
+        axes[3].plot([r['position']/1e6 for r in rows],[float('nan') if r['ratio'] is None else r['ratio'] for r in rows],label=library,lw=1)
+    axes[3].set_ylabel('Hi-C contact support\nCross / √(within L × R)')
+    axes[3].set_title('Binned Hi-C support · 100 kb bins, 300 kb flanks · libraries shown separately',fontsize=10)
+    if profiles:axes[3].legend(fontsize=8)
+    else:axes[3].text(.5,.5,'Hi-C profiles unavailable',ha='center',transform=axes[3].transAxes)
+    telomeres=event.get('telomeres',[])
+    if telomeres:axes[4].plot([r['start']/1e6 for r in telomeres],[r['count'] for r in telomeres],color='#762a83',lw=.8)
+    else:axes[4].text(.5,.5,'Telomere measurements unavailable',ha='center',transform=axes[4].transAxes)
+    axes[4].set_ylabel('Telomere motif count\nper 1 kb');axes[4].set_xlabel('Original scaffold coordinate (Mb)')
+    shade_chromosomes(axes[1:],regions,colors)
     for ax in axes:
-        ax.axvspan(event['lo']/1e6,event['hi']/1e6,color='orange',alpha=.12)
+        ax.set_facecolor('white')
+        ax.axvspan(event['lo']/1e6,event['hi']/1e6,color='orange',alpha=.12,zorder=0)
         for cut in event['cut_options']:ax.axvline(cut['cut_bp']/1e6,color='#b2182b',ls='--')
         ax.grid(alpha=.15)
-    if event.get('depth_all_primary'):axes[2].plot([(p['start']+p['end'])/2e6 for p in event['depth_all_primary']],[p['depth'] for p in event['depth_all_primary']],color='gray',label='All primary placements')
-    if event.get('depth'):
-        axes[2].plot([(p['start']+p['end'])/2e6 for p in event['depth']],[p['depth'] for p in event['depth']],color='#238b45',label='MAPQ ≥20');axes[2].legend(fontsize=9)
-    axes[2].set_ylabel('Mean aligned\nHiFi depth');axes[2].set_xlabel('Original scaffold coordinate (Mb)')
-    axes[1].set_ylim(bottom=0);axes[2].set_ylim(bottom=0)
-    axes[2].set_xlim(max(0,event['lo']-500000)/1e6,(event['hi']+500000)/1e6)
-    fig.suptitle(event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'])
-    fig.tight_layout();fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
+    for ax in axes[1:]:ax.set_ylim(bottom=0)
+    axes[-1].set_xlim(max(0,event['lo']-500000)/1e6,(event['hi']+500000)/1e6)
+    fig.suptitle(event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'],y=.995)
+    fig.tight_layout(rect=(0,0,1,.92));fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
     progress(f"Finished candidate plot {event['id']} in {time.monotonic()-started:.1f}s")
 
 
-def plot_scaffold(chrom,matrix,telomeres,events,out,resolution=100000):
-    started=time.monotonic();progress('Starting scaffold plot '+chrom)
+def plot_scaffold(chrom,matrix,events,out,resolution=100000):
+    """The standalone scaffold figure contains only the pooled contact matrix."""
+    started=time.monotonic();progress('Starting contact map '+chrom)
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import numpy as np
-    fig,axes=plt.subplots(3,1,figsize=(10,11),gridspec_kw={'height_ratios':[4,1,1]})
+    fig,axis=plt.subplots(figsize=(10,9))
     if matrix is not None:
         extent=(0,matrix.shape[0]*resolution/1e6,matrix.shape[0]*resolution/1e6,0)
-        image=axes[0].imshow(np.log1p(matrix),extent=extent,cmap='magma',aspect='equal')
-        fig.colorbar(image,ax=axes[0],label='log(1 + Hi-C pairs); libraries pooled')
-        axes[0].set_ylabel('Scaffold position (Mb)');axes[0].set_xlabel('Scaffold position (Mb)')
-        positions=[];profile=[]
-        for i in range(3,len(matrix)-3):
-            left=matrix[i-3:i,i-3:i];right=matrix[i:i+3,i:i+3]
-            within_left=(left.sum()+np.trace(left))/2;within_right=(right.sum()+np.trace(right))/2
-            positions.append(i*resolution/1e6)
-            profile.append(float(matrix[i-3:i,i:i+3].sum())/math.sqrt(float(within_left)*float(within_right)) if min(within_left,within_right)>0 else float('nan'))
-        axes[2].plot(positions,profile,lw=.7,color='#2166ac')
-        axes[2].set_title('Binned contact continuity · 300 kb flanks · pooled libraries',fontsize=10)
-    else:axes[0].text(.5,.5,'Hi-C mappings unavailable',ha='center',transform=axes[0].transAxes)
-    axes[0].set_title(chrom+' · contact map')
-    if telomeres:axes[1].plot([t['start']/1e6 for t in telomeres],[t['count'] for t in telomeres],lw=.7)
-    else:axes[1].text(.5,.5,'Telomere measurements unavailable',ha='center',transform=axes[1].transAxes)
-    axes[1].set_ylabel('Telomere motif count\nper 1 kb');axes[1].set_xlabel('Original scaffold position (Mb)')
-    axes[2].set_ylabel('Cross / geometric mean\nof within-side pairs');axes[2].set_xlabel('Original scaffold position (Mb)')
-    if matrix is not None:
-        axes[1].set_xlim(0,len(matrix)*resolution/1e6);axes[2].set_xlim(axes[1].get_xlim())
-    for event in events:
-        if event['scaffold']!=chrom:continue
-        position=(event['lo']+event['hi'])/2e6
-        if matrix is not None:
-            axes[0].axvline(position,color='cyan',ls='--',lw=.8);axes[0].axhline(position,color='cyan',ls='--',lw=.8)
-        axes[1].axvline(position,color='red',ls='--');axes[1].annotate(event['id'],(position,.9),xycoords=('data','axes fraction'),fontsize=9)
-        axes[2].axvline(position,color='red',ls='--')
-    fig.tight_layout();fig.savefig(out/'plots'/(chrom+'.scaffold.png'),dpi=150,facecolor='white');plt.close(fig)
-    progress(f'Finished scaffold plot {chrom} in {time.monotonic()-started:.1f}s')
+        image=axis.imshow(np.log1p(matrix),extent=extent,cmap='magma',aspect='equal')
+        fig.colorbar(image,ax=axis,label='log(1 + Hi-C pairs); libraries pooled')
+        for event in events:
+            if event['scaffold']!=chrom:continue
+            position=(event['lo']+event['hi'])/2e6
+            axis.axvline(position,color='cyan',ls='--',lw=.8);axis.axhline(position,color='cyan',ls='--',lw=.8)
+            axis.annotate(event['id'],(position,1),xycoords=('data','axes fraction'),fontsize=9,rotation=90,va='bottom')
+    else:axis.text(.5,.5,'Hi-C mappings unavailable',ha='center',transform=axis.transAxes)
+    axis.set_title(chrom+' · contact map',pad=28)
+    axis.set_ylabel('Scaffold position (Mb)');axis.set_xlabel('Scaffold position (Mb)')
+    fig.tight_layout();fig.savefig(out/'plots'/(chrom+'.contacts.png'),dpi=150,facecolor='white');plt.close(fig)
+    progress(f'Finished contact map {chrom} in {time.monotonic()-started:.1f}s')
 
 
 def main():
@@ -150,6 +201,7 @@ def main():
         if a.agp:
             gaps,placements,lengths=agp(a.agp)
             if lengths!=sizes:raise ValueError('Current AGP and FASTA dictionaries differ')
+        gaps=assessment_gaps(a.fasta,gaps) if events else []
         intervals={};queries=work/'queries.fa'
         with queries.open('w') as handle:
             for event in events:
@@ -161,7 +213,7 @@ def main():
                 for gap in gaps:
                     if gap['scaffold']!=sc or gap['lo']<lo-250000 or gap['hi']>hi+250000:continue
                     if set(sequence(fa,sc,gap['lo'],gap['hi']).upper())!={'N'}:raise ValueError('AGP gap is not literal N sequence')
-                    option=dict(scaffold=sc,lo=gap['lo'],hi=gap['hi'],cut_bp=gap['hi'],id=key+'G%02d'%(len(event['cut_options'])+1))
+                    option=dict(scaffold=sc,lo=gap['lo'],hi=gap['hi'],cut_bp=gap['hi'],origin=gap['origin'],id=key+'G%02d'%(len(event['cut_options'])+1))
                     option['peer_tests']=peer_tests(event,option['lo'],option['hi']);option['peers']=summarize_peers(option['peer_tests'],data['sample'],(event['left'],event['right']))
                     # A nearby gap is an alternative hypothesis. It must not jump
                     # over a reversal or a third chromosome to become a recommendation.
@@ -169,8 +221,8 @@ def main():
                     bridge=[]
                     for t in event['peer_tracks']:
                         if not t['eligible'] or t['sample']==data['sample']:continue
-                        blocks=[b for b in t['blocks'] if b['lo']<bridge_hi and b['hi']>bridge_lo and b.get('chrom')]
-                        bases=sum(min(bridge_hi,b['hi'])-max(bridge_lo,b['lo']) for b in blocks)
+                        blocks=[b for b in coarse_tracks(t['blocks'],1000) if b['lo']<bridge_hi and b['hi']>bridge_lo]
+                        bases=sum(max(0,min(bridge_hi,b['hi'])-max(bridge_lo,b['lo']))*b['aligned_bp']/max(1,b['hi']-b['lo']) for b in blocks)
                         order=[]
                         for b in blocks:
                             if not order or order[-1]!=b['chrom']:order.append(b['chrom'])
@@ -180,7 +232,8 @@ def main():
                     option['bridge_consistent']=(lo<=option['lo'] and option['hi']<=hi or len({b['sample'] for b in bridge if b['observable'] and b['consistent']})>=2) and not any(b['observable'] and not b['consistent'] for b in bridge)
                     event['cut_options'].append(option)
                 for target in [event]+event['cut_options']:
-                    target['start']=max(0,target['lo']-100000);target['end']=min(sizes[sc],target['hi']+100000)
+                    flank=500000 if target is event else 100000
+                    target['start']=max(0,target['lo']-flank);target['end']=min(sizes[sc],target['hi']+flank)
                     intervals[target['id']]=dict(target,scaffold=sc)
                     handle.write('>'+target['id']+'\n'+sequence(fa,sc,target['start'],target['end'])+'\n')
         progress('Building matched controls and chromosome context')
@@ -200,6 +253,7 @@ def main():
                         target['hifi']=support_grid(sam,event['lo'],event['hi'],mapq=20);target['hifi_strict']=support_grid(sam,event['lo'],event['hi'],mapq=30);target['hifi_all_primary']=support_grid(sam,event['lo'],event['hi'],mapq=0)
                         for tier in ('hifi','hifi_strict','hifi_all_primary'):
                             support_rows.extend(dict(event=event['id'],mapq=target[tier]['mapq'],**site) for site in target[tier]['probes'])
+                            target[tier+'_profile']=support_grid(sam,target['start'],target['end'],mapq=target[tier]['mapq'])
                     else:
                         target['spanning']=gap_spanning(sam,target['lo'],target['hi'])
                         target['flank_molecules']=[support_grid(sam,target['lo']-1000,target['lo']-1000)['minimum'],support_grid(sam,target['hi']+1000,target['hi']+1000)['minimum']]
@@ -215,7 +269,7 @@ def main():
                 sam=work/(key+'.sam');run(['samtools','view','-h',mapping['bam'],'%s:%d-%d'%(control['scaffold'],control['lo']-2000+1,control['hi']+2000)],sam)
                 if support_grid(sam,control['lo'],control['hi'])['minimum']<2:continue
             usable_controls[key]=control
-        matrices={}
+        matrices={};library_matrices={};profiles={}
         if a.pairs and events:
             if not all((a.source,a.libraries,a.agp)):raise ValueError('Hi-C evidence requires its source FASTA, last AGP and library identities')
             source=work/'source.fa';source.symlink_to(Path(a.source).resolve());run(['samtools','faidx',source])
@@ -225,13 +279,17 @@ def main():
             if a.plots=='true':
                 import numpy as np
                 matrices={sc:np.zeros((math.ceil(sizes[sc]/100000),)*2,dtype=np.uint32) for sc in {e['scaffold'] for e in events}}
+                library_matrices={library:{sc:np.zeros_like(matrix) for sc,matrix in matrices.items()} for library in sorted({r['library_id'] for r in libraries})}
             def capture(library,x,y):
                 if x[0]==y[0] and x[0] in matrices:
-                    matrix=matrices[x[0]];i,j=x[1]//100000,y[1]//100000;matrix[i,j]+=1
-                    if i!=j:matrix[j,i]+=1
+                    i,j=x[1]//100000,y[1]//100000
+                    for matrix in (matrices[x[0]],library_matrices[library][x[0]]):
+                        matrix[i,j]+=1
+                        if i!=j:matrix[j,i]+=1
             progress(f'Starting Hi-C scan: {len(intervals)} locations, {len(usable_controls)} controls')
             counts,totals,audit=scan_contacts(a.pairs,placements,dict(intervals,**usable_controls),libraries,on_pair=capture)
             progress('Finished Hi-C scan')
+            profiles={sc:{library:contact_profile(values[sc]) for library,values in library_matrices.items()} for sc in matrices}
             data['hic_audit']=dict(audit=audit,libraries=totals,source_sha256=sha(a.source),agp_sha256=sha(a.agp))
             for event in events:
                 for target in [event]+event['cut_options']:
@@ -256,9 +314,13 @@ def main():
         for event in events:
             event['recommendation'],event['reason']=recommend(event)
             for t in event['peer_tracks']:block_rows.extend(dict(event=event['id'],peer=t['peer'],**b) for b in t['blocks'])
-            if a.plots=='true':plot_event(event,out)
+            if a.plots=='true':
+                event['chromosome_regions']=consensus_regions(event['peer_tracks'],data['sample'])
+                event['contact_profiles']={library:[r for r in rows if event['lo']-500000<=r['position']<=event['hi']+500000] for library,rows in profiles.get(event['scaffold'],{}).items()}
+                event['telomeres']=[r for r in telomere_rows if r['scaffold']==event['scaffold'] and event['lo']-500000<=r['start']<=event['hi']+500000]
+                plot_event(event,out)
         if a.plots=='true':
-            for sc in sorted({e['scaffold'] for e in events}):plot_scaffold(sc,matrices.get(sc),[r for r in telomere_rows if r['scaffold']==sc],events,out)
+            for sc in sorted({e['scaffold'] for e in events}):plot_scaffold(sc,matrices.get(sc),events,out)
         data['control_registry']=usable_controls
     # Publish only evidence used by the report and decisions. No SAMs, duplicate FASTAs,
     # speculative IGV sessions, recovered historical joins or diagnostic HTML files.

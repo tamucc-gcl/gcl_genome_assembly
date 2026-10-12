@@ -129,8 +129,8 @@ def peer_arms(track,minimum=1000000,maximum_gap=1000000):
     for block in track:
         if not block.get('chrom'):continue
         if arms and arms[-1]['chrom']==block['chrom'] and block['lo']-arms[-1]['end']<=maximum_gap:
-            arms[-1]['end']=block['hi'];arms[-1]['aligned_bp']+=block['hi']-block['lo']
-        else:arms.append(dict(chrom=block['chrom'],start=block['lo'],end=block['hi'],aligned_bp=block['hi']-block['lo']))
+            arms[-1]['end']=block['hi'];arms[-1]['aligned_bp']+=block.get('aligned_bp',block['hi']-block['lo'])
+        else:arms.append(dict(chrom=block['chrom'],start=block['lo'],end=block['hi'],aligned_bp=block.get('aligned_bp',block['hi']-block['lo'])))
     minor=[a for a in arms if a['aligned_bp']<minimum]
     major=[]
     for arm in arms:
@@ -145,9 +145,12 @@ def peer_arms(track,minimum=1000000,maximum_gap=1000000):
 
 def discover(peer_tracks,sample,minimum=1000000,cluster_distance=250000):
     observations=[];minor=[]
+    width=max(1,min(100000,minimum//10))
     for peer,scaffolds in peer_tracks:
         for scaffold,track in scaffolds.items():
-            events,islands=peer_arms(track,minimum)
+            # Use regional dominance for chromosome-scale topology, preserving
+            # exact alignments in peer tracks for the subsequent local assays.
+            events,islands=peer_arms(coarse_tracks(track,width),minimum)
             minor.extend(dict(assembly=peer['id'],scaffold=scaffold,**v) for v in islands)
             if peer['sample']==sample or not peer.get('eligible'):continue
             observations.extend(dict(peer=peer['id'],sample=peer['sample'],scaffold=scaffold,**v) for v in events)
@@ -159,6 +162,31 @@ def discover(peer_tracks,sample,minimum=1000000,cluster_distance=250000):
         if matches:
             group=matches[-1];group['lo']=min(group['lo'],observation['lo']);group['hi']=max(group['hi'],observation['hi']);group['observations'].append(observation)
         else:groups.append(dict(scaffold=observation['scaffold'],left=observation['left'],right=observation['right'],lo=observation['lo'],hi=observation['hi'],observations=[observation]))
+    retained=[]
+    for group in groups:
+        local=[dict(peer=p['id'],sample=p['sample'],eligible=p['eligible'],blocks=m.get(group['scaffold'],[])) for p,m in peer_tracks]
+        regional=consensus_regions(local,sample,width)
+        transitions,_=peer_arms(regional,minimum)
+        matches=[t for t in transitions if (t['left'],t['right'])==(group['left'],group['right']) and t['lo']<=group['hi']+cluster_distance and t['hi']>=group['lo']-cluster_distance]
+        if matches:
+            transition=min(matches,key=lambda t:abs(t['lo']-group['lo'])+abs(t['hi']-group['hi']))
+            group['screening_range']=dict(lo=group['lo'],hi=group['hi'])
+            lo,hi=transition['lo'],transition['hi']
+            focused=[dict(t,blocks=[dict(b,lo=max(b['lo'],max(0,lo-2*width)),hi=min(b['hi'],hi+2*width)) for b in t['blocks'] if b['hi']>max(0,lo-2*width) and b['lo']<hi+2*width]) for t in local]
+            fine=consensus_regions(focused,sample,max(1,width//100))
+            left=[r for r in fine if r['chrom']==group['left'] and r['lo']<=hi]
+            right=[r for r in fine if r['chrom']==group['right'] and r['hi']>=lo]
+            if left and right:
+                left_end=max(r['hi'] for r in left)
+                right_start=min(r['lo'] for r in right if r['hi']>=left_end) if any(r['hi']>=left_end for r in right) else hi
+                if left_end<=right_start:lo,hi=left_end,right_start
+            group.update(lo=lo,hi=hi,localization='Independent-individual regional chromosome transition')
+        elif any(r['lo']<=group['lo'] and r['hi']>=group['hi'] and r['chrom'] in (group['left'],group['right']) for r in regional):
+            minor.append(dict(group,kind='rejected_peer_transition',reason='Independent local assignments remain on the same chromosome'))
+            continue
+        else:group['localization']='Peer transition; cohort boundary unresolved'
+        retained.append(group)
+    groups=retained
     groups.sort(key=lambda g:(g['scaffold'],g['lo'],g['right']))
     for i,group in enumerate(groups,1):
         group['id']='C%02d'%i;group['independent_individuals']=sorted({r['sample'] for r in group['observations']})
@@ -178,11 +206,41 @@ def coarse_tracks(track,width=100000):
     for block in track:
         if not block.get('chrom'):continue
         for index in range(block['lo']//width,(block['hi']-1)//width+1):
-            counts[index][block['chrom']]+=min(block['hi'],(index+1)*width)-max(block['lo'],index*width)
+            counts[index][block['chrom']]+=(min(block['hi'],(index+1)*width)-max(block['lo'],index*width))*block.get('aligned_bp',block['hi']-block['lo'])/max(1,block['hi']-block['lo'])
     result=[]
     for index,values in sorted(counts.items()):
         chrom,n=max(values.items(),key=lambda v:v[1]);total=sum(values.values())
-        if total>=25000 and n/total>=.9:result.append(dict(lo=index*width,hi=(index+1)*width,chrom=chrom,aligned_bp=total))
+        if total>=width*.25 and n/total>=.9:result.append(dict(lo=index*width,hi=(index+1)*width,chrom=chrom,aligned_bp=n))
+    return result
+
+
+def consensus_regions(tracks,sample,width=10000):
+    """Regional identities, counting each independent individual once.
+
+    Conflicting sister haplotypes abstain. Require two individuals when available
+    and a strict majority of informative individuals; missing regions stay blank.
+    """
+    eligible=[t for t in tracks if t['eligible'] and t['sample']!=sample]
+    minimum=min(2,len({t['sample'] for t in eligible}))
+    from statistics import median
+    bins=defaultdict(lambda:defaultdict(set));coverage={}
+    for track in eligible:
+        for block in coarse_tracks(track['blocks'],width):
+            bins[block['lo']][track['sample']].add(block['chrom'])
+            key=(block['lo'],track['sample'],block['chrom'])
+            coverage[key]=max(coverage.get(key,0),block['aligned_bp'])
+    result=[]
+    for lo,individuals in sorted(bins.items()):
+        votes=Counter(next(iter(labels)) for labels in individuals.values() if len(labels)==1)
+        if not votes:continue
+        chrom,n=max(votes.items(),key=lambda item:item[1])
+        if n<minimum or n<=sum(votes.values())/2:continue
+        # Conflicting haplotypes count as uncertainty, rather than a supporting vote.
+        if n<=len(individuals)/2:continue
+        assigned=median(coverage[lo,individual,chrom] for individual,labels in individuals.items() if labels=={chrom})
+        if result and result[-1]['hi']==lo and result[-1]['chrom']==chrom:
+            result[-1]['hi']=lo+width;result[-1]['aligned_bp']+=assigned
+        else:result.append(dict(lo=lo,hi=lo+width,chrom=chrom,aligned_bp=assigned))
     return result
 
 
@@ -340,6 +398,9 @@ def recommend(event):
         return 'CUT','Independent chromosome separation and contact loss in two libraries support this exact gap cut.'
     if any(c.get('spanning',0)>=2 and c['lo']<=event['lo']<=event['hi']<=c['hi'] for c in options):
         return 'RETAIN','At least two HiFi molecules directly span the verified gap containing this transition.'
+    if any(len(c['peers']['separate'])>=2 and not c['peers']['continuous'] and not c['peers']['conflicting'] and
+           c.get('spanning')==0 and min(c.get('flank_molecules',[0,0]))>=2 and c.get('bridge_consistent',True) and not c.get('native_continuity') for c in options):
+        return 'SUSPECT','A nearby chromosome-consistent gap has observable read support on both sides but no spanning HiFi molecule; its contact evidence needs review.'
     if grid.get('state') in ('continuous','mostly_continuous'):
         return 'RETAIN','Local HiFi molecules support continuity across the transition'+(' with short weak pockets.' if grid['state']=='mostly_continuous' else '.')
     if peers['conflicting'] or peers['continuous']:return 'REVIEW','Chromosome comparisons conflict; leave intact while reviewing the conflicting evidence.'

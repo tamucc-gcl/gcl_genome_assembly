@@ -26,6 +26,7 @@ def event_card(event,assembly,cohort=False):
         '**'+advice(event)+'.** '+event['reason'],'',
         '**Location:** '+event['scaffold']+', transition range '+bp(event['lo'])+'–'+bp(event['hi'])+' bp.','',
         '**Evidence for breaking**','']
+    if event.get('localization'):md+=['Boundary localization: '+event['localization']+'.','']
     peers=event['peers'];grid=event.get('hifi',{})
     if peers['separate']:md+=['- '+str(len(peers['separate']))+' independent individuals place the flanks on different chromosomes: '+', '.join(peers['separate'])+'.']
     else:md+=['- Cohort-wide alignment detects a chromosome change; qualified local confirmation is incomplete.']
@@ -47,6 +48,7 @@ def event_card(event,assembly,cohort=False):
              'Recommended cut' if event.get('recommended_cut',{}).get('id')==c['id'] else 'Not recommended' if event['recommendation']=='RETAIN' else 'Manual review option'] for c in options])
         md+=['','A gap outside the transition range is a nearby alternative, not a proven localization. Do not cut every option. All options begin unselected.','']
         for option in options:
+            if option.get('origin'):md+=['**'+option['id']+' gap source:** '+('Current scaffolding AGP.' if option['origin']=='current_agp' else 'Literal N gap inherited inside a scaffold component.')+'','']
             if option.get('contacts'):
                 md+=['**'+option['id']+' — contact evidence at this exact gap**','']+mdtable(['Library','Cross / within-left / within-right','Matched controls','Finding'],[
                     [t['library'],str(t['raw_counts']['cross'])+' / '+str(t['raw_counts']['left_within'])+' / '+str(t['raw_counts']['right_within']),t['matched_controls'],
@@ -133,13 +135,13 @@ def main():
             md+=['<details>','<summary>What was screened</summary>','']+mdtable(['Chromosome-scale scaffold','Individuals with chromosome assignments','Best assigned fraction'],screen)+['','An absence of detected transitions applies to the usable comparisons above. Unmapped sequence is not evidence of continuity.','</details>','']
         for event in data['events']:
             md+=['<a name="'+event['id'].lower()+'"></a>','']+event_card(event,assembly)
-            if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity and local HiFi support](plots/'+event['id']+'.png)','','Shading marks the chromosome transition range. Dashed red lines mark available gap cut options. Blank chromosome tracks mean no usable assignment; gaps in read curves mean unmeasured positions.','']
+            if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity, HiFi support, Hi-C support and telomeres](plots/'+event['id']+'.png)','','Pale chromosome colors show the local assignment agreed by independent individuals; ambiguous regions remain neutral. Orange marks the assessed transition range; dashed red lines mark gap cut options. Spanning molecules are HiFi reads. The Hi-C curves show binned contact support per library, not calibrated cut recommendations. Telomere counts are shown in the bottom panel. Gaps in curves mean unavailable measurements.','']
             md+=['<details>','<summary>Peer chromosome assignments</summary>','']+mdtable(['Assembly','Left → right','Local assignment','Role'],[
                 [t['peer'],str(t['left']['chrom'] or '?')+' → '+str(t['right']['chrom'] or '?'),'Confirmed' if t['qualified'] else 'Partial or ambiguous',
                  'Sister haplotype' if t['sample']==data['sample'] else 'Independent individual' if t['eligible'] else 'Context only'] for t in event['peer_tests']])+['','</details>','']
-        scaffold_figures=sorted((target/'plots').glob('*.scaffold.png'))
+        scaffold_figures=sorted((target/'plots').glob('*.contacts.png'))
         if scaffold_figures:
-            md+=['## Scaffold contact maps and telomeres','']
+            md+=['## Scaffold contact maps','']
             for image in scaffold_figures:md+=['!['+image.stem+'](plots/'+image.name+')','']
         md+=['## Evidence records','', '[Read support](read_support.tsv) · [Hi-C counts](contact_support.tsv) · [Chromosome assignments](chromosome_blocks.tsv) · [Telomere counts](telomeres.tsv) · [Full measurements and provenance](evidence.json).', '',
              'Small chromosome-labelled islands below the chromosome-arm threshold are retained in the machine-readable screening audit. They are not counted as chromosome-sized fusions. Missing homology is distinguished from evidence for a different placement.']
