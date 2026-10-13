@@ -27,6 +27,11 @@ finish() {
     for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
+    # Final names are needed to review the chromosome inventory after manual cuts.
+    # Include these small tables without packaging the final FASTAs or mappings.
+    for name in "$out"/results/assembly/final/*.name_map.tsv; do
+        [[ -f "$name" ]] && files+=("${name#"$out/"}")
+    done
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
         --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' \
         -czf "$out.review.tar.gz" -C "$out" "${files[@]}"
