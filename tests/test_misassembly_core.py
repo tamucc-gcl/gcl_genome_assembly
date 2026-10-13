@@ -86,7 +86,7 @@ class MisassemblyTests(unittest.TestCase):
 
     def test_cut_needs_observable_flanks_and_unique_option(self):
         peers=dict(separate=['a','b'],continuous=[],conflicting=[])
-        option=dict(id='G1',peers=peers,spanning=0,flank_molecules=[5,5],flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(calibrated=True,loss=True),dict(calibrated=True,loss=True)])
+        option=dict(id='G1',peers=peers,spanning=0,spanning_all_primary=0,flank_molecules=[5,5],flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(calibrated=True,loss=True),dict(calibrated=True,loss=True)])
         event=dict(peers=peers,cut_options=[option],hifi=dict(state='patchy'))
         self.assertEqual(recommend(event)[0],'CUT')
         option['flank_support'][0]['observable']=False

@@ -149,7 +149,7 @@ def plot_event(event,out):
     if other:
         fig.legend(handles=[Patch(color=colors[c],label=c) for c in other],ncol=min(8,len(other)),
                    title='Other chromosome assignments',loc='upper center',bbox_to_anchor=(.5,.927),fontsize=8,title_fontsize=8,frameon=False)
-    axes[0].set_title('Chromosome assignments; blank regions have no usable assignment',fontsize=10)
+    axes[0].set_title('Chromosome assignments; blank regions have no usable assignment',fontsize=10,pad=24)
     ambiguous_axes=[]
     for name,color,label,style in [('hifi','#2166ac','MAPQ ≥20','-'),('hifi_strict','#b35806','MAPQ ≥30','-')]:
         probes=event.get(name+'_profile',event.get(name,{})).get('probes',[])
@@ -185,19 +185,25 @@ def plot_event(event,out):
     else:axes[4].text(.5,.5,'Telomere measurements unavailable',ha='center',transform=axes[4].transAxes)
     axes[4].set_ylabel('Telomere motif count\nper 1 kb');axes[4].set_xlabel('Original scaffold coordinate (Mb)')
     shade_chromosomes(axes[1:],regions,colors)
+    displayed=[t for t in event.get('alternatives',[]) if t.get('site_verdict')!='EXCLUDE'][:6]
     for ax in axes:
         ax.set_facecolor('white')
         ax.axvspan(event['lo']/1e6,event['hi']/1e6,color='orange',alpha=.12,zorder=0)
         for cut in event['cut_options']:ax.axvline(cut['cut_bp']/1e6,color='#b2182b',ls='--')
-        for location in event.get('alternatives',[])[:6]:
+        for location in displayed:
             ax.axvspan(location['lo']/1e6,location['hi']/1e6,facecolor='#762a83',alpha=.08,zorder=0)
         ax.grid(alpha=.15)
-    for location in event.get('alternatives',[])[:6]:
-        axes[0].annotate(location['id'],(location['probe_bp']/1e6,1),xycoords=('data','axes fraction'),fontsize=7,rotation=90,va='bottom',color='#762a83')
+    groups=[];separation=.03*(event['hi']-event['lo']+1000000)
+    for location in sorted(displayed,key=lambda t:t['probe_bp']):
+        if groups and location['probe_bp']-groups[-1][-1]['probe_bp']<separation:groups[-1].append(location)
+        else:groups.append([location])
+    for group in groups:
+        label='/'.join(t['id'].removeprefix(event['id']) for t in group)
+        axes[0].annotate(label,(sum(t['probe_bp'] for t in group)/len(group)/1e6,1),xycoords=('data','axes fraction'),fontsize=7,ha='center',va='bottom',xytext=(0,3),textcoords='offset points',color='#762a83')
     for ax in axes[1:]:ax.set_ylim(bottom=0)
     axes[-1].set_xlim(max(0,event['lo']-500000)/1e6,(event['hi']+500000)/1e6)
     fig.suptitle(event.get('assembly','Assessment')+' · '+event['id']+' · '+event['scaffold']+' · '+event['left']+' → '+event['right'],y=.995)
-    fig.tight_layout(rect=(0,0,1,.86 if other else .92));fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
+    fig.subplots_adjust(left=.20,right=.92,top=.83 if other else .89,bottom=.06,hspace=.44);fig.savefig(out/'plots'/(event['id']+'.png'),dpi=150,facecolor='white');plt.close(fig)
     progress(f"Finished candidate plot {event['id']} in {time.monotonic()-started:.1f}s")
 
 
@@ -285,6 +291,8 @@ def main():
                             target[tier+'_profile']=support_grid(sam,target['start'],target['end'],mapq=target[tier]['mapq'])
                     else:
                         target['spanning']=gap_spanning(sam,target['lo'],target['hi'])
+                        target['spanning_strict']=gap_spanning(sam,target['lo'],target['hi'],mapq=30)
+                        target['spanning_all_primary']=gap_spanning(sam,target['lo'],target['hi'],mapq=0)
                         target['flank_support']=flank_support(sam,target['lo'],target['hi'],sizes[event['scaffold']])
                         target['flank_molecules']=[support_grid(sam,target['lo']-1000,target['lo']-1000)['minimum'],support_grid(sam,target['hi']+1000,target['hi']+1000)['minimum']]
                 # Failed reads cannot justify a cut; direct evidence is explicitly unavailable.
@@ -331,10 +339,10 @@ def main():
             source_sizes={f[0]:int(f[1]) for f in (l.split('\t') for l in Path(str(source)+'.fai').read_text().splitlines())}
             if any(name not in source_sizes or v[4]>source_sizes[name] for name,values in placements.items() for v in values):raise ValueError('AGP components outside Hi-C source FASTA')
             libraries=table(a.libraries)
-            if a.plots=='true':
-                import numpy as np
-                matrices={sc:np.zeros((math.ceil(sizes[sc]/100000),)*2,dtype=np.uint32) for sc in {e['scaffold'] for e in events}}
-                library_matrices={library:{sc:np.zeros_like(matrix) for sc,matrix in matrices.items()} for library in sorted({r['library_id'] for r in libraries})}
+            # Contact evidence must not depend on whether figure rendering is enabled.
+            import numpy as np
+            matrices={sc:np.zeros((math.ceil(sizes[sc]/100000),)*2,dtype=np.uint32) for sc in {e['scaffold'] for e in events}}
+            library_matrices={library:{sc:np.zeros_like(matrix) for sc,matrix in matrices.items()} for library in sorted({r['library_id'] for r in libraries})}
             def capture(library,x,y):
                 if x[0]==y[0] and x[0] in matrices:
                     i,j=x[1]//100000,y[1]//100000
@@ -368,12 +376,12 @@ def main():
                     if 'id' in r and 'window' in r:telomere_rows.append(dict(scaffold=r['id'],start=max(0,int(r['window'])-1000),count=int(r['forward_repeat_number'])+int(r['reverse_repeat_number'])))
         for event in events:
             event['assembly']=data['assembly']
+            event['contact_profiles']={library:[r for r in rows if event['lo']-500000<=r['position']<=event['hi']+500000] for library,rows in profiles.get(event['scaffold'],{}).items()}
             rank_alternatives(event)
             event['recommendation'],event['reason']=recommend(event)
             for t in event['peer_tracks']:block_rows.extend(dict(event=event['id'],peer=t['peer'],**b) for b in t['blocks'])
             if a.plots=='true':
                 event['chromosome_regions']=consensus_regions(event['peer_tracks'],data['sample'])
-                event['contact_profiles']={library:[r for r in rows if event['lo']-500000<=r['position']<=event['hi']+500000] for library,rows in profiles.get(event['scaffold'],{}).items()}
                 event['telomeres']=[r for r in telomere_rows if r['scaffold']==event['scaffold'] and event['lo']-500000<=r['start']<=event['hi']+500000]
                 plot_event(event,out)
         if a.plots=='true':

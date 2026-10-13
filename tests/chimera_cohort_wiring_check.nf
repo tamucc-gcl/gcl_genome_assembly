@@ -88,6 +88,9 @@ workflow {
         if(params.fixture_evidence) {
             def data=new groovy.json.JsonSlurper().parseText(report.parent.resolve('assemblies/sample_hap1/evidence.json').text)
             assert data.events[0].cut_options[0].spanning==2
+            assert data.events[0].cut_options[0].spanning_strict==2
+            assert data.events[0].cut_options[0].spanning_all_primary==2
+            assert data.events[0].contact_profiles.size()==(params.fixture_single ? 1 : 2)
             assert data.events[0].recommendation=='REVIEW'
             assert data.events[0].localization_warning
             assert data.events[0].alternatives

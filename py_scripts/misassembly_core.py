@@ -13,7 +13,7 @@ from pathlib import Path
 from chimera_tracks import tracks
 from chimera_controls import molecule_chains, qualified_molecule
 
-POLICY='cohort-regional-review-v4'
+POLICY='cohort-site-review-v5'
 
 
 def sha(path):
@@ -299,9 +299,12 @@ def gap_association(event,option,sample):
     localized=event.get('localization')=='Independent-individual regional chromosome transition' and not event.get('localization_warning')
     if len(opposing)>=2:status='contradicted';reason='Two independent individuals show a different intervening chromosome order.'
     elif opposing:status='unresolved';reason='An intervening chromosome assignment conflicts; independent confirmation is incomplete.'
-    elif len(supporting)>=2:status='confirmed';reason='Two independent individuals support a consistent intervening chromosome order.'
-    elif nearby and localized:status='confirmed';reason='Gap overlaps the cohort-localized transition within its recorded measurement resolution.'
+    elif len(supporting)>=2:status='compatible';reason='Intervening chromosome order is compatible; this does not localize a chromosome switch.'
+    elif nearby and localized:status='confirmed';reason='Overlaps the independently localized chromosome transition within its recorded resolution.'
     else:status='unresolved';reason='Intervening chromosome assignment is insufficient; no contradictory order is established.'
+    local=summarize_peers([peer_test(dict(id=t['peer'],sample=t['sample'],eligible=t['eligible']),t['blocks'],option['lo'],option['hi']) for t in event['peer_tracks']],sample,(event['left'],event['right']))
+    if len(local['separate'])>=2 and not local['continuous'] and not local['conflicting'] and not opposing:
+        status='confirmed';reason='Two independent individuals place local flanks on the expected different chromosomes.'
     return dict(status=status,reason=reason,resolution_bp=resolution,within_resolution=nearby,
                 supporting_individuals=sorted(supporting),opposing_individuals=sorted(opposing),measurements=evidence)
 
@@ -331,6 +334,8 @@ def cut_prerequisites(option):
     if peers['conflicting']:failures.append('Local chromosome assignments conflict between individuals or haplotypes.')
     if 'spanning' not in option:failures.append('Gap-spanning HiFi support was not measured.')
     elif option['spanning']>=2:failures.append('At least two HiFi molecules span this gap.')
+    if 'spanning_all_primary' not in option:failures.append('All-primary gap-spanning support was not measured.')
+    elif option['spanning_all_primary']>0:failures.append('Primary reads span the gap when low-confidence placements are included.')
     if not observed_flanks(option):failures.append('Both adjacent HiFi neighborhoods have not established sufficient read observability.')
     if option.get('native_continuity'):failures.append('A native contig path continues across the gap.')
     if option.get('association',{}).get('status')!='confirmed':failures.append('Association between this gap and the chromosome transition is unresolved or contradicted.')
@@ -520,6 +525,10 @@ def regional_hypotheses(event,maximum=24):
             if tier==30 and len(run)<5:continue
             ranges.append(dict(lo=run[0]['position'],hi=min(event.get('end',run[-1]['position']+1000),run[-1]['position']+1000),tiers=[tier]))
     merged=[]
+    # Preserve individual MAPQ20 troughs instead of swallowing them in a much
+    # wider MAPQ30-only interval. Strict-only regions remain separate evidence.
+    confident=[r for r in ranges if 20 in r['tiers']]
+    ranges=confident+[r for r in ranges if 30 in r['tiers'] and not any(r['lo']<c['hi'] and r['hi']>c['lo'] for c in confident)]
     for r in sorted(ranges,key=lambda r:r['lo']):
         if merged and r['lo']<=merged[-1]['hi']:
             merged[-1]['hi']=max(merged[-1]['hi'],r['hi']);merged[-1]['tiers']=sorted(set(merged[-1]['tiers']+r['tiers']))
@@ -552,11 +561,64 @@ def assess_alternative(event,target,sample):
         target[key]=profile_interval(event,key+'_profile',target['lo'],target['hi'])
     target['association']=gap_association(event,target,sample)
     target['ambiguity_restores_support']=target['hifi_all_primary']['minimum'] is not None and target['hifi_all_primary']['minimum']>=2 and target['hifi_strict']['minimum'] is not None and target['hifi_strict']['minimum']<2
-    p=target['probe_bp']
     target['flank_support']=[]
-    for side,lo,hi in (('left',max(event['start'],p-10000),p-1000),('right',p+1000,min(event['end'],p+10000))):
+    for side,lo,hi in (('left',max(event['start'],target['lo']-10000),target['lo']-1000),('right',target['hi']+1000,min(event['end'],target['hi']+10000))):
         summary=profile_interval(event,'hifi_profile',lo,hi)
         target['flank_support'].append(dict(side=side,**summary,observable=len(summary['probes'])>=5 and summary['supported_fraction']>=.8))
+
+
+def regional_contact_evidence(event,target):
+    """Nearby contact troughs are corroboration, not matched-control calibration."""
+    from statistics import median
+    point=target.get('probe_bp',(target.get('lo',0)+target.get('hi',0))//2);results=[]
+    for library,rows in sorted(event.get('contact_profiles',{}).items()):
+        usable=[r for r in rows if r.get('ratio') is not None]
+        center=[r for r in usable if abs(r['position']-point)<=150000]
+        left=[r['ratio'] for r in usable if 300000<=point-r['position']<=700000 and min(r.get('left_within',0),r.get('right_within',0))>=100]
+        right=[r['ratio'] for r in usable if 300000<=r['position']-point<=700000 and min(r.get('left_within',0),r.get('right_within',0))>=100]
+        row=min(center,key=lambda r:r['ratio']) if center else None
+        baseline=min(median(left),median(right)) if len(left)>=2 and len(right)>=2 else None
+        fraction=row['ratio']/baseline if row is not None and baseline is not None and baseline>0 else None
+        results.append(dict(library=library,probe_bp=row['position'] if row else None,ratio=row['ratio'] if row else None,
+                            baseline=baseline,fraction=fraction,depleted=fraction is not None and fraction<=.35,
+                            observable=bool(row and min(row.get('left_within',0),row.get('right_within',0))>=100)))
+    return results
+
+
+def site_review(event,target):
+    """Manual advice combines independent evidence; stricter cut criteria stay separate."""
+    broad=len(event.get('independent_individuals',event['peers']['separate']))>=2
+    peers=target.get('peers',event['peers'])
+    gap=target.get('cut_bp') is not None and target.get('kind')!='regional_read_loss'
+    target['regional_contacts']=regional_contact_evidence(event,target)
+    troughs=[r for r in target['regional_contacts'] if r['depleted'] and r['observable']]
+    calibrated=[r for r in target.get('contacts',[]) if r['calibrated'] and r['loss']]
+    if calibrated and any(r['calibrated'] and not r['loss'] for r in target.get('contacts',[])):
+        return 'REVIEW','Hi-C libraries disagree at this site; review before selecting a cut.'
+    if peers['continuous'] or peers['conflicting'] or target.get('association',{}).get('status')=='contradicted':
+        return 'EXCLUDE','Local chromosome evidence opposes this location as the fusion boundary.'
+    if not broad:return 'REVIEW','Independent chromosome-arm confirmation is incomplete.'
+    if gap and 'spanning_all_primary' not in target:
+        return 'REVIEW','Low-confidence gap-spanning support has not been measured.'
+    if gap and target['spanning_all_primary']>0:
+        return 'REVIEW','Low-confidence reads also span the gap; inspect placement ambiguity before selecting a cut.'
+    if gap and target.get('spanning')==0 and observed_flanks(target) and len(peers['separate'])>=1 and (troughs or calibrated) and not target.get('native_continuity'):
+        return 'CUT','Recommend this exact gap for a manual cut: independent chromosome-arm separation, local separating flanks, no gap-spanning HiFi reads, observable neighbors and a corroborating contact trough.'
+    grid=target.get('hifi',{});strict=target.get('hifi_strict',{})
+    if len(peers['separate'])>=2 and (grid.get('minimum') is not None and grid['minimum']<=1) and (troughs or calibrated):
+        return 'BREAK_REGION','Breaking is favored in this region; select an exact coordinate after inspecting the remaining read bridge and nearby contact transition.'
+    # A persistent MAPQ30 loss at a real chromosome transition remains a break
+    # candidate even when ambiguous placements or MAPQ20 bridges survive.
+    run=longest=0;previous=None
+    for probe in sorted(strict.get('probes',[]),key=lambda p:p['position']):
+        run=(run+1 if previous is not None and probe['position']-previous==1000 else 1) if probe['molecules']<2 else 0
+        longest=max(longest,run);previous=probe['position']
+    sustained=strict.get('longest_weak_run_bp',0)>=5000 or longest>=5
+    if len(peers['separate'])>=2 and strict.get('minimum') is not None and strict['minimum']<=1 and grid.get('minimum',0)>=2 and sustained and (calibrated or any(c['depleted'] for c in target['regional_contacts'])):
+        return 'BREAK_REGION','Likely misjoin region: independent chromosome switch, sustained loss of high-confidence HiFi support and a regional contact decline. Remaining MAPQ20 bridges are counterevidence; the exact cut requires review.'
+    if target.get('kind')=='regional_read_loss' and grid.get('minimum') is not None and grid['minimum']<=1:
+        return 'REVIEW','Measured HiFi trough: inspect as a possible break, with chromosome association and competing placements still unresolved.'
+    return 'REVIEW','No uniquely supported cut location; review the evidence.'
 
 
 def rank_alternatives(event):
@@ -565,9 +627,9 @@ def rank_alternatives(event):
         contacts=t.get('contacts',[]);losses=[c['library'] for c in contacts if c['calibrated'] and c['loss']]
         nonloss=[c['library'] for c in contacts if c['calibrated'] and not c['loss']]
         t['contact_losses']=losses
-        t['rank_score']=2*min(3,len(t['peers']['separate']))+2*bool(losses)+2*(t['hifi']['minimum']==0)+int(observed_flanks(t))-2*bool(t['peers']['continuous'])-2*t['ambiguity_restores_support']
-        t['assessment']='Review alternative boundary' if t['association']['status']=='confirmed' and t['peers']['separate'] else 'Nearby support loss; chromosome association unresolved'
-        if t['peers']['continuous']:t['assessment']='Same-chromosome flanks oppose this fusion location'
+        t['site_verdict'],t['site_reason']=site_review(event,t)
+        t['rank_score']=10*min(3,len(t['peers']['separate']))+3*bool(losses)+2*(t['hifi']['minimum']==0)+int(observed_flanks(t))-30*bool(t['peers']['continuous'])-2*t['ambiguity_restores_support']
+        t['assessment']={'CUT':'Recommend manual cut','BREAK_REGION':'Break favored; coordinate needs review','EXCLUDE':'Excluded: same-chromosome or conflicting context','REVIEW':'Review possible break'}[t['site_verdict']]
         t['reason']='; '.join(filter(None,[str(len(t['peers']['separate']))+' independent separating individuals',
             'contact loss: '+', '.join(losses) if losses else 'no calibrated contact loss',
             'libraries disagree' if losses and nonloss else '',
@@ -577,13 +639,31 @@ def rank_alternatives(event):
         t['cut_bp']=None
     event['alternatives'].sort(key=lambda t:(-t['rank_score'],t['distance_bp'],t['lo']))
     for i,t in enumerate(event['alternatives'],1):t['rank']=i
-    event['regional_concerns']=any(t['hi']-t['lo']>=5000 and not (event['lo']<=t['lo'] and t['hi']<=event['hi']) for t in event['alternatives'])
+    event['regional_concerns']=any(t['hi']-t['lo']>=5000 and not (event['lo']<=t['lo'] and t['hi']<=event['hi']) for t in event['alternatives'] if t.get('site_verdict')!='EXCLUDE')
 
 
 def recommend(event):
     peers=event['peers'];grid=event.get('hifi',{});options=event.get('cut_options',[])
     event.pop('recommended_cut',None)
-    for option in options:option['unmet_cut_prerequisites']=cut_prerequisites(option)
+    event.pop('preferred_region',None)
+    for option in options:
+        option['unmet_cut_prerequisites']=cut_prerequisites(option)
+        option['site_verdict'],option['site_reason']=site_review(event,option)
+        option['automatic_cut_eligible']=not option['unmet_cut_prerequisites']
+    manual=[c for c in options if c['site_verdict']=='CUT']
+    if len(manual)==1:
+        event['recommended_cut']=manual[0]
+        return 'CUT',manual[0]['site_reason']+' Automatic cutting remains disabled; stricter eligibility is reported separately.'
+    favored=[t for t in event.get('alternatives',[]) if t.get('site_verdict')=='BREAK_REGION']
+    if favored:
+        event['preferred_region']=dict(favored[0])
+        if favored[0]['lo']<=event.get('hi',-100000)+100000 and favored[0]['hi']>=event.get('lo',10**20)-100000:
+            event['preferred_region'].update(lo=min(favored[0]['lo'],event['lo']),hi=max(favored[0]['hi'],event['hi']))
+        return 'SUSPECT',favored[0]['site_reason']
+    event['site_verdict'],event['site_reason']=site_review(event,event)
+    if event['site_verdict']=='BREAK_REGION' and not event.get('localization_warning'):
+        event['preferred_region']=dict(id=event['id'],lo=event['lo'],hi=event['hi'],site_reason=event['site_reason'])
+        return 'SUSPECT',event['site_reason']
     supported=grid.get('state') in ('continuous','mostly_continuous')
     strict=event.get('hifi_strict',{})
     contacts=event.get('contacts',[])

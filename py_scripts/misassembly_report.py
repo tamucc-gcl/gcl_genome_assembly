@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from misassembly_core import write_table,POLICY,table,cut_prerequisites
 
-FIELDS=['selected','review_disposition','id','assembly','scaffold','chromosomes','event_id','event_assessment','event_reason','recommendation','option_advice','option_association','location_kind','location_rank','assay_probe_bp','cut_bp','review_start','review_end','action','gap_start','gap_end',
+FIELDS=['selected','review_disposition','id','assembly','scaffold','chromosomes','event_id','event_assessment','event_reason','recommendation','option_advice','option_association','location_kind','location_rank','assay_probe_bp','automatic_cut_eligible','cut_bp','review_start','review_end','action','gap_start','gap_end',
         'localization_status','reviewer','reason','coordinate_stage','assessment_sha256','decision_source','evidence_packet_id']
 
 
@@ -18,7 +18,7 @@ def mdtable(headers,rows):
 
 
 def advice(event):
-    return {'CUT':'Recommend cutting at the specified gap','RETAIN':'Keep intact — local continuity supported','SUSPECT':'Suspect misjoin — review the evidence','REVIEW':'Review — keep intact pending a decision'}[event['recommendation']]
+    return {'CUT':'Recommend cutting at the specified gap','RETAIN':'Keep intact — local continuity supported','SUSPECT':'Break favored — review the coordinate','REVIEW':'Review — no cut selected'}[event['recommendation']]
 
 
 
@@ -72,7 +72,69 @@ def gap_summary(event):
                     ('recommended' if event.get('recommended_cut',{}).get('id')==c['id'] else 'available; not recommended' if c.get('association',{}).get('status')=='confirmed' else 'nearby only; not associated')+')' for c in options)
 
 
+def review_locations(event):
+    """One editable option per physical gap; regional assay IDs remain evidence aliases."""
+    gaps=event.get('cut_options',[]);regions=[]
+    for gap in gaps:gap['assay_aliases']=[]
+    for region in event.get('alternatives',[]):
+        overlap=[g for g in gaps if region['lo']<=g['hi'] and region['hi']>=g['lo']]
+        if overlap:
+            region['gap_option_id']=overlap[0]['id']
+            overlap[0]['assay_aliases'].append(region['id'])
+        elif region.get('site_verdict')!='EXCLUDE':regions.append(region)
+    return [g for g in gaps if g.get('site_verdict')!='EXCLUDE']+regions
+
+
 def event_card(event,assembly,cohort=False,counterparts=()):
+    preferred=event.get('preferred_region',event)
+    cut=event.get('recommended_cut')
+    location=(bp(cut['cut_bp'])+' bp (exact gap cut)') if cut else bp(preferred['lo'])+'–'+bp(preferred['hi'])+' bp (review range)'
+    md=['### '+(assembly+' · ' if cohort else '')+event['id']+' — '+event['left']+' → '+event['right'],'',
+        '**'+advice(event)+'.** '+event['reason'],'','**Decision location:** '+event['scaffold']+': '+location+'.','']
+    if cut:
+        md+=['**Exact option:** '+cut['id']+'. '+('Automatic-cut prerequisites met.' if cut.get('automatic_cut_eligible') else 'Manual recommendation; automatic-cut prerequisites are not met.')+' All cut selections remain NO.','']
+    locations=[t for t in review_locations(event) if t.get('site_verdict')!='EXCLUDE']
+    locations.sort(key=lambda t:(t.get('id')!=event.get('recommended_cut',{}).get('id'),t.get('site_verdict')!='BREAK_REGION',-len(t.get('peers',event['peers'])['separate']),t.get('rank',999)))
+    if not any(t['lo']<=event['lo'] and t['hi']>=event['hi'] for t in locations):locations.append(event)
+    if not locations:locations=[event]
+    rows=[]
+    for t in (locations[:7]+[event] if len(locations)>8 and event not in locations[:8] else locations[:8]):
+        isgap=t.get('cut_bp') is not None and t.get('kind')!='regional_read_loss'
+        context=t.get('peers',event['peers'])
+        reads=str(t.get('spanning'))+' gap-spanning' if isgap and 'spanning' in t else str(t.get('hifi',{}).get('minimum','Not measured'))+' minimum MAPQ20 bridges'
+        support=[];against=[]
+        if context['separate']:support.append(str(len(context['separate']))+' separating individuals')
+        else:against.append('local chromosome separation not confirmed')
+        bridges=t.get('spanning') if isgap else t.get('hifi',{}).get('minimum')
+        if bridges is not None:(support if bridges<2 else against).append(reads)
+        else:against.append('HiFi bridges not measured')
+        contacts=t.get('contacts',[])
+        loss=[c['library'] for c in contacts if c['calibrated'] and c['loss']]
+        trough=[c['library'] for c in t.get('regional_contacts',[]) if c['depleted']]
+        if loss:support.append('matched-control contact loss: '+', '.join(loss))
+        elif trough:support.append('regional contact trough: '+', '.join(trough))
+        if isgap and 'spanning_all_primary' not in t:against.append('all-primary gap bridges not yet measured')
+        if t.get('spanning_all_primary',0)>0:against.append(str(t['spanning_all_primary'])+' all-primary gap bridges')
+        if t.get('ambiguity_restores_support'):against.append('low-confidence placements restore bridges')
+        if context['continuous']:against.append(str(len(context['continuous']))+' same-chromosome individuals')
+        if not loss:against.append('no calibrated contact loss')
+        unobserved=[c['library'] for c in t.get('regional_contacts',[]) if c['depleted'] and not c['observable']]
+        if unobserved:against.append('low-count trough: '+', '.join(unobserved))
+        finding=t.get('site_verdict','CUT' if event.get('recommended_cut',{}).get('id')==t['id'] else 'REVIEW')
+        action={'CUT':'Recommend manual cut','BREAK_REGION':'Break favored; choose coordinate','REVIEW':'Review possible break','EXCLUDE':'Not a fusion cut'}[finding]
+        if isgap and 'site_verdict' not in t:action=option_advice(event,t)
+        rows.append([t['id']+(' / '+', '.join(t['assay_aliases']) if t.get('assay_aliases') else ''),bp(t['lo'])+'–'+bp(t['hi']),action,'; '.join(support) or 'No positive local evidence','; '.join(against) or 'No measured opposition'])
+    md+=mdtable(['Location','Range, bp','Suggested action','Evidence for breaking','Against / limitations'],rows)+['']
+    if len(locations)>8:md+=['Additional locations are retained in the detailed measurements below.','']
+    md+=['The regional contact trough compares nearby binned support; it is corroboration, not matched-control calibration. Confident read bridges and low-confidence placements are reported separately.','']
+    if counterparts:
+        md+=['Other haplotype: '+ '; '.join('['+other['assembly']+' '+found['id']+']('+('assemblies/'+other['assembly']+'/report.md' if cohort else '../'+other['assembly']+'/report.md')+'#'+found['id'].lower()+')' for other,found in counterparts)+'. The chromosome pair recurs; identical junctions have not been established.','']
+    if cohort:md+=['[Plots, actual bridging reads and full measurements](assemblies/'+assembly+'/report.md#'+event['id'].lower()+')','']
+    else:md+=['<details>','<summary>Full measurements, excluded locations and control limitations</summary>','']+measurement_details(event,assembly,counterparts=counterparts)+['</details>','']
+    return md
+
+
+def measurement_details(event,assembly,cohort=False,counterparts=()):
     md=['### '+(assembly+' · ' if cohort else '')+event['id']+' — '+event['left']+' → '+event['right'],'',
         '**'+advice(event)+'.** '+event['reason'],'',
         '**Location:** '+event['scaffold']+', transition range '+bp(event['lo'])+'–'+bp(event['hi'])+' bp.','',
@@ -119,7 +181,7 @@ def event_card(event,assembly,cohort=False,counterparts=()):
                     [t['library'],str(t['raw_counts']['cross'])+' / '+str(t['raw_counts']['left_within'])+' / '+str(t['raw_counts']['right_within']),control_summary(t),
                      'Supports cutting: contact loss' if t['loss'] else 'No demonstrated loss' if t['calibrated'] else 'Unable to judge contact loss'] for t in option['contacts']])+['']
             failures=option.get('unmet_cut_prerequisites',[])
-            if failures:md+=['**Why this gap has no cut recommendation:**','']+['- '+reason for reason in failures]+['']
+            if failures:md+=['**Stricter automatic-cut prerequisites not met:**','']+['- '+reason for reason in failures]+['']
             association=option.get('association',{})
             if association:md+=['**Gap association: '+association['status']+'.** '+association['reason'],'']
             if option.get('flank_support'):
@@ -167,14 +229,16 @@ def event_card(event,assembly,cohort=False,counterparts=()):
 def decisions(data):
     rows=[]
     for event in data['events']:
-        targets=(event['cut_options'] or [dict(id=event['id'],lo=event['lo'],hi=event['hi'])])+event.get('alternatives',[])
+        targets=review_locations(event)
+        if not event['cut_options']:targets=[dict(id=event['id'],lo=event.get('preferred_region',event)['lo'],hi=event.get('preferred_region',event)['hi'])]+targets
         for target in targets:
             alternative=target.get('kind')=='regional_read_loss'
             gap='cut_bp' in target and not alternative
             rows.append(dict(selected='NO',review_disposition='PENDING',id=target['id'],assembly=data['assembly'],scaffold=event['scaffold'],
                 chromosomes=event['left']+' → '+event['right'],event_id=event['id'],event_assessment=event['recommendation'],event_reason=event['reason'],recommendation=advice(event),
-                option_advice=target['assessment']+'; assay probe is not a cut' if alternative else option_advice(event,target) if gap else 'No available gap cut; an internal cut requires a reviewed coordinate',option_association=target.get('association',{}).get('status','unresolved') if gap or alternative else 'no_gap',cut_bp=target.get('cut_bp',''),review_start=target['lo'] if alternative else event['lo'],review_end=target['hi'] if alternative else event['hi'],
+                option_advice=target['assessment']+'; assay probe is not a cut' if alternative else option_advice(event,target) if gap else 'No available gap cut; an internal cut requires a reviewed coordinate',option_association=target.get('association',{}).get('status','unresolved') if gap or alternative else 'no_gap',cut_bp=target.get('cut_bp',''),review_start=target['lo'],review_end=target['hi'],
                 location_kind='alternative_region' if alternative else 'gap_option' if gap else 'original_transition',location_rank=target.get('rank',''),assay_probe_bp=target.get('probe_bp',''),
+                automatic_cut_eligible='YES' if target.get('automatic_cut_eligible') else 'NO',
                 action='UNJOIN_UNSUPPORTED' if gap else 'UNRESOLVED',gap_start=target['lo'] if gap else '',gap_end=target['hi'] if gap else '',localization_status='available_gap' if gap else 'unlocalized',
                 reviewer='',reason='',coordinate_stage='pre_finishing',assessment_sha256=data['assessment_sha256'],decision_source='review',evidence_packet_id=data['assembly']))
     return rows
@@ -239,7 +303,7 @@ def main():
             md+=['<details>','<summary>What was screened</summary>','']+mdtable(['Chromosome-scale scaffold','Individuals with chromosome assignments','Best assigned fraction'],screen)+['','An absence of detected transitions applies to the usable comparisons above. Unmapped sequence is not evidence of continuity.','</details>','']
         for event in sorted(data['events'],key=lambda e:e['recommendation']=='RETAIN'):
             md+=['<a name="'+event['id'].lower()+'"></a>','']+event_card(event,assembly,counterparts=sister_context(event,data,all_data))
-            if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity, HiFi support, Hi-C support and telomeres](plots/'+event['id']+'.png)','','Blue and orange distinguish the focal chromosome pair consistently across haplotypes; other chromosomes are muted. Pale backgrounds show the independent-individual consensus assignment; ambiguous regions remain neutral. Yellow marks the original transition bracket. Purple regions and R labels show the six highest-ranked alternative assay locations; the table retains all assessed locations. Dashed red lines mark available gap options, not selected cuts. Spanning molecules are HiFi reads. The Hi-C curves show binned support per library, not calibrated cut recommendations. Telomere counts are in the bottom panel. Gaps in curves mean unavailable measurements.','']
+            if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity, HiFi support, Hi-C support and telomeres](plots/'+event['id']+'.png)','','Blue and orange distinguish the focal chromosome pair consistently across haplotypes; other chromosomes are muted. Pale backgrounds show the independent-individual consensus assignment; ambiguous regions remain neutral. Yellow marks the original transition bracket. Purple regions and R labels show up to six highest-ranked nonexcluded assay locations (nearby labels are grouped); the table retains all assessed locations. Dashed red lines mark available gap options, not selected cuts. Spanning molecules are HiFi reads. The Hi-C curves show binned support per library, not calibrated cut recommendations. Telomere counts are in the bottom panel. Gaps in curves mean unavailable measurements.','']
             md+=['<details>','<summary>Peer chromosome assignments</summary>','']+mdtable(['Assembly','Left → right','Local assignment','Role'],[
                 [t['peer'],str(t['left']['chrom'] or '?')+' → '+str(t['right']['chrom'] or '?'),'Confirmed' if t['qualified'] else 'Partial or ambiguous',
                  'Sister haplotype' if t['sample']==data['sample'] else 'Independent individual' if t['eligible'] else 'Context only'] for t in event['peer_tests']])+['','</details>','']
@@ -283,9 +347,9 @@ def main():
     if reviewed:
         md+=['','## Submitted manual decisions','',str(sum(r.get('selected')=='YES' for r in reviewed))+' cuts selected; '+str(sum(len(v['selected_actions']) for v in applied))+' actions verified by exact sequence reconstruction. These evidence measurements describe the original pre-finishing assemblies. Corrected assemblies are reassigned and finished downstream.','']
     if events:
-        md+=['','## Detected chromosome transitions and suggested actions','']+mdtable(['Assembly / event','Chromosomes','Suggested action','Transition range','Gap cut options'],[
+        md+=['','## Detected chromosome transitions and suggested actions','']+mdtable(['Assembly / event','Chromosomes','Suggested action','Decision location'],[
             ['['+d['assembly']+' '+e['id']+'](assemblies/'+d['assembly']+'/report.md#'+e['id'].lower()+')',e['left']+' → '+e['right'],advice(e),
-             e['scaffold']+': '+bp(e['lo'])+'–'+bp(e['hi'])+' bp',gap_summary(e)] for d,e in events])
+             e['scaffold']+': '+(bp(e['recommended_cut']['cut_bp'])+' bp (exact gap)' if e.get('recommended_cut') else bp(e.get('preferred_region',e)['lo'])+'–'+bp(e.get('preferred_region',e)['hi'])+' bp (review range)')] for d,e in events])
         md+=['','## Evidence for each decision','']
         for d,e in events:md+=event_card(e,d['assembly'],cohort=True,counterparts=sister_context(e,d,all_data))
     md+=['## Scope and reproducibility','',

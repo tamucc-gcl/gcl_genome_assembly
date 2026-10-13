@@ -44,7 +44,7 @@ class EvidenceRepairTests(unittest.TestCase):
         self.assertEqual(result['status'],'unresolved')
         self.assertEqual(result['opposing_individuals'],[])
         self.assertEqual(gap_association(self.event('chr3'),dict(lo=2500,hi=2600),'focal')['status'],'contradicted')
-        self.assertEqual(gap_association(self.event('chr2'),dict(lo=2500,hi=2600),'focal')['status'],'confirmed')
+        self.assertEqual(gap_association(self.event('chr2'),dict(lo=2500,hi=2600),'focal')['status'],'compatible')
 
     def test_association_respects_localization_resolution(self):
         event=dict(self.event(),localization='Independent-individual regional chromosome transition',localization_resolution_bp=1000)
@@ -104,7 +104,7 @@ class EvidenceRepairTests(unittest.TestCase):
 
     def test_one_library_can_support_a_cut_without_auto_selection(self):
         peers=dict(separate=['a','b'],continuous=[],conflicting=[])
-        option=dict(id='G1',peers=peers,spanning=0,flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(library='A',calibrated=True,loss=True)])
+        option=dict(id='G1',peers=peers,spanning=0,spanning_all_primary=0,flank_support=[dict(observable=True),dict(observable=True)],association=dict(status='confirmed'),contacts=[dict(library='A',calibrated=True,loss=True)])
         event=dict(peers=peers,hifi=dict(state='patchy'),cut_options=[option])
         self.assertEqual(recommend(event)[0],'CUT')
         self.assertEqual(event['recommended_cut']['id'],'G1')
