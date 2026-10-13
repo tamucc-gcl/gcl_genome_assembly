@@ -30,9 +30,11 @@ class ReviewIntegrationTests(unittest.TestCase):
             self.assertIn('Recommend cutting',report);self.assertIn('Evidence for breaking',report)
             self.assertNotIn('read_support.tsv',report)
             with (root/'review.tsv').open(encoding='utf-8') as handle:rows=list(csv.DictReader(handle,delimiter='\t'))
-            self.assertEqual(rows[0]['selected'],'NO');self.assertEqual(rows[0]['cut_bp'],'6')
-            rows[0].update(selected='YES',review_disposition='CUT',reviewer='tester',reason='Approve fixture gap.')
-            extra=dict(rows[0],id='manual01',scaffold='other',cut_bp='4',action='BREAK_PROBABLE_MISJOIN',gap_start='',gap_end='',localization_status='localized',reason='Manually added cut absent from discovery.')
+            self.assertTrue(all(r['selected']=='NO' for r in rows))
+            gap=next(r for r in rows if r['location_kind']=='gap_option')
+            self.assertEqual(gap['cut_bp'],'6')
+            gap.update(selected='YES',review_disposition='CUT',reviewer='tester',reason='Approve fixture gap.')
+            extra=dict(gap,id='manual01',scaffold='other',cut_bp='4',action='BREAK_PROBABLE_MISJOIN',gap_start='',gap_end='',localization_status='localized',reason='Manually added cut absent from discovery.')
             actions=root/'reviewed.tsv';write_table(actions,rows+[extra],FIELDS)
             run('break_chimeras.py','--fasta',fasta,'--name-map',names,'--actions',actions,'--assembly','synthetic','--out-fasta',root/'broken.fa','--out-name-map',root/'broken.names.tsv','--audit',root/'audit.tsv','--min-piece-bp',2)
             verification=json.loads((root/'broken.fa.verification.json').read_text())
@@ -41,6 +43,8 @@ class ReviewIntegrationTests(unittest.TestCase):
             second=root/'second';second.mkdir()
             run('misassembly_report.py','--packet',packet,'--actions',actions,'--verification',root/'broken.fa.verification.json',cwd=second)
             self.assertIn('2 actions verified',(second/'README.md').read_text(encoding='utf-8'))
+            self.assertIn('manual01',(second/'README.md').read_text(encoding='utf-8'))
+            self.assertIn('User-selected cut(s)',(second/'assemblies/synthetic/report.md').read_text(encoding='utf-8'))
 
 
 if __name__=='__main__':unittest.main()

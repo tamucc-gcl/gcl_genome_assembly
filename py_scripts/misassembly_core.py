@@ -13,7 +13,7 @@ from pathlib import Path
 from chimera_tracks import tracks
 from chimera_controls import molecule_chains, qualified_molecule
 
-POLICY='cohort-site-review-v5'
+POLICY='cohort-manual-review-v6'
 
 
 def sha(path):
@@ -614,8 +614,10 @@ def site_review(event,target):
         run=(run+1 if previous is not None and probe['position']-previous==1000 else 1) if probe['molecules']<2 else 0
         longest=max(longest,run);previous=probe['position']
     sustained=strict.get('longest_weak_run_bp',0)>=5000 or longest>=5
-    if len(peers['separate'])>=2 and strict.get('minimum') is not None and strict['minimum']<=1 and grid.get('minimum',0)>=2 and sustained and (calibrated or any(c['depleted'] for c in target['regional_contacts'])):
+    if len(peers['separate'])>=2 and strict.get('minimum') is not None and strict['minimum']<=1 and grid.get('minimum',0)>=2 and sustained and (calibrated or troughs):
         return 'BREAK_REGION','Likely misjoin region: independent chromosome switch, sustained loss of high-confidence HiFi support and a regional contact decline. Remaining MAPQ20 bridges are counterevidence; the exact cut requires review.'
+    if len(peers['separate'])>=2 and sustained and strict.get('minimum') is not None and strict['minimum']<=1:
+        return 'REVIEW','Possible misjoin: independent chromosome switch and sustained strict HiFi loss; surviving MAPQ20 bridges and inadequate or inconclusive Hi-C prevent a stronger recommendation.'
     if target.get('kind')=='regional_read_loss' and grid.get('minimum') is not None and grid['minimum']<=1:
         return 'REVIEW','Measured HiFi trough: inspect as a possible break, with chromosome association and competing placements still unresolved.'
     return 'REVIEW','No uniquely supported cut location; review the evidence.'

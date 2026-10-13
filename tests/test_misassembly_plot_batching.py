@@ -4,12 +4,18 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
-from misassembly_assess import draw_chromosome_track,contact_profile,shade_chromosomes,chromosome_colors,assessment_gaps,plot_event,plot_scaffold
+from misassembly_assess import contact_profile,assessment_gaps
+from misassembly_plot import draw_chromosome_track,shade_chromosomes,chromosome_colors,plot_event,plot_scaffold,detail_window
 from misassembly_core import consensus_regions,discover,recommend
 import tempfile
 
 
 class PlotBatchingTests(unittest.TestCase):
+    def test_closeup_prioritizes_user_coordinate_then_recommended_gap(self):
+        e=dict(lo=1000000,hi=9000000,recommended_cut=dict(lo=3999950,hi=4000050,cut_bp=4000050))
+        self.assertEqual(detail_window(e),(3900050,4100050))
+        self.assertEqual(detail_window(e,[dict(cut_bp=6000000)]),(5900000,6100000))
+
     def test_batching_preserves_every_interval_and_unassigned_gap(self):
         axis=Mock();colors={'chr1':'red','chr2':'blue'}
         blocks=[dict(lo=0,hi=100,chrom='chr1'),dict(lo=100,hi=200,chrom=None),
@@ -98,6 +104,19 @@ class PlotBatchingTests(unittest.TestCase):
             plot_scaffold('s',np.eye(8,dtype=np.uint32),[event],out)
             self.assertEqual(len(figures[1].axes),2) # Matrix axis and its colorbar only.
         self.assertFalse(plt.get_fignums())
+
+    def test_region_and_selected_cut_markers_cross_every_panel(self):
+        event=dict(id='C01',scaffold='s',lo=400000,hi=401000,left='chr1',right='chr2',peer_tracks=[],cut_options=[],
+            alternatives=[dict(id='C01R01',lo=399000,hi=401000,probe_bp=400000,site_verdict='REVIEW')])
+        figures=[]
+        with tempfile.TemporaryDirectory() as tmp,patch('matplotlib.figure.Figure.savefig',lambda fig,*a,**kw:figures.append(fig)):
+            out=Path(tmp);(out/'plots').mkdir()
+            plot_event(event,out,detail=True,selected_cuts=[dict(cut_bp=402000)])
+        for axis in figures[0].axes:
+            self.assertTrue(any(line.get_color()=='#762a83' and line.get_linestyle()=='--' for line in axis.lines))
+            self.assertTrue(any(line.get_color()=='#007A3D' for line in axis.lines))
+        self.assertIn('Hi-C contact support',figures[0].axes[3].get_ylabel())
+        self.assertEqual(figures[0].axes[4].get_xlabel(),'Original scaffold coordinate (Mb)')
 
     def test_ambiguous_spike_does_not_set_primary_read_scale(self):
         event=dict(assembly='assembly_hap1',id='C01',scaffold='s',lo=400000,hi=401000,left='chr1',right='chr2',peer_tracks=[],cut_options=[],

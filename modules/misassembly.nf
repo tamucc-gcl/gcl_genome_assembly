@@ -87,7 +87,7 @@ process MISASSEMBLY_ASSESS {
 }
 
 process MISASSEMBLY_REVIEW {
-    label 'chimera_joins'
+    label 'misassembly_review'
     publishDir "${params.outdir}/assembly/chimeras", mode: params.publish_dir_mode
     input:
     path(packets,stageAs:'packets??/*')

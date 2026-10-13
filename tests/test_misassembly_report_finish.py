@@ -30,7 +30,7 @@ class FinishedReviewTests(unittest.TestCase):
         self.assertTrue(any('disagreement' in v for v in cut_prerequisites(option)))
 
     def test_gap_row_preserves_event_and_labels_unassociated_option(self):
-        data=fixture();row=decisions(data)[0]
+        data=fixture();row=next(r for r in decisions(data) if r['location_kind']=='gap_option')
         self.assertEqual(row['event_id'],'C01')
         self.assertEqual(row['event_assessment'],'REVIEW')
         self.assertEqual(row['event_reason'],'Conflicting evidence.')

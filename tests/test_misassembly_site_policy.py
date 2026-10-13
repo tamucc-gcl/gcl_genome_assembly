@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
 from misassembly_core import recommend,site_review,regional_contact_evidence,rank_alternatives,regional_hypotheses
-from misassembly_report import decisions,review_locations,event_card
+from misassembly_report import decisions,review_locations,event_card,read_counts,contact_summary
 
 
 class SitePolicyTests(unittest.TestCase):
@@ -54,6 +54,38 @@ class SitePolicyTests(unittest.TestCase):
         e=self.fixture();g=e['cut_options'][0]
         g['contacts']=[dict(library='a',calibrated=True,loss=True),dict(library='b',calibrated=True,loss=False)]
         self.assertNotEqual(recommend(e)[0],'CUT')
+
+    def test_report_shows_actual_probe_bridges_not_interval_minima(self):
+        kind,counts=read_counts(dict(bridge_counts={'20':0,'30':0,'0':311},hifi_all_primary=dict(minimum=32)))
+        self.assertEqual(kind,'probe');self.assertEqual(counts,[0,0,311])
+
+    def test_library_disagreement_is_visible_in_summary(self):
+        text=contact_summary(dict(contacts=[dict(library='a',calibrated=True,loss=True),dict(library='b',calibrated=True,loss=False)]))
+        self.assertIn('a: calibrated loss',text);self.assertIn('b: no calibrated loss',text)
+
+    def test_low_count_trough_is_not_reported_as_positive_evidence(self):
+        e=self.fixture();e.update(recommendation='REVIEW',reason='review')
+        e['cut_options'][0]['regional_contacts']=[dict(library='library',depleted=True,observable=False,fraction=0)]
+        row=next(line for line in event_card(e,'unknown',cohort=True) if '| boundary |' in line)
+        self.assertNotIn('regional contact trough',row.split('|')[6])
+        self.assertIn('inadequate contacts',row.split('|')[5])
+
+    def test_unobservable_trough_does_not_strengthen_a_strict_loss(self):
+        e=self.fixture();e['cut_options']=[];e.pop('localization_warning')
+        e['hifi']=dict(state='continuous',minimum=9)
+        e['hifi_strict']=dict(state='patchy',minimum=1,longest_weak_run_bp=7000)
+        for row in e['contact_profiles']['library']:
+            if abs(row['position']-3000000)<=150000:row['right_within']=0
+        verdict,reason=site_review(e,e)
+        self.assertEqual(verdict,'REVIEW');self.assertIn('inadequate or inconclusive Hi-C',reason)
+
+    def test_every_event_has_an_internal_coordinate_row_even_with_gaps(self):
+        e=self.fixture();e.update(recommendation='CUT',reason='gap')
+        rows=decisions(dict(assembly='unseen',assessment_sha256='digest',events=[e]))
+        original=next(r for r in rows if r['location_kind']=='original_transition')
+        self.assertEqual(original['id'],e['id']);self.assertEqual(original['cut_bp'],'')
+        self.assertIn('not a restriction',original['option_advice'])
+        self.assertTrue(all(r['selected']=='NO' for r in rows))
 
     def test_unobserved_contact_ratios_cannot_corroborate_a_gap(self):
         e=self.fixture()
@@ -126,8 +158,8 @@ class SitePolicyTests(unittest.TestCase):
         lines=event_card(e,'unknown',cohort=True)
         row=next(line for line in lines if '| boundary |' in line)
         cells=row.split('|')
-        self.assertNotIn('8 gap-spanning',cells[4])
-        self.assertIn('8 gap-spanning',cells[5])
+        self.assertNotIn('8 gap-spanning',cells[6])
+        self.assertIn('8 gap-spanning',cells[7])
 
     def test_wide_strict_loss_does_not_swallow_separate_confident_troughs(self):
         e=self.fixture();e['start']=2000000;e['end']=4000000

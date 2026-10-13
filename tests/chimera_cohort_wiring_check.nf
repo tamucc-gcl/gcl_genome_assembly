@@ -56,8 +56,8 @@ workflow {
                 assert rows.size()==lengths.size()
                 rows.each { row -> assert lengths[row[1]]==row[2].toInteger() }
                 if(meta.id=='sample_hap1') {
-                    assert lengths.size()==(params.fixture_manual ? 2 : 1)
-                    assert lengths.values().sum()==(params.fixture_evidence ? 6100 : 6000)+(params.fixture_manual ? 4 : 2)
+                    assert lengths.size()==(params.fixture_manual ? params.fixture_cut_count+1 : 1)
+                    assert lengths.values().sum()==(params.fixture_evidence ? 6100 : 6000)+(params.fixture_manual ? 2*(params.fixture_cut_count+1) : 2)
                     if(params.fixture_manual) assert rows.every { it[0].startsWith('s_sub_') }
                     else assert rows[0][0]=='s'
                 }
@@ -74,14 +74,14 @@ workflow {
         def lines=decisions.readLines()
         def fields=lines[0].split('\t').toList()
         def records=lines.drop(1).collect { line -> def values=line.split('\t',-1); fields.withIndex().collectEntries { name,index -> [(name):values[index]] } }
-        assert records.count { it.location_kind!='alternative_region' }==(params.fixture_manual ? 2 : 1)
+        assert records.count { it.location_kind!='alternative_region' }==((params.fixture_evidence ? 2 : 1)+(params.fixture_manual ? params.fixture_cut_count : 0))
         assert records.every { it.location_kind!='alternative_region' || (it.selected=='NO' && !it.cut_bp && it.assay_probe_bp) }
         assert decisions.text.contains('chr1') && decisions.text.contains('chr2')
         'PASS: general discovery found the synthetic chromosome change; review row emitted unselected'
     }
     CHIMERA.out.pre_finalize.toList().view { outputs ->
         assert outputs.size()==2
-        if(params.fixture_manual) assert outputs.find { it[0].id=='sample_hap1' }[1].text.contains('s_sub_0_3100')
+        if(params.fixture_manual) assert outputs.find { it[0].id=='sample_hap1' }[1].text.contains(params.fixture_cut_count==3 ? 's_sub_0_1500' : 's_sub_0_3100')
         'PASS: finishing receives both assemblies and any verified manual cut'
     }
     CHIMERA.out.report.view { report ->
@@ -98,7 +98,7 @@ workflow {
             assert data.events[0].contacts.every { it.raw_counts.cross==0 && it.raw_counts.left_within==100 && it.raw_counts.right_within==100 && !it.calibrated }
             assert file(data.mapping.bam).exists()
         }
-        if(params.fixture_manual) assert report.text.contains('1 actions verified')
+        if(params.fixture_manual) assert report.text.contains(params.fixture_cut_count+' actions verified')
         'PASS: source-bound read evidence, per-library measured zeros and manual application reporting'
     }
 }

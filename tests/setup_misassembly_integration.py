@@ -4,7 +4,9 @@ import sys,hashlib
 root=Path('/tmp/chimera-nxf-runtime');root.mkdir(exist_ok=True)
 single='single' in sys.argv
 evidence='evidence' in sys.argv or 'manual' in sys.argv or single
-manual='manual' in sys.argv
+mixed='manual-mixed' in sys.argv
+manual='manual' in sys.argv or mixed
+evidence=evidence or manual
 (root/'a.fa').write_text('>s\n'+'A'*3000+('N'*100 if evidence else '')+'C'*3000+'\n')
 (root/'b.fa').write_text('>x\n'+'A'*3000+'\n>y\n'+'C'*3000+'\n')
 (root/'names.tsv').write_text('old_name\tnew_name\torient\torder\tlength\tclass\tchromosome_member\ns\tchr1+chr2\tfwd\t1\t'+str(6100 if evidence else 6000)+'\tcomposite\tyes\n')
@@ -65,5 +67,9 @@ if manual:
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
     from misassembly_report import FIELDS
     from misassembly_core import write_table
-    write_table(root/'reviewed.tsv',[dict(selected='YES',review_disposition='CUT',id='manual01',assembly='sample_hap1',scaffold='s',cut_bp=3100,action='UNJOIN_UNSUPPORTED',gap_start=3000,gap_end=3100,localization_status='available_gap',reviewer='integration-test',reason='Software test of explicit manual override.',coordinate_stage='pre_finishing',assessment_sha256=hashlib.sha256((root/'a.fa').read_bytes()).hexdigest(),decision_source='review',evidence_packet_id='sample_hap1')],FIELDS)
-    with (root/'check.config').open('a') as handle:handle.write("\nparams.chimera_break='/tmp/chimera-nxf-runtime/reviewed.tsv'\nparams.chimera_min_piece_bp=1000\nparams.fixture_manual=true\n")
+    actions=[dict(selected='YES',review_disposition='CUT',id='manual01',assembly='sample_hap1',scaffold='s',cut_bp=3100,action='UNJOIN_UNSUPPORTED',gap_start=3000,gap_end=3100,localization_status='available_gap',reviewer='integration-test',reason='Software test of explicit manual override.',coordinate_stage='pre_finishing',assessment_sha256=hashlib.sha256((root/'a.fa').read_bytes()).hexdigest(),decision_source='review',evidence_packet_id='sample_hap1')]
+    if mixed:
+        for identity,point in [('event_override',1500),('undetected_override',4600)]:
+            actions.append(dict(actions[0],id=identity,cut_bp=point,action='BREAK_PROBABLE_MISJOIN',gap_start='',gap_end='',localization_status='localized',event_id='C01' if point==1500 else '',reason='Explicit internal coordinate outside detector range' if point==1500 else 'Added undetected cut'))
+    write_table(root/'reviewed.tsv',actions,FIELDS)
+    with (root/'check.config').open('a') as handle:handle.write(f"\nparams.chimera_break='/tmp/chimera-nxf-runtime/reviewed.tsv'\nparams.chimera_min_piece_bp=1000\nparams.fixture_manual=true\nparams.fixture_cut_count={len(actions)}\n")
