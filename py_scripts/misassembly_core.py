@@ -13,7 +13,7 @@ from pathlib import Path
 from chimera_tracks import tracks
 from chimera_controls import molecule_chains, qualified_molecule
 
-POLICY='cohort-manual-review-v6'
+POLICY='cohort-observable-contact-v7'
 
 
 def sha(path):
@@ -574,14 +574,22 @@ def regional_contact_evidence(event,target):
     for library,rows in sorted(event.get('contact_profiles',{}).items()):
         usable=[r for r in rows if r.get('ratio') is not None]
         center=[r for r in usable if abs(r['position']-point)<=150000]
+        observed=[r for r in center if min(r.get('left_within',0),r.get('right_within',0))>=100]
+        unobservable=[r for r in rows if abs(r['position']-point)<=150000 and min(r.get('left_within',0),r.get('right_within',0))<100]
         left=[r['ratio'] for r in usable if 300000<=point-r['position']<=700000 and min(r.get('left_within',0),r.get('right_within',0))>=100]
         right=[r['ratio'] for r in usable if 300000<=r['position']-point<=700000 and min(r.get('left_within',0),r.get('right_within',0))>=100]
-        row=min(center,key=lambda r:r['ratio']) if center else None
+        # Choose a measurable trough before considering sparse bins. A sparse
+        # zero cannot hide an equally low (or higher) observable measurement.
+        pool=observed or center
+        row=min(pool,key=lambda r:(r['ratio'],abs(r['position']-point),r['position'])) if pool else None
         baseline=min(median(left),median(right)) if len(left)>=2 and len(right)>=2 else None
         fraction=row['ratio']/baseline if row is not None and baseline is not None and baseline>0 else None
         results.append(dict(library=library,probe_bp=row['position'] if row else None,ratio=row['ratio'] if row else None,
                             baseline=baseline,fraction=fraction,depleted=fraction is not None and fraction<=.35,
-                            observable=bool(row and min(row.get('left_within',0),row.get('right_within',0))>=100)))
+                            observable=bool(row and min(row.get('left_within',0),row.get('right_within',0))>=100),
+                            selection='observable_minimum' if observed else 'unobservable_only' if row else 'no_ratio',
+                            cross=row.get('cross') if row else None,left_within=row.get('left_within') if row else None,
+                            right_within=row.get('right_within') if row else None,unobservable_bins=unobservable))
     return results
 
 

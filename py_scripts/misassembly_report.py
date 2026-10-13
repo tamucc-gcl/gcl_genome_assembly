@@ -104,6 +104,9 @@ def contact_summary(target):
         elif r.get('observable') and r.get('depleted'):finding='regional trough'
         elif r.get('observable') and r.get('fraction') is not None:finding='no clear regional loss'
         else:finding='comparison unavailable'
+        if c.get('calibrated') and r.get('observable') and r.get('depleted'):finding+='; regional trough'
+        if r.get('observable') and r.get('depleted') and r.get('probe_bp') is not None:
+            finding+=' at '+format(r['probe_bp']/1e6,'.3f')+' Mb'
         labels.append(library+': '+finding)
     return '; '.join(labels) or 'Not measured'
 
@@ -150,6 +153,8 @@ def event_card(event,assembly,cohort=False,counterparts=(),manual_rows=()):
         if not loss:against.append('no calibrated contact loss')
         unobserved=[c['library'] for c in t.get('regional_contacts',[]) if c['depleted'] and not c['observable']]
         if unobserved:against.append('low-count trough: '+', '.join(unobserved))
+        sparse=[c['library'] for c in t.get('regional_contacts',[]) if any(b.get('cross')==0 for b in c.get('unobservable_bins',[]))]
+        if sparse:against.append('additional low-count zeros: '+', '.join(sparse))
         finding=t.get('site_verdict','CUT' if event.get('recommended_cut',{}).get('id')==t['id'] else 'REVIEW')
         action={'CUT':'Recommend manual cut','BREAK_REGION':'Break favored; choose coordinate','REVIEW':'Review possible break','EXCLUDE':'Not a fusion cut'}[finding]
         if isgap and 'site_verdict' not in t:action=option_advice(event,t)

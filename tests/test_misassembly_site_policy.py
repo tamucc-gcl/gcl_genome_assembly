@@ -55,6 +55,71 @@ class SitePolicyTests(unittest.TestCase):
         g['contacts']=[dict(library='a',calibrated=True,loss=True),dict(library='b',calibrated=True,loss=False)]
         self.assertNotEqual(recommend(e)[0],'CUT')
 
+    def test_observable_zero_wins_over_sparse_zero_independent_of_order_and_coordinates(self):
+        for point in (3000000,19000000,111000000):
+            for reverse in (False,True):
+                e=self.fixture(point)
+                for row in e['contact_profiles']['library']:
+                    if row['position']==point-100000:row.update(ratio=0,cross=0,right_within=1)
+                    if row['position']==point+100000:row.update(ratio=0,cross=0)
+                if reverse:e['contact_profiles']['library'].reverse()
+                result=regional_contact_evidence(e,e['cut_options'][0])[0]
+                self.assertEqual(result['probe_bp'],point+100000)
+                self.assertTrue(result['observable']);self.assertTrue(result['depleted'])
+                self.assertEqual(result['selection'],'observable_minimum')
+                self.assertEqual(result['unobservable_bins'][0]['right_within'],1)
+
+    def test_sparse_zero_cannot_override_a_higher_observable_ratio(self):
+        e=self.fixture()
+        for row in e['contact_profiles']['library']:
+            if abs(row['position']-3000000)<=150000:row.update(ratio=.015,cross=15)
+            if row['position']==3000000:row.update(ratio=0,cross=0,right_within=1)
+        result=regional_contact_evidence(e,e['cut_options'][0])[0]
+        self.assertTrue(result['observable']);self.assertFalse(result['depleted'])
+        self.assertEqual(result['ratio'],.015)
+        self.assertNotEqual(recommend(e)[0],'CUT')
+
+    def test_observable_ties_prefer_nearest_then_coordinate_not_input_order(self):
+        e=self.fixture()
+        for row in e['contact_profiles']['library']:
+            if row['position'] in (2900000,3100000):row.update(ratio=0,cross=0)
+        first=regional_contact_evidence(e,e['cut_options'][0])[0]['probe_bp']
+        e['contact_profiles']['library'].reverse()
+        self.assertEqual(first,2900000)
+        self.assertEqual(regional_contact_evidence(e,e['cut_options'][0])[0]['probe_bp'],first)
+
+    def test_sparse_only_zero_remains_a_limitation(self):
+        e=self.fixture()
+        for row in e['contact_profiles']['library']:
+            if abs(row['position']-3000000)<=150000:row.update(ratio=0,cross=0,right_within=1)
+        result=regional_contact_evidence(e,e['cut_options'][0])[0]
+        self.assertEqual(result['selection'],'unobservable_only')
+        self.assertFalse(result['observable']);self.assertTrue(result['depleted'])
+        self.assertNotEqual(recommend(e)[0],'CUT')
+
+    def test_undefined_ratio_bins_are_retained_in_observability_audit(self):
+        e=self.fixture();row=e['contact_profiles']['library'][8]
+        row.update(ratio=None,cross=0,right_within=0)
+        result=regional_contact_evidence(e,e['cut_options'][0])[0]
+        self.assertTrue(result['observable'])
+        self.assertIsNone(result['unobservable_bins'][0]['ratio'])
+        self.assertEqual(result['unobservable_bins'][0]['cross'],0)
+
+    def test_valid_neighboring_zero_can_corroborate_a_region_but_not_choose_a_cut(self):
+        e=self.fixture();e['cut_options']=[];e.pop('localization_warning')
+        e['hifi']=dict(state='continuous',minimum=9)
+        e['hifi_strict']=dict(state='patchy',minimum=1,longest_weak_run_bp=7000)
+        for row in e['contact_profiles']['library']:
+            if row['position']==2900000:row.update(ratio=0,cross=0,right_within=1)
+            if row['position']==3100000:row.update(ratio=0,cross=0)
+        verdict,reason=recommend(e)
+        self.assertEqual(verdict,'SUSPECT');self.assertNotIn('recommended_cut',e)
+
+    def test_local_and_regional_contact_findings_are_both_reported(self):
+        text=contact_summary(dict(contacts=[dict(library='a',calibrated=True,loss=False)],
+            regional_contacts=[dict(library='a',observable=True,depleted=True,probe_bp=3100000)]))
+        self.assertIn('no calibrated loss',text);self.assertIn('regional trough at 3.100 Mb',text)
+
     def test_report_shows_actual_probe_bridges_not_interval_minima(self):
         kind,counts=read_counts(dict(bridge_counts={'20':0,'30':0,'0':311},hifi_all_primary=dict(minimum=32)))
         self.assertEqual(kind,'probe');self.assertEqual(counts,[0,0,311])
