@@ -24,7 +24,7 @@ finish() {
     fi
     # Package reports and evidence, not the full assembly output tree.
     files=(exit_status.txt)
-    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras; do
+    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras results/qc/assembly results/reports; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
     # Final names are needed to review the chromosome inventory after manual cuts.
@@ -47,6 +47,7 @@ trap finish EXIT
 # The review archive above dereferences links so it remains self-contained.
 bash "$repo/run_assembly_checkpoint.sbatch" "$sample_sheet" "$hic_readsets" assembly \
     --outdir "$out/results" --publish_dir_mode symlink \
+    --qc_mode all_stages \
     --chimera_detect true --chimera_break false \
     --chimera_plots true --chimera_hifi_context true \
     -with-trace "$out/trace.tsv" -with-report "$out/execution.html" \
