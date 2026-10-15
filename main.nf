@@ -662,7 +662,17 @@ workflow {
     if (run_all_qc && params.run_scaffold_round2) ch_staged_assemblies = ch_staged_assemblies.mix( ch_final_scaffolds_round2.map { m, f -> tuple(m, 'scaffold_round2', f) } )
     if (run_all_qc) ch_staged_assemblies = ch_staged_assemblies.mix( ASSEMBLY_FINISHING.out.filled.map { m, f -> tuple(m, 'gap_filled', f) } )
     if (run_all_qc && params.run_teloclip_extend) ch_staged_assemblies = ch_staged_assemblies.mix( ASSEMBLY_FINISHING.out.extended.map { m, f -> tuple(m, 'teloclip', f) } )
-    if (run_all_qc && chimera_on) ch_staged_assemblies = ch_staged_assemblies.mix( CHIMERA.out.broken.map { m, f, nm -> tuple(m, 'chimera_broken', f) } )
+    // QC the complete sample at the post-cut checkpoint, including uncut sisters.
+    // ASSEMBLY_QC groups by n_hap: passing only a cut haplotype silently loses
+    // QUAST, Merqury and the combined summary when its sister was retained.
+    if (run_all_qc && chimera_on) {
+        ch_cut_samples = CHIMERA.out.broken.map { m, f, nm -> tuple(m.sample, true) }.unique()
+        ch_post_cut_qc = CHIMERA.out.pre_finalize
+            .map { m, f, nm -> tuple(m.sample, m, f) }
+            .combine(ch_cut_samples, by: 0)
+            .map { sample, m, f, changed -> tuple(m, 'chimera_broken', f) }
+        ch_staged_assemblies = ch_staged_assemblies.mix(ch_post_cut_qc)
+    }
     if (qc_on) ch_staged_assemblies = ch_staged_assemblies.mix( ch_finalized_assembly.map { m, f -> tuple(m, 'final', f) } )
 
     // Everything derived from QC_PHASE goes with it: ch_final_busco, ch_final_busco_table,

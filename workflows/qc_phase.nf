@@ -161,8 +161,8 @@ workflow QC_PHASE {
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
     }
 
-    // Between teloclip and final: the QC table then shows contiguity immediately before and
-    // immediately after a break, which is the most legible summary of what the cut did.
+    // After scaffolding and before gap filling/telomere extension. The caller includes
+    // all haplotypes of affected samples so paired QUAST/Merqury summaries can complete.
     if (all_stages && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false') {
     ASSEMBLY_QC_CHIMERA_BROKEN(    st.chimera_broken.map     { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'chimera_broken')
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CHIMERA_BROKEN.out.assembly_summary)

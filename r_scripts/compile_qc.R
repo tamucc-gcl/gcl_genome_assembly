@@ -94,6 +94,15 @@ bam_metrics <- read_all_tsvs(args$bam_dir)
 message("\n=== Reading Pairs Metrics ===")
 pairs_metrics <- read_all_tsvs(args$pairs_dir)
 
+# Reject repeated wide measurements before pivot_wider can turn them into
+# list-columns. Those cannot be resolved by arbitrarily choosing a file.
+for (measurements in list(bam_metrics, pairs_metrics)) {
+  if (!is.null(measurements) &&
+      any(duplicated(measurements[c('haplotype_id', 'checkpoint')]))) {
+    stop('QC compilation has duplicate Hi-C haplotype/checkpoint measurements.')
+  }
+}
+
 # =============================================================================
 # Process and combine data
 # =============================================================================
@@ -136,11 +145,11 @@ message(sprintf("  Final assembly stage: %s", last_assembly_stage))
 stage_levels <- c('contig', 'contig_organelle_filtered', 'contig_purged',
                   'contig_corrected', 'contig_decontam',
                   'scaffold', 'scaffold_corrected', 'scaffold_decontam', 'scaffold_round2',
-                  'gap_filled', 'teloclip_extended', 'chimera_broken', 'final')
+                  'chimera_broken', 'gap_filled', 'teloclip_extended', 'final')
 
 stage_labels <- c('ctg.base', 'ctg.org', 'ctg.purged', 'ctg.cor', 'ctg.deco',
                   'scaf.base', 'scaf.cor', 'scaf.deco', 'scaf2',
-                  'gap_fill', 'teloclip', 'chim.brk', 'final')
+                  'chim.brk', 'gap_fill', 'teloclip', 'final')
 
 stopifnot(length(stage_levels) == length(stage_labels))
 
@@ -192,6 +201,12 @@ last_scaf_stage <- {
   idx <- str_which(asm_stage_levels, '^scaf')
   if (length(idx) > 0) asm_stage_levels[max(idx)] else NA_character_
 }
+# The round-two reads were mapped to the corrected/decontaminated round-one
+# scaffolds, before YaHS round two, not to its output.
+round2_input_stage <- {
+  idx <- str_which(asm_stage_levels, '^scaf\\.')
+  if (length(idx) > 0) asm_stage_levels[max(idx)] else NA_character_
+}
 # scaf2 stage (for scaffold_round2_space/filtered): look for 'scaf2' explicitly,
 # fall back to last scaffold stage
 scaf2_stage <- {
@@ -212,7 +227,7 @@ if (!is.null(bam_metrics)) {
     pivot_wider(names_from = haplotype_id) %>%
     mutate(stage = case_when(
             checkpoint == 'contig_raw_map'          ~ last_ctg_stage,
-            checkpoint == 'scaffold_round2_raw_map' ~ last_scaf_stage,
+            checkpoint == 'scaffold_round2_raw_map' ~ round2_input_stage,
             checkpoint == 'final_raw_map'           ~ 'final'
           ) %>%
             factor(levels = asm_stage_levels),
@@ -232,7 +247,14 @@ if (!is.null(pairs_metrics)) {
                 names_to = 'metric',
                 values_drop_na = TRUE) %>%
     pivot_wider(names_from = haplotype_id) %>%
-    filter(!metric %in% c('cis_pairs_scaffold', 'trans_pairs_scaffold', 'trans_to_cis_scaffold')) %>%
+    # AGP checkpoints contain both input-space and output-space counts. Use the
+    # relabelled scaffold counts for the output stage; never discard those and
+    # present the original contig counts as scaffold support.
+    filter(case_when(
+      str_detect(metric, '_scaffold$') ~ checkpoint %in% c('scaffold_space', 'scaffold_round2_space'),
+      str_detect(metric, '_contig$') ~ !checkpoint %in% c('scaffold_space', 'scaffold_round2_space'),
+      TRUE ~ TRUE
+    )) %>%
     mutate(metric = str_remove_all(metric, c('_contig|_scaffold')),
           metric = case_when(metric == 'parse_total_pairs' ~ 'mapped_pairs',
                               metric == 'pairs_total' ~ 'retained_pairs',
@@ -241,7 +263,7 @@ if (!is.null(pairs_metrics)) {
             checkpoint == 'contig_filtered'          ~ last_ctg_stage,
             checkpoint == 'scaffold_space'           ~ first_scaf_stage,
             checkpoint == 'scaffold_round2_space'    ~ scaf2_stage,
-            checkpoint == 'scaffold_round2_filtered' ~ scaf2_stage,
+            checkpoint == 'scaffold_round2_filtered' ~ round2_input_stage,
             checkpoint == 'final_filtered'           ~ 'final'
           ) %>%
             factor(levels = asm_stage_levels),
@@ -252,10 +274,17 @@ if (!is.null(pairs_metrics)) {
     mutate(analysis = 'hic_contact')
 }
 
-# --- 6. Combine and write (deduplicate in case checkpoints overlap) ---
+# --- 6. Combine and write ---
 full_qc_data <- bind_rows(fixed_assembly, fixed_bam, fixed_pairs) %>%
-  distinct(sample_id, stage, analysis, metric, .keep_all = TRUE) %>%
   arrange(stage, sample_id)
+
+# A collision means different checkpoints were assigned to the same stage.
+# Choosing the first row made reported Hi-C values depend on file ordering.
+duplicate_keys <- full_qc_data %>%
+  count(sample_id, stage, analysis, metric) %>% filter(n > 1)
+if (nrow(duplicate_keys) > 0) {
+  stop('QC compilation has duplicate sample/stage/analysis/metric keys; check checkpoint routing.')
+}
 
 write_csv(full_qc_data,
           file.path(args$output_dir, 'assembly_qc_metrics.csv'))

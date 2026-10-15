@@ -22,7 +22,13 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 python3 - "$(dirname "$0")/${1:-chimera_channel_reproduction.nf}" "$runtime/reproduction.nf" "$repo" <<'PY'
 import sys
 from pathlib import Path
-Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text().replace('__REPO__',sys.argv[3]))
+source = Path(sys.argv[1]).read_text()
+if '__POST_CUT_QC__' in source:
+    main = (Path(sys.argv[3]) / 'main.nf').read_text()
+    start = main.index('    if (run_all_qc && chimera_on) {')
+    end = main.index('    if (qc_on) ch_staged_assemblies', start)
+    source = source.replace('__POST_CUT_QC__', main[start:end])
+Path(sys.argv[2]).write_text(source.replace('__REPO__',sys.argv[3]))
 PY
 cd "$runtime"
 extra=()
@@ -38,6 +44,28 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf ]]; then
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
+elif [[ "${1:-}" == qc_post_cut_wiring_check.nf ]]; then
+    touch "$runtime/b.fa"
+    cp reproduction.nf "$repo/.qc-wiring.nf"
+    trap 'rm -f "$repo/.qc-wiring.nf"' EXIT
+    script="$repo/.qc-wiring.nf"
+    cat > "$runtime/qc-check.config" <<'EOF'
+conda.enabled = false
+docker.enabled = false
+singularity.enabled = false
+trace.enabled = false
+report.enabled = false
+timeline.enabled = false
+dag.enabled = false
+params.outdir = '/tmp/chimera-nxf-runtime/qc-results'
+process {
+    executor = 'local'
+    withName: '.*' { cpus = 1; memory = '1GB'; scratch = false; errorStrategy = 'terminate' }
+}
+EOF
+    extra=(-stub-run -c "$runtime/qc-check.config")
+    mkdir -p "$runtime/qc-launch"
+    cd "$runtime/qc-launch"
 else
     script=reproduction.nf
 fi

@@ -68,7 +68,7 @@ def parse_metrics(csv_path):
     """Parse the long-format metrics CSV into a nested dict structure."""
     data = defaultdict(lambda: defaultdict(lambda: {"hap1": {}, "hap2": {}, "both": {}}))
 
-    with open(csv_path) as fh:
+    with open(csv_path, encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
             sid   = row["sample_id"]
@@ -102,9 +102,9 @@ def get_available_stages(data):
 
     # Full pipeline order — must match labels from compile_qc.R
     stage_order = [
-        "ctg.base", "ctg.mito", "ctg.purged", "ctg.cor", "ctg.deco",
-        "scaf.base", "scaf.cor", "scaf2",
-        "gap_fill", "teloclip", "final"
+        "ctg.base", "ctg.org", "ctg.purged", "ctg.cor", "ctg.deco",
+        "scaf.base", "scaf.cor", "scaf.deco", "scaf2",
+        "chim.brk", "gap_fill", "teloclip", "final"
     ]
     ordered = [s for s in stage_order if s in stages]
     remaining = sorted(stages - set(ordered))
@@ -619,7 +619,7 @@ def main():
     html = HTML_TEMPLATE.replace("__REPORT_JSON__", report_json)
     html = html.replace("__DEFAULT_STAGE__", args.report_stage)
 
-    with open(args.output, "w") as fh:
+    with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(html)
 
     print(f"Report written to {args.output}", file=sys.stderr)
