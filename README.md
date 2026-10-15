@@ -370,10 +370,16 @@ round 2 defaulting to stricter contig length and MAPQ.
 
 `GAP_FILLING` (TGSGapCloser, HiFi reads) runs on the most downstream scaffold product. HiFi-only
 samples skip it — no Hi-C scaffolding means no scaffold gaps — and rejoin afterward. Optional
-`TELOCLIP_EXTEND` then extends scaffold ends using soft-clipped HiFi overhangs containing the
-telomeric motif. Teloclip's defaults are permissive: it fires on any motif-containing soft clip,
-including small repeat-rich unplaced scaffolds, so its "contigs extended" count is an *attempt*
-count, not confirmed telomeres. Compare against tidk in §6 of the report.
+`TELOCLIP_EXTEND` then extends only scaffolds explicitly marked `chromosome_member=yes` in
+the current harmonized map, after any manual cuts and reassignment. Reads map against the
+complete assembly, then only alignments on eligible scaffolds enter telomere recovery.
+Smaller scaffolds, unresolved classifications and assemblies without chromosome-scale members
+pass through unchanged; unavailable classification (`NO_HARMONIZE`) also skips extension.
+There is no fallback based on a chromosome-like name. A missing/malformed map is an error.
+`assembly/scaffold/teloclip/<assembly>.teloclip_scope.tsv` records eligibility, reasons and
+length changes for every sequence. Verification rejects changes to ineligible sequences or
+sequence IDs/order. Extension counts describe recovered sequence, not confirmed complete
+telomeres; compare the result with terminal motif and read support.
 
 ### Harmonization and finalization
 
@@ -737,7 +743,7 @@ Rounds 1 and 2 are fully independent.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `--run_teloclip_extend` | `true` | Telomere extension from HiFi soft clips |
+| `--run_teloclip_extend` | `true` | Extend inferred chromosome-scale scaffolds from HiFi soft clips; pass other sequences through |
 | `--teloclip_min_clip` | `1` | Min soft-clip length |
 | `--teloclip_max_break` | `50` | Max break allowance |
 | `--teloclip_min_anchor` | `100` | Min anchored alignment |

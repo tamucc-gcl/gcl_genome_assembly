@@ -32,8 +32,9 @@ Path(sys.argv[2]).write_text(source.replace('__REPO__',sys.argv[3]))
 PY
 cd "$runtime"
 extra=()
-if [[ "${1:-}" == chimera_cohort_wiring_check.nf ]]; then
+if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_wiring_check.nf ]]; then
     [[ "${3:-}" == resume ]] || python3 "$repo/tests/setup_misassembly_integration.py" "${2:-}"
+    [[ "${1:-}" != teloclip_scope_wiring_check.nf ]] || python3 "$repo/tests/setup_teloclip_scope_integration.py"
     cp reproduction.nf "$repo/.misassembly-wiring.nf"
     trap 'rm -f "$repo/.misassembly-wiring.nf"' EXIT
     extra=(-c "$runtime/check.config")

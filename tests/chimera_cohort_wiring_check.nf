@@ -48,16 +48,18 @@ workflow {
         'PASS: production run summary links the generated chimera review'
     }
     FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.name_map).join(FINALIZE_ASSEMBLY.out.fai)
+        .join(ASSEMBLY_FINISHING.out.teloclip_scope)
         .toList().view { outputs ->
             assert outputs.size()==2
-            outputs.each { meta, fa, nm, fai ->
+            outputs.each { meta, fa, nm, fai, scope ->
                 def lengths=fai.readLines().collectEntries { line -> def cols=line.split('\t'); [(cols[0]):cols[1].toInteger()] }
                 def rows=nm.readLines().drop(1).collect { it.split('\t') }
                 assert rows.size()==lengths.size()
                 rows.each { row -> assert lengths[row[1]]==row[2].toInteger() }
                 if(meta.id=='sample_hap1') {
                     assert lengths.size()==(params.fixture_manual ? params.fixture_cut_count+1 : 1)
-                    assert lengths.values().sum()==(params.fixture_evidence ? 6100 : 6000)+(params.fixture_manual ? 2*(params.fixture_cut_count+1) : 2)
+                    def eligible=scope.readLines().drop(1).count { it.split('\t')[3]=='yes' }
+                    assert lengths.values().sum()==(params.fixture_evidence ? 6100 : 6000)+2*eligible
                     if(params.fixture_manual) assert rows.every { it[0].startsWith('s_sub_') }
                     else assert rows[0][0]=='s'
                 }

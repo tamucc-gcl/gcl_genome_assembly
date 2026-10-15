@@ -35,6 +35,9 @@ elif tool=='samtools' and args[0]=='idxstats':
             f=line.split('\t');print(f[1][3:]+'\t'+f[2][3:]+'\t2\t0')
 elif tool=='samtools' and args[0]=='view':
     if '-c' in args:print(sum(not line.startswith('@') for line in Path(args[-1]).read_text().splitlines()))
+    elif '-L' in args:
+        selected={line.split('\t')[0] for line in Path(args[args.index('-L')+1]).read_text().splitlines()}
+        print(''.join(line+'\n' for line in sys.stdin.read().splitlines() if line.startswith('@') or line.split('\t')[2] in selected),end='')
     elif args[-1].endswith('.bam'):print(Path(args[-1]).read_text(),end='')
     elif args[2].endswith('.bam'):print(Path(args[2]).read_text(),end='')
     else:print(sys.stdin.read(),end='')
@@ -52,8 +55,9 @@ elif tool=='teloclip':
     if args[0]=='filter':print(sys.stdin.read(),end='')
     elif args[0]=='extend':
         records=fasta(args[2])
-        Path(args[args.index('--output-fasta')+1]).write_text(''.join('>'+n+'\n'+s+'TT\n' for n,s in records.items()))
-        Path(args[args.index('--stats-report')+1]).write_text(''.join(f'### {n}\n  Original length: {len(s)}\n  Right extension: +2bp\n' for n,s in records.items()))
+        selected={line.split('\t')[2] for line in Path(args[1]).read_text().splitlines() if not line.startswith('@')}
+        Path(args[args.index('--output-fasta')+1]).write_text(''.join('>'+n+'\n'+s+('TT' if n in selected else '')+'\n' for n,s in records.items()))
+        Path(args[args.index('--stats-report')+1]).write_text(''.join(f'### {n}\n  Original length: {len(s)}\n  Right extension: +2bp\n' for n,s in records.items() if n in selected))
     else:raise RuntimeError('Unexpected teloclip call')
 elif tool=='minimap2' and '-ax' in args:
     for name,seq in fasta(args[-2]).items():

@@ -16,6 +16,7 @@ workflow ASSEMBLY_FINISHING {
     ch_versions = Channel.empty()
     ch_filled = Channel.empty()
     ch_extended = Channel.empty()
+    ch_teloclip_scope = Channel.empty()
     ch_teloclip_stats = Channel.value(file('NO_TELOCLIP'))
     ch_maps = ch_assemblies.map { meta, fa, nm -> tuple(meta.id, nm) }
     ch_input = ch_assemblies.map { meta, fa, nm -> tuple(meta, fa) }
@@ -32,12 +33,17 @@ workflow ASSEMBLY_FINISHING {
     ch_finished = ch_after_gap
     if (capabilities.hifiasm && params.run_teloclip_extend) {
         TELOCLIP_EXTEND(ch_after_gap.filter { meta, fa -> meta.assembler == 'hifiasm' }
-            .map { meta, fa -> tuple(meta.sample, meta, fa) }
+            .map { meta, fa -> tuple(meta.id, meta, fa) }
+            .join(ch_maps, failOnDuplicate: true)
+            .map { id, meta, fa, nm -> tuple(meta, fa, nm) }
+            .map { meta, fa, nm -> tuple(meta.sample, meta, fa, nm) }
             .combine(ch_hifi.map { meta, fq -> tuple(meta.sample, fq) }, by: 0)
-            .map { sample, meta, fa, fq -> tuple(meta.taxid.toString(), meta, fa, fq) }
+            .map { sample, meta, fa, nm, fq -> tuple(meta.taxid.toString(), meta, fa, nm, fq) }
             .combine(ch_telo_by_taxid.map { taxid, motif -> tuple(taxid.toString(), motif) }, by: 0)
-            .map { taxid, meta, fa, fq, motif -> tuple(meta, fa, fq, motif) })
+            .map { taxid, meta, fa, nm, fq, motif -> tuple(meta, fa, nm, fq, motif) },
+            file("${projectDir}/py_scripts/teloclip_scope.py", checkIfExists: true))
         ch_extended = TELOCLIP_EXTEND.out.extended_assembly
+        ch_teloclip_scope = TELOCLIP_EXTEND.out.scope
         ch_versions = ch_versions.mix(TELOCLIP_EXTEND.out.versions)
         COLLECT_TELOCLIP_STATS(TELOCLIP_EXTEND.out.stats.map { meta, f -> f }.collect())
         ch_teloclip_stats = COLLECT_TELOCLIP_STATS.out.stats.ifEmpty(file('NO_TELOCLIP'))
@@ -52,5 +58,6 @@ workflow ASSEMBLY_FINISHING {
     filled = ch_filled
     extended = ch_extended
     teloclip_stats = ch_teloclip_stats
+    teloclip_scope = ch_teloclip_scope
     versions = ch_versions
 }

@@ -24,7 +24,7 @@ finish() {
     fi
     # Package reports and evidence, not the full assembly output tree.
     files=(exit_status.txt)
-    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
+    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras results/assembly/scaffold/teloclip results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
     # Final names are needed to review the chromosome inventory after manual cuts.

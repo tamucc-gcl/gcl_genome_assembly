@@ -6,7 +6,9 @@
 
     Recovers missing telomeres from soft-clipped HiFi alignments and extends scaffold ends.
     Single process: map (minimap2 map-hifi) -> teloclip filter -> teloclip extend.
-    Input : tuple(meta, scaffold_fasta, hifi_fastq)
+    Input : tuple(meta, scaffold_fasta, current_name_map, hifi_fastq, motif), scope helper
+    Only chromosome_member=yes scaffolds can be extended. Unclassified assemblies
+    and assemblies without eligible scaffolds pass through without mapping.
     Output: extended fasta + stats TSV + overhang BAM/BAI (per-haplotype, meta.id).
 
     NOTE: the stats TSV prefixes each contig with meta.id (contract with
@@ -21,13 +23,15 @@ process TELOCLIP_EXTEND {
     publishDir "${params.outdir}/assembly/scaffold/teloclip", mode: params.publish_dir_mode
 
     input:
-    tuple val(meta), path(scaffold_fasta), path(hifi_fastq), val(telomere_motif)
+    tuple val(meta), path(scaffold_fasta), path(name_map), path(hifi_fastq), val(telomere_motif)
+    path(scope_script)
 
     output:
     tuple val(meta), path("${meta.id}.teloclip_extended.fasta"), emit: extended_assembly
     tuple val(meta), path("${meta.id}.teloclip_stats.tsv"),      emit: stats
-    tuple val(meta), path("${meta.id}.teloclip_overhangs.bam"),  emit: overhangs_bam
-    tuple val(meta), path("${meta.id}.teloclip_overhangs.bam.bai"), emit: overhangs_bai
+    tuple val(meta), path("${meta.id}.teloclip_scope.tsv"), emit: scope
+    tuple val(meta), path("${meta.id}.teloclip_overhangs.bam"),  emit: overhangs_bam, optional: true
+    tuple val(meta), path("${meta.id}.teloclip_overhangs.bam.bai"), emit: overhangs_bai, optional: true
     path "versions.tsv", emit: versions
 
     script:
@@ -41,6 +45,16 @@ process TELOCLIP_EXTEND {
     """
     set -euo pipefail
 
+    ELIGIBLE_COUNT=\$(python3 ${scope_script} prepare --fasta ${scaffold_fasta} \\
+        --name-map ${name_map} --prefix ${meta.id})
+    if [[ "\$ELIGIBLE_COUNT" -eq 0 ]]; then
+        echo "[TELOCLIP] No classified chromosome-scale scaffolds; preserving assembly unchanged"
+        cp ${scaffold_fasta} ${meta.id}.teloclip_extended.fasta
+        printf "contig\\tcontig_length\\tend\\textension_length\\toverhang_count\\tmotif_counts\\n" > ${meta.id}.teloclip_stats.tsv
+        printf 'teloclip\\tskipped_no_chromosome_scale_scaffolds\\n' > versions.tsv
+        exit 0
+    fi
+
     echo "[TELOCLIP] Starting telomere extension for ${meta.id}"
     echo "[TELOCLIP] Motif: ${motif}  min_clip: ${min_clip}  max_break: ${max_break}"
     echo "[TELOCLIP] min_anchor: ${min_anchor}  min_mapq: ${min_mapq}"
@@ -52,13 +66,15 @@ process TELOCLIP_EXTEND {
     # ---- Step 2: Map raw HiFi reads, filter for overhangs with telomere motifs ----
     #   -ax map-hifi : HiFi preset for minimap2
     #   -F 0x100     : exclude secondary alignments
+    #   -L           : allow only inferred chromosome scaffolds, after mapping to
+    #                  the complete assembly so repeat competition is retained
     #   --motifs     : only keep overhangs containing the telomeric motif
     minimap2 \\
         -ax map-hifi \\
         -t ${task.cpus} \\
         ${scaffold_fasta} \\
         ${hifi_fastq} \\
-    | samtools view -h -F 0x100 -q ${min_mapq} \\
+    | samtools view -h -F 0x100 -q ${min_mapq} -L ${meta.id}.eligible.bed \\
     | teloclip filter \\
         --ref-idx ${scaffold_fasta}.fai \\
         --motifs ${motif} \\
@@ -158,6 +174,7 @@ PYEOF
             > ${meta.id}.teloclip_stats.tsv
     fi
 
+    python3 ${scope_script} verify --fasta ${meta.id}.teloclip_extended.fasta --prefix ${meta.id}
     echo "[TELOCLIP] Done: ${meta.id}"
 
     printf 'teloclip\t%s\n' "\$(teloclip --version 2>&1 | sed 's/^teloclip, version //')" > versions.tsv
@@ -166,6 +183,7 @@ PYEOF
     stub:
     """
     touch ${meta.id}.teloclip_extended.fasta
+    touch ${meta.id}.teloclip_scope.tsv
     printf "contig\\tcontig_length\\tend\\textension_length\\toverhang_count\\tmotif_counts\\n" > ${meta.id}.teloclip_stats.tsv
     touch ${meta.id}.teloclip_overhangs.bam
     touch ${meta.id}.teloclip_overhangs.bam.bai
