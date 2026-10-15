@@ -2,6 +2,8 @@
 
 Date: 2026-10-02. Status: agreed scope and proposed implementation; not a claim of runtime validation.
 
+2026-10-15 progress reconciliation: [complete remaining-work inventory](remaining-pipeline-work-2026-10-15.md). PSMC and the other extensions below remain agreed deliverables; the core-first ordering is unchanged.
+
 ## 1. Scheduling decision and precedence
 
 Finish the current assembly, QC, core pangenome, consolidated Markdown report and cleanup before implementing these extensions. This document moves the former step 6 **after step 7**. It also brings resurrection of the nonfunctional BlobTools/decontamination-evidence workflow into the future extension phase. It supersedes older planning documents where they require SV classification before core completion or exclude that resurrection from the rework.

@@ -36,6 +36,10 @@ finish() {
     for name in "$out"/results/contact_maps/*_final_*bp_contact_map.png "$out"/results/contact_maps/*_final_contact_stats.txt; do
         [[ -f "$name" ]] && files+=("${name#"$out/"}")
     done
+    # Include validation-only graph audits without archiving large graph products.
+    for name in "$out"/results/pangenome/*/pangenome_input_report.md "$out"/results/pangenome/*/pangenome_input_audit.json "$out"/results/pangenome/*/pangenome_identity.tsv; do
+        [[ -f "$name" ]] && files+=("${name#"$out/"}")
+    done
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
         --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' \
         -czf "$out.review.tar.gz" -C "$out" "${files[@]}"
