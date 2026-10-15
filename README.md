@@ -770,7 +770,19 @@ Rounds 1 and 2 are fully independent.
 | `--harmonize_min_chrom_frac` | `0.1` | Chromosome piece below this fraction of the median → unplaced |
 | `--harmonize_batch_consensus` | `true` | Batch-wide consensus classification vs. per-sample |
 | `--finalize_min_scaffold_bp` | `1000000` | Chromosome-scale threshold for size-rank naming |
-| `--run_final_contact_maps` | `true` | Final Hi-C maps |
+| `--run_final_contact_maps` | `true` | Final Hi-C plots during QC; disabling plots retains final mapping, filtering and metrics |
+
+With `--qc_mode final_only` or `all_stages`, samples with Hi-C reads are mapped to
+the finalized assemblies, filtered once, and assessed for mapping, pair retention and
+trans/cis statistics. The same filtered pairs supply the final contact maps. This is
+independent of `--run_post_assembly`; `--qc_mode none` disables this final Hi-C QC branch.
+Small metric tables are published under `qc/hic/map/final_raw_map` and `final_filtered`,
+and are included at the `final` stage in the compiled QC and interactive report.
+
+`--run_post_assembly` controls the additional cross-assembly dotplots/riparian plots,
+cohort-wide QUAST comparison, telomere scans/plots, HiFi coverage books and the existing
+combined report. Compartments/TADs require this toggle plus Hi-C balancing and contact
+maps. These analyses are separate from final Hi-C QC.
 
 ### Visualization
 

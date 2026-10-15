@@ -32,6 +32,10 @@ finish() {
     for name in "$out"/results/assembly/final/*.name_map.tsv; do
         [[ -f "$name" ]] && files+=("${name#"$out/"}")
     done
+    # Review contact-map images/statistics without packaging large cooler matrices.
+    for name in "$out"/results/contact_maps/*_final_*bp_contact_map.png "$out"/results/contact_maps/*_final_contact_stats.txt; do
+        [[ -f "$name" ]] && files+=("${name#"$out/"}")
+    done
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
         --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' \
         -czf "$out.review.tar.gz" -C "$out" "${files[@]}"

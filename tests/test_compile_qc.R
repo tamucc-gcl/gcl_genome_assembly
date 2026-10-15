@@ -59,9 +59,25 @@ stopifnot(isTRUE(all.equal(value("ctg.deco", "trans_to_cis"), 1)),
           isTRUE(all.equal(value("scaf2", "trans_to_cis"), 6/210)),
           identical(value("scaf.deco", "bam_mapped_pct"), 95),
           length(value("final", "trans_to_cis")) == 0L)
+# Real final-coordinate evidence must survive even when only final assembly QC is present.
+final_contacts <- contacts[1, ] %>% mutate(checkpoint = "final_filtered", cis_pairs_contig = 400,
+    trans_pairs_contig = 50, trans_to_cis_contig = .125, pairs_total = 450, retention_pct = 45)
+write_tsv(final_contacts, file.path(root, "pairs", "final.tsv"))
+write_tsv(tibble(haplotype_id = "test_hap1", checkpoint = "final_raw_map",
+                 bam_mapped_pct = 98), file.path(root, "bam", "final.tsv"))
+dir.create(file.path(root, "final_only"))
+write_tsv(mutate(metrics, sample_id = "test", qc_label = "final", .before = everything()),
+          file.path(root, "final_only", "final.tsv"))
+env$args$assembly_dir <- file.path(root, "final_only")
+eval(compiler, envir = env)
+result <- read_csv(file.path(root, "out", "assembly_qc_metrics.csv"), show_col_types = FALSE)
+stopifnot(identical(unique(result$stage), "final"),
+          identical(value("final", "trans_to_cis"), .125),
+          identical(value("final", "retention_pct"), 45),
+          identical(value("final", "bam_mapped_pct"), 98))
 # A repeated measurement must be rejected instead of silently taking the first file.
 file.copy(file.path(root, "pairs", "1.tsv"), file.path(root, "pairs", "duplicate.tsv"))
 failure <- tryCatch({eval(compiler, envir = env); NULL}, error = conditionMessage)
 stopifnot(grepl("duplicate Hi-C haplotype/checkpoint", failure, fixed = TRUE))
 unlink(root, recursive = TRUE)
-cat("PASS: stage order, AGP contact counts, mapping coordinates, no invented final contacts and duplicate rejection\n")
+cat("PASS: stage order, AGP contact counts, mapping coordinates, real final-only metrics, no invented contacts and duplicate rejection\n")

@@ -10,6 +10,22 @@ from generate_assembly_report import parse_metrics, get_available_stages, build_
 
 
 class AssemblyQCReportTests(unittest.TestCase):
+    def test_final_hic_metrics_reach_the_report(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "metrics.csv"
+            with path.open("w", newline="", encoding="utf-8") as dest:
+                writer = csv.writer(dest)
+                writer.writerow(["sample_id", "stage", "analysis", "metric", "hap1", "hap2", "both"])
+                writer.writerows([
+                    ["arbitrary", "final", "hic_contact", "trans_to_cis", .2, .3, "NA"],
+                    ["arbitrary", "final", "hic_contact", "retention_pct", 30, 40, "NA"],
+                ])
+            data = parse_metrics(path)
+            report = build_report_data(data, get_available_stages(data))
+            assembly = report["stage_data"]["final"]["assemblies"]["arbitrary"]
+            self.assertEqual(assembly["hap1"]["tc_ratio"], .2)
+            self.assertEqual(assembly["hap2"]["retention_pct"], 40)
+
     def test_pipeline_stage_order_and_disabled_stages(self):
         expected = ["ctg.base", "ctg.org", "ctg.purged", "ctg.cor", "ctg.deco",
                     "scaf.base", "scaf.cor", "scaf.deco", "scaf2", "chim.brk",

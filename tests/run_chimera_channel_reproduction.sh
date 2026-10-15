@@ -28,6 +28,11 @@ if '__POST_CUT_QC__' in source:
     start = main.index('    if (run_all_qc && chimera_on) {')
     end = main.index('    if (qc_on) ch_staged_assemblies', start)
     source = source.replace('__POST_CUT_QC__', main[start:end])
+if '__FINAL_HIC_QC__' in source:
+    main = (Path(sys.argv[3]) / 'main.nf').read_text()
+    start = main.index('    // Final Hi-C evidence belongs to QC')
+    end = main.index('    // String-id view', start)
+    source = source.replace('__FINAL_HIC_QC__', main[start:end])
 Path(sys.argv[2]).write_text(source.replace('__REPO__',sys.argv[3]))
 PY
 cd "$runtime"
@@ -45,7 +50,7 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_w
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
-elif [[ "${1:-}" == qc_post_cut_wiring_check.nf ]]; then
+elif [[ "${1:-}" == qc_post_cut_wiring_check.nf || "${1:-}" == final_hic_qc_wiring_check.nf ]]; then
     touch "$runtime/b.fa"
     cp reproduction.nf "$repo/.qc-wiring.nf"
     trap 'rm -f "$repo/.qc-wiring.nf"' EXIT
@@ -64,6 +69,14 @@ process {
     withName: '.*' { cpus = 1; memory = '1GB'; scratch = false; errorStrategy = 'terminate' }
 }
 EOF
+    if [[ "${1:-}" == final_hic_qc_wiring_check.nf ]]; then
+        touch "$runtime/one_R1.fq" "$runtime/one_R2.fq" "$runtime/two_R1.fq" "$runtime/two_R2.fq"
+        cat >> "$runtime/qc-check.config" <<EOF
+params.qc_mode = '${2:-final_only}'
+params.run_final_contact_maps = ${3:-true}
+params.run_hic_balance = true
+EOF
+    fi
     extra=(-stub-run -c "$runtime/qc-check.config")
     mkdir -p "$runtime/qc-launch"
     cd "$runtime/qc-launch"

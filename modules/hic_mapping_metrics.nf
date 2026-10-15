@@ -17,7 +17,8 @@ process HIC_BAM_METRICS {
     tag "${meta.id}_${checkpoint}"
     label 'hic_qc'
 
-    //publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode,
+        enabled: { checkpoint == 'final_raw_map' }
 
     input:
     tuple val(meta), val(checkpoint), path(bam), path(bai)
@@ -60,7 +61,8 @@ process HIC_PAIRS_METRICS {
     tag "${meta.id}_${checkpoint}"
     label 'hic_qc'
 
-    //publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode,
+        enabled: { checkpoint == 'final_filtered' }
 
     input:
     tuple val(meta),

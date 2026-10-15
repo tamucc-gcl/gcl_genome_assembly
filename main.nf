@@ -61,7 +61,7 @@ log.info """\
      Decontamination  : ${stages(params.run_decon_contigs, params.run_decon_scaffolds)}${params.run_fcs_adaptor ? '  (+FCS-adaptor)' : ''}
      Scaffold round 2 : ${onOff(params.run_scaffold_round2)}
      Gap filling      : Enabled
-     Hi-C contact maps: ${onOff(params.run_post_assembly != false && params.run_final_contact_maps)}
+     Hi-C contact maps: ${onOff((params.qc_mode ?: 'all_stages').toString().toLowerCase() != 'none' && params.run_final_contact_maps)}
      Pairwise synteny : ${params.run_post_assembly != false && params.run_pairwise_alignments ? params.pairwise_alignment_mode : 'Disabled'}
      Teloclip extend  : ${onOff(params.run_teloclip_extend)}
     ------------------------------------------------------------
@@ -549,19 +549,21 @@ workflow {
         STEP 14: Finalization
     ========================================================================================
     */
-    // 1. Contact Maps for Final Assemblies
-    //    REPLACE: ASSEMBLY_FINISHING.out.filled → ch_final_assembly
+    // Final Hi-C evidence belongs to QC in both final_only and all_stages mode.
+    // Optional contact-map plotting can be disabled without losing its QC metrics.
     ch_final_contact_maps = Channel.empty()
-    if (post_on && capabilities.hic && params.run_final_contact_maps) {
+    if (qc_on && capabilities.hic) {
         FINAL_HIC_MAPS(
             ch_finalized_assembly,
             READ_PREPARATION.out.hic,
             ch_compartments_script,
-            ch_tad_book_script
+            ch_tad_book_script,
+            post_on
         )
         ch_all_bam_metrics   = ch_all_bam_metrics.mix(FINAL_HIC_MAPS.out.bam_metrics)
         ch_all_pairs_metrics = ch_all_pairs_metrics.mix(FINAL_HIC_MAPS.out.pairs_metrics)
         ch_final_contact_maps = FINAL_HIC_MAPS.out.contact_maps
+        ch_versions = ch_versions.mix(FINAL_HIC_MAPS.out.versions)
     }
 
     // String-id view of the finalized per-hap assemblies for the leaf viz/QUAST steps.

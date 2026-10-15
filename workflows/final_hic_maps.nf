@@ -5,17 +5,10 @@
 ========================================================================================
     Repo location:  workflows/final_hic_maps.nf
 
-    Extracted verbatim from main.nf STEP 14 (the `if (params.run_final_contact_maps)`
-    block). The caller wraps the invocation in that same guard, so this subworkflow
-    assumes it should run; the internal `params.run_hic_balance` guard still controls
-    whether compartments/TADs are computed.
-
-    Body is unchanged except the trimmed-Hi-C input, which was `TRIM_HIC.out.trimmed_reads`
-    in main and is now the `ch_trimmed_hic` take: channel.
-
-    NOTE: matches current behaviour by NOT emitting a versions channel — the final
-    mapping/contact processes were not mixed into ch_versions in main. Add a `versions`
-    emit here when wiring software-version capture (piece 5).
+    Core final QC: map and filter once, then share filtered pairs between metrics
+    and contact maps. The caller enables this for final_only/all_stages QC.
+    run_final_contact_maps controls plots, not evidence generation. Compartments
+    and TADs additionally require post-assembly analyses to be enabled.
 ========================================================================================
 */
 
@@ -30,9 +23,10 @@ workflow FINAL_HIC_MAPS {
 
     take:
     ch_finalized_assembly     //  FINALIZE_ASSEMBLY.out.assembly   tuple(meta, fasta)
-    ch_trimmed_hic            //  TRIM_HIC.out.trimmed_reads        tuple(meta, r1, r2)
+    ch_trimmed_hic            // per sample, ordered mate lists and library metadata
     ch_compartments_script    //  file: py_scripts/plot_compartments_pc1_genomewide.py
     ch_tad_book_script        //  file: py_scripts/make_tad_book.py
+    post_analyses_on          // optional compartments/TADs remain post-assembly analyses
 
     main:
     // Combine final per-hap assemblies with sample Hi-C reads (key on meta.sample)
@@ -73,36 +67,46 @@ workflow FINAL_HIC_MAPS {
 
     HIC_PAIRS_METRICS_FINAL(ch_final_pairs_qc)
 
-    FILTER_HIC_BAM_FINAL.out.pairs
-        .join(ch_finalized_assembly)
-        .map { meta, stage, pairs_gz, final_fasta ->
-            tuple(meta, pairs_gz, final_fasta, "final")
+    ch_maps = Channel.empty()
+    ch_versions = MAP_HIC_TO_FINAL.out.versions.mix(FILTER_HIC_BAM_FINAL.out.versions)
+    if (params.run_final_contact_maps != false) {
+        FILTER_HIC_BAM_FINAL.out.pairs
+            .join(ch_finalized_assembly)
+            .map { meta, stage, pairs_gz, final_fasta ->
+                tuple(meta, pairs_gz, final_fasta, "final")
+            }
+            .set { ch_contact_map_final_input }
+
+        CONTACT_MAP_FINAL(ch_contact_map_final_input)
+        ch_maps = CONTACT_MAP_FINAL.out.contact_maps
+        ch_versions = ch_versions.mix(CONTACT_MAP_FINAL.out.versions)
+
+        if (post_analyses_on && params.run_hic_balance) {
+            HIC_COMPARTMENTS(
+                CONTACT_MAP_FINAL.out.mcool,
+                params.compartment_resolution ?: 250000,
+                params.compartment_min_contig_bp ?: 5000000,
+                params.compartment_max_contigs ?: 30,
+                ch_compartments_script
+            )
+
+            HIC_TADS(
+                CONTACT_MAP_FINAL.out.mcool,
+                params.tad_resolution ?: 50000,
+                params.tad_window_bp ?: 500000,
+                params.tad_min_contig_bp ?: 5000000,
+                params.tad_max_contigs ?: 0,
+                ch_tad_book_script
+            )
         }
-        .set { ch_contact_map_final_input }
-
-    CONTACT_MAP_FINAL(ch_contact_map_final_input)
-
-    if (params.run_hic_balance) {
-        HIC_COMPARTMENTS(
-            CONTACT_MAP_FINAL.out.mcool,
-            params.compartment_resolution ?: 250000,
-            params.compartment_min_contig_bp ?: 5000000,
-            params.compartment_max_contigs ?: 30,
-            ch_compartments_script
-        )
-
-        HIC_TADS(
-            CONTACT_MAP_FINAL.out.mcool,
-            params.tad_resolution ?: 50000,
-            params.tad_window_bp ?: 500000,
-            params.tad_min_contig_bp ?: 5000000,
-            params.tad_max_contigs ?: 0,
-            ch_tad_book_script
-        )
     }
 
     emit:
-    contact_maps  = CONTACT_MAP_FINAL.out.contact_maps
+    contact_maps  = ch_maps
     bam_metrics   = HIC_BAM_METRICS_FINAL.out.metrics
     pairs_metrics = HIC_PAIRS_METRICS_FINAL.out.metrics
+    bam = MAP_HIC_TO_FINAL.out.bam
+    filtered_bam = FILTER_HIC_BAM_FINAL.out.bam
+    pairs = FILTER_HIC_BAM_FINAL.out.pairs
+    versions = ch_versions
 }
