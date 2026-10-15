@@ -378,7 +378,8 @@ pass through unchanged; unavailable classification (`NO_HARMONIZE`) also skips e
 There is no fallback based on a chromosome-like name. A missing/malformed map is an error.
 `assembly/scaffold/teloclip/<assembly>.teloclip_scope.tsv` records eligibility, reasons and
 length changes for every sequence. Verification rejects changes to ineligible sequences or
-sequence IDs/order. Extension counts describe recovered sequence, not confirmed complete
+sequence IDs and restores the original record order after Teloclip writes its output.
+Extension counts describe recovered sequence, not confirmed complete
 telomeres; compare the result with terminal motif and read support.
 
 ### Harmonization and finalization

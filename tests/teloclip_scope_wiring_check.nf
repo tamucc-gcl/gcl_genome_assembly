@@ -15,7 +15,7 @@ workflow {
             def input=file(root+"/${m.id}.fa").text
             if(m.id=='mixed') {
                 assert fa.text==input.replace('AAAACCCC','AAAACCCCTT')
-                assert fa.text.contains('>small\nGGGG\n>uncertain\nTTTT\n')
+                assert fa.text.startsWith('>small\nGGGG\n>big\n')
             } else {
                 assert fa.text==input
                 assert !fa.parent.resolve("${m.id}.teloclip_overhangs.bam").exists()

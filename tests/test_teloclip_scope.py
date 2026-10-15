@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_scripts"))
-from teloclip_scope import prepare, verify
+from teloclip_scope import fingerprints, prepare, verify
 
 
 class TeloclipScopeTests(unittest.TestCase):
@@ -35,6 +35,42 @@ class TeloclipScopeTests(unittest.TestCase):
                      ">large\nAAAACCCC\n>uncertain\nTTTT\n"]:
             extended = self.root / "bad.fa"
             extended.write_text(text)
+            with self.assertRaises(ValueError):
+                verify(extended, self.prefix)
+
+    def test_reordered_output_is_restored_without_losing_extensions(self):
+        prepare(self.fasta, self.mapping, self.prefix)
+        extended = self.root / "reordered.fa"
+        # Final record lacks a newline and moves into the middle of the result.
+        extended.write_text(">uncertain description\nTTTT\n>large\nAAAACCCCTT\n>small\nGGGG")
+        verify(extended, self.prefix)
+        self.assertEqual(list(fingerprints(extended)), ["large", "small", "uncertain"])
+        self.assertEqual(extended.read_text(),
+                         ">large\nAAAACCCCTT\n>small\nGGGG\n>uncertain description\nTTTT\n")
+
+    def test_reordering_does_not_hide_changes_to_ineligible_sequences(self):
+        prepare(self.fasta, self.mapping, self.prefix)
+        extended = self.root / "bad-reordered.fa"
+        extended.write_text(">small\nGGGGTT\n>large\nAAAACCCCTT\n>uncertain\nTTTT\n")
+        before = extended.read_bytes()
+        with self.assertRaisesRegex(ValueError, "ineligible sequence: small"):
+            verify(extended, self.prefix)
+        self.assertEqual(extended.read_bytes(), before)
+
+    def test_reordering_large_records_uses_complete_byte_ranges(self):
+        sequence = "ACGT" * 600000
+        self.fasta.write_text(">small\nGGGG\n>large\n" + sequence + "\n>uncertain\nTTTT\n")
+        prepare(self.fasta, self.mapping, self.prefix)
+        extended = self.root / "large-reordered.fa"
+        extended.write_text(">large\n" + sequence + "TT\n>small\nGGGG\n>uncertain\nTTTT\n")
+        verify(extended, self.prefix)
+        self.assertEqual(extended.read_text(), self.fasta.read_text().replace(sequence, sequence + "TT"))
+
+    def test_unexpected_or_duplicate_ids_are_rejected(self):
+        prepare(self.fasta, self.mapping, self.prefix)
+        extended = self.root / "bad-ids.fa"
+        for extra in [">extra\nAAAA\n", ">large\nAAAA\n"]:
+            extended.write_text(self.fasta.read_text() + extra)
             with self.assertRaises(ValueError):
                 verify(extended, self.prefix)
 

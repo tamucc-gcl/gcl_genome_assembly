@@ -83,11 +83,58 @@ def prepare(fasta, name_map, prefix):
     return len(eligible)
 
 
+def restore_order(fasta, names):
+    """Copy FASTA byte ranges in source order without loading chromosome sequences.
+
+    Teloclip 0.3.2 writes extended records before copying untouched records.
+    Ordering is a pipeline responsibility, not a sequence-validity failure.
+    """
+    path = Path(fasta)
+    blocks = {}
+    current = None
+    with path.open("rb") as source:
+        while True:
+            start = source.tell()
+            line = source.readline()
+            if not line:
+                if current is not None:
+                    blocks[current][1] = start
+                break
+            if line.startswith(b">"):
+                if current is not None:
+                    blocks[current][1] = start
+                current = line[1:].split()[0].decode("utf-8")
+                blocks[current] = [start, None]
+    temporary = path.with_name(path.name + ".ordered.tmp")
+    try:
+        with path.open("rb") as source, temporary.open("wb") as dest:
+            for name in names:
+                start, end = blocks[name]
+                source.seek(start)
+                remaining = end - start
+                last = b""
+                while remaining:
+                    chunk = source.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("Truncated FASTA while restoring order")
+                    dest.write(chunk)
+                    last = chunk[-1:]
+                    remaining -= len(chunk)
+                if last != b"\n":
+                    dest.write(b"\n")
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def verify(fasta, prefix):
     state = json.loads(Path(str(prefix) + ".scope.json").read_text(encoding="utf-8"))
     records = fingerprints(fasta)
-    if list(records) != list(state["records"]):
-        raise ValueError("Telomere extension changed assembly IDs or record order")
+    if set(records) != set(state["records"]):
+        missing = sorted(set(state["records"]) - set(records))
+        unexpected = sorted(set(records) - set(state["records"]))
+        raise ValueError(f"Telomere extension changed assembly IDs: missing={missing}, unexpected={unexpected}")
     eligible = set(state["eligible"])
     for row in state["audit"]:
         name = row["scaffold"]
@@ -95,6 +142,8 @@ def verify(fasta, prefix):
             raise ValueError("Telomere extension changed an ineligible sequence: " + name)
         row["final_length"] = records[name]["length"]
         row["added_bp"] = records[name]["length"] - row["original_length"]
+    if list(records) != list(state["records"]):
+        restore_order(fasta, state["records"])
     write_audit(prefix, state["audit"])
 
 

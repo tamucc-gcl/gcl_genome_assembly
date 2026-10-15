@@ -56,7 +56,9 @@ elif tool=='teloclip':
     elif args[0]=='extend':
         records=fasta(args[2])
         selected={line.split('\t')[2] for line in Path(args[1]).read_text().splitlines() if not line.startswith('@')}
-        Path(args[args.index('--output-fasta')+1]).write_text(''.join('>'+n+'\n'+s+('TT' if n in selected else '')+'\n' for n,s in records.items()))
+        # Match Teloclip's real writer: extended records first, untouched ones last.
+        ordered=[n for n in records if n in selected]+[n for n in records if n not in selected]
+        Path(args[args.index('--output-fasta')+1]).write_text(''.join('>'+n+'\n'+records[n]+('TT' if n in selected else '')+'\n' for n in ordered))
         Path(args[args.index('--stats-report')+1]).write_text(''.join(f'### {n}\n  Original length: {len(s)}\n  Right extension: +2bp\n' for n,s in records.items() if n in selected))
     else:raise RuntimeError('Unexpected teloclip call')
 elif tool=='minimap2' and '-ax' in args:
