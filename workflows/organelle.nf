@@ -24,9 +24,12 @@ workflow ORGANELLE {
     ch_versions = Channel.empty()
 
     ch_reads.branch { meta, hifi_fastq, sr1, sr2 ->
-        hifi: meta.hifi
-        other: true
+        hifi: meta.hifi && meta.mito_tool != 'none'
+        other: !meta.hifi && meta.mito_tool != 'none'
+        disabled: true
     }.set { ch_org }
+    // Explicitly disabled organelle assembly must still release nuclear refinement.
+    ch_baits = ch_org.disabled.map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.sample, []) }
 
     if (capabilities.hifi) {
         ch_mitohifi_input = ch_org.hifi
@@ -43,10 +46,10 @@ workflow ORGANELLE {
         ch_gene_map = MITOHIFI.out.gene_map
         ch_versions = ch_versions.mix(MITOHIFI.out.versions)
         // Explicit successful completion even when no complete mitogenome was recovered.
-        ch_baits = MITOHIFI.out.status
+        ch_baits = ch_baits.mix(MITOHIFI.out.status
             .map { meta, status -> tuple(meta.sample, status) }
             .join(MITOHIFI.out.mitogenome.map { meta, fa -> tuple(meta.sample, fa) }, remainder: true)
-            .map { sample, status, fa -> tuple(sample, fa ? [fa] : []) }
+            .map { sample, status, fa -> tuple(sample, fa ? [fa] : []) })
     }
 
     if (capabilities.shortread_organelle) {

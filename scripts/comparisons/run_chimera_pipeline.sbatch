@@ -24,7 +24,7 @@ finish() {
     fi
     # Package reports and evidence, not the full assembly output tree.
     files=(exit_status.txt)
-    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly/chimeras results/assembly/scaffold/teloclip results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
+    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly_eligibility.json results/assembly_eligibility.tsv results/assembly_eligibility.md results/references results/assembly/chimeras results/assembly/scaffold/teloclip results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
     # Final names are needed to review the chromosome inventory after manual cuts.
@@ -36,10 +36,14 @@ finish() {
     for name in "$out"/results/contact_maps/*_final_*bp_contact_map.png "$out"/results/contact_maps/*_final_contact_stats.txt; do
         [[ -f "$name" ]] && files+=("${name#"$out/"}")
     done
-    # Include validation-only graph audits without archiving large graph products.
-    for name in "$out"/results/pangenome/*/pangenome_input_report.md "$out"/results/pangenome/*/pangenome_input_audit.json "$out"/results/pangenome/*/pangenome_identity.tsv; do
-        [[ -f "$name" ]] && files+=("${name#"$out/"}")
-    done
+    # Compact graph reports, provenance, summary tables and figures. Graphs, indexes,
+    # alignments, VCFs and large per-node tables remain in the selected results directory.
+    if [[ -d "$out/results/pangenome" ]]; then
+        while IFS= read -r -d '' name; do files+=("${name#"$out/"}"); done < <(
+            find -L "$out/results/pangenome" -type f -size -20M \( \
+                -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name '*.csv' -o \
+                -name '*.txt' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' \) -print0)
+    fi
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
         --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' \
         -czf "$out.review.tar.gz" -C "$out" "${files[@]}"

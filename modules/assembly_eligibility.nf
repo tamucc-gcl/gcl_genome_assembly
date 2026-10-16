@@ -16,6 +16,7 @@ process ASSEMBLY_ELIGIBILITY {
     def settings = [
         min_individuals: nz('pangenome_min_individuals', 2) as int,
         run_pangenome: params.run_pangenome as boolean, qc_mode: params.qc_mode,
+        linear_reference_ids: (params.linear_reference_ids ?: '').toString().split(',').collect { it.trim() }.findAll { it },
         min_scaffold_bp: nz('harmonize_min_scaffold_bp', nz('finalize_min_scaffold_bp', 1000000)) as long,
         chromosome_method: nz('harmonize_chromosome_method', 'dropoff'),
         dropoff_ratio: nz('harmonize_dropoff_ratio', 2.0),

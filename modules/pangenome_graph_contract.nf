@@ -60,10 +60,9 @@ compatibility, full compressed-stream integrity, or biological correctness.
 |---|---|---|
 ${rows}
 
-This batch provides construction contracts and basic graph statistics.
-Panacus sharing, chromosome-by-haplotype summaries, ordination, and the revised
-structural-variant analysis are not yet part of this replacement analysis workflow.
-Their absence is not a zero result.
+This report covers construction only. Sharing, regional attribution and similarity
+reports are produced by their enabled downstream processes after these checks pass.
+An absent downstream result must not be interpreted as a zero result.
 
 </details>
 GRAPH_REPORT

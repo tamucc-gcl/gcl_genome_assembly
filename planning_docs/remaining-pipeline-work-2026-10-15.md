@@ -5,6 +5,107 @@ PSMC design, current active workflows and the completed Crest QC evidence. It su
 abbreviated remaining-work summaries, without removing agreed extensions or changing their
 ordering. Optional means independently enabled per run, not forgotten from this roadmap.
 
+## Completion checklist — the 13 agreed categories
+
+These IDs are the canonical progress checklist. Check a category only after its agreed
+implementation and applicable acceptance evidence are complete; source presence alone is
+insufficient. Update its evidence/status here when checking it off. Existing completed
+substeps remain recorded below and should not be repeated without a concrete reason.
+
+- [x] **1. Assembly/QC acceptance** — accepted 2026-10-16 from Crest run 1535116:
+  55 completed tasks, 774 cached, zero failures/retries. All ten finalized assemblies have
+  final Hi-C mapping/filtering/metrics and 40 contact-map plots. Final CSV/HTML retention and
+  trans/cis values reconcile with pair counts and map statistics. Both reviewed cuts remain
+  verified; final name maps are unchanged. Detailed evidence: local
+  `comparisons/assembly-all-stage-qc-final-hic-inspection/QC-review.md` and uploaded
+  `assembly-all-stage-qc.review.tar.gz`. Standalone metric-table publication was fixed/tested
+  locally for the next normal resume (category 7); crowded map labels remain category 6.
+- [ ] **2. General-purpose input handling** — complete the supported-input/species/skip matrix.
+- [ ] **3. Failure and organelle handling** — audit and finish the remaining failure/fallback contracts.
+- [ ] **4. Shared references and provenance** — add graph-independent singleton references and compatibility records.
+- [ ] **5. Core pangenome** — final-input/tool preflight accepted in run 1535116 for ten
+  assemblies/five individuals, reference Sde-CMat_203_hap1. Construction, graph roles, required
+  summaries and variant-output acceptance remain outstanding.
+- [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
+- [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
+- [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.
+- [ ] **9. BlobToolKit evidence and cleaning** — evidence first, separately validated cleaning.
+- [ ] **10. Graph self-mapping QC** — bounded supported mapping, metrics and report integration.
+- [ ] **11. Private/accessory sequence evidence** — repair/replace and decide retained scope after requested use.
+- [ ] **12. Graph SV interpretation and supplementary SyRI** — method validation and integrated reporting.
+- [ ] **13. Additional graph exports/figures** — inventory and disposition, then only justified agreed additions.
+
+Category 1 does not wait for optional post-assembly comparison plots or the consolidated
+report. Their runtime/routing/dependency acceptance belongs to categories 2/7 and their
+report integration to category 6. If later work exposes a concrete defect affecting an
+accepted category, record and address it rather than silently retaining an invalid checkmark.
+
+### 2026-10-16 input/reference/graph check batch
+
+- Shared final linear-reference selection now runs independently of graph admission and
+  graph enablement. Singleton and collapsed/fragmented assemblies can have a linear reference
+  without becoming graph eligible. An eligible graph uses the same selected reference.
+- Optional `--linear_reference_ids` takes comma-separated final assembly IDs, at most one per
+  species. Unknown, missing or duplicate species overrides fail. An override unsuitable for
+  the graph withholds that graph rather than silently choosing a different coordinate frame.
+- `references/<taxid>/reference.json` records the final FASTA SHA256, sequence dictionary,
+  source assembly/path, selection reason and mapping compatibility requirement. The real
+  FASTA and FAI are checked together. This does not implement PSMC or certify biology.
+- Final haplotype/ploidy metadata mismatches now fail eligibility. Graph input auditing no
+  longer overwrites an existing member taxid with the cohort taxid, which could mask a
+  mismatched species record. Both input and build reports reach the report channel.
+- Explicit `mito_tool=none` now bypasses organelle assembly/reference lookup and emits empty
+  bait lists so nuclear refinement continues for both HiFi and short-read routes.
+- Use ordinary Nextflow caching and `-resume`. No extra persistent state, job-store recovery
+  mechanism or protection against cache deletion was added. Successful cached tasks are
+  reused; failed/missing tasks rerun through normal Nextflow behavior.
+- The review archive now includes reference/eligibility records and compact graph reports,
+  summary tables and figures (under 20 MB each), excluding graphs, mappings, VCFs and indexes.
+- Acceptance remains scoped: synthetic production-wiring tests do not certify a real Cactus
+  graph or every supported input route. Current runtime failures still stop the controller
+  after configured retries. Independent-species continuation, short-read tool-failure versus
+  no-recovery reporting, reference-lookup fallback and complete real short-read integration
+  remain open under categories 2/3. Do not mark those categories complete from these checks.
+
+The next real run enables construction with `--run_pangenome true
+--pangenome_validate_only false`, retaining the reviewed cut file, current input sheets,
+normal work/cache paths and all-stage QC. Its graph acceptance remains category 5.
+
+Local acceptance: 47 focused Python tests passed (eligibility, reference identity, graph
+input/output/variant audits, sharing/regional calculations and FASTQ subset preparation).
+`python3 tests/run_core_contract_checks.py` passed ten Nextflow 23.10.1 scenarios, including
+eight expected failures. External Cactus/MitoHiFi executables are tiny doubles; production
+workflow modules and auditors execute normally. These tests cover routing/validation,
+not the biological quality of real graph or organelle outputs. Replaying the uploaded final
+name-map lengths preserved all ten graph identities, reference chromosomes and the existing
+Sde-CMat_203_hap1 reference. Logs are under `comparisons/core-check-*.log`.
+
+After syncing, from the Crest project directory, with no other controller using its resume session:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/core-graph-01 \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-observable-contact-v7/results/assembly/chimeras/mapping_manifest.json" \
+  --chimera_break "$PWD/data/chimera_reviews/Sde-CTlk_104.v7.reviewed.tsv" \
+  --run_pangenome true --pangenome_validate_only false
+```
+
+This uses normal pipeline resources, work and resume paths, all-stage QC and symlink
+publication. It retains the manual cuts. No new assembly parameter settings are introduced.
+Return `comparisons/core-graph-01.review.tar.gz` for real graph/output acceptance.
+
+### Existing post-assembly plots: acceptance still needed
+
+Dotplots/riparian, cohort QUAST, final telomere visualization and coverage books have existing
+implementations. Expect reuse, with bounded checks of final-input identities, pairing/species
+scope, empty/disabled routes, dependencies and plot content before full report integration.
+They were disabled in the recent accepted assembly/QC runs. Current all-pairs selection
+builds pairs across its input stream; verify species-aware behavior for general multi-species
+use. SETUP_PAFR still performs an unpinned runtime GitHub install and needs dependency cleanup.
+For the current ten assemblies, all-pairs mode schedules 45 alignments; within-sample mode
+schedules five. Their scope/cost should be deliberate when enabling the branch.
+
 ## Current accepted checkpoint
 
 - General cohort chimera evidence, explicit manual cuts and downstream finishing have been
@@ -14,7 +115,8 @@ ordering. Optional means independently enabled per run, not forgotten from this 
   CTlk hap1 cuts remain verified. Purging/biological optimization is deferred by the user.
 - Final Hi-C mapping/filtering/metrics/contact maps have now been decoupled from
   run_post_assembly and tested locally in final_only/all_stages, QC-off and plots-off cases.
-  Their real Crest acceptance is pending. Local Nextflow wiring tests used tool stubs.
+  Real Crest acceptance passed in run 1535116. Local wiring tests additionally cover
+  final_only/QC-off/plots-off cases using tool stubs.
 - Graph admission/construction, role audits and sharing/regional/similarity modules exist.
   Presence of source and synthetic tests is not acceptance of the updated real cohort.
 - The always-on assembly summary and interactive QC viewer exist. The consolidated Markdown
@@ -74,9 +176,9 @@ Markdown report. The unfinished core report is not a reason to deliver extension
 
 ## Execution order and concurrency
 
-1. Upcoming combined Crest run: final Hi-C QC plus validation-only pangenome preflight/input
-   audit. This does not build a graph or start PSMC. The review archive includes small graph
-   input audits and final Hi-C plot/statistic products.
+1. Completed 2026-10-16: final Hi-C QC plus validation-only pangenome preflight/input
+   audit (run 1535116). Category 1 is checked off. No graph or PSMC was started.
+   The review archive includes small graph input audits and final Hi-C plot/statistic products.
 2. While Crest runs: audit/test remaining input, failure, reference and operational contracts
    locally; prepare report interfaces. Do not sync changes to source used by live tasks.
 3. After preflight acceptance: run the core graph and dependent core summaries. Independent

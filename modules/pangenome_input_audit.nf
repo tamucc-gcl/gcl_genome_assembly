@@ -15,7 +15,9 @@ process PANGENOME_INPUT_AUDIT {
     tuple val(taxid), path('pangenome_input_report.md'), emit: report
     script:
     def paths = fastas instanceof List ? fastas : [fastas]
-    def members = cohort.members.withIndex().collect { member, i -> member + [taxid: taxid, staged_fasta: paths[i].toString()] }
+    def members = cohort.members.withIndex().collect { member, i ->
+        member + [taxid: member.taxid ?: taxid, staged_fasta: paths[i].toString()]
+    }
     def payload = groovy.json.JsonOutput.toJson(cohort + [members: members])
     """
     set -euo pipefail

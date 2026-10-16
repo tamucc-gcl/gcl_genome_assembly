@@ -50,6 +50,56 @@ class EligibilityTests(unittest.TestCase):
         cohort = evaluate(self.data)["cohorts"][0]
         self.assertFalse(cohort["ready"])
         self.assertEqual(cohort["individuals"], ["one"])
+        self.assertEqual(evaluate(self.data)['linear_references'][0]['id'], cohort['reference_id'])
+
+    def test_graph_toggle_preserves_shared_reference(self):
+        self.add('one')
+        self.add('two')
+        off = evaluate(self.data)
+        self.data['settings']['run_pangenome'] = True
+        on = evaluate(self.data)
+        self.assertEqual(off['linear_references'], on['linear_references'])
+        self.assertEqual(on['linear_references'][0]['id'], on['cohorts'][0]['reference_id'])
+
+    def test_collapsed_singleton_still_has_linear_reference(self):
+        self.add('one', assembler='spades', fragmented=True)
+        result = evaluate(self.data)
+        self.assertFalse(result['cohorts'][0]['ready'])
+        self.assertEqual(result['linear_references'][0]['id'], 'one_primary')
+        self.assertIn('without_graph_eligibility', result['linear_references'][0]['selection'])
+
+    def test_override_is_shared_and_does_not_relax_graph_admission(self):
+        self.add('one')
+        self.add('two', fragmented=True)
+        self.data['settings']['linear_reference_ids'] = ['two_hap2']
+        result = evaluate(self.data)
+        self.assertEqual(result['linear_references'][0]['id'], 'two_hap2')
+        self.assertEqual(result['cohorts'][0]['reference_id'], 'two_hap2')
+        self.assertFalse(result['cohorts'][0]['ready'])
+        self.assertIn('no_suitable_chromosome_scale_reference', result['cohorts'][0]['reasons'])
+
+    def test_unknown_and_same_species_multiple_overrides_rejected(self):
+        self.add('one')
+        for ids in (['absent'], ['one_hap1', 'one_hap2']):
+            self.data['settings']['linear_reference_ids'] = ids
+            with self.assertRaises(ValueError):
+                evaluate(self.data)
+
+    def test_species_references_are_independent(self):
+        self.add('one', taxid='1')
+        self.add('two', taxid='2')
+        self.data['settings']['linear_reference_ids'] = ['two_hap2', 'one_hap1']
+        refs = {r['taxid']: r['id'] for r in evaluate(self.data)['linear_references']}
+        self.assertEqual(refs, {'1': 'one_hap1', '2': 'two_hap2'})
+
+    def test_final_haplotype_and_ploidy_mismatches_rejected(self):
+        self.add('one')
+        for field, value in [('haplotype', 'hap2'), ('ploidy', 1), ('n_hap', 1)]:
+            with self.subTest(field=field):
+                data = copy.deepcopy(self.data)
+                data['observed'][0]['meta'][field] = value
+                with self.assertRaisesRegex(ValueError, 'disagrees'):
+                    evaluate(data)
 
     def test_cross_species_reference_rejected(self):
         self.add('one')

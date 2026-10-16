@@ -50,6 +50,14 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_w
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
+elif [[ "${1:-}" == core_contract_checks.nf ]]; then
+    python3 "$repo/tests/setup_core_contract_checks.py" "$runtime" "${2:-success}"
+    cp reproduction.nf "$repo/.core-contract-checks.nf"
+    trap 'rm -f "$repo/.core-contract-checks.nf"' EXIT
+    script="$repo/.core-contract-checks.nf"
+    extra=(-c "$runtime/core-check.config")
+    mkdir -p "$runtime/core-launch"
+    cd "$runtime/core-launch"
 elif [[ "${1:-}" == qc_post_cut_wiring_check.nf || "${1:-}" == final_hic_qc_wiring_check.nf ]]; then
     touch "$runtime/b.fa"
     cp reproduction.nf "$repo/.qc-wiring.nf"
@@ -103,6 +111,13 @@ JAVA_TOOL_OPTIONS="${java_opens[*]} --add-exports=java.management/com.sun.jmx.mb
 if ! run_nextflow; then
     find work -name .command.err -mmin -10 -exec sh -c 'echo "$1"; tail -20 "$1"' sh {} \;
     exit 1
+fi
+if [[ "${1:-}" == final_hic_qc_wiring_check.nf && "${2:-final_only}" != none ]]; then
+    for checkpoint in final_raw_map final_filtered; do
+        count=$(find "$runtime/qc-results/qc/hic/map/$checkpoint" -name '*.tsv' -type f | wc -l)
+        [[ "$count" -eq 4 ]] || { echo "Expected four published $checkpoint tables; found $count" >&2; exit 1; }
+    done
+    echo 'PASS: final Hi-C standalone metric tables are published'
 fi
 if [[ "${3:-}" == cache ]]; then
     cp .nextflow.log "$repo/comparisons/misassembly-validation/first-nextflow.log"

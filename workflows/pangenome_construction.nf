@@ -41,7 +41,7 @@ workflow PANGENOME_CONSTRUCTION {
     ch_clip_stats_input = CACTUS_PANGENOME.out.gbz.join(CACTUS_PANGENOME.out.og)
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)
         .map { taxid, gbz, og, check -> tuple(taxid, gbz, og) }
-    ch_report = PANGENOME_GRAPH_CONTRACT.out.report
+    ch_report = ch_report.mix(PANGENOME_GRAPH_CONTRACT.out.report)
     ch_clip_sharing_input = CACTUS_PANGENOME.out.gfa
         .join(PANGENOME_INPUT_AUDIT.out.identities)
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)

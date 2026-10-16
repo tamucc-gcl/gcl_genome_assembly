@@ -18,7 +18,7 @@ process HIC_BAM_METRICS {
     label 'hic_qc'
 
     publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode,
-        enabled: { checkpoint == 'final_raw_map' }
+        saveAs: { name -> checkpoint == 'final_raw_map' ? name : null }
 
     input:
     tuple val(meta), val(checkpoint), path(bam), path(bai)
@@ -62,7 +62,7 @@ process HIC_PAIRS_METRICS {
     label 'hic_qc'
 
     publishDir "${params.outdir}/qc/hic/map/${checkpoint}", mode: params.publish_dir_mode,
-        enabled: { checkpoint == 'final_filtered' }
+        saveAs: { name -> checkpoint == 'final_filtered' ? name : null }
 
     input:
     tuple val(meta),

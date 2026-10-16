@@ -94,6 +94,7 @@ include { parseSampleSheet } from './functions/input_validation.nf'
 include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
 include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
+include { SHARED_REFERENCE } from './modules/shared_reference.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
 
 /*
@@ -347,7 +348,7 @@ workflow {
     // (short-read samples use mitofinder / the organelle `other` branch — no MitoHiFi ref).
     // Runs after taxonomy resolution now (was a global no-dependency call).
     ch_mito_ref_todo = ch_input
-        .filter { meta, reads -> meta.hifi }
+        .filter { meta, reads -> meta.hifi && meta.mito_tool != 'none' }
         .map    { meta, reads -> tuple(meta.taxid?.toString(), meta.sample) }
         .filter { taxid, sample -> taxid != null }
         .combine( ch_taxonomy, by: 0 )                 // (taxid, sample, tax) — many samples per taxid
@@ -513,6 +514,14 @@ workflow {
         HARMONIZE_SCAFFOLDS.out.reference_id.collect(flat: false),
         file("${projectDir}/py_scripts/assembly_eligibility.py", checkIfExists: true),
         file("${projectDir}/py_scripts/harmonize_names.py", checkIfExists: true))
+    // Always record real final reference identities, including singleton/graph-off runs.
+    SHARED_REFERENCE(ASSEMBLY_ELIGIBILITY.out.manifest.flatMap { manifest ->
+        new groovy.json.JsonSlurper().parse(manifest).linear_references.collect { selection ->
+            tuple(selection.taxid, selection, file(selection.fasta, checkIfExists: true),
+                  file(selection.fai, checkIfExists: true))
+        }
+    }, file("${projectDir}/py_scripts/shared_reference.py", checkIfExists: true),
+       file("${projectDir}/py_scripts/pangenome_input_audit.py", checkIfExists: true))
     ASSEMBLY_RUN_SUMMARY(ch_input_status,
         ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false),
         CHIMERA.out.coordinate_report, ASSEMBLY_ELIGIBILITY.out.report, CHIMERA.out.report)
