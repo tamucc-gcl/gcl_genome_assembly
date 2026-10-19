@@ -26,6 +26,12 @@ The launcher checks the published v7 evidence against its actual retained
 Nextflow task inputs. It verifies FASTA, source FASTA, AGP and assembly-alignment
 checksums, BAM identity and sequence dictionaries. Missing cache inputs stop the
 diagnostic with a named input; nothing silently falls back to a different run.
+Completed scratch tasks need not retain their staged input links. The launcher
+uses retained source paths recorded in the evidence and follows literal input
+links from `.command.run`, including directory links and upstream staging chains.
+It does not execute the wrapper, search for files with matching names, or rebuild
+missing inputs. An unused raw graph input is not required because this diagnostic
+uses the already retained native graph measurements.
 
 Two chromosome-evidence jobs first project the retained CIGAR alignments into
 bounded local windows. CIGAR blocks are clipped before the interval sweep so
@@ -162,3 +168,15 @@ links, unselected cut worksheets and a seven-task cached resume were checked.
 The smoke report and logs are in the ignored
 `comparisons/four-join-software-validation` directory. CTlk evidence collection
 still requires the Crest launch above.
+
+The initial Crest preflight exposed an incorrect assumption that `.command.sh`
+input paths would remain present after scratch cleanup. The regression suite
+now includes a complete preflight with all transient links absent, nested input
+directory recovery, an upstream staging chain, cycle rejection, unchanged
+manifest timestamps, and rejection of changed source sequence. The synthetic
+real-tool fixture now uses absent staging links rather than persistent absolute
+input paths, reproducing the completed-task layout that was missed initially.
+All 24 tests passed after this repair. The updated synthetic real-tool run
+completed all seven Nextflow jobs, passed evidence/report verification, and
+then resumed with all seven jobs cached. Its report and logs are in
+`comparisons/four-join-staging-validation`.

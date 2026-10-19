@@ -12,6 +12,7 @@ import gzip
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shlex
@@ -74,6 +75,59 @@ def required(path):
     return str(path)
 
 
+def staged_links(task):
+    """Read literal Nextflow input links; never execute its cached shell wrapper."""
+    wrapper=task/'.command.run'
+    if not wrapper.is_file():return []
+    result=[]
+    for line in wrapper.read_text().splitlines():
+        if not line.lstrip().startswith('ln '):continue
+        try:tokens=shlex.split(line,comments=True)
+        except ValueError:continue
+        if len(tokens)<4 or not any(t=='--symbolic' or (t.startswith('-') and 's' in t)
+                                    for t in tokens[1:-2]):continue
+        source,destination=tokens[-2:]
+        # Nextflow writes concrete paths. Expanding shell expressions here would
+        # turn metadata parsing into shell execution or an unsupported guess.
+        if any(c in source+destination for c in ('$','`','\n')):continue
+        result.append((Path(os.path.abspath(task/destination)),Path(os.path.abspath(task/source))))
+    return result
+
+
+def retained_input(task,value,hint=None):
+    """Recover a cleaned scratch-stage input through its exact recorded link chain.
+
+    A staged directory link can supply a file beneath it. Upstream staging links
+    can also have been removed; follow their wrappers recursively. No work-tree
+    search by basename, copied input, or recreated symlink is used.
+    """
+    requested=Path(os.path.abspath(task/value));seen=set()
+    def resolve(path):
+        path=Path(os.path.abspath(path))
+        if path.is_file():return str(path.resolve())
+        if path in seen or len(seen)>=64:return None
+        seen.add(path)
+        for parent in path.parents:
+            matches=[]
+            for destination,source in staged_links(parent):
+                try:rest=path.relative_to(destination)
+                except ValueError:continue
+                matches.append((len(destination.parts),source/rest))
+            for _,source in sorted(matches,key=lambda item:item[0],reverse=True):
+                found=resolve(source)
+                if found:return found
+        return None
+    # Absolute retained paths already recorded in the evidence take precedence
+    # over transient staging names; downstream checksum checks still apply.
+    if hint:
+        found=resolve(Path(hint))
+        if found:return found
+    found=resolve(requested)
+    if found:return found
+    raise ValueError(f'Required retained input unavailable: {requested}. '
+                     'No existing source was recoverable from recorded Nextflow staging links.')
+
+
 def cached_task(evidence):
     # mapping_manifest provenance is a cached <assembly>.evidence/evidence.json.
     return Path(evidence).parent.parent
@@ -109,8 +163,9 @@ def prepare(a):
         data = json.loads(published.read_text())
         task = cached_task(mappings[assembly]['provenance'])
         args = command_args(task, 'misassembly_assess.py')
-        paths = {key: required(task/value) for key, value in args.items()
-                 if key in ('fasta', 'discovery', 'mapping', 'agp', 'pairs', 'source', 'libraries', 'graph')}
+        hints={'fasta':data.get('assessment_fasta') or mappings[assembly].get('fasta')}
+        paths = {key: retained_input(task,value,hints.get(key)) for key, value in args.items()
+                 if key in ('fasta', 'discovery', 'mapping', 'agp', 'pairs', 'source', 'libraries')}
         for key in ('fasta', 'discovery', 'mapping', 'agp', 'pairs', 'source', 'libraries'):
             if key not in paths: raise ValueError(f'{assembly}: {key} unavailable in retained task')
         for key, expected in (('fasta', data['assessment_sha256']),
@@ -122,9 +177,9 @@ def prepare(a):
         # The staged discovery path resolves back to its actual Nextflow task.
         discovery_task = Path(paths['discovery']).parent.parent
         discovery_args = command_args(discovery_task, 'misassembly_discover.py')
-        catalog = required(discovery_task/discovery_args['catalog'])
+        catalog = retained_input(discovery_task,discovery_args['catalog'])
         alignments = json.loads(discovery_args['alignments'])
-        for pair in alignments: pair['path'] = required(discovery_task/pair['path'])
+        for pair in alignments: pair['path'] = retained_input(discovery_task,pair['path'])
         if { (r['a'], r['b'], r['sha256']) for r in data['alignments'] } != {
                 (r['a'], r['b'], sha(r['path'])) for r in alignments }:
             raise ValueError('Cohort alignment provenance differs from reviewed evidence')

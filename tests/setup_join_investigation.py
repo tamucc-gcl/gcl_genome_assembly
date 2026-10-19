@@ -72,14 +72,24 @@ def main():
             paths.append(dict(a=focal,b=peer,path=str(paf)))
         discovery_task=a.out/(focal+'.discover_task');discovery=discovery_task/(focal+'.discovery');discovery.mkdir(parents=True)
         discovery_file=discovery/'discovery.json';m.save(discovery_file,{})
-        (discovery_task/'.command.sh').write_text('python3 misassembly_discover.py discover --catalog '+shlex.quote(str(catalog_file))+' --alignments '+shlex.quote(json.dumps(paths)))
+        staged_alignments=[dict(r,path=f'alignments{i:02d}/{Path(r["path"]).name}') for i,r in enumerate(paths)]
+        (discovery_task/'.command.sh').write_text('python3 misassembly_discover.py discover --catalog catalog.json --alignments '+shlex.quote(json.dumps(staged_alignments)))
+        (discovery_task/'.command.run').write_text('nxf_stage() {\n'+
+            'ln -s '+shlex.quote(str(catalog_file))+' catalog.json\n'+''.join(
+            'ln -s '+shlex.quote(r['path'])+' '+shlex.quote(s['path'])+'\n'
+            for r,s in zip(paths,staged_alignments))+'}\n')
         mapping=a.out/(focal+'.mapping.json');m.save(mapping,dict(assessment_sha256=m.sha(assembly),assembly=focal,sample='A',coordinate_stage='pre_finishing'))
         assessment_task=a.out/(focal+'.assessment_task');retained=assessment_task/(focal+'.evidence');retained.mkdir(parents=True)
         args=dict(fasta=assembly,discovery=discovery_file,mapping=mapping,agp=agp,pairs=focal_pairs,source=source,libraries=libraries)
-        (assessment_task/'.command.sh').write_text('python3 misassembly_assess.py '+' '.join('--'+k+' '+shlex.quote(str(v)) for k,v in args.items()))
+        staged={key:f'{key}/{Path(value).name}' for key,value in args.items()}
+        (assessment_task/'.command.sh').write_text('python3 misassembly_assess.py '+' '.join('--'+k+' '+shlex.quote(v) for k,v in staged.items()))
+        # Intentionally do not create staging links. A completed scratch task can
+        # retain its wrapper and outputs while every transient input is absent.
+        (assessment_task/'.command.run').write_text('nxf_stage() {\n'+''.join(
+            'ln -s '+shlex.quote(str(args[k]))+' '+shlex.quote(v)+'\n' for k,v in staged.items())+'}\n')
         event=dict(id='C07',scaffold='s',left='chr1',right='chr2',lo=599000,hi=601000,
                    alternatives=[dict(id='C07R01',lo=584000,hi=586000,probe_bp=585000)],cut_options=[],contact_profiles={'single':focal_contacts})
-        data=dict(assembly=focal,sample='A',coordinate_stage='pre_finishing',assessment_sha256=m.sha(assembly),events=[event],
+        data=dict(assembly=focal,sample='A',coordinate_stage='pre_finishing',assessment_fasta=str(assembly),assessment_sha256=m.sha(assembly),events=[event],
                   alignments=[dict(a=r['a'],b=r['b'],sha256=m.sha(r['path'])) for r in paths],
                   hic_audit=dict(source_sha256=m.sha(source),agp_sha256=m.sha(agp),audit=dict(input_pairs=focal_count)))
         m.save(retained/'evidence.json',data);pub=source_packet/'assemblies'/focal;pub.mkdir(parents=True);m.save(pub/'evidence.json',data)
