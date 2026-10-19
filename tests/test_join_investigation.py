@@ -1,6 +1,7 @@
 """General junction diagnostic tests; no CTlk locations or chromosome identities."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -15,10 +16,10 @@ mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
 
 
 class JoinInvestigationTests(unittest.TestCase):
-    def stage_wrapper(self,task,links):
+    def stage_wrapper(self,task,links,mode='symlink'):
         task.mkdir(parents=True,exist_ok=True)
         (task/'.command.run').write_text('nxf_stage() {\n'+''.join(
-            '  ln -s '+shlex.quote(str(source))+' '+shlex.quote(str(destination))+'\n'
+            {'symlink':'  ln -s ','copy':'  cp -fRL ','link':'  ln -f '}[mode]+shlex.quote(str(source))+' '+shlex.quote(str(destination))+'\n'
             for source,destination in links)+'}\n')
 
     def test_removed_file_stage_resolves_exact_recorded_source(self):
@@ -31,7 +32,7 @@ class JoinInvestigationTests(unittest.TestCase):
     def test_removed_directory_and_upstream_stages_are_followed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'retained';source.mkdir();(source/'catalog.json').write_text('{}')
-            upstream=root/'upstream';self.stage_wrapper(upstream,[(source,'catalogs')])
+            upstream=root/'upstream';self.stage_wrapper(upstream,[(source,'catalogs')],mode='copy')
             task=root/'task';self.stage_wrapper(task,[(upstream/'catalogs','staged')])
             self.assertEqual(mod.retained_input(task,'staged/catalog.json'),str((source/'catalog.json').resolve()))
 
@@ -44,8 +45,29 @@ class JoinInvestigationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);(root/'same.fa').write_text('wrong source');task=root/'task'
             self.stage_wrapper(task,[(root/'missing.fa','assembly/same.fa')])
-            with self.assertRaisesRegex(ValueError,'recorded Nextflow staging links'):
+            with self.assertRaisesRegex(ValueError,'recorded Nextflow input staging'):
                 mod.retained_input(task,'assembly/same.fa')
+
+    def test_copy_staging_recovers_agp_with_no_staged_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'upstream/assembly.agp';source.parent.mkdir();source.write_text('AGP')
+            task=root/'task';self.stage_wrapper(task,[(source,'agp/assembly.agp')],mode='copy')
+            self.assertEqual(mod.retained_input(task,'agp/assembly.agp'),str(source.resolve()))
+
+    def test_hard_link_staging_is_supported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'source.fa';source.write_text('FASTA')
+            task=root/'task';self.stage_wrapper(task,[(source,'assembly/a.fa')],mode='link')
+            self.assertEqual(mod.retained_input(task,'assembly/a.fa'),str(source.resolve()))
+
+    def test_copy_parser_ignores_output_transfers_and_shell_expansion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task=Path(tmp);source=task/'source.agp';source.write_text('AGP')
+            self.stage_wrapper(task,[(source,'agp/a.agp')],mode='copy')
+            wrapper=task/'.command.run'
+            wrapper.write_text('nxf_fs_copy() {\n cp -fRL $source $target/$basedir\n}\n'+wrapper.read_text()+
+                               'nxf_unstage() {\n cp .command.out /retained/.command.out || true\n cp bogus agp/a.agp\n}\n')
+            self.assertEqual(mod.staged_links(task),[(Path(os.path.abspath(task/'agp/a.agp')),source.resolve())])
 
     def test_cyclic_stage_metadata_fails_without_recursion(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -71,7 +93,7 @@ class JoinInvestigationTests(unittest.TestCase):
             mod.save(output/'discovery.json',{})
             alignment=[dict(a=assembly,b='B',path='alignments01/a.paf')]
             (discover/'.command.sh').write_text('python3 misassembly_discover.py discover --catalog catalog.json --alignments '+shlex.quote(json.dumps(alignment)))
-            self.stage_wrapper(discover,[(catalog,'catalog.json'),(paf,'alignments01/a.paf')])
+            self.stage_wrapper(discover,[(catalog,'catalog.json'),(paf,'alignments01/a.paf')],mode='copy')
             assess=root/'work/assess';retained=assess/(assembly+'.evidence');retained.mkdir(parents=True)
             stage=dict(fasta='assembly/a.fa',discovery=assembly+'.discovery/discovery.json',
                        mapping=assembly+'.mapping/mapping.json',agp='agp/a.agp',pairs='pairs/a.pairs',
@@ -79,7 +101,7 @@ class JoinInvestigationTests(unittest.TestCase):
             (assess/'.command.sh').write_text('python3 misassembly_assess.py '+' '.join('--'+k+' '+shlex.quote(v) for k,v in stage.items()))
             self.stage_wrapper(assess,[(fasta,stage['fasta']),(output,assembly+'.discovery'),
                                       (mapping_dir,assembly+'.mapping'),(agp,stage['agp']),
-                                      (pairs,stage['pairs']),(source,stage['source']),(libraries,stage['libraries'])])
+                                      (pairs,stage['pairs']),(source,stage['source']),(libraries,stage['libraries'])],mode='copy')
             evidence=dict(assembly=assembly,sample='A',coordinate_stage='pre_finishing',mapping=mapping,
                           assessment_fasta=str(fasta),assessment_sha256=mod.sha(fasta),
                           events=[dict(id='C01',scaffold='s',left='chr1',right='chr2',lo=1,hi=3)],
@@ -100,6 +122,13 @@ class JoinInvestigationTests(unittest.TestCase):
                 original=fasta.read_text();fasta.write_text('>s\nTGCA\n')
                 with self.assertRaisesRegex(ValueError,'changed fasta'):mod.prepare(args)
                 fasta.write_text(original)
+                agp.unlink();libraries.unlink()
+                with self.assertRaisesRegex(ValueError,'agp.*libraries'):mod.prepare(args)
+                audit=json.loads((args.out/'input_resolution.json').read_text())['assemblies'][0]['inputs']
+                self.assertEqual(audit['agp']['status'],'unavailable')
+                self.assertEqual(audit['libraries']['status'],'unavailable')
+                self.assertEqual(audit['pairs']['status'],'resolved')
+                self.assertTrue(any('cp -fRL' in command for wrapper in audit['agp']['wrappers'] for command in wrapper['commands']))
             job=json.loads((args.out/(assembly+'.json')).read_text())
             self.assertEqual(job['paths']['agp'],str(agp.resolve()))
             self.assertEqual(job['alignments'][0]['path'],str(paf.resolve()))

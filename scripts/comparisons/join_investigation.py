@@ -75,23 +75,39 @@ def required(path):
     return str(path)
 
 
-def staged_links(task):
-    """Read literal Nextflow input links; never execute its cached shell wrapper."""
+def stage_commands(task):
+    """Read only nxf_stage, excluding similarly named output-copy commands."""
     wrapper=task/'.command.run'
     if not wrapper.is_file():return []
-    result=[]
+    commands=[];inside=False
     for line in wrapper.read_text().splitlines():
-        if not line.lstrip().startswith('ln '):continue
+        if re.match(r'^\s*nxf_stage\(\)\s*\{\s*$',line):inside=True;continue
+        if inside and re.match(r'^\s*}\s*$',line):break
+        if inside and re.match(r'^\s*(?:cp|ln)\s',line):commands.append(line.strip())
+    return commands
+
+
+def staged_links(task):
+    """Read literal input source/destination mappings for copy and link modes."""
+    result=[]
+    for line in stage_commands(task):
         try:tokens=shlex.split(line,comments=True)
         except ValueError:continue
-        if len(tokens)<4 or not any(t=='--symbolic' or (t.startswith('-') and 's' in t)
-                                    for t in tokens[1:-2]):continue
-        source,destination=tokens[-2:]
+        operands=[t for t in tokens[1:] if not t.startswith('-')]
+        if len(operands)!=2:continue
+        source,destination=operands
         # Nextflow writes concrete paths. Expanding shell expressions here would
         # turn metadata parsing into shell execution or an unsupported guess.
         if any(c in source+destination for c in ('$','`','\n')):continue
         result.append((Path(os.path.abspath(task/destination)),Path(os.path.abspath(task/source))))
     return result
+
+
+class RetainedInputError(ValueError):
+    def __init__(self,requested,attempts,wrappers):
+        self.details=dict(requested=str(requested),attempted_paths=attempts,wrappers=wrappers)
+        super().__init__(f'Required retained input unavailable: {requested}. '
+                         'No existing source was recoverable from recorded Nextflow input staging.')
 
 
 def retained_input(task,value,hint=None):
@@ -101,14 +117,18 @@ def retained_input(task,value,hint=None):
     can also have been removed; follow their wrappers recursively. No work-tree
     search by basename, copied input, or recreated symlink is used.
     """
-    requested=Path(os.path.abspath(task/value));seen=set()
+    requested=Path(os.path.abspath(task/value));seen=set();attempts=[];wrappers={}
     def resolve(path):
         path=Path(os.path.abspath(path))
         if path.is_file():return str(path.resolve())
         if path in seen or len(seen)>=64:return None
-        seen.add(path)
+        seen.add(path);attempts.append(str(path))
         for parent in path.parents:
             matches=[]
+            if (parent/'.command.run').is_file() and str(parent) not in wrappers:
+                wrappers[str(parent)]=dict(path=str(parent/'.command.run'),commands=stage_commands(parent),
+                    mappings=[dict(destination=str(d),source=str(s),source_exists=s.is_file() or s.is_dir())
+                              for d,s in staged_links(parent)])
             for destination,source in staged_links(parent):
                 try:rest=path.relative_to(destination)
                 except ValueError:continue
@@ -124,8 +144,7 @@ def retained_input(task,value,hint=None):
         if found:return found
     found=resolve(requested)
     if found:return found
-    raise ValueError(f'Required retained input unavailable: {requested}. '
-                     'No existing source was recoverable from recorded Nextflow staging links.')
+    raise RetainedInputError(requested,attempts,list(wrappers.values()))
 
 
 def cached_task(evidence):
@@ -157,29 +176,46 @@ def prepare(a):
         raise ValueError('Duplicate investigation target')
     grouped = defaultdict(list)
     for row in selected: grouped[row['assembly']].append(row)
-    jobs = []
+    jobs = [];failures=[];resolution=dict(assemblies=[])
+    def resolve_input(audit,key,task,value,hint=None):
+        try:
+            path=retained_input(task,value,hint)
+            audit['inputs'][key]=dict(status='resolved',path=path)
+            return path
+        except RetainedInputError as error:
+            audit['inputs'][key]=dict(status='unavailable',**error.details)
+            failures.append(audit['assembly']+': '+key)
+            return None
+        finally:save(a.out/'input_resolution.json',resolution)
     for assembly, rows in grouped.items():
         published = source/'assemblies'/assembly/'evidence.json'
         data = json.loads(published.read_text())
         task = cached_task(mappings[assembly]['provenance'])
         args = command_args(task, 'misassembly_assess.py')
+        audit=dict(assembly=assembly,assessment_task=str(task),inputs={});resolution['assemblies'].append(audit)
         hints={'fasta':data.get('assessment_fasta') or mappings[assembly].get('fasta')}
-        paths = {key: retained_input(task,value,hints.get(key)) for key, value in args.items()
+        paths = {key: resolve_input(audit,key,task,value,hints.get(key)) for key, value in args.items()
                  if key in ('fasta', 'discovery', 'mapping', 'agp', 'pairs', 'source', 'libraries')}
+        bam=resolve_input(audit,'bam',task,mappings[assembly]['bam'])
+        index=resolve_input(audit,'index',task,mappings[assembly]['index'])
         for key in ('fasta', 'discovery', 'mapping', 'agp', 'pairs', 'source', 'libraries'):
             if key not in paths: raise ValueError(f'{assembly}: {key} unavailable in retained task')
         for key, expected in (('fasta', data['assessment_sha256']),
                               ('agp', data['hic_audit']['agp_sha256']),
                               ('source', data['hic_audit']['source_sha256'])):
-            if sha(paths[key]) != expected: raise ValueError(f'{assembly}: changed {key}')
+            if paths[key] is not None and sha(paths[key]) != expected: raise ValueError(f'{assembly}: changed {key}')
         if data.get('coordinate_stage') != 'pre_finishing':
             raise ValueError('Expected explicit pre_finishing evidence coordinates')
+        if paths['discovery'] is None:continue
         # The staged discovery path resolves back to its actual Nextflow task.
         discovery_task = Path(paths['discovery']).parent.parent
         discovery_args = command_args(discovery_task, 'misassembly_discover.py')
-        catalog = retained_input(discovery_task,discovery_args['catalog'])
+        catalog = resolve_input(audit,'catalog',discovery_task,discovery_args['catalog'])
         alignments = json.loads(discovery_args['alignments'])
-        for pair in alignments: pair['path'] = retained_input(discovery_task,pair['path'])
+        for pair in alignments:
+            pair['path'] = resolve_input(audit,'alignment:'+pair['a']+':'+pair['b'],discovery_task,pair['path'])
+        if (catalog is None or bam is None or index is None or
+                any(path is None for path in paths.values()) or any(pair['path'] is None for pair in alignments)):continue
         if { (r['a'], r['b'], r['sha256']) for r in data['alignments'] } != {
                 (r['a'], r['b'], sha(r['path'])) for r in alignments }:
             raise ValueError('Cohort alignment provenance differs from reviewed evidence')
@@ -190,7 +226,6 @@ def prepare(a):
             raise ValueError('BAM provenance differs from assessment sequence')
         if 'mapping' in data and Path(mappings[assembly]['bam']).resolve()!=Path(data['mapping']['bam']).resolve():
             raise ValueError('Published BAM manifest differs from evidence provenance')
-        bam = required(mappings[assembly]['bam']); index = required(mappings[assembly]['index'])
         run(['samtools', 'quickcheck', bam])
         sizes = {f[0]:int(f[1]) for f in (line.split('\t') for line in
                  subprocess.check_output(['samtools','idxstats',bam],text=True).splitlines()) if f[0]!='*'}
@@ -221,6 +256,9 @@ def prepare(a):
                          assessment_sha256=data['assessment_sha256'],
                          coordinate_stage='pre_finishing',
                          hic_expected=data['hic_audit']['audit']['input_pairs']))
+    if failures:
+        raise ValueError('Unresolved investigation inputs: '+', '.join(failures)+'. '
+                         f'Details: {a.out / "input_resolution.json"} (included in the review archive).')
     if len({j['sample'] for j in jobs}) != 1:
         raise ValueError('This competitive read investigation expects haplotypes of one individual')
     for job in jobs:

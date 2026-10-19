@@ -28,7 +28,7 @@ checksums, BAM identity and sequence dictionaries. Missing cache inputs stop the
 diagnostic with a named input; nothing silently falls back to a different run.
 Completed scratch tasks need not retain their staged input links. The launcher
 uses retained source paths recorded in the evidence and follows literal input
-links from `.command.run`, including directory links and upstream staging chains.
+copy/link mappings from `.command.run`, including directories and upstream staging chains.
 It does not execute the wrapper, search for files with matching names, or rebuild
 missing inputs. An unused raw graph input is not required because this diagnostic
 uses the already retained native graph measurements.
@@ -180,3 +180,21 @@ All 24 tests passed after this repair. The updated synthetic real-tool run
 completed all seven Nextflow jobs, passed evidence/report verification, and
 then resumed with all seven jobs cached. Its report and logs are in
 `comparisons/four-join-staging-validation`.
+
+A second Crest preflight exposed the missing `stageInMode='copy'` case: retained
+Crest wrappers use `cp -fRL`, while the first recovery implementation understood
+only symbolic links. Recovery now handles copy, hard-link and symbolic-link input
+commands inside `nxf_stage` only; output transfer functions are excluded. The
+copy parser was checked against an actual retained Crest wrapper. The real-tool
+fixture now uses copy-mode staging throughout, with all scratch copies absent.
+
+Preflight resolves independent inputs across both haplotypes before reporting
+missing sources. `inputs/input_resolution.json` records resolved paths and, for
+failures, attempted source paths and relevant wrapper staging commands. This
+diagnostic is automatically included in the review archive, so a failure can be
+investigated without submitting another job merely to expose the next missing
+input. Source checksum and BAM checks are unchanged.
+
+Copy-staging validation passed all 27 tests, the real-tool Nextflow 23.10.1 run,
+evidence verification, and a seven-task cached resume. The updated smoke packet
+and resolution audit are in `comparisons/four-join-copy-validation`.

@@ -23,7 +23,7 @@ finish() {
     trap - EXIT
     printf '%s\n' "$rc" > "$out/exit_status.txt"
     files=(exit_status.txt)
-    for name in review trace.tsv nextflow.log inputs/manifest.json preflight.log; do
+    for name in review trace.tsv nextflow.log inputs/manifest.json inputs/input_resolution.json preflight.log; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
     tar --dereference --exclude='*.sam' --exclude='*.bam' --exclude='*.fa' \

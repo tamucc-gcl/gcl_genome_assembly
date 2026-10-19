@@ -75,18 +75,18 @@ def main():
         staged_alignments=[dict(r,path=f'alignments{i:02d}/{Path(r["path"]).name}') for i,r in enumerate(paths)]
         (discovery_task/'.command.sh').write_text('python3 misassembly_discover.py discover --catalog catalog.json --alignments '+shlex.quote(json.dumps(staged_alignments)))
         (discovery_task/'.command.run').write_text('nxf_stage() {\n'+
-            'ln -s '+shlex.quote(str(catalog_file))+' catalog.json\n'+''.join(
-            'ln -s '+shlex.quote(r['path'])+' '+shlex.quote(s['path'])+'\n'
+            'cp -fRL '+shlex.quote(str(catalog_file))+' catalog.json\n'+''.join(
+            'cp -fRL '+shlex.quote(r['path'])+' '+shlex.quote(s['path'])+'\n'
             for r,s in zip(paths,staged_alignments))+'}\n')
         mapping=a.out/(focal+'.mapping.json');m.save(mapping,dict(assessment_sha256=m.sha(assembly),assembly=focal,sample='A',coordinate_stage='pre_finishing'))
         assessment_task=a.out/(focal+'.assessment_task');retained=assessment_task/(focal+'.evidence');retained.mkdir(parents=True)
         args=dict(fasta=assembly,discovery=discovery_file,mapping=mapping,agp=agp,pairs=focal_pairs,source=source,libraries=libraries)
         staged={key:f'{key}/{Path(value).name}' for key,value in args.items()}
         (assessment_task/'.command.sh').write_text('python3 misassembly_assess.py '+' '.join('--'+k+' '+shlex.quote(v) for k,v in staged.items()))
-        # Intentionally do not create staging links. A completed scratch task can
-        # retain its wrapper and outputs while every transient input is absent.
+        # Match Crest stageInMode=copy: staged copies disappear with scratch,
+        # while the retained wrapper records their exact upstream sources.
         (assessment_task/'.command.run').write_text('nxf_stage() {\n'+''.join(
-            'ln -s '+shlex.quote(str(args[k]))+' '+shlex.quote(v)+'\n' for k,v in staged.items())+'}\n')
+            'cp -fRL '+shlex.quote(str(args[k]))+' '+shlex.quote(v)+'\n' for k,v in staged.items())+'}\n')
         event=dict(id='C07',scaffold='s',left='chr1',right='chr2',lo=599000,hi=601000,
                    alternatives=[dict(id='C07R01',lo=584000,hi=586000,probe_bp=585000)],cut_options=[],contact_profiles={'single':focal_contacts})
         data=dict(assembly=focal,sample='A',coordinate_stage='pre_finishing',assessment_fasta=str(assembly),assessment_sha256=m.sha(assembly),events=[event],
