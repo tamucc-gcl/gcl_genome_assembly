@@ -3,9 +3,11 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
-from pangenome_assignment_replay import CASES, identity_aliases, select_queries, split_command, fragment, summarize_split, parse_decisions, report
+from pangenome_assignment_replay import CASES, initialize_cactus_tools, identity_aliases, select_queries, split_command, fragment, summarize_split, parse_decisions, report
 from pangenome_source_audit import write_table
 
 
@@ -14,6 +16,15 @@ minQueryCoverageThresholds="100000 1000000" minQueryUniqueness="2" ambiguousName
 
 
 class AssignmentReplayTests(unittest.TestCase):
+    def test_imported_cactus_helpers_explicitly_use_existing_container_tools(self):
+        setup=Mock()
+        with patch.dict(sys.modules,{'cactus.shared.common':SimpleNamespace(setupBinaries=setup)}):
+            initialize_cactus_tools()
+        options=setup.call_args.args[0]
+        self.assertEqual(options.binariesMode,'local')
+        self.assertFalse(options.latest)
+        self.assertIsNone(options.workDir)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

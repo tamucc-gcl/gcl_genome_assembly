@@ -67,6 +67,13 @@ class LocalJob:
         return str(Path(path).resolve())
 
 
+def initialize_cactus_tools():
+    # Nextflow already supplies the pinned container. Imported Cactus helpers do
+    # not run the CLI's setup and otherwise default cactus_call to nested Docker.
+    from cactus.shared.common import setupBinaries
+    setupBinaries(SimpleNamespace(binariesMode='local',latest=False,workDir=None))
+
+
 def prepare(sources, identities, paf, gfa, out):
     import cactus
     from cactus.shared.version import cactus_commit
@@ -75,6 +82,7 @@ def prepare(sources, identities, paf, gfa, out):
     from cactus.refmap.cactus_minigraph import minigraph_gfa_from_pansn
     if cactus_commit != CACTUS_COMMIT or importlib.metadata.version('cactus') != '3.2.1':
         raise ValueError('Assignment replay requires the audited Cactus 3.2.1 image/commit')
+    initialize_cactus_tools()
     out = Path(out).resolve(); out.mkdir(parents=True,exist_ok=True)
     ledger = read_table(identities)
     references = [r['graph_name'] for r in ledger if r['is_reference'].lower()=='true']
@@ -112,6 +120,7 @@ def prepare(sources, identities, paf, gfa, out):
     with gzip.open(converted,'rb') as src, (out/'cactus.sv.gfa').open('wb') as dst:
         shutil.copyfileobj(src,dst)
     provenance = dict(cactus_package=importlib.metadata.version('cactus'),cactus_commit=cactus_commit,
+        binaries_mode='local',
         config_sha256=hashlib.sha256(config_path.read_bytes()).hexdigest(),reference=references[0],
         selected_queries=len(selected),selection='all missing/FULL-only paths, composites, two represented chromosome controls per assembly',
         filter='installed cactus.refmap.cactus_graphmap.filter_paf; whole-query subset',

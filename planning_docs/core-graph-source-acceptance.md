@@ -107,6 +107,12 @@ in this audit-only patch so the current graph's cache remains valid.
 
 ## Cached assignment/candidate-fix batch — prepared 2026-10-19
 
+First Crest attempt failed in preparation: the directly imported Cactus library had
+not been initialized and attempted nested Docker for gaffilter. Fixed by calling the
+native `setupBinaries(binariesMode='local')` before helper execution. The missing-path
+cause remains untested; none of the four assignment cases ran. Resume the same batch
+after syncing; the construction command and cached graph are unchanged.
+
 The exact Cactus release commit is `d7e5fc1b51327a5a4cdb494c85b0607e3d81a713`.
 Its build recipe pins cactus-gfa-tools to `f9b999e54c49a05ad6e9d44e1832c4a8421f28f2`.
 The pinned assignment code normally chooses one reference chromosome for an entire
