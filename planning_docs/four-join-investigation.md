@@ -181,9 +181,10 @@ completed all seven Nextflow jobs, passed evidence/report verification, and
 then resumed with all seven jobs cached. Its report and logs are in
 `comparisons/four-join-staging-validation`.
 
-A second Crest preflight exposed the missing `stageInMode='copy'` case: retained
-Crest wrappers use `cp -fRL`, while the first recovery implementation understood
-only symbolic links. Recovery now handles copy, hard-link and symbolic-link input
+A subsequent investigation of retained Crest wrappers identified the missing
+`stageInMode='copy'` case, while the first recovery implementation understood
+only symbolic links. Adding copy support did not resolve the full Crest failure.
+Recovery handles copy, hard-link and symbolic-link input
 commands inside `nxf_stage` only; output transfer functions are excluded. The
 copy parser was checked against an actual retained Crest wrapper. The real-tool
 fixture now uses copy-mode staging throughout, with all scratch copies absent.
@@ -198,3 +199,31 @@ input. Source checksum and BAM checks are unchanged.
 Copy-staging validation passed all 27 tests, the real-tool Nextflow 23.10.1 run,
 evidence verification, and a seven-task cached resume. The updated smoke packet
 and resolution audit are in `comparisons/four-join-copy-validation`.
+
+The user's `input_resolution.json` then showed that every unresolved input was
+staged into a subdirectory; root-level inputs resolved. A direct reproduction
+with Nextflow 23.10.1 emitted:
+
+```bash
+mkdir -p agp && ln -s /retained/source.agp agp/source.agp
+```
+
+The parser had discarded that entire line because it began with `mkdir`.
+It now tokenizes simple shell commands separated by `&&`, `;`, or other shell
+operators, selects literal copy/link operations, and preserves quoted filenames.
+No shell command is executed by recovery. Failure diagnostics now retain all
+input-staging lines, including directory-creation prefixes.
+
+`tests/join_nested_staging.nf` generates genuine Nextflow wrappers for symlink,
+copy and hard-link modes, with `stageAs: 'agp/*'`.
+`tests/verify_join_nested_staging.py` removes only the marked fixture's staged
+inputs and verifies recovery from those generated wrappers. The synthetic
+genome investigation also uses these directory-creation prefixes in every
+nested staging record, so future preflight tests exercise the actual command
+shape instead of simplified hand-built links.
+
+Validation passed all 29 general tests, recovery after removing nested inputs
+from three genuine Nextflow 23.10.1 tasks (symlink/copy/hard-link), the full
+synthetic investigation, evidence/report verification, and a seven-task cached
+resume. The latest report, logs and input audit are in
+`comparisons/four-join-prefixed-staging-validation`.

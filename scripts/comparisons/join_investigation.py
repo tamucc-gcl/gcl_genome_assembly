@@ -83,23 +83,41 @@ def stage_commands(task):
     for line in wrapper.read_text().splitlines():
         if re.match(r'^\s*nxf_stage\(\)\s*\{\s*$',line):inside=True;continue
         if inside and re.match(r'^\s*}\s*$',line):break
-        if inside and re.match(r'^\s*(?:cp|ln)\s',line):commands.append(line.strip())
+        if inside and line.strip() and not line.lstrip().startswith('#'):commands.append(line.strip())
     return commands
+
+
+def shell_commands(line):
+    """Tokenize literal simple commands without executing mkdir, copies or links.
+
+    Nextflow prefixes nested stage names with `mkdir -p DIR && ...` on one
+    line. Shell punctuation must be tokenized before selecting cp/ln commands;
+    punctuation inside a quoted filename remains part of that filename.
+    """
+    lexer=shlex.shlex(line,posix=True,punctuation_chars=';&|')
+    lexer.whitespace_split=True;lexer.commenters='#'
+    command=[]
+    for token in lexer:
+        if token in ('&&','||',';','&','|'):
+            if command:yield command;command=[]
+        else:command.append(token)
+    if command:yield command
 
 
 def staged_links(task):
     """Read literal input source/destination mappings for copy and link modes."""
     result=[]
     for line in stage_commands(task):
-        try:tokens=shlex.split(line,comments=True)
+        try:commands=list(shell_commands(line))
         except ValueError:continue
-        operands=[t for t in tokens[1:] if not t.startswith('-')]
-        if len(operands)!=2:continue
-        source,destination=operands
-        # Nextflow writes concrete paths. Expanding shell expressions here would
-        # turn metadata parsing into shell execution or an unsupported guess.
-        if any(c in source+destination for c in ('$','`','\n')):continue
-        result.append((Path(os.path.abspath(task/destination)),Path(os.path.abspath(task/source))))
+        for tokens in commands:
+            if tokens[0] not in ('cp','ln'):continue
+            operands=[t for t in tokens[1:] if not t.startswith('-')]
+            if len(operands)!=2:continue
+            source,destination=operands
+            # Nextflow writes concrete paths. Never expand shell expressions.
+            if any(c in source+destination for c in ('$','`','\n')):continue
+            result.append((Path(os.path.abspath(task/destination)),Path(os.path.abspath(task/source))))
     return result
 
 

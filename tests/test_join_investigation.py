@@ -19,7 +19,8 @@ class JoinInvestigationTests(unittest.TestCase):
     def stage_wrapper(self,task,links,mode='symlink'):
         task.mkdir(parents=True,exist_ok=True)
         (task/'.command.run').write_text('nxf_stage() {\n'+''.join(
-            {'symlink':'  ln -s ','copy':'  cp -fRL ','link':'  ln -f '}[mode]+shlex.quote(str(source))+' '+shlex.quote(str(destination))+'\n'
+            '  '+('mkdir -p '+shlex.quote(str(Path(destination).parent))+' && ' if Path(destination).parent!=Path('.') else '')+
+            {'symlink':'ln -s ','copy':'cp -fRL ','link':'ln -f '}[mode]+shlex.quote(str(source))+' '+shlex.quote(str(destination))+'\n'
             for source,destination in links)+'}\n')
 
     def test_removed_file_stage_resolves_exact_recorded_source(self):
@@ -68,6 +69,22 @@ class JoinInvestigationTests(unittest.TestCase):
             wrapper.write_text('nxf_fs_copy() {\n cp -fRL $source $target/$basedir\n}\n'+wrapper.read_text()+
                                'nxf_unstage() {\n cp .command.out /retained/.command.out || true\n cp bogus agp/a.agp\n}\n')
             self.assertEqual(mod.staged_links(task),[(Path(os.path.abspath(task/'agp/a.agp')),source.resolve())])
+
+    def test_mkdir_prefix_keeps_quoted_punctuation_in_file_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'source && kept.agp';source.write_text('AGP')
+            task=root/'task';self.stage_wrapper(task,[(source,'agp files/assembly; kept.agp')])
+            self.assertEqual(mod.retained_input(task,'agp files/assembly; kept.agp'),str(source.resolve()))
+
+    def test_semicolon_and_and_prefixes_extract_multiple_transfers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'source.agp';source.write_text('AGP');task=root/'task';task.mkdir()
+            src=shlex.quote(str(source))
+            (task/'.command.run').write_text('nxf_stage() {\n mkdir -p agp; cp -fRL '+src+
+                ' agp/a.agp; mkdir -p other && ln -s '+src+' other/b.agp\n}\n')
+            self.assertEqual(len(mod.staged_links(task)),2)
+            self.assertEqual(mod.retained_input(task,'agp/a.agp'),str(source.resolve()))
+            self.assertEqual(mod.retained_input(task,'other/b.agp'),str(source.resolve()))
 
     def test_cyclic_stage_metadata_fails_without_recursion(self):
         with tempfile.TemporaryDirectory() as tmp:
