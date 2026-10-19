@@ -30,7 +30,14 @@ substeps remain recorded below and should not be repeated without a concrete rea
   similarity/ordination/tree and standard variant-export/count audits passed real run 1535231
   (15 completed, 826 cached; no failures/retries). Ten assemblies/five individuals; reference
   Sde-CMat_203_hap1. Finish compact FULL/clipping accounting before final category acceptance.
-  Detailed review: `comparisons/core-graph-01-inspection/QC-review.md`. No graph rebuild is
+  Core-graph-02 completed with 4 new/839 cached tasks and no failures/retries. Its raw
+  Cactus bundle exposed representation-summary parser errors (vg phase suffixes,
+  synthetic editing records and BED interval interpretation), now corrected locally.
+  Corrected comparison: all 4,663 measured FULL source path names survive in CLIP;
+  CTlk hap1 chr4/chr14 is already absent under its expected name in FULL, requiring
+  an upstream mapping/partitioning explanation before acceptance. Review:
+  `comparisons/core-graph-02-inspection/QC-review.md`.
+  Detailed original review: `comparisons/core-graph-01-inspection/QC-review.md`. No graph rebuild is
   indicated. Resource requests, Cactus/Toil version labeling and review-archive omissions
   were identified for category 7; consolidated presentation remains category 6.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.

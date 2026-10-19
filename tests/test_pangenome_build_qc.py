@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'py_scripts'))
-from pangenome_build_qc import summarize, union_bp
+from pangenome_build_qc import summarize, union_bp, source_sequence
 
 
 class BuildQCTests(unittest.TestCase):
@@ -41,9 +41,9 @@ class BuildQCTests(unittest.TestCase):
         self.assertEqual(result['full']['sequence_bp'],10)
         with (self.root/'out/assembly_clipping.tsv').open() as handle:
             rows={r['assembly']:r for r in csv.DictReader(handle,delimiter='\t')}
-        self.assertEqual(rows['A2']['reported_clip_interval_bp'],'4')
+        self.assertEqual(rows['A2']['reported_tool_edit_interval_bp'],'4')
         self.assertEqual(rows['A2']['retained_path_bp'],'8')
-        self.assertEqual(rows['A2']['input_minus_retained_minus_reported_clip_bp'],'0')
+        self.assertEqual(rows['A2']['input_minus_retained_path_bp'],'4')
         self.assertIn('9.4.1',json.loads((self.root/'out/tool_provenance.json').read_text())['original_build_version_record'])
 
     def test_missing_bundle_member_fails(self):
@@ -90,6 +90,29 @@ class BuildQCTests(unittest.TestCase):
         self.files['other/sample-stats.tsv']=self.files['sample-stats.tsv']
         with self.assertRaisesRegex(ValueError,'Duplicate clipping bundle member'):
             self.run_summary()
+
+    def test_real_vg_phase_block_suffix_does_not_create_false_missing_paths(self):
+        self.files['path-stats.tsv']=self.files['path-stats.tsv'].replace('#chr1', '#chr1#0')
+        self.run_summary()
+        with (self.root/'out/full_clip_sequence_paths.tsv').open() as handle:
+            rows=list(csv.DictReader(handle,delimiter='\t'))
+        self.assertEqual({r['sequence'] for r in rows},{'chr1'})
+        self.assertEqual(next(r for r in rows if r['assembly']=='A1')['clip_retained_path_bp'],'9')
+
+    def test_synthetic_paths_do_not_make_biological_mapping_incomplete(self):
+        self.files['clip-stats.bed'] += '_MINIGRAPH_#0#s1\t0\t15\tchr1\n'
+        result=self.run_summary()
+        self.assertEqual(result['status'],'PASS')
+        self.assertEqual(result['unknown_name_categories'],0)
+        self.assertEqual(result['synthetic_records'],1)
+
+    def test_whole_path_edit_is_not_subtracted_as_biological_clipping(self):
+        self.files['clip-stats.bed']='IND_A#2#chr1#0\t0\t12\tchr1\n'
+        self.run_summary()
+        with (self.root/'out/assembly_clipping.tsv').open() as handle:
+            row=next(r for r in csv.DictReader(handle,delimiter='\t') if r['assembly']=='A2')
+        self.assertEqual(row['input_minus_retained_path_bp'],'4')
+        self.assertEqual(row['reported_tool_edit_interval_bp'],'12')
 
 
 if __name__ == '__main__':

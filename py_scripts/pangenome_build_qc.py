@@ -9,6 +9,7 @@ import csv
 import gzip
 import importlib.metadata
 import json
+import re
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 import tarfile
@@ -28,6 +29,12 @@ def union_bp(intervals):
         total += max(0, hi-max(lo, end))
         end = max(end, hi)
     return total
+
+
+def source_sequence(name):
+    """Remove vg's phase-block suffix and fragment range, preserving the FASTA ID."""
+    base = name.split('[', 1)[0]
+    return re.sub(r'#\d+$', '', base)
 
 
 def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versions):
@@ -60,6 +67,7 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
     clip_paths = defaultdict(int)
     regions = defaultdict(list)
     unknown = defaultdict(lambda: dict(rows=0, bp=0))
+    synthetic = defaultdict(lambda: dict(rows=0, bp=0))
     inventory = []
     required = {'sample-stats.tsv', 'path-stats.tsv', 'clip-stats.bed'}
     with tarfile.open(bundle, 'r:gz') as archive:
@@ -89,6 +97,10 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
                         bp = int(value)
                         if bp < 0:
                             raise ValueError('Negative retained path length')
+                        if sample.startswith('_MINIGRAPH_#'):
+                            synthetic[name]['rows'] += 1
+                            synthetic[name]['bp'] += bp
+                            continue
                         aid = identity(sample)
                         if aid:
                             if name == 'sample-stats.tsv':
@@ -98,7 +110,7 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
                                 tokens = sample.split('#', 2)
                                 if len(tokens) != 3:
                                     raise ValueError('Non-PanSN Cactus path-stats name: '+sample)
-                                clip_paths[aid, tokens[2].split('[',1)[0]] += bp
+                                clip_paths[aid, source_sequence(tokens[2])] += bp
                         else:
                             unknown[name+':'+sample]['rows'] += 1
                             unknown[name+':'+sample]['bp'] += bp
@@ -108,6 +120,10 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
                         path, lo, hi = fields[0], int(fields[1]), int(fields[2])
                         if lo < 0 or hi < lo:
                             raise ValueError('Invalid clipped interval')
+                        if path.startswith('_MINIGRAPH_#'):
+                            synthetic[name]['rows'] += 1
+                            synthetic[name]['bp'] += hi-lo
+                            continue
                         aid = identity(path)
                         if aid:
                             regions[aid, path].append((lo, hi))
@@ -129,14 +145,15 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
         records.append(dict(assembly=aid, source_fasta_bp=source,
             retained_path_bp=retained.get(aid, 0),
             retained_path_percent=100*retained.get(aid, 0)/source,
-            reported_clip_interval_bp=clipped.get(aid, 0),
+            reported_tool_edit_interval_bp=clipped.get(aid, 0),
             clip_identity_status='incomplete_name_mapping' if unknown else 'mapped',
-            input_minus_retained_minus_reported_clip_bp=source-retained.get(aid, 0)-clipped.get(aid, 0)))
+            input_minus_retained_path_bp=source-retained.get(aid, 0)))
     write_table(out/'assembly_clipping.tsv', records, list(records[0]))
     write_table(out/'partition_retained_paths.tsv',
         [dict(partition=p, assembly=a, retained_path_bp=n) for (p, a), n in sorted(by_partition.items())],
         ['partition', 'assembly', 'retained_path_bp'])
     write_table(out/'unmapped_tool_names.tsv', [dict(name=k, **v) for k, v in sorted(unknown.items())], ['name','rows','bp'])
+    write_table(out/'synthetic_tool_records.tsv', [dict(category=k, **v) for k,v in sorted(synthetic.items())], ['category','rows','bp'])
     write_table(out/'clipping_bundle_inventory.tsv', inventory, ['member', 'bytes'])
     full = dict(nodes=0, sequence_bp=0, walk_records=0)
     full_intervals = defaultdict(list)
@@ -161,7 +178,7 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
                         lo, hi = int(fields[4]), int(fields[5])
                         if hi < lo:
                             raise ValueError('Invalid FULL walk coordinates')
-                        full_intervals[aid, fields[3]].append((lo,hi))
+                        full_intervals[aid, source_sequence(fields[3])].append((lo,hi))
     clip = {}
     for line in Path(clip_stats).read_text(encoding='utf-8').splitlines():
         fields = line.split('\t')
@@ -198,25 +215,25 @@ def summarize(bundle, full_gfa, clip_stats, identities, out, image, build_versio
         ('cactus', versions['cactus_package']), ('cactus_commit', versions['cactus_commit']),
         ('toil', versions['toil_package']), ('verification_container', image))], ['process','tool','version'])
     result = dict(status='name_mapping_incomplete' if unknown else 'PASS', assemblies=len(records),
-                  unknown_name_categories=len(unknown), full=full, clip=clip)
+                  unknown_name_categories=len(unknown), synthetic_records=sum(v['rows'] for v in synthetic.values()), full=full, clip=clip)
     (out/'clipping_audit.json').write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
     lines = ['# Graph representation and clipping', '',
         f"FULL support: {full['sequence_bp']:,} graph bp; CLIP biological graph: {clip['length']:,} graph bp.", '',
         'These are distinct graph-sequence totals, not assembly lengths or source-base retention percentages.', '',
-        '| Assembly | Input FASTA bp | Retained path bp | Reported clip intervals, bp |',
-        '|---|---:|---:|---:|']
-    lines += [f"| {r['assembly']} | {r['source_fasta_bp']:,} | {r['retained_path_bp']:,} | {r['reported_clip_interval_bp']:,} |" for r in records]
+        '| Assembly | Input FASTA bp | CLIP retained path bp |', '|---|---:|---:|']
+    lines += [f"| {r['assembly']} | {r['source_fasta_bp']:,} | {r['retained_path_bp']:,} |" for r in records]
     lines += ['', 'Retained path bp preserves repeated traversals and comes from Cactus sample-stats; '
-        'it is different from the deduplicated sequence in sharing plots. Clip intervals are unioned within '
-        'each tool-reported path name. They do not account for every sequence excluded before/during alignment, '
-        'nor necessarily every later cleanup operation. The signed residual is an accounting diagnostic, '
-        'not an estimate of deletion or clipping. Reference protection and assembly fragmentation can affect these values.', '',
-        f"Tool-name mapping: {result['status']}. Unmapped tool names are explicit in the audit; reported clip totals are incomplete when names cannot be resolved.", '',
+        'it is different from the deduplicated sequence in sharing plots. The source-minus-retained '
+        'difference combines earlier mapping/alignment exclusions and later graph edits; it is not a clipping-only loss. '
+        'The tool BED also records removal/replacement of whole path objects whose fragments survive. '
+        'Its unioned edit intervals are diagnostic fields in the table, not removed source-base counts, '
+        'and are never subtracted from source or retained lengths.', '',
+        f"Tool-name mapping: {result['status']}. Synthetic _MINIGRAPH_ records are counted separately, never as biological inputs or unknown samples. Unrecognized names remain explicit in the audit.", '',
         '[Assembly accounting](assembly_clipping.tsv) · [Graph partitions](partition_retained_paths.tsv) · '
-        '[FULL/CLIP totals](full_clip_graph.tsv) · [Unmapped names](unmapped_tool_names.tsv) · [Bundle inventory](clipping_bundle_inventory.tsv) · [Audit](clipping_audit.json)', '',
+        '[FULL/CLIP totals](full_clip_graph.tsv) · [Unmapped names](unmapped_tool_names.tsv) · [Synthetic records](synthetic_tool_records.tsv) · [Bundle inventory](clipping_bundle_inventory.tsv) · [Audit](clipping_audit.json)', '',
         '## Paths observed in FULL but not retained under the same sequence name in CLIP', '',
         'FULL W-record coordinate spans and CLIP retained path lengths are compared by biological assembly '
-        'and source sequence name. FULL reference P-records are not assigned guessed lengths. '
+        'and source sequence name after removing vg phase-block/fragment suffixes. FULL reference P-records are not assigned guessed lengths. '
         'This comparison can localize loss between graph stages; it does not certify a biological deletion.', '',
         '[Per-sequence FULL/CLIP evidence](full_clip_sequence_paths.tsv)', '',
         '| Assembly | Sequence | FULL W-coordinate span, bp | CLIP path bp |', '|---|---|---:|---:|']

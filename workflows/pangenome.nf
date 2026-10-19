@@ -31,7 +31,7 @@ workflow PANGENOME {
         ch_report = PANGENOME_CONSTRUCTION.out.report
         if (!params.pangenome_validate_only) {
             PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input,
-                PANGENOME_CONSTRUCTION.out.clip_sharing_input, ch_eligibility_manifest.first())
+                PANGENOME_CONSTRUCTION.out.clip_sharing_input, ch_eligibility_manifest)
             ch_report = ch_report.mix(PANGENOME_ANALYSIS.out.report)
             PANGENOME_VARIANT_AUDIT(PANGENOME_CONSTRUCTION.out.variant_input,
                 file("${projectDir}/py_scripts/pangenome_variant_audit.py", checkIfExists: true))
