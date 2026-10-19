@@ -21,6 +21,9 @@ for suffix in ['gfa.gz','gref.gfa.gz','full.gfa.gz']:
 with gzip.open(out/(taxid+'.gref.vcf.gz'),'wt') as f:
     f.write('##fileformat=VCFv4.2\\n#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n')
 (out/(taxid+'.gref.vcf.gz.tbi')).write_text('index tool double\\n')
+mapping='id=IND_'+taxid+'|chr1\\t4\\t0\\t4\\t+\\tid=_MINIGRAPH_|s1\\t4\\t0\\t4\\t4\\t4\\t60\\n'
+with gzip.open(out/(taxid+'.gaf.gz'),'wt') as f: f.write(mapping)
+(out/(taxid+'.paf')).write_text(mapping)
 with tarfile.open(out/(taxid+'.stats.tgz'),'w:gz') as archive:
     text='chr1\\tREF_'+taxid+'#0\\t4\\nchr1\\tIND_'+taxid+'#0\\t4\\n'
     paths='chr1\\tREF_'+taxid+'#0#chr1\\t4\\nchr1\\tIND_'+taxid+'#0#chr1\\t4\\n'

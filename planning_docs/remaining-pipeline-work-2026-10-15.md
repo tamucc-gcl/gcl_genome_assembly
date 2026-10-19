@@ -37,6 +37,9 @@ substeps remain recorded below and should not be repeated without a concrete rea
   CTlk hap1 chr4/chr14 is already absent under its expected name in FULL, requiring
   an upstream mapping/partitioning explanation before acceptance. Review:
   `comparisons/core-graph-02-inspection/QC-review.md`.
+  A production `PANGENOME_SOURCE_AUDIT` now checks input FAI dictionaries against
+  cached GAF/PAF and FULL/CLIP paths for every cohort member. Its Crest acceptance
+  is pending: [bounded source-audit run and completion gate](core-graph-source-acceptance.md).
   Detailed original review: `comparisons/core-graph-01-inspection/QC-review.md`. No graph rebuild is
   indicated. Resource requests, Cactus/Toil version labeling and review-archive omissions
   were identified for category 7; consolidated presentation remains category 6.

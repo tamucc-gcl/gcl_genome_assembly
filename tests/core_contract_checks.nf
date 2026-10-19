@@ -17,6 +17,7 @@ include { PANGENOME_CONSTRUCTION } from '__REPO__/workflows/pangenome_constructi
 include { ORGANELLE } from '__REPO__/workflows/organelle.nf'
 include { PANGENOME_STATS } from '__REPO__/modules/pangenome_stats.nf'
 include { PANGENOME_BUILD_QC } from '__REPO__/modules/pangenome_build_qc.nf'
+include { PANGENOME_SOURCE_AUDIT } from '__REPO__/modules/pangenome_source_audit.nf'
 include { PANGENOME_REGIONAL_CONTEXT } from '__REPO__/modules/pangenome_regional_plots.nf'
 
 workflow {
@@ -48,6 +49,30 @@ workflow {
         assert reports.size() == 2
         assert reports.every { it[1].text.contains('FULL support: 4 graph bp') }
         'PASS: per-species post-build clipping/provenance joins and outputs'
+    }
+    def sourceIndexes = cohorts.collect { row ->
+        def indexes = row[5].members.collect { member ->
+            def fai = file("${member.fasta}.fai")
+            if (System.getenv('CORE_RESUME_CHECK') != 'true' || !fai.exists()) fai.text = 'chr1\t4\n'
+            fai
+        }
+        def specs = row[5].members.withIndex().collect { member,i ->
+            [id:member.id, fai:indexes[i].name, chromosomes:['chr1']]
+        }
+        tuple(row[0],indexes,specs)
+    }
+    PANGENOME_SOURCE_AUDIT(PANGENOME_BUILD_QC.out.files
+        .map { taxid,files -> tuple(taxid,files.find { it.name == 'full_clip_sequence_paths.tsv' }) }
+        .join(PANGENOME_CONSTRUCTION.out.identities).join(Channel.fromList(sourceIndexes))
+        .join(PANGENOME_CONSTRUCTION.out.source_evidence)
+        .map { taxid,paths,identities,indexes,specs,mappings,evidence ->
+            tuple(taxid,identities,paths,indexes,specs,mappings,evidence)
+        }, file('__REPO__/py_scripts/pangenome_source_audit.py'))
+    PANGENOME_SOURCE_AUDIT.out.report.collect(flat:false).view { reports ->
+        assert reports.size() == 2
+        assert reports.every { it[1].text.contains('Source sequence representation') }
+        assert reports.every { it[1].text.contains('Status: **PASS**') }
+        'PASS: per-species source dictionaries, cached mappings and graph path joins'
     }
     def eligibility = file("${root}/eligibility.json")
     eligibility.text = groovy.json.JsonOutput.toJson([assemblies: cohorts.collectMany { row ->

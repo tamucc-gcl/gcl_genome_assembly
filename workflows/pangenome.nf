@@ -2,6 +2,7 @@ include { PANGENOME_CONSTRUCTION } from './pangenome_construction.nf'
 include { PANGENOME_ANALYSIS } from './pangenome_analysis.nf'
 include { PANGENOME_VARIANT_AUDIT } from '../modules/pangenome_variant_audit.nf'
 include { PANGENOME_BUILD_QC } from '../modules/pangenome_build_qc.nf'
+include { PANGENOME_SOURCE_AUDIT } from '../modules/pangenome_source_audit.nf'
 
 /* Species selection is owned by the always-on assembly eligibility audit. */
 workflow PANGENOME {
@@ -44,6 +45,26 @@ workflow PANGENOME {
                 },
                 file("${projectDir}/py_scripts/pangenome_build_qc.py", checkIfExists: true))
             ch_report = ch_report.mix(PANGENOME_BUILD_QC.out.report)
+            ch_source_inputs = ch_eligibility_manifest.flatMap { manifest ->
+                def data = new groovy.json.JsonSlurper().parseText(manifest.text)
+                data.cohorts.findAll { it.ready }.collect { cohort ->
+                    def members = cohort.members.collect { member -> data.assemblies.find { it.id == member.id } }
+                    def indexes = members.collect { file(it.fai, checkIfExists: true) }
+                    def specs = members.withIndex().collect { member, i ->
+                        [id: member.id, fai: indexes[i].name,
+                         chromosomes: member.chromosome_scale ? member.reference_contigs : []]
+                    }
+                    tuple(cohort.taxid, indexes, specs)
+                }
+            }
+            ch_source_mappings = PANGENOME_CONSTRUCTION.out.source_evidence
+            PANGENOME_SOURCE_AUDIT(PANGENOME_BUILD_QC.out.files
+                .map { taxid, files -> tuple(taxid, files.find { it.name == 'full_clip_sequence_paths.tsv' }) }
+                .join(PANGENOME_CONSTRUCTION.out.identities).join(ch_source_inputs).join(ch_source_mappings)
+                .map { taxid, paths, identities, indexes, specs, mappings, evidence ->
+                    tuple(taxid, identities, paths, indexes, specs, mappings, evidence)
+                }, file("${projectDir}/py_scripts/pangenome_source_audit.py", checkIfExists: true))
+            ch_report = ch_report.mix(PANGENOME_SOURCE_AUDIT.out.report)
             // The legacy construction `cactus --version` row reports Toil, not Cactus.
             // Keep it in the build provenance but use the separately captured versions here.
             ch_versions = PANGENOME_ANALYSIS.out.versions.mix(PANGENOME_VARIANT_AUDIT.out.versions,
