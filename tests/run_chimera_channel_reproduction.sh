@@ -50,6 +50,14 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_w
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
+elif [[ "${1:-}" == assignment_replay_checks.nf ]]; then
+    python3 "$repo/tests/setup_assignment_replay_checks.py" "$runtime"
+    cp reproduction.nf "$repo/.assignment-replay-checks.nf"
+    trap 'rm -f "$repo/.assignment-replay-checks.nf"' EXIT
+    script="$repo/.assignment-replay-checks.nf"
+    extra=(-c "$runtime/assignment-check.config")
+    mkdir -p "$runtime/assignment-launch"
+    cd "$runtime/assignment-launch"
 elif [[ "${1:-}" == core_contract_checks.nf ]]; then
     python3 "$repo/tests/setup_core_contract_checks.py" "$runtime" "${2:-success}"
     cp reproduction.nf "$repo/.core-contract-checks.nf"
@@ -111,6 +119,22 @@ JAVA_TOOL_OPTIONS="${java_opens[*]} --add-exports=java.management/com.sun.jmx.mb
 if ! run_nextflow; then
     find work -name .command.err -mmin -10 -exec sh -c 'echo "$1"; tail -20 "$1"' sh {} \;
     exit 1
+fi
+if [[ "${1:-}" == assignment_replay_checks.nf ]]; then
+    assignment_out="$runtime/assignment-results/pangenome/1/assignment"
+    test -s "$assignment_out/assignment_report.md"
+    test -s "$assignment_out/assignment_comparison.tsv"
+    test -s "$assignment_out/preparation/effective_config.xml"
+    for assignment_case in baseline whole_relaxed regional_1Mb regional_3Mb; do
+        test -s "$assignment_out/replay_$assignment_case/assignment_log.txt"
+        test -s "$assignment_out/replay_$assignment_case/regions.tsv"
+        test -s "$assignment_out/replay_$assignment_case/decisions.tsv"
+    done
+    if find "$assignment_out" -type f \( -name '*.gfa' -o -name '*.paf' \) -print -quit | grep -q .; then
+        echo 'Large replay intermediates must not be published' >&2
+        exit 1
+    fi
+    echo 'PASS: assignment logs/configuration published; large intermediates remain in cache'
 fi
 if [[ "${1:-}" == final_hic_qc_wiring_check.nf && "${2:-final_only}" != none ]]; then
     for checkpoint in final_raw_map final_filtered; do

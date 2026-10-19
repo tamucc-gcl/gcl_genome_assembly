@@ -16,7 +16,7 @@ out = Path(sys.argv[sys.argv.index('--outDir')+1]); out.mkdir(exist_ok=True)
 taxid = sys.argv[sys.argv.index('--outName')+1]
 for suffix in ['gbz','og','hapl','snarls','gref.gbz','stats.tgz']:
     (out/(taxid+'.'+suffix)).write_text('tool double artifact\\n')
-for suffix in ['gfa.gz','gref.gfa.gz','full.gfa.gz']:
+for suffix in ['gfa.gz','gref.gfa.gz','full.gfa.gz','sv.gfa.gz']:
     with gzip.open(out/(taxid+'.'+suffix),'wt') as f: f.write('H\\tVN:Z:1.1\\nS\\t1\\tACGT\\n')
 with gzip.open(out/(taxid+'.gref.vcf.gz'),'wt') as f:
     f.write('##fileformat=VCFv4.2\\n#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n')
@@ -65,3 +65,5 @@ process {
     }
 }
 ''' % (root, case, tools))
+with (root/'core-check.config').open('a') as handle:
+    handle.write('params.pangenome_assignment_replay='+('true' if case=='assignment_inputs' else 'false')+'\n')

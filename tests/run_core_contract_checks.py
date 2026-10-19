@@ -12,6 +12,7 @@ checks = [
     ('input_reference_checks.nf', 'unknown_hic_sample', False, 'unknown sample'),
     ('input_reference_checks.nf', 'no_valid_samples', False, 'No assembly-capable valid samples'),
     ('core_contract_checks.nf', 'success', True, 'PASS: validated graph roles'),
+    ('core_contract_checks.nf', 'assignment_inputs', True, 'PASS: cached assignment inputs retain species-specific'),
     ('core_contract_checks.nf', 'graph_failure', False, 'exit status (17)'),
     ('core_contract_checks.nf', 'cross_species', False, 'Cross-species graph input'),
     ('core_contract_checks.nf', 'missing_graph_role', False, 'Graph output audit failed'),

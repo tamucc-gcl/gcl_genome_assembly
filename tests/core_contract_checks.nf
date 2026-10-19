@@ -40,6 +40,14 @@ workflow {
     }
     if (params.contract_case == 'cross_species') cohorts[0][5].members[1].taxid = '999'
     PANGENOME_CONSTRUCTION(Channel.fromList(cohorts))
+    if (params.pangenome_assignment_replay) {
+        PANGENOME_CONSTRUCTION.out.assignment_input.view { taxid,graph,paf,contigs ->
+            assert graph.name == taxid+'.sv.gfa.gz'
+            assert paf.name == taxid+'.paf'
+            assert contigs == ['chr1']
+            'PASS: cached assignment inputs retain species-specific graph, PAF and reference contigs'
+        }
+    }
     PANGENOME_STATS(PANGENOME_CONSTRUCTION.out.clip_stats_input)
     PANGENOME_BUILD_QC(PANGENOME_CONSTRUCTION.out.support_qc
         .join(PANGENOME_STATS.out.vg_stats).join(PANGENOME_CONSTRUCTION.out.identities)

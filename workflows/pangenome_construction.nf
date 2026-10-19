@@ -15,6 +15,7 @@ workflow PANGENOME_CONSTRUCTION {
     ch_versions = Channel.empty()
     ch_support_qc = Channel.empty()
     ch_source_evidence = Channel.empty()
+    ch_assignment_input = Channel.empty()
     PANGENOME_PREFLIGHT(ch_cohorts.map { row -> true }.unique())
     PANGENOME_INPUT_AUDIT(ch_cohorts,
         file("${projectDir}/py_scripts/pangenome_input_audit.py", checkIfExists: true))
@@ -58,6 +59,17 @@ workflow PANGENOME_CONSTRUCTION {
     }.join(PANGENOME_INPUT_AUDIT.out.identities).join(PANGENOME_GRAPH_CONTRACT.out.ready)
         .map { taxid, vcf, tbi, identities, check -> tuple(taxid, vcf, tbi, identities) }
     ch_versions = CACTUS_PANGENOME.out.versions
+    if (params.pangenome_assignment_replay) {
+        ch_assignment_input = CACTUS_PANGENOME.out.all
+            .join(ch_cohorts.map { row -> tuple(row[0],row[4]) })
+            .map { taxid, products, contigs ->
+                def files = products instanceof Collection ? products : [products]
+                def graph = files.find { it.name == taxid + '.sv.gfa.gz' }
+                def paf = files.find { it.name == taxid + '.paf' }
+                if (!graph || !paf) error 'Assignment replay requires cached Cactus SV rGFA and mapping PAF'
+                tuple(taxid, graph, paf, contigs)
+            }
+    }
     ch_source_evidence = CACTUS_PANGENOME.out.all.map { taxid, products ->
         def files = products instanceof Collection ? products : [products]
         def evidence = []
@@ -90,4 +102,5 @@ workflow PANGENOME_CONSTRUCTION {
     versions = ch_versions
     support_qc = ch_support_qc
     source_evidence = ch_source_evidence
+    assignment_input = ch_assignment_input
 }

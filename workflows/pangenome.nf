@@ -3,6 +3,7 @@ include { PANGENOME_ANALYSIS } from './pangenome_analysis.nf'
 include { PANGENOME_VARIANT_AUDIT } from '../modules/pangenome_variant_audit.nf'
 include { PANGENOME_BUILD_QC } from '../modules/pangenome_build_qc.nf'
 include { PANGENOME_SOURCE_AUDIT } from '../modules/pangenome_source_audit.nf'
+include { PANGENOME_ASSIGNMENT_PREPARE; PANGENOME_ASSIGNMENT_REPLAY; PANGENOME_ASSIGNMENT_REPORT } from '../modules/pangenome_assignment_replay.nf'
 
 /* Species selection is owned by the always-on assembly eligibility audit. */
 workflow PANGENOME {
@@ -65,6 +66,25 @@ workflow PANGENOME {
                     tuple(taxid, identities, paths, indexes, specs, mappings, evidence)
                 }, file("${projectDir}/py_scripts/pangenome_source_audit.py", checkIfExists: true))
             ch_report = ch_report.mix(PANGENOME_SOURCE_AUDIT.out.report)
+            if (params.pangenome_assignment_replay) {
+                if (params.pangenome_cactus_extra)
+                    error 'Assignment replay currently requires the pinned default assignment configuration (no pangenome_cactus_extra)'
+                def assignment_adapters = ['pangenome_assignment_replay.py','pangenome_source_audit.py']
+                    .collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }
+                PANGENOME_ASSIGNMENT_PREPARE(PANGENOME_CONSTRUCTION.out.assignment_input
+                    .join(PANGENOME_CONSTRUCTION.out.identities)
+                    .join(PANGENOME_SOURCE_AUDIT.out.files.map { taxid, files ->
+                        tuple(taxid, files.find { it.name == 'source_sequences.tsv' })
+                    }), assignment_adapters)
+                PANGENOME_ASSIGNMENT_REPLAY(PANGENOME_ASSIGNMENT_PREPARE.out.prepared.flatMap { taxid, graph, paf, config, selection, identities, provenance, contigs ->
+                    ['baseline','whole_relaxed','regional_1Mb','regional_3Mb'].collect { name ->
+                        tuple(taxid,graph,paf,config,selection,identities,provenance,contigs,name)
+                    }
+                }, assignment_adapters)
+                PANGENOME_ASSIGNMENT_REPORT(PANGENOME_ASSIGNMENT_REPLAY.out.results.groupTuple()
+                    .map { taxid, names, directories -> tuple(taxid,directories) }, assignment_adapters)
+                ch_report = ch_report.mix(PANGENOME_ASSIGNMENT_REPORT.out.report)
+            }
             // The legacy construction `cactus --version` row reports Toil, not Cactus.
             // Keep it in the build provenance but use the separately captured versions here.
             ch_versions = PANGENOME_ANALYSIS.out.versions.mix(PANGENOME_VARIANT_AUDIT.out.versions,
