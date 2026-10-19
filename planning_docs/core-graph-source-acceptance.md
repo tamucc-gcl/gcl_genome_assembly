@@ -107,6 +107,15 @@ in this audit-only patch so the current graph's cache remains valid.
 
 ## Cached assignment/candidate-fix batch — prepared 2026-10-19
 
+The corrected rerun succeeded (7 new/843 cached; no failures or retries). Native baseline
+output confirms whole-scaffold uniqueness rejection: CTlk chr4/chr14 top/runner-up ratio
+1.09358 < 2, despite passing coverage. Relaxed whole-scaffold and stock regional modes
+retain only the chr14 portion, so neither is an accepted correction. A likely upstream
+regional grouping defect compares coverage weight to chromosome ID rather than comparing
+consecutive chromosome IDs; it needs a known-answer plus real-data test before activation.
+All 82 represented-path controls retained baseline mapping coverage. Detailed review:
+`comparisons/core-graph-assignment-01-local-tools-inspection/QC-review.md`.
+
 First Crest attempt failed in preparation: the directly imported Cactus library had
 not been initialized and attempted nested Docker for gaffilter. Fixed by calling the
 native `setupBinaries(binariesMode='local')` before helper execution. The missing-path

@@ -1,0 +1,7 @@
+assembly	event	role
+Sde-CTlk_104_hap1	C02	target
+Sde-CTlk_104_hap1	C03	target
+Sde-CTlk_104_hap2	C01	target
+Sde-CTlk_104_hap2	C02	target
+Sde-CTlk_104_hap1	C01	previously_reviewed_break_benchmark
+Sde-CTlk_104_hap1	C04	previously_reviewed_break_benchmark
