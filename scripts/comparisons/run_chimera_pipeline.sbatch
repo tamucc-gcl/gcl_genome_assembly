@@ -42,7 +42,8 @@ finish() {
         while IFS= read -r -d '' name; do files+=("${name#"$out/"}"); done < <(
             find -L "$out/results/pangenome" -type f -size -20M \( \
                 -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name '*.csv' -o \
-                -name '*.txt' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' \) -print0)
+                -name '*.txt' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' -o \
+                -name '*.nwk' -o -name '*.stats.tgz' \) -print0)
     fi
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
         --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' \

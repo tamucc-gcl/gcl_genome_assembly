@@ -3,7 +3,7 @@ include { PANGENOME_SHARING } from '../modules/pangenome_sharing.nf'
 include { PANGENOME_SHARING_PLOTS } from '../modules/pangenome_sharing_plots.nf'
 include { PANGENOME_SIMILARITY; PANGENOME_COMPARISON_PLOTS } from '../modules/pangenome_similarity.nf'
 include { PANGENOME_NODE_COVERAGE; PANGENOME_REGIONAL } from '../modules/pangenome_regional.nf'
-include { PANGENOME_REGIONAL_PLOTS } from '../modules/pangenome_regional_plots.nf'
+include { PANGENOME_REGIONAL_CONTEXT; PANGENOME_REGIONAL_PLOTS } from '../modules/pangenome_regional_plots.nf'
 
 /* Only validated CLIP handles enter biological statistics.
  * Identity grouping is audited before Panacus; ordination follows separately.
@@ -12,6 +12,7 @@ workflow PANGENOME_ANALYSIS {
     take:
     ch_clip_stats_input
     ch_clip_sharing_input
+    ch_eligibility_manifest
     main:
     ch_versions = Channel.empty()
     ch_report = Channel.empty()
@@ -39,7 +40,9 @@ workflow PANGENOME_ANALYSIS {
             file("${projectDir}/tests/test_pangenome_regional.py", checkIfExists: true))
         ch_versions = ch_versions.mix(PANGENOME_NODE_COVERAGE.out.versions)
         ch_report = ch_report.mix(PANGENOME_REGIONAL.out.report)
-        PANGENOME_REGIONAL_PLOTS(PANGENOME_REGIONAL.out.sharing,
+        PANGENOME_REGIONAL_CONTEXT(PANGENOME_REGIONAL.out.sharing.combine(ch_eligibility_manifest),
+            file("${projectDir}/py_scripts/pangenome_regional_context.py", checkIfExists: true))
+        PANGENOME_REGIONAL_PLOTS(PANGENOME_REGIONAL.out.sharing.join(PANGENOME_REGIONAL_CONTEXT.out.context),
             file("${projectDir}/r_scripts/pangenome_regional_plots.R", checkIfExists: true))
         ch_report = ch_report.mix(PANGENOME_REGIONAL_PLOTS.out.report)
         ch_versions = ch_versions.mix(PANGENOME_REGIONAL_PLOTS.out.versions)

@@ -132,3 +132,10 @@ if [[ "${3:-}" == cache ]]; then
     grep -q 'Cached process > FINAL_READ_EVIDENCE:MAP_HIFI_FINAL' cache-resume.log
     echo 'PASS: discovery, evidence, cutting, reassignment, finishing and final read mapping resume from cache'
 fi
+if [[ "${1:-}" == core_contract_checks.nf && "${3:-}" == resume_build ]]; then
+    extra+=(-resume)
+    run_nextflow | tee core-resume.log
+    grep -q 'Cached process > PANGENOME_CONSTRUCTION:CACTUS_PANGENOME' core-resume.log
+    cp core-resume.log "$repo/comparisons/core-graph-resume-check.log"
+    echo 'PASS: completed graph construction uses ordinary Nextflow resume'
+fi

@@ -1,3 +1,22 @@
+process PANGENOME_REGIONAL_CONTEXT {
+    tag "${taxid}"
+    cpus 1
+    memory '1 GB'
+    time '10m'
+    conda 'conda-forge::python=3.11'
+    publishDir "${params.outdir}/pangenome/${taxid}/regional", mode: params.publish_dir_mode,
+        pattern: 'context/*', saveAs: { it.replaceFirst('^context/', '') }
+    input:
+    tuple val(taxid), path(sharing), path(eligibility)
+    path(adapter)
+    output:
+    tuple val(taxid), path('context/regional_groups.tsv'), path('context/chromosome_presence.tsv'), emit: context
+    script:
+    """
+    python3 ${adapter} --sharing ${sharing} --eligibility ${eligibility} --taxid '${taxid}' --out context
+    """
+}
+
 process PANGENOME_REGIONAL_PLOTS {
     tag "${taxid}"
     cpus 1
@@ -7,7 +26,7 @@ process PANGENOME_REGIONAL_PLOTS {
     publishDir "${params.outdir}/pangenome/${taxid}/regional/figures", mode: params.publish_dir_mode,
         pattern: 'figures/*', saveAs: { it.replaceFirst('^figures/', '') }
     input:
-    tuple val(taxid), path(sharing)
+    tuple val(taxid), path(sharing), path(groups), path(presence)
     path(plotter)
     output:
     tuple val(taxid), path('figures/regional_figures.md'), emit: report
@@ -16,6 +35,6 @@ process PANGENOME_REGIONAL_PLOTS {
     script:
     """
     set -euo pipefail
-    Rscript ${plotter} ${sharing} figures
+    Rscript ${plotter} ${sharing} ${groups} ${presence} figures
     """
 }

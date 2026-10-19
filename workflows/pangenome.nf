@@ -1,6 +1,7 @@
 include { PANGENOME_CONSTRUCTION } from './pangenome_construction.nf'
 include { PANGENOME_ANALYSIS } from './pangenome_analysis.nf'
 include { PANGENOME_VARIANT_AUDIT } from '../modules/pangenome_variant_audit.nf'
+include { PANGENOME_BUILD_QC } from '../modules/pangenome_build_qc.nf'
 
 /* Species selection is owned by the always-on assembly eligibility audit. */
 workflow PANGENOME {
@@ -30,13 +31,23 @@ workflow PANGENOME {
         ch_report = PANGENOME_CONSTRUCTION.out.report
         if (!params.pangenome_validate_only) {
             PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input,
-                PANGENOME_CONSTRUCTION.out.clip_sharing_input)
-            ch_versions = ch_versions.mix(PANGENOME_ANALYSIS.out.versions)
+                PANGENOME_CONSTRUCTION.out.clip_sharing_input, ch_eligibility_manifest.first())
             ch_report = ch_report.mix(PANGENOME_ANALYSIS.out.report)
             PANGENOME_VARIANT_AUDIT(PANGENOME_CONSTRUCTION.out.variant_input,
                 file("${projectDir}/py_scripts/pangenome_variant_audit.py", checkIfExists: true))
-            ch_versions = ch_versions.mix(PANGENOME_VARIANT_AUDIT.out.versions)
             ch_report = ch_report.mix(PANGENOME_VARIANT_AUDIT.out.report)
+            PANGENOME_BUILD_QC(PANGENOME_CONSTRUCTION.out.support_qc
+                .join(PANGENOME_ANALYSIS.out.stats)
+                .join(PANGENOME_CONSTRUCTION.out.identities)
+                .map { taxid, bundle, full, versions, stats, identities ->
+                    tuple(taxid, bundle, full, stats, identities, versions)
+                },
+                file("${projectDir}/py_scripts/pangenome_build_qc.py", checkIfExists: true))
+            ch_report = ch_report.mix(PANGENOME_BUILD_QC.out.report)
+            // The legacy construction `cactus --version` row reports Toil, not Cactus.
+            // Keep it in the build provenance but use the separately captured versions here.
+            ch_versions = PANGENOME_ANALYSIS.out.versions.mix(PANGENOME_VARIANT_AUDIT.out.versions,
+                                                           PANGENOME_BUILD_QC.out.versions)
         }
         ch_manifest = PANGENOME_CONSTRUCTION.out.manifest
     }

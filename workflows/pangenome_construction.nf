@@ -13,6 +13,7 @@ workflow PANGENOME_CONSTRUCTION {
     ch_report = Channel.empty()
     ch_manifest = Channel.empty()
     ch_versions = Channel.empty()
+    ch_support_qc = Channel.empty()
     PANGENOME_PREFLIGHT(ch_cohorts.map { row -> true }.unique())
     PANGENOME_INPUT_AUDIT(ch_cohorts,
         file("${projectDir}/py_scripts/pangenome_input_audit.py", checkIfExists: true))
@@ -56,6 +57,14 @@ workflow PANGENOME_CONSTRUCTION {
     }.join(PANGENOME_INPUT_AUDIT.out.identities).join(PANGENOME_GRAPH_CONTRACT.out.ready)
         .map { taxid, vcf, tbi, identities, check -> tuple(taxid, vcf, tbi, identities) }
     ch_versions = CACTUS_PANGENOME.out.versions
+    ch_support_qc = CACTUS_PANGENOME.out.all.join(PANGENOME_GRAPH_CONTRACT.out.ready)
+        .join(CACTUS_PANGENOME.out.seqfile)
+        .map { taxid, products, check, seqfile ->
+            def files = products instanceof Collection ? products : [products]
+            tuple(taxid, files.find { it.name == taxid + '.stats.tgz' },
+                  files.find { it.name == taxid + '.full.gfa.gz' },
+                  file("${seqfile.parent}/versions.tsv", checkIfExists: true))
+        }
     }
     emit:
     clip_stats_input = ch_clip_stats_input
@@ -65,4 +74,5 @@ workflow PANGENOME_CONSTRUCTION {
     manifest = ch_manifest
     identities = PANGENOME_INPUT_AUDIT.out.identities
     versions = ch_versions
+    support_qc = ch_support_qc
 }

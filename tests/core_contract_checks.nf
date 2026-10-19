@@ -15,6 +15,9 @@ params.mitohifi_cov_cutoff = 'auto'
 params.mitohifi_bloom_filter = false
 include { PANGENOME_CONSTRUCTION } from '__REPO__/workflows/pangenome_construction.nf'
 include { ORGANELLE } from '__REPO__/workflows/organelle.nf'
+include { PANGENOME_STATS } from '__REPO__/modules/pangenome_stats.nf'
+include { PANGENOME_BUILD_QC } from '__REPO__/modules/pangenome_build_qc.nf'
+include { PANGENOME_REGIONAL_CONTEXT } from '__REPO__/modules/pangenome_regional_plots.nf'
 
 workflow {
     def root = file('/tmp/chimera-nxf-runtime/core-fixtures')
@@ -23,7 +26,7 @@ workflow {
         def names = ["REF_${taxid}", "IND_${taxid}"]
         def fastas = ['a','b'].collect { sample ->
             def fa = file("${root}/${taxid}_${sample}.fa")
-            fa.text = '>chr1\nACGT\n'
+            if (System.getenv('CORE_RESUME_CHECK') != 'true' || !fa.exists()) fa.text = '>chr1\nACGT\n'
             fa
         }
         def members = ['a','b'].withIndex().collect { sample, i ->
@@ -36,6 +39,33 @@ workflow {
     }
     if (params.contract_case == 'cross_species') cohorts[0][5].members[1].taxid = '999'
     PANGENOME_CONSTRUCTION(Channel.fromList(cohorts))
+    PANGENOME_STATS(PANGENOME_CONSTRUCTION.out.clip_stats_input)
+    PANGENOME_BUILD_QC(PANGENOME_CONSTRUCTION.out.support_qc
+        .join(PANGENOME_STATS.out.vg_stats).join(PANGENOME_CONSTRUCTION.out.identities)
+        .map { taxid,bundle,full,versions,stats,identities -> tuple(taxid,bundle,full,stats,identities,versions) },
+        file('__REPO__/py_scripts/pangenome_build_qc.py'))
+    PANGENOME_BUILD_QC.out.report.collect(flat:false).view { reports ->
+        assert reports.size() == 2
+        assert reports.every { it[1].text.contains('FULL support: 4 graph bp') }
+        'PASS: per-species post-build clipping/provenance joins and outputs'
+    }
+    def eligibility = file("${root}/eligibility.json")
+    eligibility.text = groovy.json.JsonOutput.toJson([assemblies: cohorts.collectMany { row ->
+        row[5].members.collect { m -> [id:m.id,taxid:row[0],chromosome_scale:true,reference_contigs:['chr1_1']] }
+    }])
+    def regional = cohorts.collect { row ->
+        def sharing = file("${root}/${row[0]}.sharing.tsv")
+        sharing.text = 'scope\thaplotype\tchromosome\n' + row[5].members.collect { m ->
+            "haplotype\t${m.id}\t\nchromosome_haplotype\t${m.id}\tchr1\n"
+        }.join('')
+        tuple(row[0],sharing,eligibility)
+    }
+    PANGENOME_REGIONAL_CONTEXT(Channel.fromList(regional),file('__REPO__/py_scripts/pangenome_regional_context.py'))
+    PANGENOME_REGIONAL_CONTEXT.out.context.collect(flat:false).view { records ->
+        assert records.size() == 2
+        assert records.every { it[2].text.contains('separate_group') }
+        'PASS: production regional context process for two species'
+    }
     PANGENOME_CONSTRUCTION.out.report.collect(flat: false).view { reports ->
         assert reports.size() == 4  // input AND build report, independently for each species
         'PASS: both species retain input and build reports'

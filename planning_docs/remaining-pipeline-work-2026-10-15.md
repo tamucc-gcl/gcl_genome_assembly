@@ -22,10 +22,17 @@ substeps remain recorded below and should not be repeated without a concrete rea
   locally for the next normal resume (category 7); crowded map labels remain category 6.
 - [ ] **2. General-purpose input handling** — complete the supported-input/species/skip matrix.
 - [ ] **3. Failure and organelle handling** — audit and finish the remaining failure/fallback contracts.
-- [ ] **4. Shared references and provenance** — add graph-independent singleton references and compatibility records.
-- [ ] **5. Core pangenome** — final-input/tool preflight accepted in run 1535116 for ten
-  assemblies/five individuals, reference Sde-CMat_203_hap1. Construction, graph roles, required
-  summaries and variant-output acceptance remain outstanding.
+- [x] **4. Shared references and provenance** — reference selection is independent of graph
+  enablement/admission, with singleton/override/species-isolation tests and final FASTA/FAI
+  identity checks. Real run 1535231 confirms the shared reference checksum agrees with graph
+  inputs. PSMC consumption belongs to category 8; graph tool-version labeling remains category 7.
+- [ ] **5. Core pangenome** — construction, role checks, sharing/growth, regional attribution,
+  similarity/ordination/tree and standard variant-export/count audits passed real run 1535231
+  (15 completed, 826 cached; no failures/retries). Ten assemblies/five individuals; reference
+  Sde-CMat_203_hap1. Finish compact FULL/clipping accounting before final category acceptance.
+  Detailed review: `comparisons/core-graph-01-inspection/QC-review.md`. No graph rebuild is
+  indicated. Resource requests, Cactus/Toil version labeling and review-archive omissions
+  were identified for category 7; consolidated presentation remains category 6.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.
@@ -94,6 +101,62 @@ sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
 This uses normal pipeline resources, work and resume paths, all-stage QC and symlink
 publication. It retains the manual cuts. No new assembly parameter settings are introduced.
 Return `comparisons/core-graph-01.review.tar.gz` for real graph/output acceptance.
+
+### 2026-10-19 graph representation follow-up
+
+The supplied CTlk name maps match the accepted final maps. Both haplotypes contain
+chr4_1+chr14_1 and chr7_1+chr12_1, plus separately named chr4/chr7 pieces. Regional
+statistics group whole scaffold names; they do not paint the components of a composite
+onto separate chromosomes. Thus pure chr4/chr7 rows cover only separately named pieces.
+
+An additional discrepancy was found: CTlk hap1's chr4_1+chr14_1 is absent under that
+sequence name from the accepted CLIP path-group ledger, although it exists in the final
+assembly. Hap2's counterpart and both chr7/chr12 composites are reported. This requires
+FULL/CLIP path and clipping evidence; it must not be described as biological absence.
+
+Implemented for the next regular resume:
+
+- A small regional-context process compares final chromosome-scale selections with the
+  existing regional measurements. Main figures include chromosome-scale composites and
+  distinguish composite-only (`C`), separate pieces plus composite (`+`) and an expected
+  composite missing under its name from CLIP (`!`, or `+!` with separate pieces).
+- Composite composition is shown per haplotype/scaffold, including unavailable expected
+  entries without fabricating percentages. Other composite labels remain in supplementary
+  tables; no graph sequence or global sharing measurement is removed or reassigned.
+- A separate post-build QC process reads the existing Cactus stats bundle, summarizes
+  retained path lengths, unions reported clip intervals within tool path names, compares
+  FULL/CLIP graph sizes and reports per-sequence FULL W-coordinate spans versus CLIP path
+  lengths. Unmapped tool names are explicit; residual source lengths are not called clipping.
+- Correct Cactus package/commit, Toil and verification-container provenance is captured
+  separately. The original construction version record is retained; its Toil value is no
+  longer propagated as the Cactus release in the workflow version channel.
+- Statistics requests 128 GB; node coverage/similarity request 96 GB, matching observed
+  memory with headroom. Review archives include `.nwk`, compact `.stats.tgz`, representation
+  summaries and the regional context/presence tables.
+- Cactus construction scripts, input assemblies, retained cuts and assembly parameters
+  are unchanged. Ordinary Nextflow resume was verified with the real construction/QC
+  modules and external tool doubles; the construction tasks were cached.
+
+Validation: 60 focused Python tests passed. Ten Nextflow scenarios passed with the new
+post-build/context processes; a further normal-resume check passed. Updated figures were
+rendered and visually inspected from the actual run tables in `comparisons/core-graph-02-preview`.
+The real Cactus clipping bundle is on Crest and still needs the new production QC step.
+Category 5 remains open pending that evidence, especially the missing CTlk hap1 composite.
+
+After syncing, from the Crest project directory:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/core-graph-02 \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-observable-contact-v7/results/assembly/chimeras/mapping_manifest.json" \
+  --chimera_break "$PWD/data/chimera_reviews/Sde-CTlk_104.v7.reviewed.tsv" \
+  --run_pangenome true --pangenome_validate_only false
+```
+
+Return `comparisons/core-graph-02.review.tar.gz`. New results include
+`results/pangenome/373251/representation/clipping_report.md` and
+`results/pangenome/373251/regional/figures/regional_figures.md`.
 
 ### Existing post-assembly plots: acceptance still needed
 

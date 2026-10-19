@@ -8,7 +8,7 @@ tools = root / 'core-tools'
 tools.mkdir(exist_ok=True)
 double = tools / 'cactus-pangenome'
 double.write_text('''#!/usr/bin/env python3
-import gzip,sys
+import gzip,sys,tarfile,io
 from pathlib import Path
 if '--help' in sys.argv:
     print('--gref --haplo --refContigs --vcfbub --restart --clean'); sys.exit(0)
@@ -21,6 +21,12 @@ for suffix in ['gfa.gz','gref.gfa.gz','full.gfa.gz']:
 with gzip.open(out/(taxid+'.gref.vcf.gz'),'wt') as f:
     f.write('##fileformat=VCFv4.2\\n#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n')
 (out/(taxid+'.gref.vcf.gz.tbi')).write_text('index tool double\\n')
+with tarfile.open(out/(taxid+'.stats.tgz'),'w:gz') as archive:
+    text='chr1\\tREF_'+taxid+'#0\\t4\\nchr1\\tIND_'+taxid+'#0\\t4\\n'
+    paths='chr1\\tREF_'+taxid+'#0#chr1\\t4\\nchr1\\tIND_'+taxid+'#0#chr1\\t4\\n'
+    for name,body in [('sample-stats.tsv',text),('path-stats.tsv',paths),('clip-stats.bed','')]:
+        data=body.encode(); member=tarfile.TarInfo(name); member.size=len(data)
+        archive.addfile(member,io.BytesIO(data))
 ''')
 if case == 'missing_graph_role':
     double.write_text(double.read_text() + "\n(out/(taxid+'.gref.gbz')).unlink()\n")
@@ -30,6 +36,11 @@ if case == 'graph_failure':
 cactus = tools / 'cactus'
 cactus.write_text('#!/bin/sh\necho "cactus tool double"\n')
 cactus.chmod(0o755)
+for name, body in [('vg','nodes\\t1\\nedges\\t0\\nlength\\t4\\n'),
+                   ('odgi','#length\\tnodes\\tedges\\tpaths\\tsteps\\n4\\t1\\t0\\t2\\t2\\n')]:
+    tool = tools/name
+    tool.write_text("#!/bin/sh\nprintf '"+body+"'\n")
+    tool.chmod(0o755)
 mito = tools / 'mitohifi.py'
 mito.write_text('#!/bin/sh\n[ "$1" != "-v" ] || { echo "mitohifi tool double"; exit 0; }\n' +
                 ('exit 17\n' if case == 'organelle_failure' else 'exit 0\n'))
