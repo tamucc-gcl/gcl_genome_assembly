@@ -89,6 +89,9 @@ workflow {
     CHIMERA.out.report.view { report ->
         if(params.fixture_evidence) {
             def data=new groovy.json.JsonSlurper().parseText(report.parent.resolve('assemblies/sample_hap1/evidence.json').text)
+            assert data.junction_policy=='junction-evidence-v1'
+            assert data.events[0].junction_evidence
+            assert data.events[0].junction_evidence.hifi_status=='measured'
             assert data.events[0].cut_options[0].spanning==2
             assert data.events[0].cut_options[0].spanning_strict==2
             assert data.events[0].cut_options[0].spanning_all_primary==2

@@ -111,6 +111,43 @@ def contact_summary(target):
     return '; '.join(labels) or 'Not measured'
 
 
+def junction_card(event,assembly,cohort=False):
+    evidence=event.get('junction_evidence')
+    if not evidence:return []
+    prefix=('assemblies/'+assembly+'/' if cohort else '')+'junction/'
+    rows=[]
+    for site in evidence['sites']:
+        reach=site['minimum_anchor_span_bp']
+        feasible=site['local_reads_long_enough']
+        availability=('not measured' if feasible is None else 'no local read long enough' if int(feasible)==0 else feasible+' local reads long enough')
+        rows.append([site['id'],bp(site['point']),site['credible_bridges'] if site['credible_bridges'] is not None else '?',
+            site['unique_arm_bridges'] if site['unique_arm_bridges'] is not None else '?',
+            (bp(int(reach))+' bp needed; ' if reach else 'unique anchors incomplete; ')+availability,
+            bp(site['largest_independent_opposite_island_bp'])])
+    md=['**Junction placement checks**','']+mdtable(['Assay site','Probe, bp','Credible HiFi spans','Spans reaching both unique arms','Read reach','Largest opposite-side unique block, bp'],rows)+[
+        '', 'Credible = MAPQ ≥30, identity ≥95%, at least 80% of the read aligned, and no comparable emitted alternative in the same haplotype. Other-haplotype similarity is reported, not a veto. Arm bridges require ≥1 kb of unique assignment from each chromosome within one uninterrupted molecule chain. Probe positions are measurements, not selected cuts. For N gaps, use the original N-aware gap-spanning assay; uninterrupted counts are shown as unmeasured.',
+        '', 'Zero arm bridges is uninformative when no read can reach both anchors. Small opposite-side islands do not automatically veto a cut; the full per-peer table separates chromosome assignment from unique-locus support.', '']
+    contact_rows=[]
+    for site in evidence['sites']:
+        for r in site['contacts']:
+            measured=r['status']=='measured'
+            contact_rows.append([site['id'],r['library'],r.get('cross','?') if measured else '?',
+                (r.get('left_within','?')+' / '+r.get('right_within','?')) if measured else 'insufficient observable unique sequence',
+                (format(float(r['expected_cross']),'.1f')+' expected; observed/expected '+format(float(r['observed_expected']),'.3f')) if r.get('expected_cross') else 'No matched baseline'])
+    if contact_rows:
+        md+=mdtable(['Site','Hi-C library','Arm-crossing pairs','Within left / right','Distance/depth comparison'],contact_rows)+['',
+            'Arm anchors use observable unique bins (at least five within-bin contacts). The baseline matches genomic distance and diagonal contact depth within chromosome arms; every candidate bin pair needs at least five controls. It is descriptive, not a significance test. Missing controls remain unavailable; raw zero contacts are preserved in the contact scan and maps.','']
+    if not cohort:
+        for lib in sorted({r['library'] for site in evidence['sites'] for r in site['contacts']}):
+            filename=event['id']+'.'+lib+'.25000.png'
+            # Plot availability is set explicitly, independently of evidence measurement.
+            if filename in evidence.get('plots',[]):
+                md+=['![25 kb contact map: '+lib+']('+prefix+filename+')','[10 kb detail]('+prefix+event['id']+'.'+lib+'.10000.png) · [Exact 5 kb count matrix]('+prefix+'hic/'+event['id']+'.'+lib+'.5000.npz)','']
+        artifacts=[('Competitive read placements','hifi/bridge_placements.tsv'),('Unique-anchor reach','hifi/unique_anchor_reach.tsv'),('Chromosome islands','labels/opposite_side_islands.tsv'),('Arm-contact counts and controls','hic/unique_arm_contacts.tsv')]
+        md+=[' · '.join('['+label+']('+prefix+path+')' for label,path in artifacts if path in evidence.get('artifacts',[])),'']
+    return md
+
+
 def event_card(event,assembly,cohort=False,counterparts=(),manual_rows=()):
     preferred=event.get('preferred_region',event)
     cut=event.get('recommended_cut')
@@ -136,6 +173,9 @@ def event_card(event,assembly,cohort=False,counterparts=(),manual_rows=()):
         support=[];against=[]
         if context['separate']:support.append(str(len(context['separate']))+' separating individuals')
         else:against.append('local chromosome separation not confirmed')
+        junction=t.get('junction_support',{})
+        if junction.get('unique_arm_bridges',0):against.append(str(junction['unique_arm_bridges'])+' credible unique-arm bridges')
+        if junction.get('credible_bridges')==0:support.append('no credible bridge after placement checks; absence alone is insufficient')
         bridges=counts[0]
         if bridges is not None:(support if bridges<2 else against).append(reads)
         else:against.append('HiFi bridges not measured')
@@ -162,6 +202,7 @@ def event_card(event,assembly,cohort=False,counterparts=(),manual_rows=()):
     md+=mdtable(['Location','Range, bp','Suggested action','HiFi 20 / 30 / all','Hi-C by library','Evidence for breaking','Against / limitations'],rows)+['']
     if len(locations)>8:md+=['Additional locations are retained in the detailed measurements below.','']
     md+=['HiFi counts: gap = across the actual N gap; probe = at the R assay position; min = minimum across the original interval. Question marks mean unmeasured. Regional contact troughs are corroboration, not matched-control calibration; inadequate contacts do not support cutting. Native paths describe the assembler graph and do not independently validate a join.','']
+    md+=junction_card(event,assembly,cohort)
     if counterparts:
         md+=['Other haplotype: '+ '; '.join('['+other['assembly']+' '+found['id']+']('+('assemblies/'+other['assembly']+'/report.md' if cohort else '../'+other['assembly']+'/report.md')+'#'+found['id'].lower()+')' for other,found in counterparts)+'. The chromosome pair recurs; identical junctions have not been established.','']
     if cohort:md+=['[Plots, actual bridging reads and full measurements](assemblies/'+assembly+'/report.md#'+event['id'].lower()+')','']
@@ -316,7 +357,10 @@ def main():
     for packet,data in packet_data:
         assembly=data['assembly']
         for event in data['events']:
-            for option in event.get('cut_options',[]):option['unmet_cut_prerequisites']=cut_prerequisites(option)
+            for option in event.get('cut_options',[]):
+                option['unmet_cut_prerequisites']=cut_prerequisites(option)
+                if option.get('junction_support',{}).get('credible_bridges'):
+                    option['unmet_cut_prerequisites'].append('Credible reads span this assay after checking competing placements.')
         target=Path('assemblies')/assembly;target.parent.mkdir(exist_ok=True)
         shutil.copytree(packet,target);rows+=decisions(data)
         (target/'evidence.json').write_text(json.dumps(data,indent=2),encoding='utf-8')

@@ -86,6 +86,30 @@ process MISASSEMBLY_ASSESS {
     """
 }
 
+// Candidate-scoped follow-up, cached independently of the existing assessment.
+process MISASSEMBLY_JUNCTION {
+    tag "${meta.id}"
+    label 'misassembly_assessment'
+    input:
+    tuple val(meta), path(packet), path(fasta,stageAs:'assembly/*'), path(mapping), path(agp,stageAs:'agp/*'), path(pairs,stageAs:'pairs/*'), path(source,stageAs:'source/*'), path(libraries,stageAs:'libraries/*'), path(catalog), val(pair_meta), path(pafs,stageAs:'alignments??/*'), val(fasta_meta), path(peer_fastas,stageAs:'competitive??/*')
+    path(helpers)
+    output:
+    tuple val(meta), path("${meta.id}.junction_evidence"), emit: evidence
+    script:
+    def has = { p -> !p.name.endsWith('NO_PAIRS') }
+    def agpArg = has(agp) ? "--agp '${agp}'" : ''
+    def hicArg = has(pairs) ? "--pairs '${pairs}' --source '${source}' --libraries '${libraries}'" : ''
+    def stagedPafs = pafs instanceof List ? pafs : [pafs]
+    def stagedFastas = peer_fastas instanceof List ? peer_fastas : [peer_fastas]
+    def alignmentJson = groovy.json.JsonOutput.toJson(pair_meta.withIndex().collect { r,i -> r + [path:stagedPafs[i].toString()] })
+    def competitiveJson = groovy.json.JsonOutput.toJson(fasta_meta.withIndex().collectEntries { id,i -> [(id):stagedFastas[i].toString()] })
+    """
+    python3 misassembly_enrich.py --packet '${packet}' --fasta '${fasta}' --mapping '${mapping}' \
+      --catalog '${catalog}' --alignments '${alignmentJson}' --competitive '${competitiveJson}' \
+      ${agpArg} ${hicArg} --threads ${task.cpus} --plots ${params.chimera_plots} --out '${meta.id}.junction_evidence'
+    """
+}
+
 process MISASSEMBLY_REVIEW {
     label 'misassembly_review'
     publishDir "${params.outdir}/assembly/chimeras", mode: params.publish_dir_mode

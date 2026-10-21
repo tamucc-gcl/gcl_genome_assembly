@@ -1,5 +1,5 @@
 /* Cohort misassembly review before finishing. One source-bound manual cut interface. */
-include { MISASSEMBLY_CATALOG; MISASSEMBLY_ALIGN; MISASSEMBLY_DISCOVER; MISASSEMBLY_MAP_HIFI; MISASSEMBLY_ASSESS; MISASSEMBLY_REVIEW } from '../modules/misassembly.nf'
+include { MISASSEMBLY_CATALOG; MISASSEMBLY_ALIGN; MISASSEMBLY_DISCOVER; MISASSEMBLY_MAP_HIFI; MISASSEMBLY_ASSESS; MISASSEMBLY_JUNCTION; MISASSEMBLY_REVIEW } from '../modules/misassembly.nf'
 include { BREAK_CHIMERAS } from '../modules/break_chimeras.nf'
 include { HARMONIZE_SPECIES as CHIMERA_REASSIGN_SPECIES } from '../modules/harmonize_species.nf'
 include { harmonizerArgs } from './harmonize_scaffolds.nf'
@@ -94,7 +94,18 @@ workflow CHIMERA {
                       assay.pairs ?: absent,assay.source ?: absent,assay.libraries ?: absent,graph ?: absent,motifs.motifs[m.taxid.toString()] ?: 'CCCTAA')
             }
         MISASSEMBLY_ASSESS(ch_assessment_input,helpers(core+['misassembly_assess.py','misassembly_plot.py','chimera_graph_evidence.py']))
-        ch_review_input = MISASSEMBLY_ASSESS.out.evidence.toList().map { packets -> [packets:packets] }.combine(ch_cohort).map { bundle,cohort ->
+        ch_junction_input = ch_assessment_input.map { m,fa,discovery,mapping,agp,pairs,source,libraries,graph,motif ->
+            tuple(m,fa,mapping,agp,pairs,source,libraries)
+        }.join(MISASSEMBLY_ASSESS.out.evidence).combine(ch_alignments).combine(ch_cohort).combine(MISASSEMBLY_CATALOG.out.catalog.first())
+            .map { m,fa,mapping,agp,pairs,source,libraries,packet,alignments,cohort,catalog ->
+                def own=alignments.records.findAll { it[0].a==m.id.toString() || it[0].b==m.id.toString() }
+                def competitive=cohort.records.findAll { it.meta.sample.toString()==m.sample.toString() && it.meta.taxid.toString()==m.taxid.toString() }
+                tuple(m,packet,fa,mapping,agp,pairs,source,libraries,catalog,
+                    own.collect { it[0] },own ? own.collect { it[1] } : [noPaf],
+                    competitive.collect { it.meta.id.toString() },competitive.collect { it.fasta })
+            }
+        MISASSEMBLY_JUNCTION(ch_junction_input,helpers(core+['misassembly_junction.py','misassembly_enrich.py','misassembly_plot.py']))
+        ch_review_input = MISASSEMBLY_JUNCTION.out.evidence.toList().map { packets -> [packets:packets] }.combine(ch_cohort).map { bundle,cohort ->
             def packets=bundle.packets
             def expected=cohort.records.collect { it.meta.id.toString() }.sort();def observed=packets.collect { it[0].id.toString() }.sort()
             if(expected!=observed) error "Misassembly evidence incomplete: expected ${expected}; received ${observed}"

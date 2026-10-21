@@ -81,7 +81,7 @@ workflow {
     def manifest = new groovy.json.JsonSlurper().parseText(file(params.manifest,checkIfExists:true).text)
     def helpers = Channel.value([
         file("${params.repo}/scripts/comparisons/join_investigation.py",checkIfExists:true),
-        *['chimera_controls.py','chimera_tracks.py','chimera_intervals.py','misassembly_core.py'].collect {
+        *['chimera_controls.py','chimera_tracks.py','chimera_intervals.py','misassembly_core.py','misassembly_junction.py'].collect {
             file("${params.repo}/py_scripts/${it}",checkIfExists:true)
         }
     ])

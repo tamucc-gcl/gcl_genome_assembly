@@ -32,6 +32,12 @@ def main():
                 rows.append(f'L_{len(rows)}\tcomponent\t{x+1}\tcomponent\t{y+1}\t+\t-\tUU\n')
                 matrix[i,j]+=1
                 if i!=j:matrix[j,i]+=1
+    # Observable 5 kb bins exercise the production unique-arm contact baseline.
+    for start in range(0,size,5000):
+        for k in range(10):
+            x=start+100+k;y=start+200+k
+            rows.append(f'L_{len(rows)}\tcomponent\t{x+1}\tcomponent\t{y+1}\t+\t-\tUU\n')
+            matrix[start//100000,start//100000]+=1
     pairs.write_text('#pairs format v1.0\n'+''.join(rows))
     contacts=[]
     for i in range(3,10):contacts.append(dict(position=i*100000,**m.window_counts(matrix,i,3)))
