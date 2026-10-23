@@ -60,6 +60,15 @@ substeps remain recorded below and should not be repeated without a concrete rea
     [pinned regional correction test](core-graph-regional-assignment-test.md) changes
     that one comparison, audits source-coordinate ownership, and reuses existing
     graph/filter tasks. Category 5 remains open until real-data and final graph acceptance.
+    The [regional-01 assessment](core-graph-regional-01-assessment.md) confirms clean
+    execution and coordinate audits, but the one-line correction changes none of
+    the cohort's surviving coverage or chromosome memberships. It is not accepted
+    as the solution to missing arms. Distinguish the mismatched-field bug candidate
+    from explicit interval-length policy; inspect rejection gates before further changes.
+    The [observation-only gate batch](core-graph-regional-gates-test.md) now records
+    pre/post-overlap evidence, individual candidate gates and the final coverage
+    decision for both grouping variants. It requires byte-identical assignment
+    outputs with/without observation and retains the existing graph/filter cache.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.

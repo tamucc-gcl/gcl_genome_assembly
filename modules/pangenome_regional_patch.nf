@@ -1,3 +1,5 @@
+include { PANGENOME_REGIONAL_TRACE_TEST } from './pangenome_regional_trace.nf'
+
 process PANGENOME_REGIONAL_BUILD {
     tag 'pinned-regional-grouping'
     label 'rgfa_patch_build'
@@ -91,7 +93,13 @@ workflow PANGENOME_REGIONAL_PATCH_TEST {
         .map { taxid, policy, name, dir -> tuple(taxid,dir) }.groupTuple()
         .join(PANGENOME_REGIONAL_ASSIGN_FIXED.out.results.map { taxid, policy, dir -> tuple(taxid,dir) }.groupTuple())
         .join(filter_reviews.map { taxid, policy, dir -> tuple(taxid,dir) }.groupTuple()), adapter, adapters)
+    ch_reports = PANGENOME_REGIONAL_PATCH_REPORT.out.report
+    if (params.pangenome_regional_gate_trace) {
+        PANGENOME_REGIONAL_TRACE_TEST(filtered, PANGENOME_REGIONAL_BUILD.out.tool, sources,
+            file("${projectDir}/py_scripts/pangenome_regional_trace.py", checkIfExists: true), adapters + [adapter])
+        ch_reports = ch_reports.mix(PANGENOME_REGIONAL_TRACE_TEST.out.report)
+    }
     emit:
-    report = PANGENOME_REGIONAL_PATCH_REPORT.out.report
+    report = ch_reports
     files = PANGENOME_REGIONAL_PATCH_REPORT.out.files
 }

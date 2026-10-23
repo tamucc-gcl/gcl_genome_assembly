@@ -15,6 +15,8 @@ workflow PANGENOME {
     ch_report = Channel.empty()
     ch_manifest = Channel.empty()
     if (params.run_pangenome) {
+        if (params.pangenome_regional_gate_trace && !params.pangenome_regional_patch_replay)
+            error 'Regional gate tracing requires pangenome_regional_patch_replay'
         if (params.pangenome_regional_patch_replay && (!params.pangenome_deletion_filter_replay || params.pangenome_validate_only))
             error 'Regional patch replay requires the deletion-filter diagnostic and a completed graph (not validation-only)'
         if (params.pangenome_gref != true || params.pangenome_gref_source != 'clip')

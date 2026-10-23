@@ -129,7 +129,8 @@ if ! run_nextflow; then
     exit 1
 fi
 if [[ "${1:-}" == deletion_replay_checks.nf ]]; then
-    if [[ "${2:-}" == regional_patch_resume ]]; then
+    deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
+    if [[ "${2:-}" == regional_patch_resume || "${2:-}" == regional_trace_resume ]]; then
         extra+=(-resume --pangenome_regional_patch_replay true)
         run_nextflow | tee regional-resume.log
         grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_PREP' regional-resume.log
@@ -158,6 +159,33 @@ PY
         cp "$runtime/deletion-results/pangenome/1/deletion_filter/"regional_assignment* "$repo/comparisons/core-graph-regional-validation/"
         cp "$runtime/deletion-results/pangenome/tools/regional_patch/native_regressions.tsv" "$repo/comparisons/core-graph-regional-validation/"
         echo 'PASS: patched native regional assignment runs; preparation and deletion filters resume from cache'
+        if [[ "${2:-}" == regional_trace_resume ]]; then
+            extra+=(--pangenome_regional_gate_trace true)
+            run_nextflow | tee regional-trace-resume.log
+            grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_FILTER' regional-trace-resume.log
+            grep -q 'Cached process > .*PANGENOME_REGIONAL_BUILD' regional-trace-resume.log
+            grep -q 'Cached process > .*PANGENOME_REGIONAL_ASSIGN_FIXED' regional-trace-resume.log
+            test -s "$deletion_out/regional_gate_report.md"
+            test -s "$deletion_out/trace_chromosome_isolated/fixed_events.tsv.gz"
+            test -s "$runtime/deletion-results/pangenome/tools/regional_trace/native_trace.diff"
+            test -s "$runtime/deletion-results/pangenome/tools/regional_trace/gate_regressions.tsv"
+            python3 - "$runtime/deletion-results/pangenome/1/deletion_filter" <<'PY'
+import csv
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+with (root/'regional_observation_equivalence.tsv').open() as f:checks=list(csv.DictReader(f,delimiter='\t'))
+assert len(checks)==6 and all(r['byte_identical']=='yes' for r in checks)
+with (root/'regional_gate_summary.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
+assert any(r['policy']=='chromosome_isolated' and r['variant']=='fixed' and r['role']=='secondary'
+           and int(r['locally_accepted_runs'])==1 for r in rows),rows
+assert {r['chromosome'] for r in rows if r['policy']=='chromosome_isolated' and r['variant']=='fixed'
+        and int(r['final_assigned_span_bp'])==4000000}=={'chrA','chrB'}
+print('PASS: six byte-equivalent observations, real regional gates, unchanged cached assignment/filter tasks')
+PY
+            cp regional-trace-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-trace-resume.log"
+            cp "$deletion_out/"regional_gate* "$repo/comparisons/core-graph-regional-validation/"
+        fi
     fi
     deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
     test -s "$deletion_out/deletion_filter_report.md"
