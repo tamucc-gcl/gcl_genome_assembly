@@ -69,6 +69,15 @@ substeps remain recorded below and should not be repeated without a concrete rea
     pre/post-overlap evidence, individual candidate gates and the final coverage
     decision for both grouping variants. It requires byte-identical assignment
     outputs with/without observation and retains the existing graph/filter cache.
+    [Gate-run acceptance](core-graph-gates-01-assessment.md) passed: the restored
+    chr7 arms form 32.8/40.2 Mb runs at ~95% density but fail the explicit >1 Mb
+    individual-interval gate (longest 49.8/102.6 kb). Corrected grouping works, but
+    this independent policy keeps the final result unchanged. Compare supported
+    chunk settings and all-cohort side effects before changing production defaults.
+    The [supported chunk-setting batch](core-graph-regional-chunks-test.md) compares
+    1 Mb / 100 kb / 25 kb under both grouping versions and all three filtering policies.
+    Six 1 Mb baselines remain cached; 12 new assignment jobs and a report measure arm
+    recovery, control losses, new small chromosome assignments and coordinate ownership.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.

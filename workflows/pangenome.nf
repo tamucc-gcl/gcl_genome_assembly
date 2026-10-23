@@ -15,6 +15,8 @@ workflow PANGENOME {
     ch_report = Channel.empty()
     ch_manifest = Channel.empty()
     if (params.run_pangenome) {
+        if (params.pangenome_regional_chunk_replay && !params.pangenome_regional_gate_trace)
+            error 'Regional chunk comparison requires pangenome_regional_gate_trace'
         if (params.pangenome_regional_gate_trace && !params.pangenome_regional_patch_replay)
             error 'Regional gate tracing requires pangenome_regional_patch_replay'
         if (params.pangenome_regional_patch_replay && (!params.pangenome_deletion_filter_replay || params.pangenome_validate_only))

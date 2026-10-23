@@ -1,3 +1,5 @@
+include { PANGENOME_REGIONAL_CHUNK_TEST } from './pangenome_regional_chunks.nf'
+
 process PANGENOME_REGIONAL_TRACE_BUILD {
     tag 'regional-observation'
     label 'rgfa_patch_build'
@@ -89,6 +91,13 @@ workflow PANGENOME_REGIONAL_TRACE_TEST {
     PANGENOME_REGIONAL_TRACE(filtered.combine(fixed_tool).combine(PANGENOME_REGIONAL_TRACE_BUILD.out.tools), adapter, helpers)
     PANGENOME_REGIONAL_TRACE_REPORT(PANGENOME_REGIONAL_TRACE.out.results
         .map { taxid, policy, dir -> tuple(taxid,dir) }.groupTuple(), adapter, helpers)
+    ch_reports = PANGENOME_REGIONAL_TRACE_REPORT.out.report
+    if (params.pangenome_regional_chunk_replay) {
+        PANGENOME_REGIONAL_CHUNK_TEST(filtered, fixed_tool, PANGENOME_REGIONAL_TRACE_BUILD.out.tools,
+            PANGENOME_REGIONAL_TRACE.out.results,
+            file("${projectDir}/py_scripts/pangenome_regional_chunks.py", checkIfExists: true), helpers + [adapter])
+        ch_reports = ch_reports.mix(PANGENOME_REGIONAL_CHUNK_TEST.out.report)
+    }
     emit:
-    report = PANGENOME_REGIONAL_TRACE_REPORT.out.report
+    report = ch_reports
 }

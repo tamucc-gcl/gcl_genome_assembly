@@ -41,8 +41,8 @@ finish() {
     if [[ -d "$out/results/pangenome" ]]; then
         while IFS= read -r -d '' name; do files+=("${name#"$out/"}"); done < <(
             find -L "$out/results/pangenome" -type f \( -size -20M -o \
-                -name 'coverage_*.tsv.gz' -o -name '*_events.tsv.gz' -o -name 'surviving_intervals.tsv.gz' \) \( \
-                -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name 'coverage_*.tsv.gz' -o -name '*_events.tsv.gz' -o -name 'surviving_intervals.tsv.gz' -o -name '*.csv' -o \
+                -name 'coverage_*.tsv.gz' -o -name '*_events.tsv.gz' -o -name 'chunk_region_changes.tsv.gz' -o -name 'surviving_intervals.tsv.gz' \) \( \
+                -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name 'coverage_*.tsv.gz' -o -name '*_events.tsv.gz' -o -name 'chunk_region_changes.tsv.gz' -o -name 'surviving_intervals.tsv.gz' -o -name '*.csv' -o \
                 -name '*.txt' -o -name '*filter.log' -o -name '*.xml' -o -name '*.diff' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' -o \
                 -name '*.nwk' -o -name '*.stats.tgz' \) -print0)
     fi

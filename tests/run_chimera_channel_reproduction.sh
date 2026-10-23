@@ -130,7 +130,7 @@ if ! run_nextflow; then
 fi
 if [[ "${1:-}" == deletion_replay_checks.nf ]]; then
     deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
-    if [[ "${2:-}" == regional_patch_resume || "${2:-}" == regional_trace_resume ]]; then
+    if [[ "${2:-}" == regional_patch_resume || "${2:-}" == regional_trace_resume || "${2:-}" == regional_chunks_resume ]]; then
         extra+=(-resume --pangenome_regional_patch_replay true)
         run_nextflow | tee regional-resume.log
         grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_PREP' regional-resume.log
@@ -159,7 +159,7 @@ PY
         cp "$runtime/deletion-results/pangenome/1/deletion_filter/"regional_assignment* "$repo/comparisons/core-graph-regional-validation/"
         cp "$runtime/deletion-results/pangenome/tools/regional_patch/native_regressions.tsv" "$repo/comparisons/core-graph-regional-validation/"
         echo 'PASS: patched native regional assignment runs; preparation and deletion filters resume from cache'
-        if [[ "${2:-}" == regional_trace_resume ]]; then
+        if [[ "${2:-}" == regional_trace_resume || "${2:-}" == regional_chunks_resume ]]; then
             extra+=(--pangenome_regional_gate_trace true)
             run_nextflow | tee regional-trace-resume.log
             grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_FILTER' regional-trace-resume.log
@@ -185,6 +185,30 @@ print('PASS: six byte-equivalent observations, real regional gates, unchanged ca
 PY
             cp regional-trace-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-trace-resume.log"
             cp "$deletion_out/"regional_gate* "$repo/comparisons/core-graph-regional-validation/"
+            if [[ "${2:-}" == regional_chunks_resume ]]; then
+                extra+=(--pangenome_regional_chunk_replay true)
+                run_nextflow | tee regional-chunks-resume.log
+                grep -q 'Cached process > .*PANGENOME_REGIONAL_TRACE_BUILD' regional-chunks-resume.log
+                grep -q 'Cached process > .*PANGENOME_REGIONAL_TRACE (' regional-chunks-resume.log
+                grep -q 'Cached process > .*PANGENOME_DELETION_FILTER' regional-chunks-resume.log
+                [[ $(grep -c 'Submitted process > .*PANGENOME_REGIONAL_CHUNK_ASSIGN (' regional-chunks-resume.log) -eq 12 ]]
+                python3 - "$deletion_out" <<'PY'
+import csv,gzip
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+with (root/'chunk_matrix_summary.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
+assert len(rows)==18 and {int(r['chunk_bp']) for r in rows}=={1000000,100000,25000}
+assert (root/'regional_chunk_report.md').is_file()
+with gzip.open(root/'chunk_region_changes.tsv.gz','rt') as f:assert 'start_0based' in f.readline()
+print('PASS: twelve new native-tool assignments; complete 18-case matrix; graph/filter/compiler/gate cache retained')
+PY
+                plain=$(find work -path '*/trace_tools/native.bin' -print -quit)
+                fixed=$(find work -path '*/patched/rgfa-split-fixed' -print -quit)
+                python3 "$repo/tests/native_regional_chunks_check.py" "$plain" "$fixed" "$runtime/native-chunk-check"
+                cp regional-chunks-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-chunks-resume.log"
+                cp "$deletion_out/"chunk_*.tsv "$deletion_out/regional_chunk_report.md" "$repo/comparisons/core-graph-regional-validation/"
+            fi
         fi
     fi
     deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"

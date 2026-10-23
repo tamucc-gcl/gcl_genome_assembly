@@ -9,6 +9,11 @@ workflow {
         ['chrA','chrB'],root.resolve('identities.tsv'),root.resolve('sources.tsv'))),adapters,
         file('__REPO__/vendor/cactus-gfa-tools-regional'),file('__REPO__/py_scripts/pangenome_regional_patch.py'))
     PANGENOME_DELETION_DIAGNOSTIC.out.report.view { taxid,report ->
+        if (report.name == 'regional_chunk_report.md') {
+            assert report.text.contains('18 cases')
+            assert report.text.contains('chrA') && report.text.contains('chrB')
+            return 'PASS: regional chunk comparison report'
+        }
         if (report.name == 'regional_gate_report.md') {
             assert report.text.contains('byte-identical')
             assert report.text.contains('chrA') && report.text.contains('chrB')
