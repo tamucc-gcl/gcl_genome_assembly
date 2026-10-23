@@ -49,6 +49,16 @@ workflow {
             'PASS: cached assignment inputs retain species-specific graph, PAF and reference contigs'
         }
     }
+    if (params.pangenome_deletion_filter_replay) {
+        PANGENOME_CONSTRUCTION.out.deletion_input.view { taxid,graph,paf,unfiltered,log,contigs ->
+            assert graph.name == taxid+'.sv.gfa.gz'
+            assert paf.name == taxid+'.paf'
+            assert unfiltered.name == taxid+'.paf.unfiltered.gz'
+            assert log.name == taxid+'.paf.filter.log'
+            assert contigs == ['chr1']
+            'PASS: species-keyed cached deletion inputs and reference contigs'
+        }
+    }
     PANGENOME_STATS(PANGENOME_CONSTRUCTION.out.clip_stats_input)
     PANGENOME_BUILD_QC(PANGENOME_CONSTRUCTION.out.support_qc
         .join(PANGENOME_STATS.out.vg_stats).join(PANGENOME_CONSTRUCTION.out.identities)

@@ -50,6 +50,14 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_w
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
+elif [[ "${1:-}" == deletion_replay_checks.nf ]]; then
+    python3 "$repo/tests/setup_deletion_replay_checks.py" "$runtime"
+    cp reproduction.nf "$repo/.deletion-replay-checks.nf"
+    trap 'rm -f "$repo/.deletion-replay-checks.nf"' EXIT
+    script="$repo/.deletion-replay-checks.nf"
+    extra=(-c "$runtime/deletion-check.config")
+    mkdir -p "$runtime/deletion-launch"
+    cd "$runtime/deletion-launch"
 elif [[ "${1:-}" == assignment_replay_checks.nf ]]; then
     python3 "$repo/tests/setup_assignment_replay_checks.py" "$runtime"
     cp reproduction.nf "$repo/.assignment-replay-checks.nf"
@@ -119,6 +127,23 @@ JAVA_TOOL_OPTIONS="${java_opens[*]} --add-exports=java.management/com.sun.jmx.mb
 if ! run_nextflow; then
     find work -name .command.err -mmin -10 -exec sh -c 'echo "$1"; tail -20 "$1"' sh {} \;
     exit 1
+fi
+if [[ "${1:-}" == deletion_replay_checks.nf ]]; then
+    deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
+    test -s "$deletion_out/deletion_filter_report.md"
+    test -s "$deletion_out/assignment_comparison.tsv"
+    test -s "$deletion_out/review_chromosome_isolated/lanes.tsv"
+    for policy in native chromosome_isolated disabled; do
+        test -s "$deletion_out/review_$policy/filter_coverage.tsv"
+        for assignment in baseline regional_1Mb; do
+            test -s "$deletion_out/assignment_${policy}_${assignment}/surviving_intervals.tsv.gz"
+        done
+    done
+    if find "$deletion_out" -type f \( -name '*.paf' -o -name '*.gfa' -o -name '*.vg' -o -name 'node_owners.tsv.gz' \) -print -quit | grep -q .; then
+        echo 'Large deletion intermediates must not be published' >&2
+        exit 1
+    fi
+    echo 'PASS: compact deletion evidence published; large intermediates stay in cache'
 fi
 if [[ "${1:-}" == assignment_replay_checks.nf ]]; then
     assignment_out="$runtime/assignment-results/pangenome/1/assignment"

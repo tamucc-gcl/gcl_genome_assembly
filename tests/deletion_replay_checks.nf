@@ -1,0 +1,16 @@
+nextflow.enable.dsl=2
+include { PANGENOME_DELETION_DIAGNOSTIC } from '__REPO__/modules/pangenome_deletion_replay.nf'
+workflow {
+    def root=file('/tmp/chimera-nxf-runtime/deletion-fixtures')
+    def adapters=['pangenome_deletion_replay.py','pangenome_assignment_replay.py','pangenome_source_audit.py']
+        .collect { file('__REPO__/py_scripts/'+it) }
+    PANGENOME_DELETION_DIAGNOSTIC(Channel.of(tuple('1',root.resolve('sv.gfa.gz'),root.resolve('input.paf'),
+        root.resolve('input.paf.unfiltered.gz'),root.resolve('input.paf.filter.log'),
+        ['chrA','chrB'],root.resolve('identities.tsv'),root.resolve('sources.tsv'))),adapters)
+    PANGENOME_DELETION_DIAGNOSTIC.out.report.view { taxid,report ->
+        assert report.text.contains('byte for byte')
+        assert report.text.contains('chromosome_isolated')
+        assert report.text.contains('chrA,chrB')
+        'PASS: production deletion workflow, three policies, six assignments and summary'
+    }
+}

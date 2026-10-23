@@ -49,6 +49,11 @@ substeps remain recorded below and should not be repeated without a concrete rea
   acceptance remains open pending the [cached mapping/filter/assignment coverage
   trace](core-graph-coverage-trace.md); no additional graph rebuild or assembly cuts
   are indicated before that evidence.
+  The filter log subsequently confirmed whole-arm removal by the upstream deletion
+  filter. A removable, pinned-tool [chromosome-isolated filtering comparison](core-graph-deletion-filter-test.md)
+  is now wired into the pipeline: native, guarded and disabled filtering, each
+  followed by whole-query/regional assignment. Production graph policy remains
+  unchanged pending the Crest comparison and final graph acceptance.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.

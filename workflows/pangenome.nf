@@ -4,6 +4,7 @@ include { PANGENOME_VARIANT_AUDIT } from '../modules/pangenome_variant_audit.nf'
 include { PANGENOME_BUILD_QC } from '../modules/pangenome_build_qc.nf'
 include { PANGENOME_SOURCE_AUDIT } from '../modules/pangenome_source_audit.nf'
 include { PANGENOME_ASSIGNMENT_PREPARE; PANGENOME_ASSIGNMENT_REPLAY; PANGENOME_ASSIGNMENT_REPORT } from '../modules/pangenome_assignment_replay.nf'
+include { PANGENOME_DELETION_DIAGNOSTIC } from '../modules/pangenome_deletion_replay.nf'
 
 /* Species selection is owned by the always-on assembly eligibility audit. */
 workflow PANGENOME {
@@ -85,6 +86,18 @@ workflow PANGENOME {
                     .map { taxid, names, directories -> tuple(taxid,directories) }
                     .join(PANGENOME_ASSIGNMENT_PREPARE.out.coverage), assignment_adapters)
                 ch_report = ch_report.mix(PANGENOME_ASSIGNMENT_REPORT.out.report)
+            }
+            if (params.pangenome_deletion_filter_replay) {
+                if (params.pangenome_cactus_extra)
+                    error 'Deletion replay requires the pinned default configuration (no pangenome_cactus_extra)'
+                def deletion_adapters = ['pangenome_deletion_replay.py','pangenome_assignment_replay.py','pangenome_source_audit.py']
+                    .collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }
+                PANGENOME_DELETION_DIAGNOSTIC(PANGENOME_CONSTRUCTION.out.deletion_input
+                    .join(PANGENOME_CONSTRUCTION.out.identities)
+                    .join(PANGENOME_SOURCE_AUDIT.out.files.map { taxid, files ->
+                        tuple(taxid, files.find { it.name == 'source_sequences.tsv' })
+                    }), deletion_adapters)
+                ch_report = ch_report.mix(PANGENOME_DELETION_DIAGNOSTIC.out.report)
             }
             // The legacy construction `cactus --version` row reports Toil, not Cactus.
             // Keep it in the build provenance but use the separately captured versions here.
