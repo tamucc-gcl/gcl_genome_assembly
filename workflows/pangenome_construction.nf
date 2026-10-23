@@ -2,6 +2,8 @@ include { CACTUS_PANGENOME } from '../modules/cactus_pangenome.nf'
 include { PANGENOME_PREFLIGHT } from '../modules/pangenome_preflight.nf'
 include { PANGENOME_GRAPH_CONTRACT } from '../modules/pangenome_graph_contract.nf'
 include { PANGENOME_INPUT_AUDIT } from '../modules/pangenome_input_audit.nf'
+include { PANGENOME_SEQUENCE_TOOLS } from '../modules/pangenome_sequence_tools.nf'
+include { PANGENOME_SEQUENCE_AUDIT } from '../modules/pangenome_sequence_audit.nf'
 
 workflow PANGENOME_CONSTRUCTION {
     take:
@@ -24,8 +26,13 @@ workflow PANGENOME_CONSTRUCTION {
     if (!params.pangenome_validate_only) {
     ch_checked = ch_cohorts.join(PANGENOME_INPUT_AUDIT.out.ready)
         .map { taxid, ref, names, fastas, contigs, cohort, audit -> tuple(taxid, ref, names, fastas, contigs) }
+    policy_adapter = file("${projectDir}/py_scripts/pangenome_cactus_policy.py", checkIfExists: true)
+    policy_helpers = ['pangenome_cactus_guard.py','pangenome_source_audit.py']
+        .collect { file("${projectDir}/py_scripts/${it}", checkIfExists: true) }
+    PANGENOME_SEQUENCE_TOOLS(ch_checked.map { row -> true }.unique(),
+        file("${projectDir}/vendor/cactus-gfa-tools-regional", checkIfExists: true), policy_adapter, policy_helpers)
     CACTUS_PANGENOME(ch_checked.combine(PANGENOME_PREFLIGHT.out.ready.first())
-        .map { taxid, ref, names, fastas, contigs, check -> tuple(taxid, ref, names, fastas, contigs, check) })
+        .combine(PANGENOME_SEQUENCE_TOOLS.out.tools), policy_adapter, policy_helpers)
     ch_contract = CACTUS_PANGENOME.out.all.map { taxid, products ->
         def files = products instanceof Collection ? products.toList() : [products]
         def suffixes = [
@@ -42,14 +49,21 @@ workflow PANGENOME_CONSTRUCTION {
     }
     PANGENOME_GRAPH_CONTRACT(ch_contract,
         file("${projectDir}/py_scripts/pangenome_output_audit.py", checkIfExists: true))
+    PANGENOME_SEQUENCE_AUDIT(CACTUS_PANGENOME.out.gfa_full.join(CACTUS_PANGENOME.out.gfa)
+        .join(CACTUS_PANGENOME.out.sequence_policy),
+        file("${projectDir}/py_scripts/pangenome_sequence_audit.py", checkIfExists: true),
+        file("${projectDir}/py_scripts/pangenome_source_audit.py", checkIfExists: true))
     ch_clip_stats_input = CACTUS_PANGENOME.out.gbz.join(CACTUS_PANGENOME.out.og)
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)
-        .map { taxid, gbz, og, check -> tuple(taxid, gbz, og) }
+        .join(PANGENOME_SEQUENCE_AUDIT.out.ready)
+        .map { taxid, gbz, og, check, sequence_check -> tuple(taxid, gbz, og) }
     ch_report = ch_report.mix(PANGENOME_GRAPH_CONTRACT.out.report)
+    ch_report = ch_report.mix(PANGENOME_SEQUENCE_AUDIT.out.report)
     ch_clip_sharing_input = CACTUS_PANGENOME.out.gfa
         .join(PANGENOME_INPUT_AUDIT.out.identities)
         .join(PANGENOME_GRAPH_CONTRACT.out.ready)
-        .map { taxid, gfa, identities, check -> tuple(taxid, gfa, identities) }
+        .join(PANGENOME_SEQUENCE_AUDIT.out.ready)
+        .map { taxid, gfa, identities, check, sequence_check -> tuple(taxid, gfa, identities) }
     ch_manifest = PANGENOME_GRAPH_CONTRACT.out.manifest
     ch_variant_input = CACTUS_PANGENOME.out.all.map { taxid, products ->
         def files = products instanceof Collection ? products.toList() : [products]
@@ -58,7 +72,8 @@ workflow PANGENOME_CONSTRUCTION {
         if (!vcf || !tbi) error 'Standard GREF VCF or index missing'
         tuple(taxid, vcf, tbi)
     }.join(PANGENOME_INPUT_AUDIT.out.identities).join(PANGENOME_GRAPH_CONTRACT.out.ready)
-        .map { taxid, vcf, tbi, identities, check -> tuple(taxid, vcf, tbi, identities) }
+        .join(PANGENOME_SEQUENCE_AUDIT.out.ready)
+        .map { taxid, vcf, tbi, identities, check, sequence_check -> tuple(taxid, vcf, tbi, identities) }
     ch_versions = CACTUS_PANGENOME.out.versions
     if (params.pangenome_assignment_replay) {
         ch_assignment_input = CACTUS_PANGENOME.out.all

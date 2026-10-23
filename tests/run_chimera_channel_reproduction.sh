@@ -271,8 +271,16 @@ if [[ "${3:-}" == cache ]]; then
 fi
 if [[ "${1:-}" == core_contract_checks.nf && "${3:-}" == resume_build ]]; then
     extra+=(-resume)
+    export CORE_RESUME_CHECK=true
     run_nextflow | tee core-resume.log
     grep -q 'Cached process > PANGENOME_CONSTRUCTION:CACTUS_PANGENOME' core-resume.log
+    grep -q 'Cached process > PANGENOME_CONSTRUCTION:PANGENOME_SEQUENCE_TOOLS' core-resume.log
+    grep -q 'Cached process > PANGENOME_CONSTRUCTION:PANGENOME_SEQUENCE_AUDIT' core-resume.log
+    for taxid in 1 2; do
+        test -s "$runtime/core-results/pangenome/$taxid/sequence_policy/sequence_accounting.md"
+        test -s "$runtime/core-results/pangenome/$taxid/representation/source_stage_accounting.tsv"
+        test -s "$runtime/core-results/pangenome/$taxid/representation/distinct_graph_nodes.tsv"
+    done
     cp core-resume.log "$repo/comparisons/core-graph-resume-check.log"
     echo 'PASS: completed graph construction uses ordinary Nextflow resume'
 fi

@@ -6,18 +6,38 @@ root = Path(sys.argv[1])
 case = sys.argv[2]
 tools = root / 'core-tools'
 tools.mkdir(exist_ok=True)
+packages=tools/'packages';(packages/'cactus/shared').mkdir(parents=True,exist_ok=True)
+(packages/'cactus/__init__.py').write_text('')
+(packages/'cactus/shared/__init__.py').write_text('')
+(packages/'cactus/shared/version.py').write_text("cactus_commit='d7e5fc1b51327a5a4cdb494c85b0607e3d81a713'\n")
+(packages/'cactus/cactus_progressive_config.xml').write_text('<config><graphmap collapse="none" delFilter="10000000"/><graphmap_split ambiguousName="_AMBIGUOUS_"/></config>')
+(packages/'cactus-3.2.1.dist-info').mkdir(exist_ok=True)
+(packages/'cactus-3.2.1.dist-info/METADATA').write_text('Name: cactus\nVersion: 3.2.1\n')
+filter_double=tools/'filter-paf-deletions'
+filter_double.write_text('#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\nsys.stdout.write(Path(sys.argv[3]).read_text())\n')
+filter_double.chmod(0o755)
 double = tools / 'cactus-pangenome'
 double.write_text('''#!/usr/bin/env python3
-import gzip,sys,tarfile,io
+import gzip,sys,tarfile,io,subprocess
 from pathlib import Path
 if '--help' in sys.argv:
     print('--gref --haplo --refContigs --vcfbub --restart --clean'); sys.exit(0)
 out = Path(sys.argv[sys.argv.index('--outDir')+1]); out.mkdir(exist_ok=True)
 taxid = sys.argv[sys.argv.index('--outName')+1]
+# Exercise the production wrappers from a child process, as Cactus worker jobs do.
+scratch=Path('fixture-worker');scratch.mkdir()
+(scratch/'mg.gfa').write_text('S\\ts1\\tACGT\\tSN:Z:id=REF_'+taxid+'|chr1\\tSO:i:0\\tSR:i:0\\n')
+(scratch/'mg.gfa.vg').write_text('fixture graph\\n');(scratch/'trans').write_text('fixture trans\\n')
+(scratch/'raw.paf').write_text('id=IND_'+taxid+'|chr1\\t4\\t0\\t4\\t+\\ts1\\t4\\t0\\t4\\t4\\t4\\t60\\n')
+with (scratch/'guarded.paf').open('w') as f:
+    subprocess.run(['filter-paf-deletions',str(scratch/'mg.gfa.vg'),str(scratch/'trans'),str(scratch/'raw.paf'),'-d','10000000'],stdout=f,check=True)
+subprocess.run(['rgfa-split','-g',str(scratch/'mg.gfa'),'-p',str(scratch/'guarded.paf'),'-b',str(scratch/'split_'),
+                '-a','_AMBIGUOUS_','-n','.25','-Q','2','-G','-L',str(scratch/'split.log')],check=True)
 for suffix in ['gbz','og','hapl','snarls','gref.gbz','stats.tgz']:
     (out/(taxid+'.'+suffix)).write_text('tool double artifact\\n')
 for suffix in ['gfa.gz','gref.gfa.gz','full.gfa.gz','sv.gfa.gz']:
-    with gzip.open(out/(taxid+'.'+suffix),'wt') as f: f.write('H\\tVN:Z:1.1\\nS\\t1\\tACGT\\n')
+    with gzip.open(out/(taxid+'.'+suffix),'wt') as f:
+        f.write('H\\tVN:Z:1.1\\nS\\t1\\tACGT\\nW\\tREF_'+taxid+'\\t0\\tchr1\\t0\\t4\\t>1\\nW\\tIND_'+taxid+'\\t0\\tchr1\\t0\\t4\\t>1\\n')
 with gzip.open(out/(taxid+'.gref.vcf.gz'),'wt') as f:
     f.write('##fileformat=VCFv4.2\\n#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n')
 (out/(taxid+'.gref.vcf.gz.tbi')).write_text('index tool double\\n')
@@ -63,10 +83,10 @@ params.contract_case='%s'
 process {
     executor='local'
     withName: '.*' { cpus=1; memory='1GB'; scratch=false; errorStrategy='terminate'
-        beforeScript='export PATH="%s:$PATH"'
+        beforeScript='export PATH="%s:$PATH"; export PYTHONPATH="%s"'
     }
 }
-''' % (root, case, tools))
+''' % (root, case, tools,packages))
 with (root/'core-check.config').open('a') as handle:
     handle.write('params.pangenome_assignment_replay='+('true' if case=='assignment_inputs' else 'false')+'\n')
     handle.write('params.pangenome_deletion_filter_replay='+('true' if case=='deletion_inputs' else 'false')+'\n')

@@ -14,7 +14,9 @@ process CACTUS_PANGENOME {
         saveAs: { fn -> fn.startsWith('out/') ? fn.substring(4) : fn }
 
     input:
-    tuple val(taxid), val(ref_name), val(names), path(fastas), val(ref_contigs), path(capabilities)
+    tuple val(taxid), val(ref_name), val(names), path(fastas), val(ref_contigs), path(capabilities), path(sequence_tools)
+    path(policy_adapter)
+    path(policy_helpers)
 
     output:
     // Exact CLIP handles; the separate audit enforces required exports so a missing
@@ -60,6 +62,7 @@ process CACTUS_PANGENOME {
     // '**' so future cactus outputs are retained automatically (general-purpose).
     tuple val(taxid), path("out/**"),                  emit: all
     tuple val(taxid), path("seqfile.txt"),             emit: seqfile
+    tuple val(taxid), path('out/sequence_policy'),       emit: sequence_policy
     path("versions.tsv"),                              emit: versions
 
     script:
@@ -68,7 +71,7 @@ process CACTUS_PANGENOME {
         error 'Reference contigs must be explicit, nonempty finalized sequence IDs'
     if (names.size() != fastas.size() || names.toSet().size() != names.size() || !names.contains(ref_name))
         error 'Cactus input identity/cardinality mismatch'
-    if (extra =~ /--(reference|refContigs|gref|grefL|vcf|vcfwave|vcfbub|haplo|gfa|gbz|odgi|chrom-og|viz|clip|collapse|outName|outDir)(?:\s|=|$)/)
+    if (extra =~ /--(reference|refContigs|gref|grefL|vcf|vcfwave|vcfbub|haplo|gfa|gbz|odgi|chrom-og|viz|clip|collapse|outName|outDir|delFilter|mgSplit|noSplit|binariesMode|configFile)(?:\s|=|$)/)
         error 'pangenome_cactus_extra cannot override graph-role contract options'
     def chromog = params.pangenome_odgi_chromosomes ? '--chrom-og clip' : ''
     def vizopt = params.pangenome_odgi_visualization ? '--viz clip' : ''
@@ -131,6 +134,11 @@ process CACTUS_PANGENOME {
     rm -rf js cactus_work out
     mkdir -p cactus_work out
 
+    # Local wrappers apply the audited policy without modifying the installed image.
+    python3 ${policy_adapter} prepare --tools ${sequence_tools} --seqfile seqfile.txt \\
+        --runtime sequence_runtime --out out/sequence_policy --chunk ${params.pangenome_regional_chunk_bp}
+    export PATH="\$PWD/sequence_runtime/bin:\$PATH"
+
     # Scoring provenance in the graph build's own log. The default derives from HOXD70, which
     # the cactus docs describe as suited to VERY DIVERGED genomes and warn can produce "long
     # runs of transitions that really should be gaps" in a pangenome -- and this cohort is ten
@@ -167,12 +175,15 @@ process CACTUS_PANGENOME {
         --odgi clip \\
         ${chromog} \\
         --maxCores ${task.cpus} \\
+        --binariesMode local \\
         ${gpu} \\
         ${lasttrain} \\
         ${gref} \\
         ${grefmin} \\
         ${grefl} \\
         ${extra}
+
+    python3 ${policy_adapter} summarize --policy sequence_runtime/policy.json
 
     # ---- cull construction scratch (pre-join per-chromosome intermediates, superseded by
     # the joined graph; the bulk of the file count) and the duplicate seqfile. Everything
@@ -187,7 +198,8 @@ process CACTUS_PANGENOME {
 
     stub:
     """
-    mkdir -p out out/${taxid}.chroms out/${taxid}.viz
+    mkdir -p out out/${taxid}.chroms out/${taxid}.viz out/sequence_policy
+    printf 'Stub only; no sequence policy was executed.\\n' > out/sequence_policy/STUB.txt
     for x in gbz og hapl snarls gfa.gz vcf.gz vcf.gz.tbi raw.vcf.gz; do : > "out/${taxid}.\$x"; done
     # full-graph twins, so -stub-run exercises the same channel topology as a real run
     for x in full.gbz full.og full.gfa.gz full.snarls full.vcf.gz full.vcf.gz.tbi full.raw.vcf.gz; do

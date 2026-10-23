@@ -78,6 +78,18 @@ substeps remain recorded below and should not be repeated without a concrete rea
     1 Mb / 100 kb / 25 kb under both grouping versions and all three filtering policies.
     Six 1 Mb baselines remain cached; 12 new assignment jobs and a report measure arm
     recovery, control losses, new small chromosome assignments and coordinate ownership.
+    [Chunk-run assessment](core-graph-chunks-01-assessment.md) selects guarded
+    filtering + corrected grouping + 25 kb as the production candidate: both missing
+    arms recover, 98.74 Mb mapped gain, no source mapped losses or ordinary-control
+    chromosome changes. The coupled softclip behavior adds 37.81 Mb unreported source
+    sequence, so production integration must explicitly account for source ends and
+    pass real FULL/CLIP/node audits before category acceptance or diagnostic cleanup.
+    The selected policy is now integrated into normal production construction,
+    independently of the removable diagnostics. Native tool regression, workflow,
+    source-coordinate and ordinary resume checks pass locally. The
+    [production rebuild and acceptance run](core-graph-production-01-test.md) now
+    checks actual chromosome-arm representation, excluded source ends and distinct
+    graph-node accounting. Category 5 remains open pending Crest acceptance.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.

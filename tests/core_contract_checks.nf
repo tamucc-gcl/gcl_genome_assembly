@@ -111,7 +111,8 @@ workflow {
         'PASS: production regional context process for two species'
     }
     PANGENOME_CONSTRUCTION.out.report.collect(flat: false).view { reports ->
-        assert reports.size() == 4  // input AND build report, independently for each species
+        assert reports.size() == 6  // input, build and sequence audit for each species
+        assert reports.count { it[1].name == 'sequence_graph_audit.md' } == 2
         'PASS: both species retain input and build reports'
     }
     PANGENOME_CONSTRUCTION.out.variant_input.collect(flat: false).view { inputs ->
