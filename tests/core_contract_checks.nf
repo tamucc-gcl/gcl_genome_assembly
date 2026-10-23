@@ -41,9 +41,10 @@ workflow {
     if (params.contract_case == 'cross_species') cohorts[0][5].members[1].taxid = '999'
     PANGENOME_CONSTRUCTION(Channel.fromList(cohorts))
     if (params.pangenome_assignment_replay) {
-        PANGENOME_CONSTRUCTION.out.assignment_input.view { taxid,graph,paf,contigs ->
+        PANGENOME_CONSTRUCTION.out.assignment_input.view { taxid,graph,paf,gaf,contigs ->
             assert graph.name == taxid+'.sv.gfa.gz'
             assert paf.name == taxid+'.paf'
+            assert gaf.name == taxid+'.gaf.gz'
             assert contigs == ['chr1']
             'PASS: cached assignment inputs retain species-specific graph, PAF and reference contigs'
         }

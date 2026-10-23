@@ -95,6 +95,19 @@ class SourceAuditTests(unittest.TestCase):
         self.assertEqual(result['status'],'PASS')
         self.assertEqual(result['source_names_missing_from_both_graphs'],0)
 
+    def test_present_name_with_half_retention_requires_review_and_mapping_measurement(self):
+        self.paths.write_text(self.paths.read_text().replace('\t90\n','\t50\n'))
+        with self.paths.open('a') as f:f.write('sample\tchr2\t80\t70\n')
+        result=self.run_audit([self.mapping('paf',[(0,100,60)],query='id=IND_x.1|chr1',length=100)])
+        self.assertEqual(result['status'],'REVIEW')
+        self.assertEqual(result['source_names_missing_from_both_graphs'],0)
+        self.assertEqual(result['partially_retained_chromosome_paths'],1)
+        row=self.table('source_sequences.tsv')[0]
+        self.assertEqual(row['status'],'represented_in_clip')
+        self.assertEqual(row['retention_review'],'yes')
+        self.assertEqual(row['paf_query_covered_bp'],'100')
+        self.assertIn('below 80%',(self.root/'out'/'source_report.md').read_text(encoding='utf-8'))
+
     def test_small_missing_sequences_still_reported_without_chromosome_alarm(self):
         self.specs[0]['chromosomes']=['chr1']
         result=self.run_audit()

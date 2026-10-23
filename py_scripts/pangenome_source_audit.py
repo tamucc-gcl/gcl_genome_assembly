@@ -1,8 +1,8 @@
 """Trace source sequences through cached Cactus mappings and FULL/CLIP paths.
 
 Uses the actual input FAI dictionaries, not chromosome names guessed from plots.
-Mapping coverage is measured only for sequences absent under their source name
-from both graph stages. It does not certify that their bases are absent elsewhere.
+Mapping coverage is measured for missing names, composites and low-retention
+chromosome-scale paths. It does not certify that their bases are absent elsewhere.
 """
 import argparse
 import csv
@@ -11,14 +11,25 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
+# Screening threshold for investigation, not a biological deletion/callability rule.
+MIN_RETAINED_FRACTION = 0.8
+
+
+def low_retention(row):
+    return (row['chromosome_scale'] == 'yes' and
+            int(row.get('clip_retained_path_bp', row['source_bp'])) <
+            MIN_RETAINED_FRACTION * int(row['source_bp']))
+
 
 def read_table(path):
-    with open(path, encoding='utf-8') as handle:
+    opener = gzip.open if str(path).endswith('.gz') else open
+    with opener(path, 'rt', encoding='utf-8') as handle:
         return list(csv.DictReader(handle, delimiter='\t'))
 
 
 def write_table(path, rows, columns):
-    with open(path, 'w', newline='', encoding='utf-8') as handle:
+    opener = gzip.open if str(path).endswith('.gz') else open
+    with opener(path, 'wt', newline='', encoding='utf-8') as handle:
         writer = csv.DictWriter(handle, fieldnames=columns, delimiter='\t', lineterminator='\n')
         writer.writeheader()
         writer.writerows(rows)
@@ -90,6 +101,9 @@ def audit(specs, identities, paths, evidence, out):
             raise ValueError('Negative CLIP retained path length')
         graph[key] = full, clip
     missing = {key for key in inputs if key not in graph or not any(v for v in graph[key])}
+    partial = {key for key in large if graph.get(key, (None, 0))[1] > 0 and
+               graph[key][1] < MIN_RETAINED_FRACTION * inputs[key]}
+    measured_keys = missing | partial | {key for key in inputs if '+' in key[1]}
     measurements, inventory, unknown, excerpts = {}, [], Counter(), []
     seen_kinds = set()
     for item in evidence:
@@ -122,7 +136,7 @@ def audit(specs, identities, paths, evidence, out):
                 qlen, lo, hi, mapq = int(fields[1]), int(fields[2]), int(fields[3]), int(fields[11])
                 if qlen != inputs[key] or not 0 <= lo <= hi <= qlen or not 0 <= mapq <= 255:
                     raise ValueError('Mapping query coordinates disagree with input: '+str(key))
-                if key not in missing:
+                if key not in measured_keys:
                     continue
                 counts[key] += 1
                 intervals[key].append((lo, hi))
@@ -156,18 +170,23 @@ def audit(specs, identities, paths, evidence, out):
         row = dict(assembly=aid, sequence=seq, source_bp=length,
                    chromosome_scale='yes' if key in large else 'no',
                    full_W_coordinate_span_bp=full if full is not None else '',
-                   clip_retained_path_bp=clip, status=status)
+                   clip_retained_path_bp=clip, status=status,
+                   retained_path_fraction=clip/length,
+                   retention_review='yes' if key in partial else 'no')
         for kind in ('gaf','paf'):
             measured = measurements.get(kind)
-            assess = measured is not None and key in missing
+            assess = measured is not None and key in measured_keys
             row[kind+'_records'] = measured['counts'][key] if assess else ''
             row[kind+'_query_covered_bp'] = union_bp(measured['intervals'][key]) if assess else ''
             row[kind+'_mapq20_records'] = measured['highq'][key] if assess else ''
         rows.append(row)
-    problems = [r for r in rows if r['chromosome_scale']=='yes' and r['status']!='represented_in_clip']
+    problems = [r for r in rows if r['chromosome_scale']=='yes' and
+                (r['status']!='represented_in_clip' or r['retention_review']=='yes')]
     result = dict(status='REVIEW' if problems or unknown else 'PASS',
         input_sequences=len(inputs), source_names_missing_from_both_graphs=len(missing),
         chromosome_scale_paths_requiring_review=len(problems),
+        partially_retained_chromosome_paths=len(partial),
+        min_retained_fraction_screen=MIN_RETAINED_FRACTION,
         unknown_mapping_name_prefixes=dict(unknown), mapping_evidence=inventory)
     write_table(out/'source_sequences.tsv', rows, list(rows[0]))
     write_table(out/'missing_source_paths.tsv', [r for r in rows if (r['assembly'],r['sequence']) in missing], list(rows[0]))
@@ -178,7 +197,8 @@ def audit(specs, identities, paths, evidence, out):
         f"Status: **{result['status']}**. {len(inputs):,} input sequences checked; {len(problems)} chromosome-scale paths require review.", '',
         'All input FAI dictionaries reconcile with the graph input audit. Scope comes from the final assembly eligibility audit.', '',
         '| Assembly | Sequence | Source bp | GAF covered bp | PAF covered bp | Finding |', '|---|---|---:|---:|---:|---|']
-    labels = dict(full_only='Present in FULL; no retained CLIP path',
+    labels = dict(represented_in_clip='Source name present, but retained path length is below 80% of input; investigate partial representation',
+        full_only='Present in FULL; no retained CLIP path',
         mapped_but_absent_from_full_and_clip='Mapped by minigraph; source name absent from FULL and CLIP',
         gaf_present_but_no_paf_query_records='GAF query present; no query in exported PAF or FULL/CLIP',
         paf_present_but_absent_from_full_and_clip='Present in mapping PAF; source name absent from FULL and CLIP',
@@ -198,8 +218,11 @@ def audit(specs, identities, paths, evidence, out):
         'Reference mapping can be extracted directly from graph tags rather than appear as a minigraph query.', '',
         'Coverage is the union of query intervals, never a sum of overlapping alignments. MAPQ 255 is unavailable, '
         'not high quality. GAF MAPQ counts are descriptive and do not reimplement Cactus filtering. '
-        'Only missing source paths have mapping measurements; blank cells for other paths mean not measured. '
+        'Missing paths, composites and chromosome-scale paths retaining less than 80% of input length have mapping measurements; blank cells mean not measured. '
         'Missing mapping files are reported explicitly, never measured zero.', '',
+        'Retained path length below 80% is a review screen, not an acceptable-loss threshold or proof of lost bases. '
+        'Path lengths include traversals and graph edits; source-minus-retained is not clipping-only loss. '
+        'A FULL W-coordinate span matching the input length does not certify complete sequence traversal.', '',
         '[All source sequences](source_sequences.tsv) · [Missing source names](missing_source_paths.tsv) · '
         '[Mapping examples (first 20 per sequence/file; targets truncated to 2,000 characters)](mapping_examples.tsv) · [Audit and file inventory](source_audit.json)', '',
         'Chromosome-assignment logs from older cached builds may have been removed with construction scratch. '

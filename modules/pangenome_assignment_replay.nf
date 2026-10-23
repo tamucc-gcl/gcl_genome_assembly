@@ -7,19 +7,20 @@ process PANGENOME_ASSIGNMENT_PREPARE {
     time '2h'
     publishDir "${params.outdir}/pangenome/${taxid}/assignment/preparation", mode: params.publish_dir_mode,
         pattern: 'prepared/*', saveAs: { fn ->
-            fn.endsWith('.json') || fn.endsWith('.xml') || fn.endsWith('.tsv') ? fn.replaceFirst('^prepared/', '') : null
+            fn.endsWith('.json') || fn.endsWith('.xml') || fn.endsWith('.tsv') || fn.endsWith('.tsv.gz') ? fn.replaceFirst('^prepared/', '') : null
         }
     input:
-    tuple val(taxid), path(gfa), path(paf), val(contigs), path(identities), path(sources)
+    tuple val(taxid), path(gfa), path(paf), path(gaf), val(contigs), path(identities), path(sources)
     path(adapters)
     output:
     tuple val(taxid), path('prepared/cactus.sv.gfa'), path('prepared/filtered.paf'),
         path('prepared/effective_config.xml'), path('prepared/selection.tsv'),
         path('prepared/identities.tsv'), path('prepared/preparation.json'), val(contigs), emit: prepared
+    tuple val(taxid), path('prepared/coverage_intervals.tsv.gz'), path('prepared/selection.tsv'), emit: coverage
     script:
     """
     set -euo pipefail
-    python3 pangenome_assignment_replay.py prepare --gfa ${gfa} --paf ${paf} \\
+    python3 pangenome_assignment_replay.py prepare --gfa ${gfa} --paf ${paf} --gaf ${gaf} \\
         --identities ${identities} --sources ${sources} --out prepared
     """
 }
@@ -57,12 +58,12 @@ process PANGENOME_ASSIGNMENT_REPORT {
     tag "${taxid}"
     label 'cactus_tools'
     cpus 1
-    memory '1 GB'
-    time '10m'
+    memory '8 GB'
+    time '1h'
     publishDir "${params.outdir}/pangenome/${taxid}/assignment", mode: params.publish_dir_mode,
         pattern: 'summary/*', saveAs: { it.replaceFirst('^summary/', '') }
     input:
-    tuple val(taxid), path(directories)
+    tuple val(taxid), path(directories), path(coverage), path(selection)
     path(adapters)
     output:
     tuple val(taxid), path('summary/assignment_report.md'), emit: report
@@ -70,6 +71,7 @@ process PANGENOME_ASSIGNMENT_REPORT {
     script:
     """
     set -euo pipefail
-    python3 pangenome_assignment_replay.py report --directories ${directories} --out summary
+    python3 pangenome_assignment_replay.py report --directories ${directories} \\
+        --coverage ${coverage} --selection ${selection} --out summary
     """
 }

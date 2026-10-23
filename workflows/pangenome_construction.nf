@@ -66,8 +66,9 @@ workflow PANGENOME_CONSTRUCTION {
                 def files = products instanceof Collection ? products : [products]
                 def graph = files.find { it.name == taxid + '.sv.gfa.gz' }
                 def paf = files.find { it.name == taxid + '.paf' }
-                if (!graph || !paf) error 'Assignment replay requires cached Cactus SV rGFA and mapping PAF'
-                tuple(taxid, graph, paf, contigs)
+                def gaf = files.find { it.name == taxid + '.gaf.gz' }
+                if (!graph || !paf || !gaf) error 'Assignment replay requires cached Cactus SV rGFA, mapping PAF and raw GAF'
+                tuple(taxid, graph, paf, gaf, contigs)
             }
     }
     ch_source_evidence = CACTUS_PANGENOME.out.all.map { taxid, products ->

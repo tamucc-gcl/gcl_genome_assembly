@@ -19,6 +19,8 @@ metadata=packages/'cactus-3.2.1.dist-info';metadata.mkdir(exist_ok=True)
 (packages/'cactus/cactus_progressive_config.xml').write_text('''<config><graphmap minMAPQ="5"/><graphmap_split minQueryCoverages="0.75 0.5 0.25" minQueryCoverageThresholds="100000 1000000" minQueryUniqueness="2" ambiguousName="_AMBIGUOUS_"/></config>''')
 with gzip.open(assets/'sv.gfa.gz','wt') as f:f.write('S\ts1\tA\n')
 (assets/'input.paf').write_text('id=IND_sample.1|composite\t8000000\t0\t4000000\t+\tid=_MINIGRAPH_|s1\t4000000\t0\t4000000\t4000000\t4000000\t60\n')
+with gzip.open(assets/'input.gaf.gz','wt') as f:
+    f.write((assets/'input.paf').read_text())
 (assets/'identities.tsv').write_text('id\tgraph_name\tis_reference\nsample\tIND_sample.1\tFalse\nreference\tREF\tTrue\n')
 (assets/'sources.tsv').write_text('assembly\tsequence\tsource_bp\tchromosome_scale\tstatus\nsample\tcomposite\t8000000\tyes\tmapped_but_absent_from_full_and_clip\n')
 binary=tools/'rgfa-split'

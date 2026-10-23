@@ -40,8 +40,9 @@ finish() {
     # alignments, VCFs and large per-node tables remain in the selected results directory.
     if [[ -d "$out/results/pangenome" ]]; then
         while IFS= read -r -d '' name; do files+=("${name#"$out/"}"); done < <(
-            find -L "$out/results/pangenome" -type f -size -20M \( \
-                -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name '*.csv' -o \
+            find -L "$out/results/pangenome" -type f \( -size -20M -o \
+                -name 'coverage_*.tsv.gz' -o -name 'surviving_intervals.tsv.gz' \) \( \
+                -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name 'coverage_*.tsv.gz' -o -name 'surviving_intervals.tsv.gz' -o -name '*.csv' -o \
                 -name '*.txt' -o -name '*.xml' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' -o \
                 -name '*.nwk' -o -name '*.stats.tgz' \) -print0)
     fi

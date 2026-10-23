@@ -124,11 +124,17 @@ if [[ "${1:-}" == assignment_replay_checks.nf ]]; then
     assignment_out="$runtime/assignment-results/pangenome/1/assignment"
     test -s "$assignment_out/assignment_report.md"
     test -s "$assignment_out/assignment_comparison.tsv"
+    test -s "$assignment_out/coverage_trace.tsv"
+    test -s "$assignment_out/coverage_bins.tsv"
+    test -s "$assignment_out/coverage_changes.tsv.gz"
+    test -s "$assignment_out/coverage_intervals.tsv.gz"
+    test -s "$assignment_out/preparation/coverage_intervals.tsv.gz"
     test -s "$assignment_out/preparation/effective_config.xml"
     for assignment_case in baseline whole_relaxed regional_1Mb regional_3Mb; do
         test -s "$assignment_out/replay_$assignment_case/assignment_log.txt"
         test -s "$assignment_out/replay_$assignment_case/regions.tsv"
         test -s "$assignment_out/replay_$assignment_case/decisions.tsv"
+        test -s "$assignment_out/replay_$assignment_case/surviving_intervals.tsv.gz"
     done
     if find "$assignment_out" -type f \( -name '*.gfa' -o -name '*.paf' \) -print -quit | grep -q .; then
         echo 'Large replay intermediates must not be published' >&2

@@ -7,7 +7,9 @@ from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
-from pangenome_assignment_replay import CASES, initialize_cactus_tools, identity_aliases, select_queries, split_command, fragment, summarize_split, parse_decisions, report
+from pangenome_assignment_replay import (CASES, initialize_cactus_tools, identity_aliases,
+    select_queries, split_command, fragment, summarize_split, parse_decisions, report,
+    merged, interval_difference, bin_coverage, mapping_intervals, write_intervals, coverage_report)
 from pangenome_source_audit import write_table
 
 
@@ -65,6 +67,72 @@ class AssignmentReplayTests(unittest.TestCase):
     def test_bounded_controls_are_selected_per_assembly(self):
         rows=[self.row('chr'+str(i)) for i in range(10)]
         self.assertEqual(len(select_queries(rows)),2)
+
+    def test_low_retention_paths_are_selected_beyond_normal_control_limit(self):
+        rows=[self.row('chr'+str(i)) for i in range(5)]
+        rows[-1]['clip_retained_path_bp']='49'
+        self.assertIn(rows[-1],select_queries(rows))
+
+    def test_coverage_uses_interval_sets_and_distinguishes_loss_from_gain(self):
+        left=merged([(0,10),(5,20),(20,30),(50,70)])
+        right=merged([(10,40),(60,80)])
+        self.assertEqual(left,[(0,30),(50,70)])
+        self.assertEqual(interval_difference(left,right),[(0,10),(50,60)])
+        self.assertEqual(interval_difference(right,left),[(30,40),(70,80)])
+        self.assertEqual(bin_coverage([(900000,1100000),(2000000,2000003)],2000003),
+                         [100000,100000,3])
+
+    def test_original_mapping_reader_unions_overlap_and_ignores_unselected_queries(self):
+        paf=self.root/'raw.paf'
+        paf.write_text('id=IND_island.1|chr1\t100\t0\t50\t+\ts\t100\t0\t50\t50\t50\t60\n'
+                       'id=IND_island.1|chr1\t100\t20\t80\t+\ts\t100\t0\t60\t60\t60\t255\n'
+                       'id=_MINIGRAPH_|s\t100\t0\t90\t+\ts\t100\t0\t90\t90\t90\t60\n')
+        spans,counts=mapping_intervals(paf,{'IND_island.1':'island'},
+                                      {('island','chr1'):100,('island','chr2'):80})
+        self.assertEqual(spans[('island','chr1')],[(0,80)])
+        self.assertEqual(spans[('island','chr2')],[])
+        self.assertEqual(counts[('island','chr1')],2)
+        paf.write_text(paf.read_text().replace('\t100\t0\t50','\t101\t0\t50',1))
+        with self.assertRaisesRegex(ValueError,'coordinates disagree'):
+            mapping_intervals(paf,{'IND_island.1':'island'},{('island','chr1'):100})
+
+    def test_full_report_includes_present_composites_and_exact_stage_losses(self):
+        source=self.row('chr8+chr10')
+        source.update(clip_retained_path_bp='45',retention_review='yes')
+        selection=self.root/'selection.tsv';write_table(selection,[source],list(source))
+        key=('island','chr8+chr10')
+        coverage=self.root/'coverage.tsv'
+        write_intervals(coverage,{'raw_gaf':{key:[(0,100)]},'raw_paf':{key:[(0,90)]},
+                                  'filtered_paf':{key:[(50,90)]}})
+        dirs=[]
+        for case in CASES:
+            directory=self.root/case;directory.mkdir();dirs.append(directory)
+            row=dict(case=case,assembly=key[0],sequence=key[1],source_bp='100',
+                chromosome_scale='yes',graph_status='represented_in_clip',
+                filtered_query_covered_bp='40',assigned_chromosomes='chr10',
+                assigned_span_bp='100',ambiguous_span_bp='0',surviving_query_covered_bp='30',
+                retention_review='yes')
+            write_table(directory/'assignments.tsv',[row],list(row))
+            write_table(directory/'decisions.tsv',[],['assembly','sequence'])
+            write_intervals(directory/'surviving_intervals.tsv.gz',{case:{key:[(60,90)]}})
+            write_table(directory/'regions.tsv',[dict(case=case,assembly=key[0],sequence=key[1],
+                chromosome='chr10',start_0based=0,end_exclusive=100)],
+                ['case','assembly','sequence','chromosome','start_0based','end_exclusive'])
+        out=self.root/'summary'
+        report(dirs,out,coverage,selection)
+        text=(out/'assignment_report.md').read_text(encoding='utf-8')
+        self.assertIn('island / chr8+chr10',text)
+        self.assertIn('coverage_changes.tsv.gz',text)
+        from pangenome_source_audit import read_table
+        trace={r['stage']:r for r in read_table(out/'coverage_trace.tsv')}
+        self.assertEqual(trace['raw_paf']['lost_covered_bp'],'10')
+        self.assertEqual(trace['filtered_paf']['lost_covered_bp'],'50')
+        self.assertEqual(trace['baseline']['lost_covered_bp'],'10')
+        self.assertEqual(trace['baseline']['covered_bp'],'30')
+        changes=read_table(out/'coverage_changes.tsv.gz')
+        self.assertTrue(any(r['stage']=='filtered_paf' and r['start_0based']=='0'
+                            and r['end_exclusive']=='50' for r in changes))
+        self.assertIn('| regional_1Mb | 0 | 0 |',text)  # composites are not normal controls
 
     def test_fragment_coordinates_are_one_based_in_tool_zero_based_in_report(self):
         aliases={'IND_island.1':'island'};lengths={('island','chr1'):100}

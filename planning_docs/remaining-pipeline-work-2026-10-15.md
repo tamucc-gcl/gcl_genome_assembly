@@ -43,6 +43,12 @@ substeps remain recorded below and should not be repeated without a concrete rea
   Detailed original review: `comparisons/core-graph-01-inspection/QC-review.md`. No graph rebuild is
   indicated. Resource requests, Cactus/Toil version labeling and review-archive omissions
   were identified for category 7; consolidated presentation remains category 6.
+  **2026-10-23 checkpoint:** v8 rebuilt successfully; the separated chr4/chr14 paths
+  now survive. The retained chr7/chr12 composites retain only about half their source
+  path lengths. Name presence alone had hidden this from the PASS audit. Core
+  acceptance remains open pending the [cached mapping/filter/assignment coverage
+  trace](core-graph-coverage-trace.md); no additional graph rebuild or assembly cuts
+  are indicated before that evidence.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.
@@ -277,3 +283,14 @@ outside this agreed rework unless separately requested.
 - [Detailed PSMC design](completed-run-review-and-psmc-plan.md)
 - [Original architecture and batches](pipeline-rework-roadmap.md)
 - [Optional SyRI checkpoint](assembly-sv-integration-checkpoint.md)
+
+
+## Reporting follow-up — HiFi alternate placements (2026-10-22)
+
+Evidence figures must show apparent spanning molecules versus credible spans after
+checking same-haplotype alternatives, with ambiguous/rejected reads visually distinct.
+Show unique-arm bridge counts and read-length feasibility at each assessed site.
+Provide a compact read-placement view with alternative scaffold/locus, alignment
+quality and clipping; distinguish same-haplotype competition from other-haplotype
+similarity. Preserve per-library Hi-C context and applied/retained decision labels.
+This is deferred to the reporting pass; the underlying placement tables already exist.

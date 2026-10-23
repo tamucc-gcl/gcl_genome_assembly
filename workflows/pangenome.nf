@@ -82,7 +82,8 @@ workflow PANGENOME {
                     }
                 }, assignment_adapters)
                 PANGENOME_ASSIGNMENT_REPORT(PANGENOME_ASSIGNMENT_REPLAY.out.results.groupTuple()
-                    .map { taxid, names, directories -> tuple(taxid,directories) }, assignment_adapters)
+                    .map { taxid, names, directories -> tuple(taxid,directories) }
+                    .join(PANGENOME_ASSIGNMENT_PREPARE.out.coverage), assignment_adapters)
                 ch_report = ch_report.mix(PANGENOME_ASSIGNMENT_REPORT.out.report)
             }
             // The legacy construction `cactus --version` row reports Toil, not Cactus.
