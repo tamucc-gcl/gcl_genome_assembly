@@ -43,7 +43,7 @@ finish() {
             find -L "$out/results/pangenome" -type f \( -size -20M -o \
                 -name 'coverage_*.tsv.gz' -o -name 'surviving_intervals.tsv.gz' \) \( \
                 -name '*.md' -o -name '*.json' -o -name '*.tsv' -o -name 'coverage_*.tsv.gz' -o -name 'surviving_intervals.tsv.gz' -o -name '*.csv' -o \
-                -name '*.txt' -o -name '*filter.log' -o -name '*.xml' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' -o \
+                -name '*.txt' -o -name '*filter.log' -o -name '*.xml' -o -name '*.diff' -o -name '*.png' -o -name '*.svg' -o -name '*.pdf' -o \
                 -name '*.nwk' -o -name '*.stats.tgz' \) -print0)
     fi
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \

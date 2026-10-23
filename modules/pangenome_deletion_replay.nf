@@ -1,4 +1,5 @@
 /* Optional cached-input experiment. No construction task or assembly is changed. */
+include { PANGENOME_REGIONAL_PATCH_TEST } from './pangenome_regional_patch.nf'
 process PANGENOME_DELETION_PREPARE {
     tag "${taxid}"
     label 'cactus_tools'
@@ -108,6 +109,8 @@ workflow PANGENOME_DELETION_DIAGNOSTIC {
     take:
     ch_inputs
     adapters
+    patch_sources
+    patch_adapter
     main:
     PANGENOME_DELETION_PREPARE(ch_inputs, adapters)
     PANGENOME_DELETION_FILTER(PANGENOME_DELETION_PREPARE.out.prepared.flatMap { taxid, prepared, contigs ->
@@ -120,7 +123,14 @@ workflow PANGENOME_DELETION_DIAGNOSTIC {
         .map { taxid, policies, dirs -> tuple(taxid,dirs) }
         .join(PANGENOME_DELETION_ASSIGN.out.results.groupTuple()
             .map { taxid, policies, cases, dirs -> tuple(taxid,dirs) }), adapters)
+    ch_report = PANGENOME_DELETION_REPORT.out.report
+    if (params.pangenome_regional_patch_replay) {
+        PANGENOME_REGIONAL_PATCH_TEST(PANGENOME_DELETION_FILTER.out.prepared,
+            PANGENOME_DELETION_ASSIGN.out.results, PANGENOME_DELETION_FILTER.out.reviews,
+            patch_sources, patch_adapter, adapters)
+        ch_report = ch_report.mix(PANGENOME_REGIONAL_PATCH_TEST.out.report)
+    }
     emit:
-    report = PANGENOME_DELETION_REPORT.out.report
+    report = ch_report
     files = PANGENOME_DELETION_REPORT.out.files
 }

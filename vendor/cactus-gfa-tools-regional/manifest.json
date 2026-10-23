@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/ComparativeGenomicsToolkit/cactus-gfa-tools",
+  "commit": "f9b999e54c49a05ad6e9d44e1832c4a8421f28f2",
+  "archive_sha256": "8e24ce3e01c6d2ab2c7e668736f7989e4c99e3a10a16afbf80420594e693623e",
+  "files": {
+    "gfakluge.hpp": "e006e8ed3b39a9ee51f679910090f5f6b8ae6f94f0763a5c763b0a457104ea8c",
+    "IntervalTree.h": "da1958ba2244c6bf791bd6be9fb4b39fa531c34dc649100fd1c0b0af9f19baae",
+    "LICENSE": "a6c6f87ca9301443e2c24d472fe8ac0b28195df7814b52042da4b664fe74f073",
+    "paf.hpp": "6be00537390064337e42fdd44552cd673f80ae94f3ba5bbca7de5fe28917034b",
+    "pafcoverage.cpp": "1f68951ef4b2a6a340d41642179c76a89c998e527a93cd320b368ae6a465d31b",
+    "pafcoverage.hpp": "dc0f2ca7d7d0c066fbe89074cf746b90e3056be1354f206ff202887c53adb2f5",
+    "pliib.hpp": "aa434d3582b7abebd19af04a1d3876d5fd7174180db2af27c94b94bf02cfd2e3",
+    "rgfa-split.cpp": "6ba591b3b89840260e8ab392ee4ff8d07d9130170a83d4cd357301842244c601",
+    "rgfa-split.hpp": "375bad8044b10729f8f084544df52e1ef31aa893a523a4fdabb4b9d9b1f08c9e",
+    "rgfa-split_main.cpp": "ef13257a8dc183af1f87feb26e3442983abcdc827e66fb40af0a0247e437ba74",
+    "tinyfa.hpp": "957226805aa4eeeb854a91faef6271db9dc6a5ab870834c053d30f81c67bd871"
+  }
+}

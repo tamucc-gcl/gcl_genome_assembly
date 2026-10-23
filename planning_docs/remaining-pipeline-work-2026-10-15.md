@@ -54,6 +54,12 @@ substeps remain recorded below and should not be repeated without a concrete rea
   is now wired into the pipeline: native, guarded and disabled filtering, each
   followed by whole-query/regional assignment. Production graph policy remains
   unchanged pending the Crest comparison and final graph acceptance.
+    The deletion comparison reproduced the native exported PAF byte for byte and
+    confirmed recovery under chromosome-isolated filtering. A separate upstream
+    regional grouping comparison still discards an arm. The next
+    [pinned regional correction test](core-graph-regional-assignment-test.md) changes
+    that one comparison, audits source-coordinate ownership, and reuses existing
+    graph/filter tasks. Category 5 remains open until real-data and final graph acceptance.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.

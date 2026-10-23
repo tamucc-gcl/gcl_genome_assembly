@@ -1,0 +1,6 @@
+name: rgfa_split_patch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - gxx_linux-64=12.4

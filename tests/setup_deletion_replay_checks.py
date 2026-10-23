@@ -10,10 +10,10 @@ assets=root/'deletion-fixtures';assets.mkdir(exist_ok=True)
 tools=root/'assignment-tools';packages=tools/'packages'
 (packages/'cactus/cactus_progressive_config.xml').write_text('''<config><graphmap minMAPQ="5" collapse="none" delFilter="10000000" delFilterThreshold="0.01" delFilterQuerySizeThreshold="2"/><graphmap_split minQueryCoverages="0.75 0.5 0.25" minQueryCoverageThresholds="100000 1000000" minQueryUniqueness="2" ambiguousName="_AMBIGUOUS_"/></config>''')
 with gzip.open(assets/'sv.gfa.gz','wt') as f:
-    f.write('S\tsA\tACGT\tSN:Z:chrA\tSO:i:0\tSR:i:0\nS\tsB\tACGT\tSN:Z:chrB\tSO:i:0\tSR:i:0\n')
+    f.write('S\ts1\tACGT\tSN:Z:chrA\tSO:i:0\tSR:i:0\nS\ts2\tACGT\tSN:Z:chrB\tSO:i:0\tSR:i:0\n')
 query='id=IND_sample.1|chrA+chrB'
 records=[f'{query}\t8000000\t{start}\t{start+4000000}\t+\tid=_MINIGRAPH_|{node}\t4000000\t0\t4000000\t4000000\t4000000\t60\n'
-         for start,node in ((0,'sA'),(4000000,'sB'))]
+         for start,node in ((0,'s1'),(4000000,'s2'))]
 with gzip.open(assets/'input.paf.unfiltered.gz','wt') as f:f.writelines(records)
 (assets/'input.paf').write_text(records[1])
 (assets/'input.paf.filter.log').write_text('fixture: native drops the chrA lane from the composite\n')
@@ -38,7 +38,7 @@ for line in rows:
  f=line.split('\\t');targets[f[0]].add(f[5])
 for line in rows:
  f=line.split('\\t')
- if len(targets[f[0]])>1 and f[5].endswith('sA'):continue
+ if len(targets[f[0]])>1 and f[5].endswith('s1'):continue
  sys.stdout.write(line)
 print('fixture native deletion filter',file=sys.stderr)
 ''');binary.chmod(0o755)
@@ -50,7 +50,7 @@ args=sys.argv[1:];prefix=args[args.index('-b')+1]
 rows=[line.rstrip().split('\\t') for line in Path(args[args.index('-p')+1]).read_text().splitlines()]
 regional='-u' in args
 Path(args[args.index('-L')+1]).write_text('fixture assignment decisions\\n')
-for chrom,node in [('chrA','sA'),('chrB','sB')]:
+for chrom,node in [('chrA','s1'),('chrB','s2')]:
  chosen=[f for f in rows if f[5].endswith(node)]
  if not regional and chrom!='chrB':continue
  if not chosen:continue

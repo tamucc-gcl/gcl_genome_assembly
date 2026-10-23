@@ -15,6 +15,8 @@ workflow PANGENOME {
     ch_report = Channel.empty()
     ch_manifest = Channel.empty()
     if (params.run_pangenome) {
+        if (params.pangenome_regional_patch_replay && (!params.pangenome_deletion_filter_replay || params.pangenome_validate_only))
+            error 'Regional patch replay requires the deletion-filter diagnostic and a completed graph (not validation-only)'
         if (params.pangenome_gref != true || params.pangenome_gref_source != 'clip')
             error 'The default graph contract requires pangenome_gref=true and pangenome_gref_source=clip'
         if (params.pangenome_grefl != null)
@@ -96,7 +98,9 @@ workflow PANGENOME {
                     .join(PANGENOME_CONSTRUCTION.out.identities)
                     .join(PANGENOME_SOURCE_AUDIT.out.files.map { taxid, files ->
                         tuple(taxid, files.find { it.name == 'source_sequences.tsv' })
-                    }), deletion_adapters)
+                    }), deletion_adapters,
+                    file("${projectDir}/vendor/cactus-gfa-tools-regional", checkIfExists: true),
+                    file("${projectDir}/py_scripts/pangenome_regional_patch.py", checkIfExists: true))
                 ch_report = ch_report.mix(PANGENOME_DELETION_DIAGNOSTIC.out.report)
             }
             // The legacy construction `cactus --version` row reports Toil, not Cactus.

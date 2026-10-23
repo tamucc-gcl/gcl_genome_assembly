@@ -129,6 +129,36 @@ if ! run_nextflow; then
     exit 1
 fi
 if [[ "${1:-}" == deletion_replay_checks.nf ]]; then
+    if [[ "${2:-}" == regional_patch_resume ]]; then
+        extra+=(-resume --pangenome_regional_patch_replay true)
+        run_nextflow | tee regional-resume.log
+        grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_PREP' regional-resume.log
+        grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_FILTER' regional-resume.log
+        test -s "$runtime/deletion-results/pangenome/1/deletion_filter/regional_assignment_report.md"
+        test -s "$runtime/deletion-results/pangenome/1/deletion_filter/regional_coordinate_audit.tsv"
+        test -s "$runtime/deletion-results/pangenome/tools/regional_patch/native_regressions.tsv"
+        python3 - "$runtime/deletion-results/pangenome/1/deletion_filter" <<'PY'
+import csv
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+with (root/'regional_assignment_comparison.tsv').open() as f:
+    rows={r['policy']:r for r in csv.DictReader(f,delimiter='\t')}
+assert int(rows['native']['fixed_regional_bp'])==4000000,rows
+for policy in ('chromosome_isolated','disabled'):
+    assert int(rows[policy]['fixed_regional_bp'])==8000000,rows
+    assert set(rows[policy]['fixed_chromosomes'].split(','))=={'chrA','chrB'},rows
+with (root/'regional_coordinate_audit.tsv').open() as f:
+    audits=list(csv.DictReader(f,delimiter='\t'))
+assert len(audits)==3 and all(r['status']=='PASS' and int(r['duplicate_or_overlapping_bp'])==0 for r in audits)
+print('PASS: both chromosome arms retained by the real corrected tool without duplicate source ownership')
+PY
+        mkdir -p "$repo/comparisons/core-graph-regional-validation"
+        cp regional-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-resume.log"
+        cp "$runtime/deletion-results/pangenome/1/deletion_filter/"regional_assignment* "$repo/comparisons/core-graph-regional-validation/"
+        cp "$runtime/deletion-results/pangenome/tools/regional_patch/native_regressions.tsv" "$repo/comparisons/core-graph-regional-validation/"
+        echo 'PASS: patched native regional assignment runs; preparation and deletion filters resume from cache'
+    fi
     deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
     test -s "$deletion_out/deletion_filter_report.md"
     test -s "$deletion_out/assignment_comparison.tsv"
