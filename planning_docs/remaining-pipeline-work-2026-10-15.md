@@ -90,6 +90,12 @@ substeps remain recorded below and should not be repeated without a concrete rea
     [production rebuild and acceptance run](core-graph-production-01-test.md) now
     checks actual chromosome-arm representation, excluded source ends and distinct
     graph-node accounting. Category 5 remains open pending Crest acceptance.
+    [Production-01 failed](core-graph-production-01-assessment.md) at a pinned
+    Cactus fragment FASTA/PAF naming mismatch, before completed graph export.
+    The production adapter now reconciles fragment identifiers without changing
+    coordinates and probes the installed extraction/sanitizing tools before
+    graph construction. Production-02 must pass the existing recovery/accounting
+    acceptance checks; no assembly or chimera changes are indicated.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.

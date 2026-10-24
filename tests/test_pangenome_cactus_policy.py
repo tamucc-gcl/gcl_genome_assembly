@@ -1,6 +1,8 @@
 import ast
 import gzip
 import json
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -57,6 +59,35 @@ class CactusPolicyTests(unittest.TestCase):
         (self.root/'split_chrA.paf').write_text('id=S.1|a:11-80\t70\t0\t71\t+\tn\t100\t0\t71\t71\t71\t60\n')
         paf=self.root/'in.paf';paf.write_text('')
         with self.assertRaisesRegex(ValueError,'outside'):mod.audit_split(self.data,self.root/'split_',paf,'split_test')
+
+    def test_fragment_paf_name_matches_sanitized_fasta_without_changing_coordinates(self):
+        name='id=S.1|a:11-80'
+        regions=self.root/'split_A.fa_contigs';regions.write_text(name+'\n')
+        paf=self.root/'split_A.paf'
+        original=f'{name}\t70\t5\t65\t+\tnode\t100\t9\t69\t60\t60\t60\tcg:Z:60M\n'
+        paf.write_text(original)
+        result=mod.normalize_split_pafs(self.data,self.root/'split_')
+        self.assertEqual(paf.read_text(),original.replace(name,'id=S.1|a_sub_10_80',1))
+        self.assertEqual(regions.read_text(),name+'\n')
+        self.assertEqual(result['renamed_mapping_records'],1)
+        self.assertEqual(resolve_sequence('S.1','a_sub_10_80',{'id=S.1|a':100}),('id=S.1|a',10,80))
+
+    def test_fragment_alias_collision_fails(self):
+        sources=self.sources+[dict(query='id=S.1|a_sub_10_80',sample='S.1',sequence='a_sub_10_80',source_bp=70)]
+        mod.write_table(self.root/'lengths.tsv',sources,list(sources[0]))
+        (self.root/'split_A.fa_contigs').write_text('id=S.1|a:11-80\n')
+        with self.assertRaisesRegex(ValueError,'collides'):mod.normalize_split_pafs(self.data,self.root/'split_')
+
+    @unittest.skipUnless(shutil.which('sed'),'GNU sed regression runs in Linux integration checks')
+    def test_pinned_upstream_rename_leaves_colon_paf_unchanged(self):
+        sys.path.insert(0,str(Path(__file__).parent/'fixtures'))
+        from cactus_fragment_rename import get_faidx_subpath_rename_cmd
+        raw='id=S.1|a:11-80\t70\t0\t70\t+\tnode\t100\t0\t70\t70\t70\t60\n'
+        result=subprocess.run(get_faidx_subpath_rename_cmd(),input=raw,text=True,stdout=subprocess.PIPE,check=True)
+        self.assertEqual(result.stdout,raw)
+        fixed=raw.replace('a:11-80','a_sub_10_80')
+        result=subprocess.run(get_faidx_subpath_rename_cmd()+['-e','s/ /\t/g'],input=fixed,text=True,stdout=subprocess.PIPE,check=True)
+        self.assertEqual(result.stdout,fixed)
 
     def graph(self,walks,segments='S\t1\tACGT\n'):
         p=self.root/'graph.gfa';p.write_text(segments+walks);return p

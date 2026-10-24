@@ -14,6 +14,7 @@ checks = [
     ('core_contract_checks.nf', 'success', True, 'PASS: validated graph roles'),
     ('core_contract_checks.nf', 'assignment_inputs', True, 'PASS: cached assignment inputs retain species-specific'),
     ('core_contract_checks.nf', 'graph_failure', False, 'exit status (17)'),
+    ('core_contract_checks.nf', 'fragment_header_failure', False, 'Installed Cactus fragment FASTA convention differs'),
     ('core_contract_checks.nf', 'cross_species', False, 'Cross-species graph input'),
     ('core_contract_checks.nf', 'missing_graph_role', False, 'Graph output audit failed'),
     ('core_contract_checks.nf', 'organelle_failure', False, 'exit status (17)'),

@@ -71,6 +71,74 @@ def fasta_lengths(path):
     return result
 
 
+def fragment_alignment_name(query,lo,hi):
+    """Cactus sanitizer/hal2vg convention, with original 0-based source bounds."""
+    return f'{query}_sub_{lo}_{hi}'
+
+
+def check_fragment_header_contract(runtime):
+    """Probe the actual installed extraction/sanitizing tools before graph building."""
+    from cactus.shared.common import get_faidx_subpath_rename_cmd
+    root=Path(runtime)/'fragment_header_check';root.mkdir()
+    event='GCL_POLICY_CHECK';query=f'id={event}|sequence'
+    fasta=root/'input.fa';fasta.write_text(f'>{query}\n'+('ACGT'*25)+'\n')
+    regions=root/'regions.txt';regions.write_text(f'{query}:11-50\n{query}:1-20\n')
+    extracted=subprocess.run(['samtools','faidx',str(fasta),'--region-file',str(regions)],
+        check=True,stdout=subprocess.PIPE).stdout
+    rename_cmd=get_faidx_subpath_rename_cmd()
+    renamed=subprocess.run(rename_cmd,input=extracted,check=True,stdout=subprocess.PIPE).stdout
+    fragment_fasta=root/'fragments.fa';fragment_fasta.write_bytes(renamed)
+    sanitized=subprocess.run(['cactus_sanitizeFastaHeaders',str(fragment_fasta),event,'-p'],
+        check=True,stdout=subprocess.PIPE).stdout.decode()
+    expected={fragment_alignment_name(query,10,50):40,fragment_alignment_name(query,0,20):20}
+    sanitized_file=root/'sanitized.fa';sanitized_file.write_text(sanitized)
+    if fasta_lengths(sanitized_file)!=expected:
+        raise ValueError('Installed Cactus fragment FASTA convention differs from audited PAF normalization')
+    prefix=root/'split_';(root/'split_chr.fa_contigs').write_text(regions.read_text())
+    lengths=root/'source_lengths.tsv'
+    write_table(lengths,[dict(query=query,source_bp=100)],['query','source_bp'])
+    raw_paf=''.join(f'{query}:{lo+1}-{hi}\t{hi-lo}\t0\t{hi-lo}\t+\tnode\t100\t0\t{hi-lo}\t{hi-lo}\t{hi-lo}\t60\n'
+        for lo,hi in [(10,50),(0,20)])
+    paf_path=root/'split_chr.paf';paf_path.write_text(raw_paf)
+    normalization=normalize_split_pafs(dict(source_lengths=lengths),prefix)
+    paf=paf_path.read_text()
+    normalized=subprocess.run(rename_cmd+['-e','s/ /\t/g'],input=paf.encode(),check=True,stdout=subprocess.PIPE).stdout.decode()
+    identities={f[0]:int(f[1]) for f in (line.split('\t') for line in normalized.splitlines())}
+    if normalized!=paf or identities!=expected:
+        raise ValueError('Cactus extracted FASTA and normalized fragment PAF names/lengths disagree')
+    result=dict(status='PASS',fragments=2,coordinate_convention='0-based half-open',
+        sanitizer=shutil.which('cactus_sanitizeFastaHeaders'),faidx=shutil.which('samtools'),rename_command=rename_cmd,
+        normalization=normalization)
+    dump(root/'result.json',result)
+    print('Cactus fragment FASTA/PAF header contract: PASS',file=sys.stderr)
+    return result
+
+
+def normalize_split_pafs(data,prefix):
+    """Normalize alignment names only; keep faidx extraction lists/coordinates intact."""
+    lengths={r['query']:int(r['source_bp']) for r in read_table(data['source_lengths'])}
+    aliases={q:(q,0,n) for q,n in lengths.items()};renames={}
+    for path in Path(prefix).parent.glob(Path(prefix).name+'*.fa_contigs'):
+        for name in path.read_text().splitlines():
+            parsed=source_fragment(name,lengths)
+            if parsed is None or name in lengths:continue
+            query,lo,hi=parsed;alias=fragment_alignment_name(query,lo,hi)
+            if alias in aliases and aliases[alias]!=parsed:
+                raise ValueError('Fragment alignment name collides with another source: '+alias)
+            aliases[alias]=parsed;renames[name]=alias
+    records=0;files=0
+    for path in Path(prefix).parent.glob(Path(prefix).name+'*.paf'):
+        tmp=path.with_suffix('.normalized.tmp')
+        with path.open() as src,tmp.open('w') as dst:
+            for line in src:
+                fields=line.rstrip('\n').split('\t')
+                if fields[0] in renames:
+                    fields[0]=renames[fields[0]];records+=1
+                dst.write('\t'.join(fields)+'\n')
+        os.replace(tmp,path);files+=1
+    return dict(status='PASS',fragment_names=len(renames),renamed_mapping_records=records,paf_files=files)
+
+
 def prepare(tools,seqfile,runtime,out,chunk):
     import cactus
     from cactus.shared.version import cactus_commit
@@ -84,6 +152,7 @@ def prepare(tools,seqfile,runtime,out,chunk):
         raise ValueError('Production regional executable provenance mismatch')
     native=shutil.which('filter-paf-deletions')
     if not native:raise ValueError('Native deletion filter unavailable')
+    header_check=check_fragment_header_contract(runtime)
     config=Path(cactus.__file__).parent/'cactus_progressive_config.xml';xml=ET.parse(config).getroot()
     if xml.find('graphmap').get('collapse','none')!='none' or int(xml.find('graphmap').get('delFilter','-1'))<=0:
         raise ValueError('Production guarded policy requires positive deletion filtering without collapse')
@@ -100,7 +169,7 @@ def prepare(tools,seqfile,runtime,out,chunk):
         native_filter=str(Path(native).resolve()),native_filter_sha256=sha256(native),
         source_lengths=str(out/'source_lengths.tsv'),evidence=str(out),
         ambiguous_name=xml.find('graphmap_split').get('ambiguousName','_AMBIGUOUS_'),
-        config_sha256=sha256(config),runtime_sha256=sha256(__file__))
+        config_sha256=sha256(config),runtime_sha256=sha256(__file__),fragment_header_check=header_check)
     dump(runtime/'policy.json',policy);dump(out/'policy.json',policy);shutil.copyfile(tools/'build.json',out/'tool_build.json')
     for name,mode in [('filter-paf-deletions','filter'),('rgfa-split','split')]:
         script=(f'#!{sys.executable}\nimport os,sys\nos.execv({sys.executable!r},'
@@ -220,6 +289,9 @@ def regional_split(policy,args):
     subprocess.run(cmd,check=True)
     ident='split_'+uuid.uuid4().hex
     stats=audit_split(data,cmd[cmd.index('-b')+1],cmd[cmd.index('-p')+1],ident)
+    # Keep fa_contigs in faidx notation for extraction, but match the names that
+    # cactus_sanitizeFastaHeaders -p gives the extracted FASTAs before alignment.
+    stats['fragment_header_normalization']=normalize_split_pafs(data,cmd[cmd.index('-b')+1])
     dump(Path(data['evidence'])/(ident+'.json'),dict(kind='split',policy=POLICY,chunk_bp=data['chunk_bp'],command=cmd,**stats))
 
 
@@ -232,6 +304,7 @@ def summarize(policy):
     stats=splits[0]
     text=['# Graph input sequence accounting','',f'Policy: `{POLICY}`. Regional chunk: {data["chunk_bp"]:,} bp.','',
         'Deletion filtering runs on separate query/chromosome lanes. Regional assignment uses the pinned grouping correction. '
+        'Fragment alignment identifiers match the Cactus FASTA sanitizer; native extraction/header checks passed before construction. '
         'Source coordinates and input assembly sequences are unchanged.','',
         '| Category | Bases |','|---|---:|',f'| Assigned to chromosome partitions | {stats["assigned_bp"]:,} |',
         f'| Ambiguous, omitted from chromosome subproblems | {stats["ambiguous_bp"]:,} |',

@@ -1,5 +1,6 @@
 """Tiny external tool doubles; orchestration/auditors remain production code."""
 import sys
+import shutil
 from pathlib import Path
 
 root = Path(sys.argv[1])
@@ -10,6 +11,31 @@ packages=tools/'packages';(packages/'cactus/shared').mkdir(parents=True,exist_ok
 (packages/'cactus/__init__.py').write_text('')
 (packages/'cactus/shared/__init__.py').write_text('')
 (packages/'cactus/shared/version.py').write_text("cactus_commit='d7e5fc1b51327a5a4cdb494c85b0607e3d81a713'\n")
+shutil.copyfile(Path(__file__).parent/'fixtures/cactus_fragment_rename.py',packages/'cactus/shared/common.py')
+# External extraction/sanitizer doubles support the native header probe. The
+# unchanged upstream sed helper above executes for real; native tools run on Crest.
+for name,body in {
+    'samtools': '''import sys
+from pathlib import Path
+fa=Path(sys.argv[2]).read_text().splitlines();name=fa[0][1:];sequence=''.join(fa[1:])
+for region in Path(sys.argv[sys.argv.index('--region-file')+1]).read_text().splitlines():
+    base,span=region.rsplit(':',1);lo,hi=map(int,span.split('-'))
+    assert base==name
+    print('>'+region);print(sequence[lo-1:hi])
+''',
+    'cactus_sanitizeFastaHeaders': '''import re,sys
+from pathlib import Path
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line.startswith('>'):
+        match=re.fullmatch(r'(.*):(\\d+)-(\\d+)',line)
+        if match:line=match[1]+'_sub_'+str(int(match[2])-1)+'_'+match[3]
+    print(line)
+'''
+}.items():
+    tool=tools/name;tool.write_text('#!/usr/bin/env python3\n'+body);tool.chmod(0o755)
+if case=='fragment_header_failure':
+    sanitizer=tools/'cactus_sanitizeFastaHeaders'
+    sanitizer.write_text(sanitizer.read_text().replace("print(line)","print(line.replace('_sub_', '_wrong_'))"))
 (packages/'cactus/cactus_progressive_config.xml').write_text('<config><graphmap collapse="none" delFilter="10000000"/><graphmap_split ambiguousName="_AMBIGUOUS_"/></config>')
 (packages/'cactus-3.2.1.dist-info').mkdir(exist_ok=True)
 (packages/'cactus-3.2.1.dist-info/METADATA').write_text('Name: cactus\nVersion: 3.2.1\n')
