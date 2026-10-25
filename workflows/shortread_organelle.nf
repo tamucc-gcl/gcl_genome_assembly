@@ -26,6 +26,7 @@
 
 include { DOWNLOAD_GETORGANELLE_DB } from '../modules/download_getorganelle_db.nf'
 include { GETORGANELLE }            from '../modules/getorganelle.nf'
+include { attachRequiredContext } from '../functions/organelle_context.nf'
 
 workflow SHORTREAD_ORGANELLE {
     take:
@@ -40,13 +41,17 @@ workflow SHORTREAD_ORGANELLE {
             ).config_dir.first()
 
     // Fan out: one GETORGANELLE task per (sample, organelle target).
-    ch_reads
+    ch_by_taxid = ch_reads
         .map { meta, sr1, sr2 -> tuple(meta.taxid?.toString(), meta, sr1, sr2) }
-        .combine( ch_organelle, by: 0 )
-        .flatMap { taxid, meta, sr1, sr2, specs -> specs.collect { s -> tuple(meta, sr1, sr2, s) } }
+    attachRequiredContext(ch_by_taxid, ch_organelle, 'organelle targets')
+        .flatMap { taxid, meta, sr1, sr2, specs ->
+            if (!specs) error "No organelle targets for enabled sample '${meta.sample}'"
+            specs.collect { s -> tuple(meta, sr1, sr2, s) }
+        }
         .set { ch_jobs }
 
-    GETORGANELLE( ch_jobs, ch_db )
+    GETORGANELLE( ch_jobs, ch_db,
+        file("${projectDir}/py_scripts/organelle_command.py", checkIfExists: true) )
 
     emit:
     assembly = GETORGANELLE.out.assembly

@@ -26,7 +26,15 @@ substeps remain recorded below and should not be repeated without a concrete rea
   enablement/admission, with singleton/override/species-isolation tests and final FASTA/FAI
   identity checks. Real run 1535231 confirms the shared reference checksum agrees with graph
   inputs. PSMC consumption belongs to category 8; graph tool-version labeling remains category 7.
-- [ ] **5. Core pangenome** — construction, role checks, sharing/growth, regional attribution,
+- [x] **5. Core pangenome** — accepted 2026-10-25 from
+  [production-02 acceptance](core-graph-production-02-assessment.md): 17 completed,
+  840 cached, zero failures/retries. Both missing CTlk chr7 arms recover; CLIP
+  retains 96.82%/95.88% of the composite inputs. All 6,182 sources are accounted
+  through partitioning and FULL/CLIP, with no assignment overlaps or stage-coordinate
+  discrepancies. Five pre-existing low-retention flags remain explicit for later
+  graph QC/interpretation; they are not new regressions. Temporary diagnostics and
+  report/resource cleanup remain categories 6/7. Earlier checkpoints follow.
+  Construction, role checks, sharing/growth, regional attribution,
   similarity/ordination/tree and standard variant-export/count audits passed real run 1535231
   (15 completed, 826 cached; no failures/retries). Ten assemblies/five individuals; reference
   Sde-CMat_203_hap1. Finish compact FULL/clipping accounting before final category acceptance.
@@ -109,6 +117,21 @@ Category 1 does not wait for optional post-assembly comparison plots or the cons
 report. Their runtime/routing/dependency acceptance belongs to categories 2/7 and their
 report integration to category 6. If later work exposes a concrete defect affecting an
 accepted category, record and address it rather than silently retaining an invalid checkmark.
+
+**2026-10-25 continuation:** completed pangenome replay/trace diagnostics are removed
+from the active pipeline. Permanent production ownership/coordinate/native checks
+remain. The [tool-change record](../docs/pangenome-tool-changes.md) distinguishes
+implementation defects from policy choices and documents biological rationale,
+validation and limitations. The [input/failure/cleanup checkpoint](core-input-failure-cleanup-checkpoint.md)
+records the expanded bounded matrix and the specific remaining short-read,
+taxonomy/reference, operational and reporting checks. Categories 2/3/6/7 remain open;
+PSMC remains the first extension after their core acceptance gate.
+
+The subsequent [organelle/taxonomy contract pass](organelle-failure-contracts-2026-10-25.md)
+repairs swallowed GetOrganelle/MITOS failures, retry graph discovery, incomplete
+versus circular naming, missing context joins and invalid taxonomy records. It adds
+enabled-route fixtures and explicit recovery states; native short-read pilot and
+multi-record annotation support remain unaccepted, so categories 2/3/7 stay open.
 
 ### 2026-10-16 input/reference/graph check batch
 

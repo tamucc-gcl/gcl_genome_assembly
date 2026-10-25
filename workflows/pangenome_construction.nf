@@ -17,8 +17,6 @@ workflow PANGENOME_CONSTRUCTION {
     ch_versions = Channel.empty()
     ch_support_qc = Channel.empty()
     ch_source_evidence = Channel.empty()
-    ch_assignment_input = Channel.empty()
-    ch_deletion_input = Channel.empty()
     PANGENOME_PREFLIGHT(ch_cohorts.map { row -> true }.unique())
     PANGENOME_INPUT_AUDIT(ch_cohorts,
         file("${projectDir}/py_scripts/pangenome_input_audit.py", checkIfExists: true))
@@ -75,30 +73,6 @@ workflow PANGENOME_CONSTRUCTION {
         .join(PANGENOME_SEQUENCE_AUDIT.out.ready)
         .map { taxid, vcf, tbi, identities, check, sequence_check -> tuple(taxid, vcf, tbi, identities) }
     ch_versions = CACTUS_PANGENOME.out.versions
-    if (params.pangenome_assignment_replay) {
-        ch_assignment_input = CACTUS_PANGENOME.out.all
-            .join(ch_cohorts.map { row -> tuple(row[0],row[4]) })
-            .map { taxid, products, contigs ->
-                def files = products instanceof Collection ? products : [products]
-                def graph = files.find { it.name == taxid + '.sv.gfa.gz' }
-                def paf = files.find { it.name == taxid + '.paf' }
-                def gaf = files.find { it.name == taxid + '.gaf.gz' }
-                if (!graph || !paf || !gaf) error 'Assignment replay requires cached Cactus SV rGFA, mapping PAF and raw GAF'
-                tuple(taxid, graph, paf, gaf, contigs)
-            }
-    }
-    if (params.pangenome_deletion_filter_replay) {
-        ch_deletion_input = CACTUS_PANGENOME.out.all
-            .join(ch_cohorts.map { row -> tuple(row[0],row[4]) })
-            .map { taxid, products, contigs ->
-                def files = products instanceof Collection ? products : [products]
-                def selected = ['.sv.gfa.gz','.paf','.paf.unfiltered.gz','.paf.filter.log'].collect { suffix ->
-                    files.find { it.name == taxid + suffix }
-                }
-                if (selected.any { it == null }) error 'Deletion replay requires cached SV graph, exported PAF, pre-deletion PAF and deletion-filter log'
-                tuple(taxid, *selected, contigs)
-            }
-    }
     ch_source_evidence = CACTUS_PANGENOME.out.all.map { taxid, products ->
         def files = products instanceof Collection ? products : [products]
         def evidence = []
@@ -131,6 +105,4 @@ workflow PANGENOME_CONSTRUCTION {
     versions = ch_versions
     support_qc = ch_support_qc
     source_evidence = ch_source_evidence
-    assignment_input = ch_assignment_input
-    deletion_input = ch_deletion_input
 }

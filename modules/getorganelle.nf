@@ -13,11 +13,11 @@
                    gives a clean plastome/mito-sized graph in minutes.
       2. PRUNE     if no circle was closed, re-disentangle the graph with
                    get_organelle_from_assembly.py --min-depth to drop low-depth contamination
-                   (rescues contamination-limited samples; harmless otherwise). Toggle via
+                   (a retry policy, not a guarantee of recovery). Toggle via
                    params.getorganelle_from_assembly.
       3. SELECT    prefer a certified-circular config; else take the largest scaffolded
                    (linear) path. Always emit a usable FASTA (unless nothing assembled) plus
-                   status in {circular, linear, failed}. Plant mitogenomes and IR/MTPT-tangled
+                   status in {circular, linear, no_recovery}. Plant mitogenomes and IR/MTPT-tangled
                    plastomes legitimately end at 'linear' — a valid result, not a failure —
                    and it feeds annotation + organelle-removal unchanged.
 
@@ -26,9 +26,9 @@
       val config_dir               GetOrganelle DB dir (DOWNLOAD_GETORGANELLE_DB)
     Output:
       assembly  tuple(meta, org.type, fasta)   canonical FASTA, sample/status-tagged headers
-                                               (absent if status=failed -> sample drops out)
+                                               (absent on no-recovery; nuclear sample continues)
       graph     tuple(meta, org.type, gfa)     largest selected graph (Bandage/QC)
-      stats     tuple(meta, org.type, tsv)     status/length/params (ALWAYS, incl. failed)
+      stats     tuple(meta, org.type, tsv)     completed-run status/length/params, incl. no-recovery
       log       the GetOrganelle reads-run log
 ========================================================================================
 */
@@ -42,6 +42,7 @@ process GETORGANELLE {
     input:
     tuple val(meta), path(sr1), path(sr2), val(org)
     val config_dir
+    path command_check
 
     output:
     tuple val(meta), val(org.type), path("${meta.sample}.${org.type}.fasta"),           emit: assembly, optional: true
@@ -49,6 +50,7 @@ process GETORGANELLE {
     tuple val(meta), val(org.type), path("${meta.sample}.${org.type}.stats.tsv"),       emit: stats
     tuple val(meta), val(org.type), path("${meta.sample}.${org.type}.get_org.log.txt"), emit: log,      optional: true
     path "versions.tsv", emit: versions
+    tuple val(meta), val(org.type), path("${meta.sample}.${org.type}.*.command.log"), emit: execution_logs
 
     script:
     def cov       = org.coverage
@@ -60,7 +62,7 @@ process GETORGANELLE {
     def do_prune  = (params.getorganelle_from_assembly == false) ? 'false' : 'true'
     def min_depth = params.getorganelle_min_depth ?: 10
     """
-    set -eu
+    set -euo pipefail
     shopt -s nullglob
 
     SAMPLE="${meta.sample}"
@@ -68,7 +70,7 @@ process GETORGANELLE {
     echo "[GETORGANELLE] sample=\${SAMPLE} organelle=\${ORG} cov=${cov} -R=${rounds} -k=${kmers} ${wflag}"
 
     # ---------- 1) primary attempt: recruit + assemble from reads (coverage-capped) ----------
-    get_organelle_from_reads.py \\
+    python3 ${command_check} --log "\${SAMPLE}.\${ORG}.reads.command.log" -- get_organelle_from_reads.py \\
         --config-dir "${config_dir}" \\
         -1 ${sr1} -2 ${sr2} \\
         -F \${ORG} \\
@@ -78,33 +80,33 @@ process GETORGANELLE {
         -k ${kmers} \\
         -o reads_out \\
         -t ${task.cpus} \\
-        ${extra} || echo "[GETORGANELLE] reads run exited non-zero; will inspect the graph"
+        ${extra}
 
     [ -f reads_out/get_org.log.txt ] && cp reads_out/get_org.log.txt "\${SAMPLE}.\${ORG}.get_org.log.txt" || true
 
     # labelled graph from the reads run (for the prune-retry and QC)
-    rg=(reads_out/extended_spades/K*/*extend-embplant*.fastg)
+    rg=(reads_out/extended_spades/K*/*.fastg reads_out/extended_spades/assembly_graph*.fastg)
     READS_GRAPH=""
     [ \${#rg[@]} -gt 0 ] && READS_GRAPH=\$(ls -S "\${rg[@]}" | head -n1)
 
     # ---------- 2) optional prune + retry if no circle was closed ----------
-    comp0=(reads_out/*complete*.path_sequence.fasta)
+    comp0=(reads_out/*.complete.*.path_sequence.fasta)
     if [ \${#comp0[@]} -eq 0 ] && [ "${do_prune}" = "true" ] && [ -n "\${READS_GRAPH}" ]; then
         echo "[GETORGANELLE] no circle from reads; pruning graph (--min-depth ${min_depth}) and retrying"
-        get_organelle_from_assembly.py \\
+        python3 ${command_check} --log "\${SAMPLE}.\${ORG}.retry.command.log" -- get_organelle_from_assembly.py \\
             --config-dir "${config_dir}" \\
             -F \${ORG} \\
             -g "\${READS_GRAPH}" \\
             --min-depth ${min_depth} \\
             -o fromasm_out \\
-            -t ${task.cpus} || echo "[GETORGANELLE] from-assembly retry exited non-zero; inspecting"
+            -t ${task.cpus}
     fi
 
     # ---------- 3) select best: circle > linear; prefer reads_out over fromasm_out ----------
-    STATUS=failed; PICK=""; GRAPHDIR=""
+    STATUS=no_recovery; PICK=""; GRAPHDIR=""
     for d in reads_out fromasm_out; do
         [ -d "\$d" ] || continue
-        comp=("\$d"/*complete*.path_sequence.fasta)
+        comp=("\$d"/*.complete.*.path_sequence.fasta)
         if [ \${#comp[@]} -gt 0 ]; then
             PICK=\$(ls -S "\${comp[@]}" | head -n1); STATUS=circular; GRAPHDIR="\$d"; break
         fi
@@ -160,5 +162,6 @@ process GETORGANELLE {
     printf 'sample\\torganelle\\tstatus\\tn_seqs\\ttotal_len\\tcoverage_target\\trecursion\\tsource\\n%s\\t%s\\tlinear\\t1\\t16\\t${org.coverage}\\t${org.recursion}\\tstub\\n' "${meta.sample}" "${org.type}" > ${meta.sample}.${org.type}.stats.tsv
     echo stub > ${meta.sample}.${org.type}.get_org.log.txt
     touch versions.tsv
+    echo 'stub' > ${meta.sample}.${org.type}.reads.command.log
     """
 }

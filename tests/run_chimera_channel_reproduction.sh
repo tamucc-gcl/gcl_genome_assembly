@@ -50,22 +50,21 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_w
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
-elif [[ "${1:-}" == deletion_replay_checks.nf ]]; then
-    python3 "$repo/tests/setup_deletion_replay_checks.py" "$runtime"
-    cp reproduction.nf "$repo/.deletion-replay-checks.nf"
-    trap 'rm -f "$repo/.deletion-replay-checks.nf"' EXIT
-    script="$repo/.deletion-replay-checks.nf"
-    extra=(-c "$runtime/deletion-check.config")
-    mkdir -p "$runtime/deletion-launch"
-    cd "$runtime/deletion-launch"
-elif [[ "${1:-}" == assignment_replay_checks.nf ]]; then
-    python3 "$repo/tests/setup_assignment_replay_checks.py" "$runtime"
-    cp reproduction.nf "$repo/.assignment-replay-checks.nf"
-    trap 'rm -f "$repo/.assignment-replay-checks.nf"' EXIT
-    script="$repo/.assignment-replay-checks.nf"
-    extra=(-c "$runtime/assignment-check.config")
-    mkdir -p "$runtime/assignment-launch"
-    cd "$runtime/assignment-launch"
+elif [[ "${1:-}" == organelle_contract_checks.nf || "${1:-}" == taxonomy_contract_checks.nf ]]; then
+    python3 "$repo/tests/setup_organelle_checks.py" "$runtime" "${2:-circular}"
+    cp reproduction.nf "$repo/.organelle-contract-checks.nf"
+    trap 'rm -f "$repo/.organelle-contract-checks.nf"' EXIT
+    script="$repo/.organelle-contract-checks.nf"
+    extra=(-c "$runtime/organelle-check.config")
+    export ORG_CASE="${2:-circular}"
+    mkdir -p "$runtime/organelle-launch"
+    cd "$runtime/organelle-launch"
+elif [[ "${1:-}" == pangenome_empty_checks.nf ]]; then
+    cp reproduction.nf "$repo/.pangenome-empty-checks.nf"
+    trap 'rm -f "$repo/.pangenome-empty-checks.nf"' EXIT
+    script="$repo/.pangenome-empty-checks.nf"
+    mkdir -p "$runtime/empty-launch"
+    cd "$runtime/empty-launch"
 elif [[ "${1:-}" == core_contract_checks.nf ]]; then
     python3 "$repo/tests/setup_core_contract_checks.py" "$runtime" "${2:-success}"
     cp reproduction.nf "$repo/.core-contract-checks.nf"
@@ -127,127 +126,6 @@ JAVA_TOOL_OPTIONS="${java_opens[*]} --add-exports=java.management/com.sun.jmx.mb
 if ! run_nextflow; then
     find work -name .command.err -mmin -10 -exec sh -c 'echo "$1"; tail -20 "$1"' sh {} \;
     exit 1
-fi
-if [[ "${1:-}" == deletion_replay_checks.nf ]]; then
-    deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
-    if [[ "${2:-}" == regional_patch_resume || "${2:-}" == regional_trace_resume || "${2:-}" == regional_chunks_resume ]]; then
-        extra+=(-resume --pangenome_regional_patch_replay true)
-        run_nextflow | tee regional-resume.log
-        grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_PREP' regional-resume.log
-        grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_FILTER' regional-resume.log
-        test -s "$runtime/deletion-results/pangenome/1/deletion_filter/regional_assignment_report.md"
-        test -s "$runtime/deletion-results/pangenome/1/deletion_filter/regional_coordinate_audit.tsv"
-        test -s "$runtime/deletion-results/pangenome/tools/regional_patch/native_regressions.tsv"
-        python3 - "$runtime/deletion-results/pangenome/1/deletion_filter" <<'PY'
-import csv
-from pathlib import Path
-import sys
-root=Path(sys.argv[1])
-with (root/'regional_assignment_comparison.tsv').open() as f:
-    rows={r['policy']:r for r in csv.DictReader(f,delimiter='\t')}
-assert int(rows['native']['fixed_regional_bp'])==4000000,rows
-for policy in ('chromosome_isolated','disabled'):
-    assert int(rows[policy]['fixed_regional_bp'])==8000000,rows
-    assert set(rows[policy]['fixed_chromosomes'].split(','))=={'chrA','chrB'},rows
-with (root/'regional_coordinate_audit.tsv').open() as f:
-    audits=list(csv.DictReader(f,delimiter='\t'))
-assert len(audits)==3 and all(r['status']=='PASS' and int(r['duplicate_or_overlapping_bp'])==0 for r in audits)
-print('PASS: both chromosome arms retained by the real corrected tool without duplicate source ownership')
-PY
-        mkdir -p "$repo/comparisons/core-graph-regional-validation"
-        cp regional-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-resume.log"
-        cp "$runtime/deletion-results/pangenome/1/deletion_filter/"regional_assignment* "$repo/comparisons/core-graph-regional-validation/"
-        cp "$runtime/deletion-results/pangenome/tools/regional_patch/native_regressions.tsv" "$repo/comparisons/core-graph-regional-validation/"
-        echo 'PASS: patched native regional assignment runs; preparation and deletion filters resume from cache'
-        if [[ "${2:-}" == regional_trace_resume || "${2:-}" == regional_chunks_resume ]]; then
-            extra+=(--pangenome_regional_gate_trace true)
-            run_nextflow | tee regional-trace-resume.log
-            grep -q 'Cached process > PANGENOME_DELETION_DIAGNOSTIC:PANGENOME_DELETION_FILTER' regional-trace-resume.log
-            grep -q 'Cached process > .*PANGENOME_REGIONAL_BUILD' regional-trace-resume.log
-            grep -q 'Cached process > .*PANGENOME_REGIONAL_ASSIGN_FIXED' regional-trace-resume.log
-            test -s "$deletion_out/regional_gate_report.md"
-            test -s "$deletion_out/trace_chromosome_isolated/fixed_events.tsv.gz"
-            test -s "$runtime/deletion-results/pangenome/tools/regional_trace/native_trace.diff"
-            test -s "$runtime/deletion-results/pangenome/tools/regional_trace/gate_regressions.tsv"
-            python3 - "$runtime/deletion-results/pangenome/1/deletion_filter" <<'PY'
-import csv
-from pathlib import Path
-import sys
-root=Path(sys.argv[1])
-with (root/'regional_observation_equivalence.tsv').open() as f:checks=list(csv.DictReader(f,delimiter='\t'))
-assert len(checks)==6 and all(r['byte_identical']=='yes' for r in checks)
-with (root/'regional_gate_summary.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
-assert any(r['policy']=='chromosome_isolated' and r['variant']=='fixed' and r['role']=='secondary'
-           and int(r['locally_accepted_runs'])==1 for r in rows),rows
-assert {r['chromosome'] for r in rows if r['policy']=='chromosome_isolated' and r['variant']=='fixed'
-        and int(r['final_assigned_span_bp'])==4000000}=={'chrA','chrB'}
-print('PASS: six byte-equivalent observations, real regional gates, unchanged cached assignment/filter tasks')
-PY
-            cp regional-trace-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-trace-resume.log"
-            cp "$deletion_out/"regional_gate* "$repo/comparisons/core-graph-regional-validation/"
-            if [[ "${2:-}" == regional_chunks_resume ]]; then
-                extra+=(--pangenome_regional_chunk_replay true)
-                run_nextflow | tee regional-chunks-resume.log
-                grep -q 'Cached process > .*PANGENOME_REGIONAL_TRACE_BUILD' regional-chunks-resume.log
-                grep -q 'Cached process > .*PANGENOME_REGIONAL_TRACE (' regional-chunks-resume.log
-                grep -q 'Cached process > .*PANGENOME_DELETION_FILTER' regional-chunks-resume.log
-                [[ $(grep -c 'Submitted process > .*PANGENOME_REGIONAL_CHUNK_ASSIGN (' regional-chunks-resume.log) -eq 12 ]]
-                python3 - "$deletion_out" <<'PY'
-import csv,gzip
-from pathlib import Path
-import sys
-root=Path(sys.argv[1])
-with (root/'chunk_matrix_summary.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
-assert len(rows)==18 and {int(r['chunk_bp']) for r in rows}=={1000000,100000,25000}
-assert (root/'regional_chunk_report.md').is_file()
-with gzip.open(root/'chunk_region_changes.tsv.gz','rt') as f:assert 'start_0based' in f.readline()
-print('PASS: twelve new native-tool assignments; complete 18-case matrix; graph/filter/compiler/gate cache retained')
-PY
-                plain=$(find work -path '*/trace_tools/native.bin' -print -quit)
-                fixed=$(find work -path '*/patched/rgfa-split-fixed' -print -quit)
-                python3 "$repo/tests/native_regional_chunks_check.py" "$plain" "$fixed" "$runtime/native-chunk-check"
-                cp regional-chunks-resume.log "$repo/comparisons/core-graph-regional-validation/nextflow-chunks-resume.log"
-                cp "$deletion_out/"chunk_*.tsv "$deletion_out/regional_chunk_report.md" "$repo/comparisons/core-graph-regional-validation/"
-            fi
-        fi
-    fi
-    deletion_out="$runtime/deletion-results/pangenome/1/deletion_filter"
-    test -s "$deletion_out/deletion_filter_report.md"
-    test -s "$deletion_out/assignment_comparison.tsv"
-    test -s "$deletion_out/review_chromosome_isolated/lanes.tsv"
-    for policy in native chromosome_isolated disabled; do
-        test -s "$deletion_out/review_$policy/filter_coverage.tsv"
-        for assignment in baseline regional_1Mb; do
-            test -s "$deletion_out/assignment_${policy}_${assignment}/surviving_intervals.tsv.gz"
-        done
-    done
-    if find "$deletion_out" -type f \( -name '*.paf' -o -name '*.gfa' -o -name '*.vg' -o -name 'node_owners.tsv.gz' \) -print -quit | grep -q .; then
-        echo 'Large deletion intermediates must not be published' >&2
-        exit 1
-    fi
-    echo 'PASS: compact deletion evidence published; large intermediates stay in cache'
-fi
-if [[ "${1:-}" == assignment_replay_checks.nf ]]; then
-    assignment_out="$runtime/assignment-results/pangenome/1/assignment"
-    test -s "$assignment_out/assignment_report.md"
-    test -s "$assignment_out/assignment_comparison.tsv"
-    test -s "$assignment_out/coverage_trace.tsv"
-    test -s "$assignment_out/coverage_bins.tsv"
-    test -s "$assignment_out/coverage_changes.tsv.gz"
-    test -s "$assignment_out/coverage_intervals.tsv.gz"
-    test -s "$assignment_out/preparation/coverage_intervals.tsv.gz"
-    test -s "$assignment_out/preparation/effective_config.xml"
-    for assignment_case in baseline whole_relaxed regional_1Mb regional_3Mb; do
-        test -s "$assignment_out/replay_$assignment_case/assignment_log.txt"
-        test -s "$assignment_out/replay_$assignment_case/regions.tsv"
-        test -s "$assignment_out/replay_$assignment_case/decisions.tsv"
-        test -s "$assignment_out/replay_$assignment_case/surviving_intervals.tsv.gz"
-    done
-    if find "$assignment_out" -type f \( -name '*.gfa' -o -name '*.paf' \) -print -quit | grep -q .; then
-        echo 'Large replay intermediates must not be published' >&2
-        exit 1
-    fi
-    echo 'PASS: assignment logs/configuration published; large intermediates remain in cache'
 fi
 if [[ "${1:-}" == final_hic_qc_wiring_check.nf && "${2:-final_only}" != none ]]; then
     for checkpoint in final_raw_map final_filtered; do

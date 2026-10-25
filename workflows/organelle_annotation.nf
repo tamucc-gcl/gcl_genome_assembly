@@ -25,6 +25,7 @@ include { DOWNLOAD_MITOS_DB } from '../modules/download_mitos_db.nf'
 include { ANNOTATE_MITO }     from '../modules/annotate_mito.nf'
 include { MITO_CIRCULAR_MAP } from '../modules/mito_circular_map.nf'
 include { mitosRefseqFor }    from '../functions/taxonomy.nf'
+include { attachRequiredContext } from '../functions/organelle_context.nf'
 
 mito_gb_script       = file("${projectDir}/py_scripts/mitos_to_genbank.py", checkIfExists: true)
 mito_circular_script = file("${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
@@ -89,9 +90,9 @@ workflow ORGANELLE_ANNOTATION {
                       params.mitos_force_download
                   ).db.first()
 
-    br.mito
+    ch_mito_by_taxid = br.mito
         .map { meta, org, status, fa -> tuple(meta.taxid?.toString(), meta, org, status, fa) }
-        .combine( ch_gcode, by: 0 )
+    attachRequiredContext(ch_mito_by_taxid, ch_gcode, 'genetic code')
         .map { taxid, meta, org, status, fa, gcode ->
                tuple(meta, org, status, gcode, (params.mitos_refseq ?: mitosRefseqFor(org)), fa) }
         .set { ch_mito_in }

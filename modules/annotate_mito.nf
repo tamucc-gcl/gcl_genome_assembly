@@ -17,7 +17,9 @@
 
     Requirements: conda mitos=2.1.10 (binary is `runmitos`, bundles biopython for the converter);
     RefSeq set pre-fetched by DOWNLOAD_MITOS_DB (refseq89m animal / refseq89f fungus).
-    MITOS annotates ONE sequence per run — a closed metazoan mito is a single record.
+    This adapter currently converts one sequence per task. MITOS 2.1.10 itself can
+    emit per-record subdirectories for multiple sequences, which this converter
+    does not yet aggregate; reject that input rather than silently selecting one.
 
     Input:
       tuple(meta, org_type, status, gcode, refseq, fasta)   status in {circular,linear}
@@ -47,9 +49,13 @@ process ANNOTATE_MITO {
     def linear = (status == 'circular') ? '' : '--linear'
     def circ   = (status == 'circular') ? '--circular' : ''
     """
-    set -eu
+    set -euo pipefail
     SAMPLE="${meta.sample}"
     ORG="${org_type}"
+    if [ "\$(grep -c '^>' '${fasta}')" -ne 1 ]; then
+        echo '[ANNOTATE_MITO] Current MITOS adapter requires one FASTA record; multi-record annotation aggregation is not implemented' >&2
+        exit 1
+    fi
 
     mkdir -p mitos_out
     runmitos \\
@@ -59,7 +65,7 @@ process ANNOTATE_MITO {
         -R "${mitos_db}" \\
         -r ${refseq} \\
         ${linear} \\
-        --noplots || echo "[ANNOTATE_MITO] runmitos exited non-zero; collecting whatever landed"
+        --noplots
 
     BED=\$(find mitos_out -name 'result.bed' | head -n1 || true)
     PNG=\$(find mitos_out -name 'result.png' | head -n1 || true)
@@ -69,7 +75,7 @@ process ANNOTATE_MITO {
 
     # MITOS BED -> GenBank (single record, CDS/tRNA/rRNA + /gene + /product) for the circular map + report
     GB="\${SAMPLE}_\${ORG}_mitogenome.gb"
-    if [ -n "\${BED}" ]; then
+    if [ -n "\${BED}" ] && [ -s "\${BED}" ]; then
         python "${gb_script}" \\
             --fasta "${fasta}" \\
             --bed "\${BED}" \\
@@ -79,9 +85,10 @@ process ANNOTATE_MITO {
             ${circ} \\
             --output "\${GB}"
     else
-        echo "[ANNOTATE_MITO] no result.bed; emitting empty GenBank"
-        : > "\${GB}"
+        echo "[ANNOTATE_MITO] runmitos produced no result.bed; annotation is incomplete" >&2
+        exit 1
     fi
+    test -s "\${GB}"
 
     # stats — SAME columns and counting rules as MitoHiFi's mito_stats.tsv
     MITO_LEN=\$(grep -v '^>' "${fasta}" | tr -d '\\n' | wc -c)

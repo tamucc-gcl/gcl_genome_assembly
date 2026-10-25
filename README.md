@@ -4,6 +4,10 @@ R development uses tidyverse syntax, ggplot2 for graphics, and patchwork for mul
 
 **Nextflow DSL2 pipeline for reference-quality eukaryotic genome assembly**
 
+The accepted pangenome preprocessing policy, exact upstream differences, biological
+rationale, validation and limitations are documented in
+[Pangenome tool changes](docs/pangenome-tool-changes.md).
+
 **Author:** Jason Selwyn · **Group:** TAMUCC CORE / birdlab (GCL) · **Executor:** SLURM (Crest HPC) · **Package manager:** conda + Singularity
 
 A modular, multi-input Nextflow pipeline that takes raw reads to chromosome-level assemblies with

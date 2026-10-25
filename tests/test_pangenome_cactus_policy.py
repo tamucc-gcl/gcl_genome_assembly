@@ -1,4 +1,3 @@
-import ast
 import gzip
 import json
 import shutil
@@ -19,13 +18,6 @@ class CactusPolicyTests(unittest.TestCase):
         self.sources=[dict(query='id=S.1|a',sample='S.1',sequence='a',source_bp=100)]
         mod.write_table(self.root/'lengths.tsv',self.sources,list(self.sources[0]))
         self.data=dict(source_lengths=str(self.root/'lengths.tsv'),ambiguous_name='_AMBIGUOUS_',evidence=str(self.root))
-
-    def test_production_guard_matches_validated_implementation(self):
-        root=Path(__file__).resolve().parents[1]/'py_scripts'
-        def functions(file):
-            text=file.read_text();return {n.name:ast.dump(n,include_attributes=False) for n in ast.parse(text).body if isinstance(n,ast.FunctionDef)}
-        old=functions(root/'pangenome_deletion_replay.py');new=functions(root/'pangenome_cactus_guard.py')
-        for name in ('node_owners','lane_paf','restore_names'):self.assertEqual(old[name],new[name])
 
     def test_existing_chunk_flag_is_replaced_once(self):
         cmd=mod.regional_command(dict(corrected_binary='fixed',chunk_bp=25000),['-g','g','-u','1000000','-s','-p','p'])

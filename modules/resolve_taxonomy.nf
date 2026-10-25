@@ -31,6 +31,11 @@ process RESOLVE_TAXONOMY {
     # Full lineage (semicolon-joined clade NAMES) — captures unranked clades NCBI hides from
     # {c}: Liliopsida (monocots), eudicotyledons, Endopterygota, etc. The BUSCO map matches this.
     LINEAGE=\$(echo "${taxid}" | taxonkit lineage --data-dir "${taxdump_dir}" | cut -f2)
+    if [ "\$(printf '%s\\n' "\${RANKS}" | awk -F '\\t' '{print NF}')" -ne 8 ] || \\
+       [ -z "\${LINEAGE}" ] || [ "\${LINEAGE}" = "${taxid}" ] || [ "\${LINEAGE}" = 'NA' ]; then
+        echo '[RESOLVE_TAXONOMY] Taxonomy lookup did not resolve a valid lineage/rank record for taxid ${taxid}' >&2
+        exit 1
+    fi
 
     printf 'taxid\\tsuperkingdom\\tkingdom\\tphylum\\tclass\\torder\\tfamily\\tgenus\\tspecies\\tlineage\\n' > ${taxid}.taxonomy.tsv
     printf '%s\\t%s\\t%s\\n' "${taxid}" "\${RANKS}" "\${LINEAGE}" >> ${taxid}.taxonomy.tsv

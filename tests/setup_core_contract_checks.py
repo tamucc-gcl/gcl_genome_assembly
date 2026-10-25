@@ -113,6 +113,3 @@ process {
     }
 }
 ''' % (root, case, tools,packages))
-with (root/'core-check.config').open('a') as handle:
-    handle.write('params.pangenome_assignment_replay='+('true' if case=='assignment_inputs' else 'false')+'\n')
-    handle.write('params.pangenome_deletion_filter_replay='+('true' if case=='deletion_inputs' else 'false')+'\n')

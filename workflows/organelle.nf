@@ -2,6 +2,7 @@ include { MITOHIFI }             from '../modules/mitohifi.nf'
 include { MITO_CIRCULAR_MAP }    from '../modules/mito_circular_map.nf'
 include { SHORTREAD_ORGANELLE }  from './shortread_organelle.nf'
 include { ORGANELLE_ANNOTATION } from './organelle_annotation.nf'
+include { attachRequiredContext } from '../functions/organelle_context.nf'
 
 mito_circular_script = file("${projectDir}/py_scripts/plot_mito_circular.py", checkIfExists: true)
 
@@ -22,6 +23,7 @@ workflow ORGANELLE {
     ch_baits = Channel.empty()
     ch_notes = Channel.empty()
     ch_versions = Channel.empty()
+    ch_recovery_status = Channel.empty()
 
     ch_reads.branch { meta, hifi_fastq, sr1, sr2 ->
         hifi: meta.hifi && meta.mito_tool != 'none'
@@ -32,10 +34,10 @@ workflow ORGANELLE {
     ch_baits = ch_org.disabled.map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.sample, []) }
 
     if (capabilities.hifi) {
-        ch_mitohifi_input = ch_org.hifi
+        ch_hifi_by_taxid = ch_org.hifi
             .map { meta, hifi_fastq, sr1, sr2 -> tuple(meta.taxid?.toString(), meta, hifi_fastq) }
-            .combine(ch_mito_ref, by: 0)
-            .combine(ch_gcode, by: 0)
+        ch_hifi_with_ref = attachRequiredContext(ch_hifi_by_taxid, ch_mito_ref, 'mitochondrial reference')
+        ch_mitohifi_input = attachRequiredContext(ch_hifi_with_ref, ch_gcode, 'genetic code')
             .map { taxid, meta, hifi_fastq, ref_fa, ref_gb, gcode -> tuple(meta, hifi_fastq, ref_fa, ref_gb, gcode) }
         MITOHIFI(ch_mitohifi_input)
         MITO_CIRCULAR_MAP(MITOHIFI.out.annotation, mito_circular_script)
@@ -45,6 +47,7 @@ workflow ORGANELLE {
         ch_circular = MITO_CIRCULAR_MAP.out.circular_map
         ch_gene_map = MITOHIFI.out.gene_map
         ch_versions = ch_versions.mix(MITOHIFI.out.versions)
+        ch_recovery_status = ch_recovery_status.mix(MITOHIFI.out.status.map { meta, tsv -> tuple(meta, 'mitochondrion', tsv) })
         // Explicit successful completion even when no complete mitogenome was recovered.
         ch_baits = ch_baits.mix(MITOHIFI.out.status
             .map { meta, status -> tuple(meta.sample, status) }
@@ -55,6 +58,7 @@ workflow ORGANELLE {
     if (capabilities.shortread_organelle) {
         ch_sr_reads = ch_org.other.map { meta, hifi_fastq, sr1, sr2 -> tuple(meta, sr1, sr2) }
         SHORTREAD_ORGANELLE(ch_sr_reads, ch_organelle)
+        ch_recovery_status = ch_recovery_status.mix(SHORTREAD_ORGANELLE.out.stats)
         ORGANELLE_ANNOTATION(SHORTREAD_ORGANELLE.out.assembly, SHORTREAD_ORGANELLE.out.stats, ch_gcode)
         ch_assemblies = ch_assemblies.mix(SHORTREAD_ORGANELLE.out.assembly.map { meta, org, fa -> tuple(meta, fa) })
         ch_annotation = ch_annotation.mix(ORGANELLE_ANNOTATION.out.annotation.map { meta, org, gb -> tuple(meta, gb) })
@@ -82,4 +86,5 @@ workflow ORGANELLE {
     gene_map = ch_gene_map
     notes = ch_notes
     versions = ch_versions
+    recovery_status = ch_recovery_status
 }

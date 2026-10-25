@@ -1,5 +1,5 @@
 nextflow.enable.dsl=2
-params.run_pangenome = false
+params.run_pangenome = (System.getenv('CORE_INPUT_CASE') == 'graph_with_invalid_sample')
 params.hifiasm_primary = false
 params.outdir = '/tmp/chimera-nxf-runtime/reference-results'
 params.publish_dir_mode = 'copy'
@@ -34,6 +34,24 @@ workflow {
             'sample_id,library_id,readset_id,hic_r1,hic_r2\nabsent,A,A1,hic1.fq,hic2.fq\n', [], 0, 0)
     if (negative == 'no_valid_samples')
         check(header + 'a,,,,hic1.fq,hic2.fq,diploid,none\n', '', [], 0, 1)
+    if (negative == 'duplicate_header')
+        check('sample_id,hifi_bam,hifi_bam\na,hifi.bam,hifi.bam\n', '', [], 0, 0)
+    if (negative == 'malformed_record')
+        check('sample_id,hifi_bam\na,hifi.bam,unexpected\n', '', [], 0, 0)
+    if (negative == 'unsafe_sample')
+        check(header + '../a,hifi.bam,,,,,diploid,none\n', '', [], 0, 0)
+    if (negative == 'duplicate_readset')
+        check(header + 'a,hifi.bam,,,,,diploid,none\n',
+            'sample_id,library_id,readset_id,hic_r1,hic_r2\na,A,R,hic1.fq,hic2.fq\na,B,R,hic3.fq,hic4.fq\n', [], 0, 0)
+    if (negative == 'missing_hic_mate')
+        check(header + 'a,hifi.bam,,,,,diploid,none\n',
+            'sample_id,library_id,readset_id,hic_r1,hic_r2\na,A,R,hic1.fq,\n', [], 0, 0)
+    if (negative == 'conflicting_hic_sources')
+        check(header + 'a,hifi.bam,,,hic1.fq,hic2.fq,diploid,none\n',
+            'sample_id,library_id,readset_id,hic_r1,hic_r2\na,A,R,hic3.fq,hic4.fq\n', [], 0, 0)
+    if (negative == 'graph_with_invalid_sample') {
+        check(header + 'good,hifi.bam,,,,,diploid,none\nbad,,missing.fq,two.fq,,,diploid,none\n', '', [], 1, 0)
+    }
     def mixed = check(header + 'long,hifi.bam,,,,,diploid,none\nshort,,one.fq,two.fq,,,diploid,none\nhic_only,,,,hic1.fq,hic2.fq,diploid,none\n',
         '', ['long','short'], 0, 1)
     assert mixed.samples[0][0].n_hap == 2
@@ -43,6 +61,11 @@ workflow {
     def two = check(header + 'long,hifi.bam,,,,,diploid,none\n', libraries, ['long'], 0, 0)
     assert two.samples[0][1].hic_sets.size() == 2
     assert two.samples[0][1].hic_sets*.library_id == ['A','B']
+    def shortHic = check(header + 'short,,one.fq,two.fq,hic1.fq,hic2.fq,diploid,none\n', '', ['short'], 0, 0)
+    assert shortHic.samples[0][0].assembler == 'spades'
+    assert shortHic.capabilities.hic && !shortHic.capabilities.scaffold
+    def bothReads = check(header + 'both,hifi.bam,one.fq,two.fq,,,diploid,none\n', '', ['both'], 0, 0)
+    assert bothReads.samples[0][0].assembler == 'hifiasm'
     check(header + 'good,hifi.bam,,,,,haploid,none\nbad,,one.fq,,,,diploid,none\n', '', ['good'], 1, 0)
     check(header + 'good,hifi.bam,,,,,haploid,none\nbad,,missing.fq,two.fq,,,diploid,none\n', '', ['good'], 1, 0)
     // Taxa stay attached to their own samples; no cohort-level inheritance.
