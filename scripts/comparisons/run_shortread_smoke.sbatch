@@ -20,9 +20,39 @@ case "$mode" in
   *) echo 'Use validate or assembly' >&2; exit 2 ;;
 esac
 mkdir -p "$rundir" "$testdir/logs"
+runlog="$testdir/logs/nextflow-${mode}-${SLURM_JOB_ID}.log"
+finish() {
+    rc=$?
+    trap - EXIT
+    printf '%s\n' "$rc" > "$testdir/exit_status-${mode}.txt"
+    files=(subset.json samples.csv "exit_status-${mode}.txt")
+    for name in "$runlog" "$testdir/trace-${mode}.tsv" "$testdir/effective-test.config"; do
+        [[ -f "$name" ]] && files+=("${name#"$testdir/"}")
+    done
+    # Review native tool outcomes without collecting reads, assemblies or graphs.
+    if [[ -d "$testdir/results" ]]; then
+        while IFS= read -r -d '' name; do files+=("${name#"$testdir/"}"); done < <(
+            find -L "$testdir/results" -type f -size -20M \( \
+                -name '*.tsv' -o -name '*.json' -o -name '*.md' -o \
+                -name '*.log' -o -name '*.log.txt' -o -name '*.gb' -o \
+                -name '*.gbk' -o -name '*.png' \) -print0)
+    fi
+    tar --dereference -czf "$testdir.${mode}.review.tar.gz" -C "$testdir" "${files[@]}" || {
+        echo 'Review archive creation failed' >&2
+        [[ "$rc" -ne 0 ]] || rc=1
+    }
+    exit "$rc"
+}
+trap finish EXIT
+cp "$repo/scripts/comparisons/shortread_smoke.config" "$testdir/effective-test.config"
 cd "$rundir"
-nextflow -log "$testdir/logs/nextflow-${mode}-${SLURM_JOB_ID}.log" \
+nextflow -log "$runlog" \
   run "$repo/main.nf" -profile slurm "${launch[@]}" \
   -c "$repo/scripts/comparisons/shortread_smoke.config" \
   -w "$testdir/work" --sample_sheet "$testdir/samples.csv" \
-  --outdir "$testdir/results"
+  --outdir "$testdir/results" --publish_dir_mode symlink \
+  -with-trace "$testdir/trace-${mode}.tsv" \
+  "${@:3}"
+if [[ "$mode" == assembly ]]; then
+    test -s "$testdir/results/assembly_run_summary.md"
+fi

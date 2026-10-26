@@ -364,3 +364,14 @@ Provide a compact read-placement view with alternative scaffold/locus, alignment
 quality and clipping; distinguish same-haplotype competition from other-haplotype
 similarity. Preserve per-library Hi-C context and applied/retained decision labels.
 This is deferred to the reporting pass; the underlying placement tables already exist.
+
+## Operational resume accepted (2026-10-25)
+
+`core-operational-01` passed: two completed tasks (native taxonomy guard and run
+summary), 855 cached, no failures/retries. All 111 packaged pangenome files and
+160 common reference/QC/name-map files match accepted production 02 byte-for-byte.
+The graph and all five HiFi organelle assemblies stayed cached. Compact organelle
+outputs were missing from the review archive; packaging now includes their status,
+annotations, logs and figures. Categories 2/3/7 remain open for the native short-read
+pilot and remaining contracts; this all-HiFi run does not validate that branch.
+See [run assessment](core-operational-01-assessment.md).
