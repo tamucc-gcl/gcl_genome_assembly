@@ -19,13 +19,13 @@ post-assembly analyses are off for this bounded route check.
 ## Crest invocation
 
 Sync the repository first. From the project directory containing
-`gcl_genome_assembly/` and `raw_fastq/`:
+`gcl_genome_assembly/` and `data/raw_fastq/`:
 
 ```bash
 mkdir -p comparisons logs
 python3 gcl_genome_assembly/scripts/comparisons/prepare_shortread_smoke.py \
-  raw_fastq/ssl/Sde-CMat_061_1.fq.gz \
-  raw_fastq/ssl/Sde-CMat_061_2.fq.gz \
+  data/raw_fastq/ssl/Sde-CMat_061_1.fq.gz \
+  data/raw_fastq/ssl/Sde-CMat_061_2.fq.gz \
   comparisons/core-shortread-native-01 \
   --full-input --sample Sde-CMat_061 --taxid 373251
 

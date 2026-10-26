@@ -4,7 +4,7 @@ import os
 import subprocess
 repo=Path(__file__).resolve().parents[1]
 checks=[(c,True,'PASS: recovery states') for c in
-        ['circular','linear','incomplete','no_recovery','retry','fungus_retry','multi_target','multi_species']]+[
+        ['circular','linear','incomplete','no_recovery','retry','fungus_retry','multi_target','multi_species','multiple_records','empty_retry']]+[
     ('execution_failure',False,'17'),
     ('logged_error',False,'GetOrganelle reported an error'),
     ('incomplete_log',False,'completion marker missing'),
@@ -12,7 +12,6 @@ checks=[(c,True,'PASS: recovery states') for c in
     ('mitos_database_failure',False,'17'),
     ('annotation_failure',False,'19'),
     ('missing_bed',False,'annotation is incomplete'),
-    ('multiple_records',False,'Current MITOS adapter requires one FASTA record'),
     ('missing_targets',False,'Missing required organelle targets'),
     ('missing_gcode',False,'Missing required genetic code'),
     ('duplicate_targets',False,'Invalid or duplicate organelle targets'),

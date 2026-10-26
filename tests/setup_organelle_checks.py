@@ -19,9 +19,15 @@ retry='from_assembly' in Path(sys.argv[0]).name
 if case=='execution_failure':print('native execution failed');sys.exit(17)
 if case=='logged_error':print('2026-10-25 - ERROR: missing dependency');print('Thank you!');sys.exit(0)
 if case=='incomplete_log':print('Interrupted before completion');sys.exit(0)
-if case in ('retry','fungus_retry') and not retry:
+if case=='empty_retry' and retry:
+    (out/'initial_assembly_graph.fastg').write_text('graph')
+    (out/'slimmed_assembly_graph.fastg').write_text('')
+    print('2026-10-26 - INFO: Slimming fromasm_out/initial_assembly_graph.fastg finished!');sys.exit(0)
+if case in ('retry','fungus_retry','empty_retry') and not retry:
     graph=out/'extended_spades/K55/assembly_graph.fastg';graph.parent.mkdir(parents=True,exist_ok=True);graph.write_text('graph\\n')
-elif case!='no_recovery':
+if case=='empty_retry' and not retry:
+    (out/(org+'.K55.scaffolds.graph1.1.path_sequence.fasta')).write_text('>contig\\nACGTACGTACGTACGT\\n>second\\nACGT\\n')
+elif case not in ('no_recovery','retry','fungus_retry') or retry:
     status='incomplete' if case=='incomplete' else ('scaffolds' if case in ('linear','annotation_failure','missing_bed','multiple_records') else 'complete')
     fasta='>contig\\nACGTACGTACGTACGT\\n'
     if case=='multiple_records':fasta+='>second\\nACGT\\n'
@@ -37,7 +43,10 @@ from pathlib import Path
 if '--version' in sys.argv:print('MITOS2 fixture');sys.exit(0)
 if os.environ['ORG_CASE']=='annotation_failure':sys.exit(19)
 out=Path(sys.argv[sys.argv.index('-o')+1]);out.mkdir(exist_ok=True)
-if os.environ['ORG_CASE']!='missing_bed':(out/'result.bed').write_text('contig\\t0\\t9\\tcox1\\t0\\t+\\n')
+count=sum(line.startswith('>') for line in Path(sys.argv[sys.argv.index('-i')+1]).read_text().splitlines())
+for i in range(count):
+    dest=out/str(i) if count>1 else out;dest.mkdir(exist_ok=True)
+    if os.environ['ORG_CASE']!='missing_bed':(dest/'result.bed').write_text('contig\\t0\\t3\\tcox1\\t0\\t+\\n')
 ''')
 tool('taxonkit','''import sys,os
 mode=os.environ['ORG_CASE'];taxid=sys.stdin.read().strip()

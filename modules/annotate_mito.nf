@@ -17,9 +17,8 @@
 
     Requirements: conda mitos=2.1.10 (binary is `runmitos`, bundles biopython for the converter);
     RefSeq set pre-fetched by DOWNLOAD_MITOS_DB (refseq89m animal / refseq89f fungus).
-    This adapter currently converts one sequence per task. MITOS 2.1.10 itself can
-    emit per-record subdirectories for multiple sequences, which this converter
-    does not yet aggregate; reject that input rather than silently selecting one.
+    MITOS 2.1.10 emits numbered subdirectories for fragmented inputs. Convert each
+    record's own annotation and preserve every fragment in a multi-record GenBank.
 
     Input:
       tuple(meta, org_type, status, gcode, refseq, fasta)   status in {circular,linear}
@@ -52,10 +51,6 @@ process ANNOTATE_MITO {
     set -euo pipefail
     SAMPLE="${meta.sample}"
     ORG="${org_type}"
-    if [ "\$(grep -c '^>' '${fasta}')" -ne 1 ]; then
-        echo '[ANNOTATE_MITO] Current MITOS adapter requires one FASTA record; multi-record annotation aggregation is not implemented' >&2
-        exit 1
-    fi
 
     mkdir -p mitos_out
     runmitos \\
@@ -67,27 +62,21 @@ process ANNOTATE_MITO {
         ${linear} \\
         --noplots
 
-    BED=\$(find mitos_out -name 'result.bed' | head -n1 || true)
     PNG=\$(find mitos_out -name 'result.png' | head -n1 || true)
 
-    [ -n "\${BED}" ] && cp "\${BED}" "\${SAMPLE}_\${ORG}.mitos.bed" || true
     [ -n "\${PNG}" ] && cp "\${PNG}" "\${SAMPLE}_\${ORG}_gene_map.png" || true
 
-    # MITOS BED -> GenBank (single record, CDS/tRNA/rRNA + /gene + /product) for the circular map + report
+    # Convert all records, requiring the matching BED for each input fragment.
     GB="\${SAMPLE}_\${ORG}_mitogenome.gb"
-    if [ -n "\${BED}" ] && [ -s "\${BED}" ]; then
         python "${gb_script}" \\
             --fasta "${fasta}" \\
-            --bed "\${BED}" \\
+            --bed-dir mitos_out \\
+            --combined-bed "\${SAMPLE}_\${ORG}.mitos.bed" \\
             --sample_id "\${SAMPLE}" \\
             --organelle "\${ORG}" \\
             --genetic_code ${gcode} \\
             ${circ} \\
             --output "\${GB}"
-    else
-        echo "[ANNOTATE_MITO] runmitos produced no result.bed; annotation is incomplete" >&2
-        exit 1
-    fi
     test -s "\${GB}"
 
     # stats — SAME columns and counting rules as MitoHiFi's mito_stats.tsv

@@ -375,3 +375,13 @@ outputs were missing from the review archive; packaging now includes their statu
 annotations, logs and figures. Categories 2/3/7 remain open for the native short-read
 pilot and remaining contracts; this all-HiFi run does not validate that branch.
 See [run assessment](core-operational-01-assessment.md).
+
+## Native short-read pilot correction (2026-10-26)
+
+CMat_061's reads-based organelle assembly completed with six fragments; the optional
+graph-pruning retry exposed a legitimate empty-target early return without the
+usual completion marker. The wrapper now verifies that output state explicitly.
+The MITOS adapter now preserves/annotates every fragment instead of rejecting
+multi-record input. Native acceptance remains pending the resumed pilot; this
+supersedes the earlier single-record-only limitation, not the requirement for
+native evidence. See [retry/fragment correction](organelle-native-retry-fix-2026-10-26.md).

@@ -3,7 +3,7 @@ include { ORGANELLE } from '__REPO__/workflows/organelle.nf'
 
 workflow {
     def mode = System.getenv('ORG_CASE') ?: 'circular'
-    def successCase=mode in ['circular','linear','incomplete','no_recovery','retry','fungus_retry','multi_target','multi_species']
+    def successCase=mode in ['circular','linear','incomplete','no_recovery','retry','fungus_retry','multi_target','multi_species','multiple_records','empty_retry']
     def hifiCase=mode in ['missing_reference','hifi_missing_gcode']
     def root=file('/tmp/chimera-nxf-runtime/organelle-fixtures'); root.mkdirs()
     def r1=file("${root}/r1.fq");r1.text='@read\nACGT\n+\nIIII\n'
@@ -33,6 +33,7 @@ workflow {
         if (successCase) {
             assert rows.size()==(mode in ['no_recovery','multi_target'] ? 0 : 2)
             assert rows.every { it[1].text.contains('LOCUS') && it[1].text.contains('/gene="cox1"') }
+            if (mode in ['multiple_records','empty_retry']) assert rows.every { it[1].text.count('LOCUS')==2 }
         }
         'PASS: actual GenBank converter and annotation output contract'
     }
@@ -42,7 +43,7 @@ workflow {
     }
     ORGANELLE.out.recovery_status.toList().view { rows ->
         if (successCase) assert rows.size()==2*specs.size()
-        def expected=mode=='no_recovery' ? 'no_recovery' : (mode in ['linear','incomplete'] ? 'linear' : 'circular')
+        def expected=mode=='no_recovery' ? 'no_recovery' : (mode in ['linear','incomplete','multiple_records','empty_retry'] ? 'linear' : 'circular')
         if (successCase) assert rows.every { it[2].text.trim().readLines().last().split('\t')[2]==expected }
         if (mode=='multi_species') assert rows.every { it[1]==(it[0].taxid=='1' ? 'animal_mt' : 'fungus_mt') }
         'PASS: recovery states distinguish circular, linear and completed no-recovery'
