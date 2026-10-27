@@ -8,9 +8,9 @@ process ASSEMBLY_RUN_SUMMARY {
     input:
     val expected
     val completed
-    path coordinate_report
+    path coordinate_report, stageAs: 'coordinates/*'
     path eligibility_report
-    path chimera_report
+    path chimera_report, stageAs: 'chimeras/*'
 
     output:
     path 'assembly_run_summary.md', emit: report

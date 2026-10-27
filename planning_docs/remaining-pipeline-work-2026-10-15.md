@@ -385,3 +385,13 @@ The MITOS adapter now preserves/annotates every fragment instead of rejecting
 multi-record input. Native acceptance remains pending the resumed pilot; this
 supersedes the earlier single-record-only limitation, not the requirement for
 native evidence. See [retry/fragment correction](organelle-native-retry-fix-2026-10-26.md).
+
+### 2026-10-27 native pilot result
+
+[Native pilot review](core-shortread-native-01-assessment.md): SPAdes, Redundans,
+decontamination and finalization completed, with native fragmented organelle
+annotation retained. The overall launcher still failed because empty harmonization
+references suppressed eligibility/summary work. That empty-list collection and
+a disabled-chimera staging collision are repaired and covered by two actual-wiring
+integration cases. Resume acceptance remains pending; the 6.36 Mb nuclear test
+output and 4,945 bp partial mitogenome do not establish biological completeness.

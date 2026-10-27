@@ -6,6 +6,8 @@ from pathlib import Path
 
 repo = Path(__file__).resolve().parents[1]
 checks = [
+    ('final_inventory_checks.nf', 'inventory_empty_reference', True, 'PASS: final run summary produced'),
+    ('final_inventory_checks.nf', 'inventory_pinned_reference', True, 'PASS: final run summary produced'),
     ('input_reference_checks.nf', 'success', True, 'PASS: production shared reference process'),
     ('input_reference_checks.nf', 'duplicate_sample', False, 'Duplicate sample_id'),
     ('input_reference_checks.nf', 'duplicate_file', False, 'Read file assigned twice'),

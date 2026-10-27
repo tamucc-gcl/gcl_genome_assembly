@@ -23,6 +23,11 @@ python3 - "$(dirname "$0")/${1:-chimera_channel_reproduction.nf}" "$runtime/repr
 import sys
 from pathlib import Path
 source = Path(sys.argv[1]).read_text()
+if '__FINAL_INVENTORY__' in source:
+    main = (Path(sys.argv[3]) / 'main.nf').read_text()
+    start = main.index('    ch_expected_assemblies = ch_declared_assemblies.join(ch_sample_identity)')
+    end = main.index('    /*', start)
+    source = source.replace('__FINAL_INVENTORY__', main[start:end])
 if '__POST_CUT_QC__' in source:
     main = (Path(sys.argv[3]) / 'main.nf').read_text()
     start = main.index('    if (run_all_qc && chimera_on) {')
@@ -65,7 +70,7 @@ elif [[ "${1:-}" == pangenome_empty_checks.nf ]]; then
     script="$repo/.pangenome-empty-checks.nf"
     mkdir -p "$runtime/empty-launch"
     cd "$runtime/empty-launch"
-elif [[ "${1:-}" == core_contract_checks.nf ]]; then
+elif [[ "${1:-}" == core_contract_checks.nf || "${1:-}" == final_inventory_checks.nf ]]; then
     python3 "$repo/tests/setup_core_contract_checks.py" "$runtime" "${2:-success}"
     cp reproduction.nf "$repo/.core-contract-checks.nf"
     trap 'rm -f "$repo/.core-contract-checks.nf"' EXIT

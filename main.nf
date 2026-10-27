@@ -511,7 +511,7 @@ workflow {
                 [meta: meta, fasta: fa.toString(), fai: fai.toString(), fai_name: fai.name]
             }, ordered.collect { meta, fa, fai -> fai })
         },
-        HARMONIZE_SCAFFOLDS.out.reference_id.collect(flat: false),
+        HARMONIZE_SCAFFOLDS.out.reference_id.toList(),
         file("${projectDir}/py_scripts/assembly_eligibility.py", checkIfExists: true),
         file("${projectDir}/py_scripts/harmonize_names.py", checkIfExists: true))
     // Always record real final reference identities, including singleton/graph-off runs.

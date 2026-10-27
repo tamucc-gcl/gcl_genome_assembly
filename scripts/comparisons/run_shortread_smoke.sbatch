@@ -35,7 +35,8 @@ finish() {
             find -L "$testdir/results" -type f -size -20M \( \
                 -name '*.tsv' -o -name '*.json' -o -name '*.md' -o \
                 -name '*.log' -o -name '*.log.txt' -o -name '*.gb' -o \
-                -name '*.gbk' -o -name '*.png' \) -print0)
+                -name '*.gbk' -o -name '*.png' -o -name '*.fai' -o \
+                -name '*.fcs_gx_report.txt' -o -name '*.taxonomy.rpt' \) -print0)
     fi
     tar --dereference -czf "$testdir.${mode}.review.tar.gz" -C "$testdir" "${files[@]}" || {
         echo 'Review archive creation failed' >&2
@@ -54,5 +55,8 @@ nextflow -log "$runlog" \
   -with-trace "$testdir/trace-${mode}.tsv" \
   "${@:3}"
 if [[ "$mode" == assembly ]]; then
-    test -s "$testdir/results/assembly_run_summary.md"
+    if [[ ! -s "$testdir/results/assembly_run_summary.md" ]]; then
+        echo '[SHORTREAD_PILOT] Nextflow completed but the required assembly_run_summary.md is missing' >&2
+        exit 1
+    fi
 fi
