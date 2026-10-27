@@ -8,13 +8,27 @@ This is an isolated native execution/routing pilot, not assembly-quality accepta
 The main HiFi/pangenome run and its cache are untouched.
 
 Use full original files without a prefix subset. Normal trimming, genome-size
-estimation and the configured 60x short-read depth cap remain active. Organelle
+estimation and a test-only 15x short-read depth target remain active. Organelle
 recovery/annotation use real tools and databases. The test config reduces SPAdes
-to k=21,33, disables its read-correction stage (`--only-assembler`), disables isolate
-mode, sets coverage cutoff off, and uses one Redundans iteration. Reduction,
+to k=55, enables its read-correction stage, disables isolate
+mode, sets coverage cutoff auto, and uses one Redundans iteration. Reduction,
 scaffolding and gap closing remain enabled. These settings reduce work but do not
 guarantee a short runtime on this approximately gigabase genome. QC, graph and
 post-assembly analyses are off for this bounded route check.
+
+Updated 2026-10-27 after the original K21/33, uncorrected, 60x-target run exhausted
+OS memory during K33 paired-information collection at approximately 6.5 hours.
+The allocator reported 732,675,194,880 bytes (~733 GB decimal); this is an actual
+allocation failure, not the harmless missing-isolate-mode warning. Lowering the
+read depth and changing graph parameters reduces the pilot workload; its resource
+requirements and assembly quality remain subject to native validation. Production
+defaults are unchanged. The depth target depends on an available genome-size
+estimate; inspect the packaged subsampling log to confirm actual reduction.
+Nextflow 23.10.1's effective configuration check confirms depth 15, K55, automatic
+coverage cutoff, an empty extra-arguments string (read correction enabled), and
+one Redundans iteration. The exact memory/runtime improvement still requires the
+Crest resume. Supported flags are documented in the
+[official SPAdes options](https://ablab.github.io/spades/running.html).
 
 ## Crest invocation
 
