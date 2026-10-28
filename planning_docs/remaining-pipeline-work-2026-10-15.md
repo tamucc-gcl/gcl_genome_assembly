@@ -438,3 +438,21 @@ This is category 7 work, not reopening accepted input/organelle/graph categories
 The next bounded Crest check compares accepted final assemblies without rebuilding
 them. Native comparison acceptance and the broader operational cleanup remain open;
 unified Markdown reporting follows under category 6.
+
+### Native comparison execution result
+
+`core-final-comparisons-01` completed 13/13 tasks with no failures or retries.
+Final input fingerprints and five within-sample pairs reconcile. Sparse retained
+alignment evidence and presentation limitations prevent complete visualization
+acceptance; see [review and bounded follow-up](core-final-comparisons-01-assessment.md).
+No assembly or graph rebuild is indicated.
+
+### R synteny restoration (2026-10-28)
+
+The optional pairwise figures again use pafr/gggenomes with ggplot2 and the
+established minimap2 mapping-chain mode. The Matplotlib renderer is retired.
+Raw/filtered mapping retention and interval-union coverage are now measured;
+R rendering, workflow cases and cache reuse passed locally. Native recovery of
+expected mapping coverage remains open. See [restoration and one-pair Crest command](final-comparisons-r-restoration-2026-10-28.md).
+The user prefers R/ggplot2 for plotting throughout the pipeline. Remaining active
+Python figure renderers are migration items for the category 6 reporting pass.

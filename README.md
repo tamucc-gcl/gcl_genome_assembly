@@ -520,7 +520,7 @@ The similarity/popstruct step derives haplotype vs. individual identity from the
 | `multiqc` | `bioconda::multiqc` | shared | pangenome MultiQC |
 | `pairwise_alignment` | R + ggplot2 (+ minimap2) | shared | growth/SV figures, progressive plot |
 | `comparison_alignment` | Python 3.11 + minimap2 2.30 | 16 CPU, normal/bigmem | finalized-assembly comparisons |
-| `pairwise_plotting` | Python 3.11 + Matplotlib 3.9.4 | 1 CPU / 8 GB / 2 h | finalized dotplots and ribbon plots |
+| `pairwise_plotting` | R 4.5 + ggplot2 4.0.1 / pafr 0.0.2 / gggenomes 1.2.0 | 1 CPU / 8 GB / 2 h | finalized dotplots and ribbon plots |
 | `summarize_assembly` | R report stack | shared | report fragment |
 
 `cactus_tools` and `cactus_pangenome` share one image, so odgi/vg/minigraph need no separate
@@ -818,11 +818,15 @@ maps. These analyses are separate from final Hi-C QC.
 Comparisons use finalized FASTA/FAI inputs and exclude cross-species pairs. The plan and
 final input inventory record exactly which assemblies were compared. Plot axes include
 unaligned sequences meeting the size threshold. An empty alignment has an explicit plot
-status; malformed alignments fail. Match fraction is matched bases divided by aligned
-block length, not whole-genome identity. Missing divergence tags are reported as unavailable.
+status; malformed alignments fail. Approximate match fraction is matched bases divided by mapping-chain
+block length, not measured base-level or whole-genome identity. Missing divergence tags are reported as unavailable.
 Alignment and plotting use separate pinned environments with no runtime R package install.
+Dotplots use pafr/ggplot2; riparian plots use gggenomes/ggplot2. The overview uses
+minimap2 mapping chains without base-level `-c`; its match fraction is approximate.
+Unfiltered mappings and per-threshold union coverage tables are retained alongside
+the filtered PAF so discarded evidence can be examined.
 The existing R environment remains in use for pangenome figures. See
-[comparison validation and native check](planning_docs/final-comparison-contracts-2026-10-28.md).
+[R comparison validation and native check](planning_docs/final-comparisons-r-restoration-2026-10-28.md).
 | `--compartment_resolution` | `250000` | A/B compartment resolution |
 | `--compartment_min_contig_bp` | `5000000` | Min contig size |
 | `--compartment_max_contigs` | `30` | Max contigs included |
@@ -949,7 +953,7 @@ results/
 ├── contact_maps/                       # final .cool/.mcool + PNGs per resolution
 ├── compartments_plot/                  # A/B compartment PC1 tracks + genome-wide PNGs
 ├── snail_plots/                        # BUSCO + assembly-stat snail SVGs
-├── pairwise_alignments/                # plan, final inventory/indexes, PAF/QC, plots, statuses, versions
+├── pairwise_alignments/                # plan, final inventory/indexes, raw/filtered PAF/QC, retention, R plots, statuses, versions
 ├── telomeres/                          # tidk explore/search/plots + all_telomere_summaries.tsv
 │
 ├── reports/

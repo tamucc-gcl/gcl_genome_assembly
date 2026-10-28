@@ -1,5 +1,9 @@
 # Finalized assembly comparisons — 2026-10-28
 
+**Superseded implementation:** the original Matplotlib/base-level alignment
+change below is historical. The current production implementation restores
+[pafr/gggenomes in R and mapping-chain synteny](final-comparisons-r-restoration-2026-10-28.md).
+
 Category 7 implementation and local validation are complete for this branch.
 Native Crest acceptance remains pending. Categories 2/3/5 remain accepted;
 category 6 (unified Markdown reporting) remains open.
@@ -85,3 +89,11 @@ retry policy or cache behavior was changed. The comparison process retries an
 external failure once; deterministic evidence/parser/dependency exits terminate.
 Optional ignored failures such as pangenome 2D visualization need explicit status
 in the category 6 report. Disabled report sections must stay absent.
+
+### Native comparison execution result
+
+`core-final-comparisons-01` completed 13/13 tasks with no failures or retries.
+Final input fingerprints and five within-sample pairs reconcile. Sparse retained
+alignment evidence and presentation limitations prevent complete visualization
+acceptance; see [review and bounded follow-up](core-final-comparisons-01-assessment.md).
+No assembly or graph rebuild is indicated.

@@ -11,6 +11,8 @@ process PAIRWISE_ALIGNMENT {
     tuple val(id1),val(id2),path("${id1}_vs_${id2}.paf.gz"), emit: paf
     tuple val(id1),val(id2),path("${id1}_vs_${id2}.qc.tsv"), emit: qc
     tuple val(id1),val(id2),path("${id1}_vs_${id2}.log"), emit: log
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}.unfiltered.paf.gz"), emit: unfiltered
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}.retention.tsv"), emit: retention
     path "${id1}_vs_${id2}.versions.tsv", emit: versions
     script:
     def preset=params.pairwise_alignment_preset ?: 'asm5'
@@ -22,11 +24,14 @@ process PAIRWISE_ALIGNMENT {
     # Multi-part indexing invalidates MAPQ; keep this reference in one index.
     REF_BASES=\$(awk '{n+=\$2} END {printf "%.0f",n}' '${fai1}')
     INDEX_BASES=\$((REF_BASES+1))
-    minimap2 -t ${task.cpus} -x ${preset} -I \${INDEX_BASES} -c --eqx --secondary=no '${fa1}' '${fa2}' \\
+    # Preserve mapping chains for the synteny overview; no base-level -c.
+    minimap2 -t ${task.cpus} -x ${preset} -I \${INDEX_BASES} --secondary=no '${fa1}' '${fa2}' \\
         2> '${id1}_vs_${id2}.log' \\
       | python3 ${helper} filter --output '${id1}_vs_${id2}.paf.gz' \\
         --qc '${id1}_vs_${id2}.qc.tsv' --ref '${id1}' --query '${id2}' \\
-        --preset '${preset}' --min-mapq ${mq} --min-length ${minlen}
+        --preset '${preset}' --min-mapq ${mq} --min-length ${minlen} \\
+        --raw-output '${id1}_vs_${id2}.unfiltered.paf.gz' \\
+        --retention '${id1}_vs_${id2}.retention.tsv' --ref-fai '${fai1}' --query-fai '${fai2}'
     printf 'minimap2\\t%s\\n' "\$(minimap2 --version)" > '${id1}_vs_${id2}.versions.tsv'
     """
 }
@@ -48,14 +53,16 @@ process PAIRWISE_PLOTS {
     def nz={ key,fallback -> params[key]!=null ? params[key] : fallback }
     """
     set -euo pipefail
-    python3 plot_pairwise.py --paf '${paf}' --ref-fai '${fai1}' --query-fai '${fai2}' \\
+    Rscript plot_pairwise.R --paf '${paf}' --ref-fai '${fai1}' --query-fai '${fai2}' \\
       --ref '${id1}' --query '${id2}' --prefix '${id1}_vs_${id2}' \\
       --dot-min-seq ${nz('pairwise_dotplot_min_seq_bp',1000000)} \\
       --ribbon-min-seq ${nz('riparian_min_seq_bp',1000000)} --ribbon-min-aln ${nz('riparian_min_aln_bp',150000)} \\
       --ribbon-alpha ${nz('riparian_alpha',0.45)} \\
       --dot-width ${nz('pairwise_dotplot_width',10)} --dot-height ${nz('pairwise_dotplot_height',10)} \\
-      --ribbon-width ${nz('riparian_width',14)} --ribbon-height ${nz('riparian_height',6)}
-    python3 -c 'import matplotlib,sys; print("Python\\t"+sys.version.split()[0]); print("matplotlib\\t"+matplotlib.__version__)' > '${id1}_vs_${id2}.plot_versions.tsv'
+      --ribbon-width ${nz('riparian_width',14)} --ribbon-height ${nz('riparian_height',6)} \\
+      --upstream-min-mapq ${nz('pairwise_alignment_min_mapq',5)} \\
+      --upstream-min-aln ${nz('pairwise_alignment_min_aln_bp',150000)}
+    Rscript -e 'cat("R\\t",as.character(getRversion()),"\\n",sep=""); for(p in c("ggplot2","pafr","gggenomes")) cat(p,"\\t",as.character(packageVersion(p)),"\\n",sep="")' > '${id1}_vs_${id2}.plot_versions.tsv'
     """
 }
 

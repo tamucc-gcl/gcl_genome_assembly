@@ -6,7 +6,8 @@ workflow PAIRWISE_COMPARISONS {
     final_assemblies // (meta, final FASTA, final FAI)
     main:
     helper=file("${projectDir}/py_scripts/pairwise_paf.py",checkIfExists:true)
-    plot_helpers=[helper,file("${projectDir}/py_scripts/plot_pairwise.py",checkIfExists:true)]
+    plot_helpers=[file("${projectDir}/r_scripts/plot_pairwise.R",checkIfExists:true),
+                  file("${projectDir}/r_scripts/pairwise_plot_helpers.R",checkIfExists:true)]
     cohort=final_assemblies.toList()
     plan=cohort.map { rows -> comparisonPlan(rows,params.pairwise_alignment_mode ?: 'within_sample') }
     COMPARISON_PLAN(plan.map { it.inventory },cohort.map { rows -> rows.collect { it[2] } },
@@ -26,5 +27,6 @@ workflow PAIRWISE_COMPARISONS {
     dotplot=PAIRWISE_PLOTS.out.dotplot
     riparian=PAIRWISE_PLOTS.out.riparian
     status=PAIRWISE_PLOTS.out.status
+    retention=PAIRWISE_ALIGNMENT.out.retention
     versions=PAIRWISE_ALIGNMENT.out.versions.mix(PAIRWISE_PLOTS.out.versions)
 }

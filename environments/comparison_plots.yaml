@@ -2,5 +2,11 @@ name: comparison_plots
 channels:
   - conda-forge
 dependencies:
+  - r-base=4.5
+  - r-ggplot2=4.0.1
+  - r-pafr=0.0.2
+  - r-gggenomes=1.2.0
+  - r-argparse=2.2.5
+  - r-dplyr=1.1.4
+  # R argparse uses Python to discover its command-line options.
   - python=3.11
-  - matplotlib-base=3.9.4

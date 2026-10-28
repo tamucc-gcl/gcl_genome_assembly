@@ -9,6 +9,7 @@ def tool(name,body):
     p=tools/name;p.write_text('#!'+sys.executable+'\n'+body);p.chmod(0o755)
 tool('minimap2','''import sys,os
 if '--version' in sys.argv:print('2.30-fixture');sys.exit(0)
+assert '-c' not in sys.argv and '--eqx' not in sys.argv, 'Synteny overview must preserve mapping chains'
 case=os.environ['PAIRWISE_CASE']
 if case=='alignment_failure':sys.exit(17)
 if case=='malformed_paf':print('broken PAF');sys.exit(0)
@@ -16,7 +17,7 @@ if case=='no_alignments':sys.exit(0)
 print('chr1\\t10000\\t0\\t5000\\t+\\tchr1\\t10000\\t0\\t5000\\t4900\\t5000\\t60')
 print('chr1\\t10000\\t6000\\t9000\\t-\\tchr1\\t10000\\t6000\\t9000\\t2940\\t3000\\t60\\tdv:f:0.02')
 ''')
-if case=='native_final':
+if case in ['native_final','native_final_selected']:
     folder=root/'native-comparison-fixtures';folder.mkdir(exist_ok=True)
     rows=[]
     for identity,sample,taxid in [('left','specimen','1'),('right','specimen','1'),('singleton','other','2')]:
@@ -43,7 +44,8 @@ elif sys.argv[1]=='search':
  Path(prefix+'_telomeric_repeat_windows.'+ext).write_text('id\\twindow\\ttelomeric_repeat_number\\nchr1\\t0\\t5\\n')
 elif sys.argv[1]=='plot':Path(sys.argv[sys.argv.index('--output')+1]+'.svg').write_text('<svg/>')
 ''')
-deps=repo/'scratch/comparison-linux-deps'
+rbin=Path('/tmp/gcl-r-comparison-tools/env/bin')
+if not (rbin/'Rscript').is_file():raise RuntimeError('Real R plotting environment required for comparison checks')
 (root/'pairwise-check.config').write_text(f'''
 conda.enabled=false
 singularity.enabled=false
@@ -67,10 +69,12 @@ params.riparian_height=4
 process {{
  executor='local'
  withName: '.*' {{ cpus=1; memory='1GB'; scratch=false
-  beforeScript='export PATH="{tools}:$PATH"; export PYTHONPATH="{deps}"; export MPLCONFIGDIR="{root}/mpl-cache"; export PAIRWISE_CASE="{case}"'
+  beforeScript='export PATH="{tools}:{rbin}:$PATH"; export PAIRWISE_CASE="{case}"'
  }}
 }}
 ''')
 
-if case=='native_final':
-    with (root/'pairwise-check.config').open('a') as config:config.write(f"\nparams.assembly_manifest='{manifest}'\n")
+if case in ['native_final','native_final_selected']:
+    with (root/'pairwise-check.config').open('a') as config:
+        config.write(f"\nparams.assembly_manifest='{manifest}'\n")
+        if case=='native_final_selected':config.write("params.comparison_sample='specimen'\n")
