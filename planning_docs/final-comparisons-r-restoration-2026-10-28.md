@@ -114,3 +114,12 @@ synteny: 95.88%/96.44% retained chain-span coverage. Final input dictionaries ar
 unchanged from the sparse run. Both R figures were inspected. No additional code
 fix is indicated; the five-pair cohort check is next. See
 [pilot assessment and full-cohort command](core-final-comparisons-r-01-assessment.md).
+
+### Full-cohort R comparison subgate accepted
+
+`core-final-comparisons-r-all-01` passed 13/13 tasks with no failures/retries.
+All ten R figures and five comparison/retention tables were reviewed; final
+input dictionaries are unchanged and expected synteny has recovered. No further
+identical pairwise rerun is needed. See [full-cohort acceptance](core-final-comparisons-r-all-01-assessment.md).
+Category 7 retains its other cleanup/integration work; category 6 retains unified
+Markdown reporting and remaining scheduled R figure migrations.

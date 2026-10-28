@@ -18,7 +18,6 @@
 ========================================================================================
 */
 
-include { COLLECT_SOFTWARE_VERSIONS } from '../modules/collect_software_versions.nf'
 include { SUMMARY_REPORT           } from '../modules/summary_report'
 
 // ---------------------------------------------------------------------------
@@ -84,7 +83,7 @@ workflow REPORTING {
     ch_pangenome_report            //  PANGENOME.out.report | NO_PANGENOME
     ch_name_map                    //  COLLECT_NAME_MAPS.out.map | NO_NAMEMAP
     ch_misassembly_registry        // Current cohort review assembly registry or sentinel
-    ch_versions                    //  accumulated versions channel (already fully mixed in main)
+    ch_software_versions           // always-on normalized provenance table
     ch_summary_report_script       //  file: r_scripts/generate_summary_report.R
 
     main:
@@ -301,10 +300,6 @@ workflow REPORTING {
         .of(wf_lines)
         .collectFile(name: 'workflow_info.tsv', newLine: true)
 
-    COLLECT_SOFTWARE_VERSIONS(
-        ch_versions.collectFile(name: 'software_versions_raw.tsv')
-    )
-
     // ---- Call SUMMARY_REPORT ----
     SUMMARY_REPORT(
         ch_report_manifest,
@@ -321,7 +316,7 @@ workflow REPORTING {
         ch_pangenome_report,
         ch_name_map,
         ch_misassembly_registry,
-        COLLECT_SOFTWARE_VERSIONS.out.versions,
+        ch_software_versions,
         ch_summary_report_script
     )
 }

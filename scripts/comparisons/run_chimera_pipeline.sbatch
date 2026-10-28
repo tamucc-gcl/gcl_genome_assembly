@@ -24,8 +24,14 @@ finish() {
     fi
     # Package reports and evidence, not the full assembly output tree.
     files=(exit_status.txt)
+    for name in core_integration_check.md core_integration_check.json execution_environments.json; do
+        [[ -f "$out/$name" ]] && files+=("$name")
+    done
     for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly_eligibility.json results/assembly_eligibility.tsv results/assembly_eligibility.md results/references results/assembly/chimeras results/assembly/scaffold/teloclip results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
         [[ -e "$out/$name" ]] && files+=("$name")
+    done
+    for name in results/provenance results/pairwise_alignments; do
+        [[ -d "$out/$name" ]] && files+=("$name")
     done
     # Final names are needed to review the chromosome inventory after manual cuts.
     # Include these small tables without packaging the final FASTAs or mappings.
@@ -56,7 +62,7 @@ finish() {
                 -name '*.nwk' -o -name '*.stats.tgz' \) -print0)
     fi
     tar --dereference --exclude='*.fa' --exclude='*.fasta' --exclude='*.fa.gz' --exclude='*.fasta.gz' \
-        --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' \
+        --exclude='*.bam' --exclude='*.bai' --exclude='*.csi' --exclude='*.sam' --exclude='*.paf.gz' \
         -czf "$out.review.tar.gz" -C "$out" "${files[@]}"
     exit "$rc"
 }
@@ -80,3 +86,8 @@ test -s "$out/results/assembly/chimeras/README.md"
 test -s "$out/results/assembly/chimeras/assembly_registry.tsv"
 test -s "$out/results/assembly/chimeras/review.tsv"
 test -s "$out/results/assembly_run_summary.md"
+if [[ -n "${CORE_INTEGRATION_BASELINE:-}" ]]; then
+    python3 "$repo/scripts/comparisons/audit_core_integration.py" \
+        --baseline "$CORE_INTEGRATION_BASELINE" --results "$out/results" \
+        --trace "$out/trace.tsv" --out "$out"
+fi

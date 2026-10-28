@@ -1597,7 +1597,7 @@ narr <- paste0(narr, " Assembly quality was assessed with BUSCO (per-sample line
 if (has_teloclip) narr <- paste0(narr, " Scaffold ends were extended into telomeric repeats with teloclip.")
 if (has_chimera) narr <- paste0(narr, " Assemblies were screened against their cohort for chromosome-scale transitions. The linked misassembly report combines read continuity, chromosome comparisons and contact evidence; manual cuts are source-bound and audited.")
 if (sig_syn)   narr <- paste0(narr, " Synteny was visualised from minimap2 alignments (gggenomes).")
-narr <- paste0(narr, " Per-step parameters and exact software versions are recorded in the pipeline's Nextflow execution reports.")
+narr <- paste0(narr, " Software records and available resolved environment snapshots are recorded under provenance/.")
 
 # --- Tool reference registry ---
 refs <- c(
@@ -1659,7 +1659,7 @@ md <- c(md,
         sec_head("methods"), "",
         narr, "",
         "### Tool References", "",
-        "Primary references for the tools used in this run. Exact versions are recorded in the pipeline's Nextflow execution reports (not reproduced here).", "",
+        "Primary references for the tools used in this run. Software records and available environment snapshots are recorded under provenance/.", "",
         paste0("- ", refs[keys]), "")
 
 # --- Software Versions (auto-populates once per-process version capture is enabled) ---
@@ -1670,10 +1670,11 @@ if (!str_detect(basename(ver_path), "NO_VERSIONS") &&
   vers <- tryCatch(read_tsv(ver_path, col_types = cols(.default = "c")),
                    error = function(e) { message("WARNING (versions): ", e$message); NULL })
 }
-md <- c(md, "### Software Versions", "")
+md <- c(md, "### Software Versions", "",
+        "[Version sources](provenance/software_versions.tsv) · [Metadata issues](provenance/software_version_issues.tsv) · [Environment snapshots](provenance/runtime_environments.json)", "")
 if (!is.null(vers) && nrow(vers) >= 1 && ncol(vers) >= 2) {
   names(vers)[1:2] <- c("Tool", "Version")
-  vers_disp <- vers %>% distinct(Tool, .keep_all = TRUE) %>%
+  vers_disp <- vers %>% distinct(Tool, Version, .keep_all = TRUE) %>%
     arrange(tolower(Tool)) %>% select(Tool, Version)
   md <- c(md, make_markdown_table(vers_disp), "")
 } else {

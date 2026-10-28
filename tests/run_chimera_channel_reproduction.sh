@@ -64,6 +64,33 @@ elif [[ "${1:-}" == organelle_contract_checks.nf || "${1:-}" == taxonomy_contrac
     export ORG_CASE="${2:-circular}"
     mkdir -p "$runtime/organelle-launch"
     cd "$runtime/organelle-launch"
+elif [[ "${1:-}" == provenance_checks.nf ]]; then
+    cp reproduction.nf "$repo/.provenance-checks.nf"
+    trap 'rm -f "$repo/.provenance-checks.nf"' EXIT
+    script="$repo/.provenance-checks.nf"
+    cat > "$runtime/provenance.config" <<EOF
+conda.enabled=false
+singularity.enabled=false
+docker.enabled=false
+trace.enabled=false
+report.enabled=false
+timeline.enabled=false
+dag.enabled=false
+params.outdir='$runtime/provenance-results/${2:-nonempty}'
+params.publish_dir_mode='copy'
+process { executor='local'; withName: '.*' { cpus=1; memory='1 GB'; scratch=false } }
+EOF
+    extra=(-c "$runtime/provenance.config")
+    if [[ "${2:-}" == trace ]]; then
+        cat >> "$runtime/provenance.config" <<EOF
+trace.enabled=true
+trace.file='$runtime/provenance-trace.tsv'
+trace.fields='task_id,hash,native_id,name,status,exit,submit,duration,realtime,%cpu,peak_rss,peak_vmem,rchar,wchar,workdir,container'
+EOF
+    fi
+    export PROVENANCE_CASE="${2:-nonempty}"
+    mkdir -p "$runtime/provenance-launch"
+    cd "$runtime/provenance-launch"
 elif [[ "${1:-}" == pairwise_checks.nf || "${1:-}" == native_final_comparisons.nf ]]; then
     python3 "$repo/tests/setup_pairwise_checks.py" "$runtime" "${2:-within_sample}"
     cp reproduction.nf "$repo/.pairwise-checks.nf"

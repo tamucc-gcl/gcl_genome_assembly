@@ -78,11 +78,15 @@ a YAML in `environments/`, or a container:
 | Decontamination | NCBI FCS-GX (Singularity), FCS-adaptor, DIAMOND, BlobToolKit (branch disabled) |
 | Assembly QC | QUAST, Merqury (meryl), BUSCO, samtools/minimap2 mapping stats, MultiQC |
 | Taxonomy | taxonkit, csvtk, NCBI taxdump |
-| Pangenome | Minigraph-Cactus v3.1.4 (container), vg, odgi, minigraph, panacus, vcfbub, bcftools |
+| Pangenome | Minigraph-Cactus v3.2.1 (container), vg, odgi, minigraph, panacus, vcfbub, bcftools |
 | Visualization / reporting | R (tidyverse, ggplot2, ape, ggrepel, rmarkdown), Matplotlib, BlobToolKit snail plots, Python |
 
-Container images pinned in config: `cactus:v3.1.4` (± `-gpu`), `ghcr.io/marcelauliano/mitohifi:master`,
-NCBI `fcs-gx.sif`.
+Cactus uses the version tag `cactus:v3.2.1` (± `-gpu`). The accepted MitoHiFi
+`master` and NCBI FCS `latest` defaults remain mutable; they are not immutable pins.
+Override `--mitohifi_container` / `--fcs_gx_container` with audited immutable images
+or local SIF paths when freezing a fresh run. Current version evidence, declared
+dependencies, resolved conda package records and available local image checksums
+are recorded under `provenance/`, independently of the full report toggle.
 
 ---
 
@@ -512,8 +516,8 @@ The similarity/popstruct step derives haplotype vs. individual identity from the
 
 | Label | Env / container | Resources | Used by |
 |---|---|---|---|
-| `cactus_pangenome` | cactus v3.1.4 (GPU variant if `pangenome_use_gpu`) | 32 cpu / 300 GB / 48 h (24 h on `gpu`) | graph construction |
-| `cactus_tools` | cactus v3.1.4 (CPU) | 4 cpu / 32 GB / 4 h | odgi/vg/minigraph: stats, QC, 2D viz, MultiQC YAMLs, similarity, progressive |
+| `cactus_pangenome` | cactus v3.2.1 (GPU variant if `pangenome_use_gpu`) | 32 cpu / 300 GB / 48 h (24 h on `gpu`) | graph construction |
+| `cactus_tools` | cactus v3.2.1 (CPU) | 4 cpu / 32 GB / 4 h | odgi/vg/minigraph: stats, QC, 2D viz, MultiQC YAMLs, similarity, progressive |
 | `pangenome_variants` | `bcftools vcfbub htslib` | 2 cpu / 16 GB / 4 h | variant catalog + `bcftools stats` |
 | `panacus` | `bioconda::panacus` | 8 cpu / 64 GB / 4 h | openness / growth |
 | `pangenome_popstruct` | R + ggplot2/ape/ggrepel | 2 cpu / 8 GB / 1 h | PCoA + NJ plots |
@@ -1195,3 +1199,12 @@ Core: **Nextflow** (Di Tommaso et al. 2017) · **hifiasm** (Cheng et al. 2021) �
 Pangenome: **Minigraph-Cactus** (Hickey et al. 2024) · **minigraph** (Li et al. 2020) · **vg**
 (Garrison et al. 2018) · **odgi** (Guarracino et al. 2022) · **panacus** (Parmigiani et al.) ·
 **vcfbub** · **bcftools** (Danecek et al. 2021).
+
+### Combined core integration acceptance
+
+The [operational audit and combined check](planning_docs/core-integration-2026-10-28.md)
+reuses the normal main.nf cache with the accepted cuts, QC, core graph and R
+comparisons enabled together. It does not introduce cache reconstruction.
+Software records preserve all observed tool/version pairs; unlabeled/malformed
+records are explicit in `provenance/software_version_issues.tsv`. The dependency
+catalog is a declaration audit, not a claim that every environment is fully locked.

@@ -94,6 +94,7 @@ include { parseSampleSheet } from './functions/input_validation.nf'
 include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
 include { INPUT_TAXONOMY } from './workflows/input_taxonomy.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
+include { RUN_PROVENANCE } from './workflows/run_provenance.nf'
 include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
 include { SHARED_REFERENCE } from './modules/shared_reference.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
@@ -768,6 +769,8 @@ workflow {
     // ---- chimera tables for the report ---------------------------------------------
     // Built inside CHIMERA, which owns the channels they come from.
     ch_misassembly_registry_rpt = CHIMERA.out.registry
+    // Record software evidence even when QC or the full report is disabled.
+    RUN_PROVENANCE(ch_versions)
 
     // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
     if (qc_on && post_on) {
@@ -795,7 +798,7 @@ workflow {
         ch_pangenome_report_for_report,
         ch_name_map_for_report,
         ch_misassembly_registry_rpt,
-        ch_versions,
+        RUN_PROVENANCE.out.versions,
         ch_summary_report_script
     )
     }

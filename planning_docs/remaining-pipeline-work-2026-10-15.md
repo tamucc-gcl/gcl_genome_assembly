@@ -114,6 +114,10 @@ substeps remain recorded below and should not be repeated without a concrete rea
     acceptance checks; no assembly or chimera changes are indicated.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
 - [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
+  **Finalized comparison subgate accepted 2026-10-28:** full cohort, 13 completed
+  tasks, no failures/retries; five pairs, all ten R figures inspected, input and
+  retention tables reconcile. See [cohort acceptance](core-final-comparisons-r-all-01-assessment.md).
+  Remaining dependency/provenance cleanup and combined integration keep category 7 open.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.
 - [ ] **9. BlobToolKit evidence and cleaning** — evidence first, separately validated cleaning.
 - [ ] **10. Graph self-mapping QC** — bounded supported mapping, metrics and report integration.
@@ -464,3 +468,12 @@ synteny: 95.88%/96.44% retained chain-span coverage. Final input dictionaries ar
 unchanged from the sparse run. Both R figures were inspected. No additional code
 fix is indicated; the five-pair cohort check is next. See
 [pilot assessment and full-cohort command](core-final-comparisons-r-01-assessment.md).
+
+## Operational provenance and combined core check (2026-10-28)
+
+Always-on software collection, schema normalization, explicit metadata issues,
+resolved environment snapshots and declaration fingerprints are now implemented.
+The next run combines all-stage QC, accepted manual cuts, core graph and accepted
+R comparisons with ordinary cache reuse. Category 7 remains open pending that
+native integration/environment review. See [implementation and run command](core-integration-2026-10-28.md).
+No package upgrade, changed biological cutoff or graph rebuild is intended.
