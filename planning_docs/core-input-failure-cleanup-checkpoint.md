@@ -61,6 +61,19 @@ now covers the enabled-route and missing-context contracts below with actual
 workflow modules, deterministic external CLI doubles and real GenBank conversion.
 Native biological pilots and name-to-taxid lookup acceptance remain distinct work.
 
+**2026-10-27 update:** the native short-read execution pilot and final completion
+resume are now accepted from run 1553560: three new/15 cached tasks, exit 0,
+eligibility/reference/summary present. This closes the native-execution requirement
+in item 1 below. The reduced output does not establish biological assembly quality.
+See [completion assessment](core-shortread-native-01-completion-assessment.md).
+The other failure, lookup, operational and reporting requirements remain open.
+
+**2026-10-28 update:** item 2 now has implemented name-to-taxid handling, explicit
+lookup failures, strict reference output checks and targeted retry rules, with
+17 passing local workflow cases. Native lookup/reference acceptance is prepared
+as a separate, small Crest check. See
+[identity/reference contracts](identity-reference-contracts-2026-10-28.md).
+
 1. Verify the full short-read nuclear route and the enabled short-read organelle
    branch, including successful circular/linear recovery, genuine no-recovery,
    execution failure, database setup failure and annotation failure. Current

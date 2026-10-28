@@ -8,6 +8,8 @@
 process RESOLVE_TAXONOMY {
     tag "${taxid}"
     label 'taxonkit'
+    // Offline deterministic lookup: retrying the same unknown taxid cannot fix it.
+    errorStrategy 'terminate'
 
     input:
     tuple val(taxid), path(taxdump_dir)

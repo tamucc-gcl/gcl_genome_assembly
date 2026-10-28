@@ -152,14 +152,23 @@ given a data-driven default applies.
 
 | Column / param | Values | Default |
 |---|---|---|
-| `taxid` | NCBI taxonomy ID | none (BUSCO falls back to `busco_lineage`) |
-| `species` | scientific name; used for naming and the MitoHiFi reference search | derived from `taxid` |
+| `taxid` | Positive integer NCBI taxonomy ID | required unless `species` resolves uniquely |
+| `species` | Exact scientific name; resolves to a taxid when no effective taxid is supplied | derived from `taxid` |
 | `assembler` | `hifiasm` \| `spades` | `hifiasm` if HiFi present, else `spades` |
 | `ploidy` | positive integer, or `haploid` / `diploid` — **organism** ploidy (GenomeScope `-p`, hifiasm `--n-hap`) | `diploid` |
 | `n_hap` | `1` \| `2` — **output** haplotype count | SPAdes → 1; hifiasm → 1 if `ploidy==1` else 2 |
 | `dedup` | `purge_dups` \| `redundans` \| `none` | hifiasm → `purge_dups` if `run_purge_dups` else `none`; SPAdes → `redundans` |
 | `mito_tool` | `mitohifi` \| `mitofinder` \| `none` | `mitohifi` with HiFi, else `mitofinder` |
 | `haploid_genome_size` | bp value, `auto`, or blank | `auto` (see below) |
+
+Each assembled sample needs an effective taxid or scientific name. Name-only rows
+are resolved against the local `names.dmp`/`nodes.dmp` snapshot, ignoring case and
+repeated whitespace. Unknown or ambiguous scientific names fail with an explicit
+request for a taxid; common-name/synonym guessing is not used. The resolved canonical
+name, original query and taxid are recorded in `taxonomy/resolved_names.tsv`.
+An effective taxid remains authoritative; a supplied name then remains a label/search
+override. For a mixed-species name-only sheet, omit a global `--taxid` and supply
+each row's scientific name (or its own taxid).
 
 **`ploidy` vs `n_hap` is the distinction to internalize.** `ploidy` describes the organism;
 `n_hap` describes how many assemblies come out. A collapsed diploid assembly is

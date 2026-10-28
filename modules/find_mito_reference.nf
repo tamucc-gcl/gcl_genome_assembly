@@ -21,6 +21,10 @@
 process FIND_MITO_REFERENCE {
     tag "${species_name}"
     label 'mitohifi'
+    // Missing/malformed outputs and unavailable executables are deterministic.
+    // Other opaque external/network failures retain one bounded retry.
+    errorStrategy { task.exitStatus in [65,126,127] ? 'terminate' : 'retry' }
+    maxRetries 1
 
     publishDir "${params.outdir}/organelle", mode: params.publish_dir_mode, saveAs: { filename ->
         filename == 'mito_reference_info.tsv' ? "${taxid}_mito_reference_info.tsv" : null
@@ -38,6 +42,7 @@ process FIND_MITO_REFERENCE {
     def min_length = params.mitohifi_ref_min_bp ?: 14000
     """
     set -euo pipefail
+    shopt -s nullglob
 
     echo "[FIND_MITO_REFERENCE] Searching NCBI for closest mitogenome to: ${species_name}"
     echo "[FIND_MITO_REFERENCE] Minimum reference length: ${min_length} bp"
@@ -49,14 +54,19 @@ process FIND_MITO_REFERENCE {
         --min_length ${min_length}
 
     # Identify downloaded files
-    REF_FASTA=\$(ls *.fasta 2>/dev/null | head -n 1)
-    REF_GB=\$(ls *.gb 2>/dev/null | head -n 1)
+    fastas=(*.fasta)
+    genbanks=(*.gb)
 
-    if [ -z "\${REF_FASTA}" ] || [ -z "\${REF_GB}" ]; then
-        echo "[FIND_MITO_REFERENCE] ERROR: findMitoReference.py did not produce expected outputs"
-        echo "[FIND_MITO_REFERENCE] Files in output directory:"
-        ls -la .
-        exit 1
+    if [ \${#fastas[@]} -ne 1 ] || [ \${#genbanks[@]} -ne 1 ]; then
+        echo '[FIND_MITO_REFERENCE] Expected exactly one FASTA/GenBank reference pair; no unambiguous reference available' >&2
+        exit 65
+    fi
+    REF_FASTA=\${fastas[0]}
+    REF_GB=\${genbanks[0]}
+    if [ ! -s "\${REF_FASTA}" ] || [ ! -s "\${REF_GB}" ] || \\
+       [ "\${REF_FASTA%.fasta}" != "\${REF_GB%.gb}" ]; then
+        echo '[FIND_MITO_REFERENCE] Empty or mismatched reference files' >&2
+        exit 65
     fi
 
     # Extract accession and species from the downloaded filename
@@ -64,8 +74,13 @@ process FIND_MITO_REFERENCE {
     ACCESSION=\$(basename "\${REF_FASTA}" .fasta)
 
     # Parse the GenBank file for organism name
-    REF_SPECIES=\$(grep -m1 'ORGANISM' "\${REF_GB}" | sed 's/.*ORGANISM  *//' | xargs)
-    REF_LENGTH=\$(grep -v '^>' "\${REF_FASTA}" | tr -d '\\n' | wc -c)
+    REF_SPECIES=\$(sed -n 's/^  *ORGANISM  *//p' "\${REF_GB}" | head -n1)
+    REF_LENGTH=\$(awk '!/^>/ {gsub(/[[:space:]]/, ""); n+=length(\$0)} END {print n+0}' "\${REF_FASTA}")
+    if [ "\$(grep -c '^>' "\${REF_FASTA}" || true)" -ne 1 ] || \\
+       [ "\${REF_LENGTH}" -lt ${min_length} ] || [ -z "\${REF_SPECIES}" ]; then
+        echo '[FIND_MITO_REFERENCE] Invalid reference record, length or organism annotation' >&2
+        exit 65
+    fi
 
     # Write reference info TSV
     cat > mito_reference_info.tsv <<EOF

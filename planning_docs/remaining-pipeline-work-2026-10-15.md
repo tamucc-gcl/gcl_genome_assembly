@@ -395,3 +395,23 @@ references suppressed eligibility/summary work. That empty-list collection and
 a disabled-chimera staging collision are repaired and covered by two actual-wiring
 integration cases. Resume acceptance remains pending; the 6.36 Mb nuclear test
 output and 4,945 bp partial mitogenome do not establish biological completeness.
+
+**Completion acceptance:** the replacement packet, run 1553560, exits 0 with three
+new tasks and 15 cached, no failures/retries. Eligibility, shared reference and
+summary now execute correctly for the unharmonized shotgun-only input. The native
+short-read execution gate is accepted; no further identical pilot rerun is needed.
+See [completion assessment](core-shortread-native-01-completion-assessment.md).
+Categories 2/3/7 retain only their other documented outstanding contracts; this
+acceptance does not certify the biological completeness of the reduced test output.
+
+### 2026-10-28 identity/reference chunk
+
+Scientific-name-only input handling is now wired into main.nf; unknown/ambiguous
+names and missing identities fail explicitly. Reference retrieval validates its
+outputs and distinguishes deterministic invalid outputs/dependencies from bounded
+external retries. Seventeen local workflow cases, a full-main input-entry check
+and the native-check workflow with controlled tools passed. The small
+[native identity/reference check](identity-reference-contracts-2026-10-28.md) is
+ready for Crest; no assembly or graph rebuild is involved. Categories 2/3 remain
+open pending that evidence and final checklist reconciliation; the broader retry
+and dependency audit remains category 7.

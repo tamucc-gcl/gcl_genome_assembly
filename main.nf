@@ -92,6 +92,7 @@ if (params.run_blobtools_evidence) {
 */
 include { parseSampleSheet } from './functions/input_validation.nf'
 include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
+include { INPUT_TAXONOMY } from './workflows/input_taxonomy.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
 include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
 include { SHARED_REFERENCE } from './modules/shared_reference.nf'
@@ -204,13 +205,7 @@ workflow {
     INPUT_PREPARATION(validated_inputs)
     ch_input = INPUT_PREPARATION.out.samples
     ch_input_status = INPUT_PREPARATION.out.status
-    ch_declared_assemblies = ch_input.map { meta, reads -> tuple(meta.sample, meta) }
 
-    // ploidy + haploid-size overrides ride sample-keyed side-channels (genomescope/hifiasm only),
-    // so ploidy/size tweaks stay off the per-sample task hash.
-    ch_ploidy_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, (meta.ploidy ?: (meta.n_hap ?: 2))) }
-    ch_hgsize_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, meta.haploid_genome_size) }   // column>param, or null
-    ch_input            = ch_input.map { meta, reads -> tuple(meta.findAll { k, v -> !(k in ['ploidy', 'haploid_genome_size']) }, reads) }
     ch_versions = Channel.empty()
     ch_gxdb_dir = Channel.empty()
 
@@ -223,6 +218,13 @@ workflow {
     )
     ch_taxdump     = DOWNLOAD_TAXDUMP.out.taxdump_dir
     ch_taxdump_dir = ch_taxdump          // reused by the decon evidence branch
+    INPUT_TAXONOMY(ch_input, ch_taxdump)
+    ch_input = INPUT_TAXONOMY.out.samples
+    ch_declared_assemblies = ch_input.map { meta, reads -> tuple(meta.sample, meta) }
+    // Keep ploidy/size overrides on side channels, outside expensive task metadata.
+    ch_ploidy_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, (meta.ploidy ?: (meta.n_hap ?: 2))) }
+    ch_hgsize_by_sample = ch_input.map { meta, reads -> tuple(meta.sample, meta.haploid_genome_size) }
+    ch_input = ch_input.map { meta, reads -> tuple(meta.findAll { k, v -> !(k in ['ploidy', 'haploid_genome_size']) }, reads) }
 
     // ── 4b-i: resolve organism taxonomy (taxid -> name / kingdom / BUSCO lineage) ──
     RESOLVE_TAXONOMY(

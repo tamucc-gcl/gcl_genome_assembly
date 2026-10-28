@@ -55,7 +55,7 @@ if [[ "${1:-}" == chimera_cohort_wiring_check.nf || "${1:-}" == teloclip_scope_w
     mkdir -p "$repo/comparisons/misassembly-validation"
     mkdir -p "$launch"
     cd "$launch"
-elif [[ "${1:-}" == organelle_contract_checks.nf || "${1:-}" == taxonomy_contract_checks.nf ]]; then
+elif [[ "${1:-}" == organelle_contract_checks.nf || "${1:-}" == taxonomy_contract_checks.nf || "${1:-}" == identity_reference_checks.nf || "${1:-}" == native_identity_reference_checks.nf ]]; then
     python3 "$repo/tests/setup_organelle_checks.py" "$runtime" "${2:-circular}"
     cp reproduction.nf "$repo/.organelle-contract-checks.nf"
     trap 'rm -f "$repo/.organelle-contract-checks.nf"' EXIT

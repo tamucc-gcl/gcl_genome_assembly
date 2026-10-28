@@ -36,6 +36,19 @@ elif case not in ('no_recovery','retry','fungus_retry') or retry:
 print('Thank you!')
 '''
 tool('get_organelle_from_reads.py',body);tool('get_organelle_from_assembly.py',body)
+tool('findMitoReference.py','''import os,sys
+from pathlib import Path
+case=os.environ['ORG_CASE']
+if case=='reference_execution_failure':print('fixture reference lookup execution failure');sys.exit(17)
+if case=='reference_unavailable_executable':sys.exit(127)
+if case=='reference_missing':sys.exit(0)
+Path('ACC.fasta').write_text('' if case=='reference_empty' else '>ACC\\nACGT\\n')
+Path('OTHER.gb' if case=='reference_mismatch' else 'ACC.gb').write_text('  ORGANISM  Species one\\n')
+if case=='reference_header_only':Path('ACC.fasta').write_text('>ACC\\n')
+if case=='reference_short':Path('ACC.fasta').write_text('>ACC\\nAC\\n')
+if case=='reference_no_organism':Path('ACC.gb').write_text('LOCUS ACC\\n')
+if case=='reference_multiple':Path('EXTRA.fasta').write_text('>EXTRA\\nACGT\\n')
+''')
 tool('get_organelle_config.py',"import sys\nprint('download failed')\nsys.exit(17)\n")
 tool('curl',"import sys\nprint('fixture database download failure')\nsys.exit(17)\n")
 tool('runmitos','''import sys,os
@@ -87,6 +100,7 @@ params.outdir='%s/organelle-results/%s'
 params.publish_dir_mode='copy'
 params.getorganelle_downloads='%s'
 params.mitos_downloads='%s'
+params.mitohifi_ref_min_bp=4
 process {
     executor='local'
     withName: '.*' { cpus=1; memory='1GB'; scratch=false; errorStrategy='terminate'
@@ -94,3 +108,11 @@ process {
     }
 }
 '''%(root,case,db,mitos_parent,tools,deps,case))
+if case.startswith('reference_'):
+    config=root/'organelle-check.config'
+    config.write_text(config.read_text().replace("; errorStrategy='terminate'",''))
+if case=='native_identity_reference':
+    (db/'names.dmp').write_text('11\t|\tSpecies one\t|\t\t|\tscientific name\t|\n')
+    (db/'nodes.dmp').write_text('11\t|\t1\t|\tspecies\t|\n')
+    with (root/'organelle-check.config').open('a') as config:
+        config.write(f"\nparams.taxid='11'\nparams.species='Species one'\nparams.diamond_taxdump_dir='{db}'\n")
