@@ -106,3 +106,11 @@ evidence calculations intact. The earlier investigation/legacy chimera scripts
 should be checked for active use before porting or retirement. Category 6 owns
 that figure migration; category 7 retains native comparison acceptance, remaining
 dependency audit and final combined integration.
+
+### Native R comparison pilot accepted
+
+`core-final-comparisons-r-01` passed all five tasks and restored CMat chromosome
+synteny: 95.88%/96.44% retained chain-span coverage. Final input dictionaries are
+unchanged from the sparse run. Both R figures were inspected. No additional code
+fix is indicated; the five-pair cohort check is next. See
+[pilot assessment and full-cohort command](core-final-comparisons-r-01-assessment.md).

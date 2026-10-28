@@ -456,3 +456,11 @@ R rendering, workflow cases and cache reuse passed locally. Native recovery of
 expected mapping coverage remains open. See [restoration and one-pair Crest command](final-comparisons-r-restoration-2026-10-28.md).
 The user prefers R/ggplot2 for plotting throughout the pipeline. Remaining active
 Python figure renderers are migration items for the category 6 reporting pass.
+
+### Native R comparison pilot accepted
+
+`core-final-comparisons-r-01` passed all five tasks and restored CMat chromosome
+synteny: 95.88%/96.44% retained chain-span coverage. Final input dictionaries are
+unchanged from the sparse run. Both R figures were inspected. No additional code
+fix is indicated; the five-pair cohort check is next. See
+[pilot assessment and full-cohort command](core-final-comparisons-r-01-assessment.md).
