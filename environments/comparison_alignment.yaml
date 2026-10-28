@@ -1,0 +1,7 @@
+name: comparison_alignment
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - minimap2=2.30

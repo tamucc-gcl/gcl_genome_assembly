@@ -54,7 +54,14 @@ four shared-reference tests; one additional GNU-sed-specific test was skipped on
 Windows. The unchanged upstream sed expression also executed in the Linux native
 header-probe integration. Logs are in `comparisons/core-cleanup-validation/`.
 
-## Still required before categories 2/3/7 can be closed
+## Historical remaining-work list and current acceptance
+
+**2026-10-28 acceptance:** categories 2 and 3 are now accepted from the completed
+local matrix and native HiFi/shotgun/identity-reference checks. Items 1 and 2 below
+are complete within their supported execution/contract scope. Items 3 and 4 remain
+category 7, and item 5 remains category 6. The final combined core integration
+check is still required. See
+[native identity/reference acceptance](core-identity-reference-01-assessment.md).
 
 The subsequent [organelle/taxonomy pass](organelle-failure-contracts-2026-10-25.md)
 now covers the enabled-route and missing-context contracts below with actual
@@ -85,11 +92,23 @@ as a separate, small Crest check. See
    review outside the accepted graph path. Preserve ordinary Nextflow caching;
    do not introduce cache reconstruction or dataset-specific path rescue.
 4. Validate existing optional comparison plots against finalized assemblies and
-   species-aware pair selection before main report integration. Dependency pinning
-   for SETUP_PAFR remains explicitly open.
+   species-aware pair selection before main report integration. The branch
+   now uses isolated pinned Python environments; native acceptance remains open.
 5. Consolidate run-scoped Markdown reporting (category 6), including residual graph
    retention flags, excluded source intervals, cut dispositions and HiFi alternative
    placements. Disabled sections must be absent; no stale directory-wide discovery.
 
 These are the next bounded tests, not a request for another expensive graph rebuild.
 PSMC remains the first extension after core report/input/failure/cleanup acceptance.
+
+## 2026-10-28 finalized comparison repair
+
+The optional final comparison branch now uses metadata/species pair selection,
+final FASTA/FAI dictionaries, strict synchronous PAF measurement and separate pinned
+alignment/plot environments. Runtime SETUP_PAFR installation and retired R plot
+wrappers were removed; accepted pangenome R figures retain their environment.
+Eight unit checks, twelve workflow cases, normal resume, full-main input compilation
+and the native-check wrapper with controlled external tools passed locally.
+[Native comparison acceptance](final-comparison-contracts-2026-10-28.md) is next.
+Category 7 remains open for that run, remaining dependency/provenance cleanup and
+combined core integration. Category 6 remains the unified Markdown reporting pass.

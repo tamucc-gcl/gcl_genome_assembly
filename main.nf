@@ -168,8 +168,6 @@ include { COLLECT_NAME_MAPS } from './modules/collect_name_maps.nf'
 // ── helper scripts declared as inputs so edits invalidate the cache ──
 ch_compile_qc_script      = file("${projectDir}/r_scripts/compile_qc.R",                         checkIfExists: true)
 ch_summary_report_script  = file("${projectDir}/r_scripts/generate_summary_report.R",            checkIfExists: true)
-ch_dotplot_script         = file("${projectDir}/r_scripts/dotplot_paf.R",                        checkIfExists: true)
-ch_riparian_script        = file("${projectDir}/r_scripts/riparian_paf.R",                       checkIfExists: true)
 ch_assembly_report_script = file("${projectDir}/py_scripts/generate_assembly_report.py",         checkIfExists: true)
 ch_coverage_book_script   = file("${projectDir}/py_scripts/bigwig_genome_book.py",               checkIfExists: true)
 ch_tad_book_script        = file("${projectDir}/py_scripts/make_tad_book.py",                    checkIfExists: true)
@@ -577,12 +575,6 @@ workflow {
         ch_versions = ch_versions.mix(FINAL_HIC_MAPS.out.versions)
     }
 
-    // String-id view of the finalized per-hap assemblies for the leaf viz/QUAST steps.
-    // These only need an id (for pairing, labels, output naming) — meta itself isn't used.
-    ch_finalized_assembly
-        .map { meta, fa -> tuple(meta.id, fa) }
-        .set { ch_final_by_id }
-
     ch_finalized_assembly
         .map { meta, fa -> tuple(meta.taxid?.toString(), meta.id, fa) }
         .combine( ch_telo_by_taxid, by: 0 )
@@ -606,7 +598,7 @@ workflow {
     ch_viz_tidk            = Channel.empty()
 
     if (post_on) {
-        FINAL_VIZ(ch_final_by_id, ch_final_by_id_telo, ch_dotplot_script, ch_riparian_script)
+        FINAL_VIZ(ch_finalized_with_fai, ch_final_by_id_telo)
         ch_versions            = ch_versions.mix(FINAL_VIZ.out.versions)
         ch_pairwise_summary    = FINAL_VIZ.out.pairwise_summary
         ch_telomere_for_report = FINAL_VIZ.out.telomere_summary

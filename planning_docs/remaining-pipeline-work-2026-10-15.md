@@ -20,8 +20,16 @@ substeps remain recorded below and should not be repeated without a concrete rea
   `comparisons/assembly-all-stage-qc-final-hic-inspection/QC-review.md` and uploaded
   `assembly-all-stage-qc.review.tar.gz`. Standalone metric-table publication was fixed/tested
   locally for the next normal resume (category 7); crowded map labels remain category 6.
-- [ ] **2. General-purpose input handling** — complete the supported-input/species/skip matrix.
-- [ ] **3. Failure and organelle handling** — audit and finish the remaining failure/fallback contracts.
+- [x] **2. General-purpose input handling** — accepted 2026-10-28 from the supported
+  parser/species/skip matrix, native HiFi/shotgun runs, final inventory checks and
+  [native name/taxid acceptance](core-identity-reference-01-assessment.md). Name-only
+  and numeric identities resolve without silently dropping samples. Final core
+  integration remains category 7.
+- [x] **3. Failure and organelle handling** — accepted 2026-10-28 from controlled
+  positive/negative recovery/context/database/annotation tests and native HiFi,
+  fragmented shotgun annotation and reference retrieval. Partial recovery remains
+  explicit. Broader pipeline retry/resource/dependency cleanup remains category 7;
+  biological completeness is not claimed by execution acceptance.
 - [x] **4. Shared references and provenance** — reference selection is independent of graph
   enablement/admission, with singleton/override/species-isolation tests and final FASTA/FAI
   identity checks. Real run 1535231 confirms the shared reference checksum agrees with graph
@@ -415,3 +423,18 @@ and the native-check workflow with controlled tools passed. The small
 ready for Crest; no assembly or graph rebuild is involved. Categories 2/3 remain
 open pending that evidence and final checklist reconciliation; the broader retry
 and dependency audit remains category 7.
+
+**Native acceptance:** `core-identity-reference-01` exits 0 with four completed
+tasks and no failures/retries. Scientific-name and numeric routes agree on 373251;
+the reference is NC_009588.1 (16,617 bp). Categories 2 and 3 are now checked off
+within their supported execution/contract scope. See
+[native assessment and remaining gates](core-identity-reference-01-assessment.md).
+
+## 2026-10-28 optional finalized comparisons
+
+The production comparison branch has been repaired and locally validated; see
+[contracts, fixes and native test](final-comparison-contracts-2026-10-28.md).
+This is category 7 work, not reopening accepted input/organelle/graph categories.
+The next bounded Crest check compares accepted final assemblies without rebuilding
+them. Native comparison acceptance and the broader operational cleanup remain open;
+unified Markdown reporting follows under category 6.

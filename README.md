@@ -79,7 +79,7 @@ a YAML in `environments/`, or a container:
 | Assembly QC | QUAST, Merqury (meryl), BUSCO, samtools/minimap2 mapping stats, MultiQC |
 | Taxonomy | taxonkit, csvtk, NCBI taxdump |
 | Pangenome | Minigraph-Cactus v3.1.4 (container), vg, odgi, minigraph, panacus, vcfbub, bcftools |
-| Visualization / reporting | R (tidyverse, ggplot2, ape, ggrepel, rmarkdown), pafr, BlobToolKit snail plots, Python |
+| Visualization / reporting | R (tidyverse, ggplot2, ape, ggrepel, rmarkdown), Matplotlib, BlobToolKit snail plots, Python |
 
 Container images pinned in config: `cactus:v3.1.4` (± `-gpu`), `ghcr.io/marcelauliano/mitohifi:master`,
 NCBI `fcs-gx.sif`.
@@ -429,7 +429,7 @@ generated under earlier names (e.g. teloclip's `scaffold_N`).
 
 `FINAL_HIC_MAPS` — Hi-C re-mapped to the final assembly, cooler/mcool contact maps at
 `hic_plot_resolutions`, and — **gated on `run_hic_balance`** — A/B compartments and TAD insulation
-books. `FINAL_VIZ` — pairwise dotplots (within-sample hap1 vs hap2 by default, or all-vs-all),
+books. `FINAL_VIZ` — pairwise dotplots (within-sample haplotypes by metadata by default, or all pairs within each species),
 riparian synteny plots, tidk telomere explore/search/plot, and a cross-sample `QUAST_FINAL`.
 Plus snail plots (BUSCO + assembly stats) and HiFi coverage books per haplotype.
 
@@ -519,6 +519,8 @@ The similarity/popstruct step derives haplotype vs. individual identity from the
 | `pangenome_popstruct` | R + ggplot2/ape/ggrepel | 2 cpu / 8 GB / 1 h | PCoA + NJ plots |
 | `multiqc` | `bioconda::multiqc` | shared | pangenome MultiQC |
 | `pairwise_alignment` | R + ggplot2 (+ minimap2) | shared | growth/SV figures, progressive plot |
+| `comparison_alignment` | Python 3.11 + minimap2 2.30 | 16 CPU, normal/bigmem | finalized-assembly comparisons |
+| `pairwise_plotting` | Python 3.11 + Matplotlib 3.9.4 | 1 CPU / 8 GB / 2 h | finalized dotplots and ribbon plots |
 | `summarize_assembly` | R report stack | shared | report fragment |
 
 `cactus_tools` and `cactus_pangenome` share one image, so odgi/vg/minigraph need no separate
@@ -802,15 +804,25 @@ maps. These analyses are separate from final Hi-C QC.
 | Parameter | Default | Description |
 |---|---|---|
 | `--run_pairwise_alignments` | `true` | Dotplots + riparian plots |
-| `--pairwise_alignment_mode` | `within_sample` | `within_sample` (hap1 vs hap2) \| `all` |
+| `--pairwise_alignment_mode` | `within_sample` | Same sample by metadata; `all` compares every pair within each species |
 | `--pairwise_alignment_preset` | `asm5` | minimap2 preset |
 | `--pairwise_alignment_min_mapq` | `5` | Min MAPQ |
-| `--pairwise_alignment_min_aln_bp` | `150000` | Min alignment length |
+| `--pairwise_alignment_min_aln_bp` | `150000` | Min alignment length retained in PAF/QC |
+| `--pairwise_dotplot_min_seq_bp` | `1000000` | Minimum final sequence length shown in dotplots |
 | `--pairwise_dotplot_width` / `_height` | `10` / `10` | Dotplot size (inches) |
 | `--riparian_min_aln_bp` | `150000` | Min alignment length for riparian plots |
 | `--riparian_min_seq_bp` | `1000000` | Min sequence length shown |
 | `--riparian_alpha` | `0.45` | Ribbon alpha |
 | `--riparian_width` / `--riparian_height` | `14` / `6` | Riparian plot size |
+
+Comparisons use finalized FASTA/FAI inputs and exclude cross-species pairs. The plan and
+final input inventory record exactly which assemblies were compared. Plot axes include
+unaligned sequences meeting the size threshold. An empty alignment has an explicit plot
+status; malformed alignments fail. Match fraction is matched bases divided by aligned
+block length, not whole-genome identity. Missing divergence tags are reported as unavailable.
+Alignment and plotting use separate pinned environments with no runtime R package install.
+The existing R environment remains in use for pangenome figures. See
+[comparison validation and native check](planning_docs/final-comparison-contracts-2026-10-28.md).
 | `--compartment_resolution` | `250000` | A/B compartment resolution |
 | `--compartment_min_contig_bp` | `5000000` | Min contig size |
 | `--compartment_max_contigs` | `30` | Max contigs included |
@@ -937,7 +949,7 @@ results/
 ├── contact_maps/                       # final .cool/.mcool + PNGs per resolution
 ├── compartments_plot/                  # A/B compartment PC1 tracks + genome-wide PNGs
 ├── snail_plots/                        # BUSCO + assembly-stat snail SVGs
-├── pairwise_alignments/                # PAF, dotplot PNGs, riparian PNGs, summary TSV
+├── pairwise_alignments/                # plan, final inventory/indexes, PAF/QC, plots, statuses, versions
 ├── telomeres/                          # tidk explore/search/plots + all_telomere_summaries.tsv
 │
 ├── reports/

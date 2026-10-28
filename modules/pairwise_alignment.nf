@@ -1,216 +1,122 @@
-/*
-========================================================================================
-    PAIRWISE GENOME ALIGNMENT MODULE
-========================================================================================
-    Performs pairwise whole-genome alignment between two assemblies using minimap2
-    and generates a dotplot visualization
-    
-    Input:
-    - haplotype_id1: Identifier for reference assembly
-    - assembly1: Reference assembly FASTA
-    - haplotype_id2: Identifier for query assembly
-    - assembly2: Query assembly FASTA
-    
-    Output:
-    - paf: Filtered PAF alignment file (gzipped)
-    - qc: QC summary statistics TSV
-    - log: Minimap2 log file
-    - dotplot: Dotplot visualization (PNG)
-    
-    Use cases:
-    - Comparing haplotypes within a sample
-    - Cross-sample genome comparisons
-    - Input for dotplot visualization
-========================================================================================
-*/
-
-/*
- * One-time setup process to install pafr R package from GitHub
- * Runs once before any alignment jobs start to avoid race conditions
- */
-process SETUP_PAFR {
-    tag "setup_pafr"
-    label 'pairwise_alignment'
-    
-    output:
-    val true, emit: ready
-    
-    script:
-    """
-    # Install pafr from GitHub if not already installed
-    Rscript -e '
-    if (!requireNamespace("pafr", quietly = TRUE)) {
-        message("Installing pafr from GitHub...")
-        remotes::install_github("dwinter/pafr", quiet = TRUE, upgrade = "never")
-        message("pafr installation complete")
-    } else {
-        message("pafr already installed")
-    }
-    # Verify installation
-    library(pafr)
-    message("pafr version: ", packageVersion("pafr"))
-    '
-    """
-    
-    stub:
-    """
-    echo "Stub mode - skipping pafr setup"
-    """
-}
-
 process PAIRWISE_ALIGNMENT {
-    tag "${haplotype_id1}_vs_${haplotype_id2}"
-    label 'pairwise_alignment'
-    
-    publishDir "${params.outdir}/pairwise_alignments", 
-        mode: params.publish_dir_mode,
-        saveAs: { filename -> 
-            // Only publish paf.gz, log, and dotplot files; skip qc.tsv
-            filename.endsWith('.qc.tsv') ? null : filename
-        }
-    
+    tag "${id1}_vs_${id2}"
+    label 'comparison_alignment'
+    errorStrategy { task.exitStatus in [65,126,127] ? 'terminate' : 'retry' }
+    maxRetries 1
+    publishDir "${params.outdir}/pairwise_alignments", mode: params.publish_dir_mode
     input:
-    tuple val(haplotype_id1), path(assembly1), val(haplotype_id2), path(assembly2)
-    val(pafr_ready)
-    path(dotplot_script)
-    
+    tuple val(id1), path(fa1,stageAs:'ref/*'), path(fai1,stageAs:'ref/*'), val(id2), path(fa2,stageAs:'query/*'), path(fai2,stageAs:'query/*')
+    path helper
     output:
-    tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.paf.gz"), emit: paf
-    tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.qc.tsv"), emit: qc
-    tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}.log"), emit: log
-    tuple val(haplotype_id1), val(haplotype_id2), path("${haplotype_id1}_vs_${haplotype_id2}_dotplot.png"), emit: dotplot
-    
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}.paf.gz"), emit: paf
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}.qc.tsv"), emit: qc
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}.log"), emit: log
+    path "${id1}_vs_${id2}.versions.tsv", emit: versions
     script:
-    def preset = params.pairwise_alignment_preset ?: 'asm5'
-    def min_mapq = params.pairwise_alignment_min_mapq ?: 5
-    def min_aln_bp = params.pairwise_alignment_min_aln_bp ?: 10000
-    def dotplot_width = params.pairwise_dotplot_width ?: 10
-    def dotplot_height = params.pairwise_dotplot_height ?: 10
-    def out_prefix = "${haplotype_id1}_vs_${haplotype_id2}"
+    def preset=params.pairwise_alignment_preset ?: 'asm5'
+    def mq=params.pairwise_alignment_min_mapq != null ? params.pairwise_alignment_min_mapq : 5
+    def minlen=params.pairwise_alignment_min_aln_bp != null ? params.pairwise_alignment_min_aln_bp : 150000
+    if (!(preset in ['asm5','asm10','asm20'])) error "Unsupported assembly comparison preset '${preset}'"
     """
     set -euo pipefail
-    
-    # QC header
-    echo -e "ref_id\\tqry_id\\tpreset\\tmin_mapq\\tmin_aln_bp\\tn_align\\tsum_aln_bp\\tsum_match_bp\\tmean_identity\\tmean_dv\\tmean_mapq" > "${out_prefix}.qc.tsv"
-    
-    # Run minimap2 alignment, filter, compute QC stats, and compress
-    minimap2 \\
-        -t ${task.cpus} \\
-        -x ${preset} \\
-        --eqx \\
-        --secondary=no \\
-        ${assembly1} \\
-        ${assembly2} \\
-        2> "${out_prefix}.log" \\
-    | awk -v mq="${min_mapq}" -v ml="${min_aln_bp}" 'BEGIN{FS=OFS="\\t"} \$12 >= mq && \$11 >= ml' \\
-    | tee >( \\
-        awk -v ref="${haplotype_id1}" \\
-            -v qry="${haplotype_id2}" \\
-            -v preset="${preset}" \\
-            -v mq="${min_mapq}" \\
-            -v ml="${min_aln_bp}" '
-        BEGIN {
-            FS=OFS="\\t"
-            n=0
-            sum_aln=0
-            sum_match=0
-            sum_mapq=0
-            sum_dv_w=0
-            sum_id_w=0
-        }
-        {
-            n++
-            aln=\$11
-            sum_aln   += aln
-            sum_match += \$10
-            sum_mapq  += \$12
-
-            dv=""
-            for(i=13;i<=NF;i++){
-                if(\$i ~ /^dv:f:/){
-                    dv=\$i
-                    sub(/^dv:f:/,"",dv)
-                    break
-                }
-            }
-            if(dv=="") dv=0
-
-            sum_dv_w += dv * aln
-            sum_id_w += (1 - dv) * aln
-        }
-        END {
-            mean_mapq = (n>0 ? sum_mapq/n : 0)
-            mean_dv   = (sum_aln>0 ? sum_dv_w/sum_aln : 0)
-            mean_id   = (sum_aln>0 ? sum_id_w/sum_aln : 0)
-
-            print ref, qry, preset, mq, ml, n, sum_aln, sum_match, mean_id, mean_dv, mean_mapq
-        }' >> "${out_prefix}.qc.tsv" \\
-    ) \\
-    | pigz -p ${task.cpus} -c > "${out_prefix}.paf.gz"
-    
-    # Ensure output exists even if no alignments pass filters
-    if [ ! -s "${out_prefix}.paf.gz" ]; then
-        echo "" | pigz -c > "${out_prefix}.paf.gz"
-    fi
-    
-    # Generate dotplot
-    Rscript ${dotplot_script} \\
-        --paf "${out_prefix}.paf.gz" \\
-        --ref "${haplotype_id1}" \\
-        --query "${haplotype_id2}" \\
-        --output "${out_prefix}_dotplot.png" \\
-        --width ${dotplot_width} \\
-        --height ${dotplot_height}
-    """
-    
-    stub:
-    def out_prefix = "${haplotype_id1}_vs_${haplotype_id2}"
-    """
-    touch "${out_prefix}.paf.gz"
-    echo -e "ref_id\\tqry_id\\tpreset\\tmin_mapq\\tmin_aln_bp\\tn_align\\tsum_aln_bp\\tsum_match_bp\\tmean_identity\\tmean_dv\\tmean_mapq" > "${out_prefix}.qc.tsv"
-    touch "${out_prefix}.log"
-    touch "${out_prefix}_dotplot.png"
+    # Multi-part indexing invalidates MAPQ; keep this reference in one index.
+    REF_BASES=\$(awk '{n+=\$2} END {printf "%.0f",n}' '${fai1}')
+    INDEX_BASES=\$((REF_BASES+1))
+    minimap2 -t ${task.cpus} -x ${preset} -I \${INDEX_BASES} -c --eqx --secondary=no '${fa1}' '${fa2}' \\
+        2> '${id1}_vs_${id2}.log' \\
+      | python3 ${helper} filter --output '${id1}_vs_${id2}.paf.gz' \\
+        --qc '${id1}_vs_${id2}.qc.tsv' --ref '${id1}' --query '${id2}' \\
+        --preset '${preset}' --min-mapq ${mq} --min-length ${minlen}
+    printf 'minimap2\\t%s\\n' "\$(minimap2 --version)" > '${id1}_vs_${id2}.versions.tsv'
     """
 }
 
-/*
-========================================================================================
-    COLLECT PAIRWISE ALIGNMENT RESULTS
-========================================================================================
-    Combines per-pair pairwise alignment QC outputs into a single summary file.
-    Replaces anonymous collectFile() calls so output is a proper Nextflow channel.
-========================================================================================
-*/
+process PAIRWISE_PLOTS {
+    tag "${id1}_vs_${id2}"
+    label 'pairwise_plotting'
+    errorStrategy 'terminate'
+    publishDir "${params.outdir}/pairwise_alignments", mode: params.publish_dir_mode
+    input:
+    tuple val(id1),val(id2),path(paf),path(fai1,stageAs:'ref/*'),path(fai2,stageAs:'query/*')
+    path helpers
+    output:
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}_dotplot.png"), emit: dotplot
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}_riparian.png"), emit: riparian
+    tuple val(id1),val(id2),path("${id1}_vs_${id2}.plot_status.tsv"), emit: status
+    path "${id1}_vs_${id2}.plot_versions.tsv", emit: versions
+    script:
+    def nz={ key,fallback -> params[key]!=null ? params[key] : fallback }
+    """
+    set -euo pipefail
+    python3 plot_pairwise.py --paf '${paf}' --ref-fai '${fai1}' --query-fai '${fai2}' \\
+      --ref '${id1}' --query '${id2}' --prefix '${id1}_vs_${id2}' \\
+      --dot-min-seq ${nz('pairwise_dotplot_min_seq_bp',1000000)} \\
+      --ribbon-min-seq ${nz('riparian_min_seq_bp',1000000)} --ribbon-min-aln ${nz('riparian_min_aln_bp',150000)} \\
+      --ribbon-alpha ${nz('riparian_alpha',0.45)} \\
+      --dot-width ${nz('pairwise_dotplot_width',10)} --dot-height ${nz('pairwise_dotplot_height',10)} \\
+      --ribbon-width ${nz('riparian_width',14)} --ribbon-height ${nz('riparian_height',6)}
+    python3 -c 'import matplotlib,sys; print("Python\\t"+sys.version.split()[0]); print("matplotlib\\t"+matplotlib.__version__)' > '${id1}_vs_${id2}.plot_versions.tsv'
+    """
+}
 
 process COLLECT_PAIRWISE_RESULTS {
-    tag "collect_pairwise"
-    label 'summarize_assembly'
-
+    tag 'collect_pairwise'
+    cpus 1
+    memory '1 GB'
+    time '10m'
+    conda 'conda-forge::python=3.11'
+    errorStrategy 'terminate'
     publishDir "${params.outdir}/pairwise_alignments", mode: params.publish_dir_mode
-
     input:
-    path("qc_files/*")    // per-pair QC TSVs from PAIRWISE_ALIGNMENT
-
+    path qc_files, stageAs: 'qc_files/*'
+    path helper
     output:
-    path("pairwise_alignment_summary.tsv"), emit: summary
-
+    path 'pairwise_alignment_summary.tsv', emit: summary
     script:
     """
-    set -euo pipefail
-
-    first_qc=\$(ls qc_files/*.tsv 2>/dev/null | head -1)
-    if [[ -n "\$first_qc" ]]; then
-        head -1 "\$first_qc" > pairwise_alignment_summary.tsv
-        for f in qc_files/*.tsv; do
-            tail -n +2 "\$f" >> pairwise_alignment_summary.tsv
-        done
-    else
-        echo "No pairwise alignment QC files found" > pairwise_alignment_summary.tsv
-    fi
+    python3 ${helper} collect --directory qc_files --output pairwise_alignment_summary.tsv
     """
+}
 
-    stub:
+process COMPARISON_PLAN {
+    cpus 1
+    memory '1 GB'
+    time '10m'
+    conda 'conda-forge::python=3.11'
+    errorStrategy 'terminate'
+    publishDir "${params.outdir}/pairwise_alignments", mode: params.publish_dir_mode
+    input:
+    val rows
+    path indexes, stageAs: 'indexes/*'
+    val sources
+    output:
+    path 'comparison_plan.tsv', emit: plan
+    path 'final_input_inventory.tsv', emit: inventory
+    path 'final_indexes', emit: indexes
+    script:
+    def table=['taxid\tref_sample\tquery_sample\tref_id\tquery_id\tref_fasta\tquery_fasta\tcoordinate_stage\tmode']+rows.collect { it.join('\t') }
+    def payload=groovy.json.JsonOutput.toJson(sources)
     """
-    touch pairwise_alignment_summary.tsv
+    cat > comparison_plan.tsv <<'PLAN'
+${table.join('\n')}
+PLAN
+    cat > sources.json <<'SOURCES'
+${payload}
+SOURCES
+    python3 - <<'PY'
+import csv,hashlib,json,shutil
+from pathlib import Path
+Path('final_indexes').mkdir()
+fields=['id','sample','taxid','fasta','fai','coordinate_stage','fai_sha256','sequences','bases']
+with open('final_input_inventory.tsv','w',newline='') as out:
+    writer=csv.DictWriter(out,fields,delimiter='\\t');writer.writeheader()
+    for source in json.loads(Path('sources.json').read_text()):
+        index=Path('indexes')/source.pop('index_name')
+        content=index.read_bytes();entries=[line.split('\\t') for line in content.decode().splitlines()]
+        source.update(coordinate_stage='final',fai_sha256=hashlib.sha256(content).hexdigest(),
+                      sequences=len(entries),bases=sum(int(row[1]) for row in entries))
+        writer.writerow(source)
+        shutil.copyfile(index,Path('final_indexes')/(source['id']+'.fasta.fai'))
+PY
     """
 }

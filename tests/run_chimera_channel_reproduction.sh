@@ -64,6 +64,19 @@ elif [[ "${1:-}" == organelle_contract_checks.nf || "${1:-}" == taxonomy_contrac
     export ORG_CASE="${2:-circular}"
     mkdir -p "$runtime/organelle-launch"
     cd "$runtime/organelle-launch"
+elif [[ "${1:-}" == pairwise_checks.nf || "${1:-}" == native_final_comparisons.nf ]]; then
+    python3 "$repo/tests/setup_pairwise_checks.py" "$runtime" "${2:-within_sample}"
+    cp reproduction.nf "$repo/.pairwise-checks.nf"
+    trap 'rm -f "$repo/.pairwise-checks.nf"' EXIT
+    script="$repo/.pairwise-checks.nf"
+    extra=(-c "$runtime/pairwise-check.config")
+    export PAIRWISE_CASE="${2:-within_sample}"
+    if [[ "${3:-}" == resume ]]; then
+        extra+=(-resume)
+        export PAIRWISE_RESUME_CHECK=true
+    fi
+    mkdir -p "$runtime/pairwise-launch"
+    cd "$runtime/pairwise-launch"
 elif [[ "${1:-}" == pangenome_empty_checks.nf ]]; then
     cp reproduction.nf "$repo/.pangenome-empty-checks.nf"
     trap 'rm -f "$repo/.pangenome-empty-checks.nf"' EXIT

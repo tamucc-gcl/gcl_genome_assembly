@@ -1,0 +1,6 @@
+name: comparison_plots
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - matplotlib-base=3.9.4
