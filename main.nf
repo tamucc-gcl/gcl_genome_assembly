@@ -551,8 +551,14 @@ workflow {
     ch_versions = ch_versions.mix(PANGENOME.out.versions)
 
     ch_pangenome_report_for_report = PANGENOME.out.report
-        .map { taxid, md -> md }
-        .ifEmpty( file('NO_PANGENOME') )
+        .toList()
+        .flatMap { rows ->
+            rows ? ['## Pangenome\n\n' + rows.sort { a,b ->
+                a[0].toString() <=> b[0].toString() ?: a[1].name <=> b[1].name
+            }.collect { taxid,md -> "### Taxid ${taxid}: ${md.name}\n\n${md.text}" }.join('\n\n')] : []
+        }
+        .collectFile(name:'pangenome_report.md',newLine:true)
+        .ifEmpty(file("${projectDir}/assets/NO_PANGENOME",checkIfExists:true))
 
     /*
     ========================================================================================

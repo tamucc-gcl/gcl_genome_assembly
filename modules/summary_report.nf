@@ -49,6 +49,7 @@ process SUMMARY_REPORT {
 
     script:
     """
+    export TZ="\${TZ:-UTC}"
     Rscript ${summary_report_script} \\
         --manifest ${report_manifest} \\
         --compiled_qc ${compiled_qc_csv} \\

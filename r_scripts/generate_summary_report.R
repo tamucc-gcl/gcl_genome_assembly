@@ -84,6 +84,8 @@ has_chimera <- any(vapply(c(args$misassembly_registry), function(p) {
 has_pairwise <- !grepl("NO_PAIRWISE", basename(args$pairwise_summary)) &&
                 file.exists(args$pairwise_summary) &&
                 file.size(args$pairwise_summary) > 0
+has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
+                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
 sec_defs <- list(
   list(key = "assemblies", title = "Final Genome Assemblies",             present = TRUE),
@@ -126,9 +128,6 @@ sec_ref <- function(key) {
   if (is.na(n)) "an earlier section"
   else sprintf("[section %d](#%d-%s)", n, n, .sec_slug(.sec_title[[key]]))
 }
-
-has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
-                 file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
 # =============================================================================
 # Helpers
@@ -396,11 +395,12 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
   final_data <- qc_data %>%
     filter(stage == "final") %>%
     mutate(
-      across(c(hap1, hap2), ~ case_when(
-        metric %in% c("complete", "single", "duplicated", "fragmented", "missing") ~
-          . / .[metric == "total_busco"],
-        TRUE ~ .
-      )),
+      across(c(hap1, hap2), ~ {
+        totals <- .x[metric == "total_busco"]
+        total <- if (length(totals) == 1 && is.finite(totals[[1]]) && totals[[1]] > 0)
+          totals[[1]] else NA_real_
+        ifelse(metric %in% c("complete", "single", "duplicated", "fragmented", "missing"), .x / total, .x)
+      }),
       .by = sample_id
     )
   
@@ -804,7 +804,7 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
         distinct(tier, n_chrom, gate) %>%
         arrange(tier) %>%
         rowwise() %>%
-        mutate(b = if (tier == "hifi+hic" && !is.na(n_chrom))
+        mutate(b = if (isTRUE(tier == "hifi+hic" && !is.na(n_chrom)))
                      sprintf("auN pieces ≤ %g (%g × %g chromosomes) for %s",
                              gate, thr_aun_mult, n_chrom, tier)
                    else sprintf("auN pieces ≤ %g for %s", gate, tier)) %>%

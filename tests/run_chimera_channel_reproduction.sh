@@ -23,6 +23,13 @@ python3 - "$(dirname "$0")/${1:-chimera_channel_reproduction.nf}" "$runtime/repr
 import sys
 from pathlib import Path
 source = Path(sys.argv[1]).read_text()
+if '__PANGENOME_REPORT_COLLECTION__' in source:
+    main = (Path(sys.argv[3]) / 'main.nf').read_text()
+    start = main.index('    ch_pangenome_report_for_report = PANGENOME.out.report')
+    end = main.index('    /*', start)
+    block = main[start:end].replace('PANGENOME.out.report', 'ch_reports')
+    block = block.replace('${projectDir}/assets/', '${fixtureRepo}/assets/')
+    source = source.replace('__PANGENOME_REPORT_COLLECTION__', block)
 if '__FINAL_INVENTORY__' in source:
     main = (Path(sys.argv[3]) / 'main.nf').read_text()
     start = main.index('    ch_expected_assemblies = ch_declared_assemblies.join(ch_sample_identity)')
