@@ -46,11 +46,18 @@ result=dict(paths=paths,sha256=hashes,fasta_match=hashes[0]==hashes[1],links_mat
 if not result['fasta_match'] or not result['links_match']:
     raise SystemExit('Old/new inputs differ; inspect input_identity.json before replay')
 PY
-if ! command -v nextflow >/dev/null; then module load nextflow; fi
+# Match the normal Crest launcher's exported tool PATH. Nextflow's worker
+# wrapper needs the conda executable before it can activate a cached environment.
+module load miniconda3
+conda info --base >/dev/null
+if ! command -v nextflow >/dev/null; then module load nextflow/23.10.1; fi
+# The production module emits *_scaffolds_final.bin. Give the retained input a
+# distinct basename so it is not also its own output/copy destination.
+ln -sfn "$new_bin" "$out/retained_hic_links.bin"
 cd "$out"
 nextflow -log "$out/nextflow.log" run "$repo/scripts/comparisons/scaffolding_replay.nf" \
     -c "$repo/nextflow.config" -profile slurm -w "$out/work" \
     --outdir "$out/results" --publish_dir_mode symlink \
     --replay_assembly "$assembly" --replay_fasta "$new_fasta" \
-    --replay_links "$new_bin" --replay_expected_agp "$old_agp" \
+    --replay_links "$out/retained_hic_links.bin" --replay_expected_agp "$old_agp" \
     -with-trace "$out/trace.tsv" "${@:8}"

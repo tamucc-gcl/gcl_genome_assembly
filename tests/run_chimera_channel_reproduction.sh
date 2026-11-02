@@ -86,6 +86,7 @@ EOF
 set -euo pipefail
 [[ "$1" != --version ]] || { echo 1.2.2-fixture; exit; }
 [[ " $* " == *' --no-mem-check '* ]] || exit 21
+input_links="$2"
 while [[ $# -gt 0 ]]; do
     if [[ "$1" == -o ]]; then prefix="$2"; break; fi
     shift
@@ -95,7 +96,8 @@ if [[ "${SCAFFOLD_CASE:-}" == degraded ]]; then
 fi
 printf '>s\nACGT\n' > "${prefix}_scaffolds_final.fa"
 printf 's\t1\t4\t1\tW\ts\t1\t4\t+\n' > "${prefix}_scaffolds_final.agp"
-printf 'fixture' > "${prefix}.bin"
+# Real YaHS reuses BIN input and does not create a new prefix BIN in that case.
+[[ "$input_links" == *.bin ]] || printf 'fixture' > "${prefix}.bin"
 EOF
     chmod +x "$runtime/scaffolding-tools/"*
     cat > "$runtime/scaffolding.config" <<EOF

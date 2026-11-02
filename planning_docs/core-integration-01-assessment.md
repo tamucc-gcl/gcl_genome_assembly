@@ -120,3 +120,27 @@ test plus hashing, scheduling and environment startup; native runtime is not
 guaranteed. Its actual result is still pending. A full run after the module fix
 will legitimately invalidate scaffolding and downstream tasks; do not promise
 that the graph will remain cached.
+
+### First native replay: inputs match, worker bootstrap failed
+
+`core-scaffolding-replay-01.review.tar.gz` confirms byte-identical old/new
+decontaminated FASTAs (SHA256
+`0c69489b9bb9ba015c33d9105dd1ad4017a8b0feb5fdcafe2fe61852c1becefc`)
+and YaHS BIN files (SHA256
+`5a62319ee517a8ad1e06f765ba15e4c701890f3138067ba35856df2b960f6f14`).
+Both submitted attempts failed before the task script started, with
+`conda: command not found` in the worker wrapper. YaHS did not execute, and
+there is no AGP comparison result. This is a diagnostic launcher defect, not
+evidence that the memory-policy fix failed.
+
+The launcher now loads Crest's miniconda3 module before launching Nextflow and
+checks that conda resolves. It also stages the retained BIN using a distinct
+basename: real YaHS reuses BIN input, whereas the earlier controlled executable
+unrealistically created a new prefix BIN. The original input basename collided
+with the production module's final BIN output and copy destination.
+
+The controlled executable now models BIN reuse without creating another BIN.
+The exact replay entry passes that case. A launcher-level test starts without
+Conda on PATH, supplies it through the module bootstrap, verifies the distinct
+input name and small review archive, and passes. Shell syntax and whitespace
+checks pass. A successful real YaHS replay remains pending.
