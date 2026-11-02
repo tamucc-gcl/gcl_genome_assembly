@@ -144,3 +144,43 @@ The exact replay entry passes that case. A launcher-level test starts without
 Conda on PATH, supplies it through the module bootstrap, verifies the distinct
 input name and small review archive, and passes. Shell syntax and whitespace
 checks pass. A successful real YaHS replay remains pending.
+
+### Second native replay: exact restoration verified
+
+`core-scaffolding-replay-02.review.tar.gz` passes with exit status 0 and
+`exact_agp_match: true`. Both retained input fingerprints match as above. The
+production YaHS module executes the 20 kb round with `--no-mem-check`, emits
+420 scaffolds and exactly reproduces the accepted round-one AGP. YaHS reports
+67.748 seconds and 6.014 GiB peak RSS; the native trace records one completed
+task, zero failed tasks and zero retries. No memory fallback appears in the log.
+
+The RAM-dependent skip is now confirmed as the cause of the round-one change.
+No YaHS source patch or chromosome-specific rule was required. This result
+validates the scaffolding correction, not full integration acceptance.
+
+The removable integration audit now has an explicit `--allow-rebuild` mode,
+enabled by `CORE_INTEGRATION_ALLOW_REBUILD=true` in the test launcher. Ordinary
+cache-only acceptance remains the default. Planned rebuild mode permits new
+FASTA/FAI locations and completed Cactus construction, while additionally hashing
+all final FASTA contents against the accepted baseline. It retains index,
+name-map, membership, nuclear-reference, graph-accounting, source-disposition,
+comparison completeness and reporting checks. It records actual cached and
+rebuilt graph task counts separately. Five audit tests pass, including rejection
+of changed FASTA content and changed graph review dispositions in rebuild mode.
+
+After syncing, run from the Crest project directory:
+
+```bash
+CORE_INTEGRATION_ALLOW_REBUILD=true \
+sbatch gcl_genome_assembly/scripts/comparisons/run_core_integration.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/core-operational-01/results \
+  data/chimera_reviews/Sde-CTlk_104.v8.reviewed.tsv \
+  comparisons/core-integration-02 \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-observable-contact-v7/results/assembly/chimeras/mapping_manifest.json"
+```
+
+This uses ordinary resume. Changed scaffolding commands legitimately invalidate
+scaffolding and downstream work, potentially including the approximately 14-hour
+Cactus construction. Unchanged upstream tasks should remain reusable. Return
+`comparisons/core-integration-02.review.tar.gz` for the full acceptance check.

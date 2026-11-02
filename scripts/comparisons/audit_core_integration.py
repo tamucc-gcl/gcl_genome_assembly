@@ -13,7 +13,7 @@ def table(path):
     with Path(path).open() as handle:return list(csv.DictReader(handle,delimiter='\t'))
 
 
-def audit(baseline,results,trace,out):
+def audit(baseline,results,trace,out,allow_rebuild=False):
     baseline=Path(baseline);results=Path(results);out=Path(out)
     old=json.loads((baseline/'assembly_eligibility.json').read_text())
     new=json.loads((results/'assembly_eligibility.json').read_text())
@@ -25,7 +25,12 @@ def audit(baseline,results,trace,out):
     if set(before)!=set(after):errors.append('Finalized assembly membership changed')
     for aid in set(before)&set(after):
         for key in ['sample','taxid','haplotype','ploidy','n_hap','fasta','fai','graph_member','graph_name']:
+            if allow_rebuild and key in ['fasta','fai']:continue
             if before[aid].get(key)!=after[aid].get(key):errors.append(f'{aid}: final {key} changed')
+        if allow_rebuild:
+            if sha256(before[aid]['fasta'])!=sha256(after[aid]['fasta']):errors.append(aid+': final FASTA content changed')
+            if any(before[aid].get(k)!=after[aid].get(k) for k in ['fasta','fai']):
+                notes.append(aid+': rebuilt output location; sequence and index fingerprints checked against baseline.')
         if sha256(before[aid]['fai'])!=sha256(after[aid]['fai']):errors.append(aid+': final index changed')
         relative=Path('assembly/final')/(aid+'.name_map.tsv')
         if (baseline/relative).is_file():
@@ -35,7 +40,8 @@ def audit(baseline,results,trace,out):
         errors.append('Trace contains failed, ignored, incomplete or missing tasks')
     graphs=[r for r in tasks if ':CACTUS_PANGENOME ' in r['name']]
     expected_graphs=[c for c in new['cohorts'] if c['ready']]
-    if len(graphs)!=len(expected_graphs) or any(r['status']!='CACHED' for r in graphs):errors.append('Accepted Cactus construction did not remain cached')
+    if len(graphs)!=len(expected_graphs):errors.append('Expected Cactus construction task(s) missing')
+    if not allow_rebuild and any(r['status']!='CACHED' for r in graphs):errors.append('Accepted Cactus construction did not remain cached')
     for cohort in expected_graphs:
         taxid=str(cohort['taxid'])
         relative=Path('references')/taxid/'reference.json'
@@ -75,11 +81,14 @@ def audit(baseline,results,trace,out):
     notes.append(f'{len(issues)} explicit version-record issues; inspect provenance/software_version_issues.tsv.')
     result=dict(status='FAIL' if errors else 'PASS',finalized=len(after),comparisons=len(plan),
         completed=sum(r['status']=='COMPLETED' for r in tasks),cached=sum(r['status']=='CACHED' for r in tasks),
-        graph_construction_cached=len(graphs),errors=errors,notes=notes)
+        graph_construction_cached=sum(r['status']=='CACHED' for r in graphs),
+        graph_construction_rebuilt=sum(r['status']=='COMPLETED' for r in graphs),
+        acceptance_mode='planned_rebuild' if allow_rebuild else 'cached',errors=errors,notes=notes)
     (out/'core_integration_check.json').write_text(json.dumps(result,indent=2)+'\n')
     text=['# Combined core integration check','',result['status'],'',
           f"{result['finalized']} final assemblies; {result['comparisons']} within-sample pairs; {result['completed']} completed / {result['cached']} cached tasks.",'',
-          'Final input/name-map consistency, unchanged source-audit dispositions and Cactus cache reuse were checked.',
+          ('Planned rebuild: final FASTA/index content, names, reference and source-audit dispositions checked against the accepted baseline.'
+           if allow_rebuild else 'Final input/name-map consistency, unchanged source-audit dispositions and Cactus cache reuse were checked.'),
           'This check does not independently hash the complete graph or certify biological completeness.','']
     text+=['- '+item for item in errors+notes]
     (out/'core_integration_check.md').write_text('\n'.join(text)+'\n')
@@ -89,8 +98,9 @@ def audit(baseline,results,trace,out):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['baseline','results','trace','out']:p.add_argument('--'+name,required=True)
+    p.add_argument('--allow-rebuild',action='store_true',help='Explicit planned rebuild: allow new output locations and completed Cactus, but require unchanged final FASTA content and existing acceptance checks')
     a=p.parse_args()
-    try:result=audit(a.baseline,a.results,a.trace,a.out)
+    try:result=audit(a.baseline,a.results,a.trace,a.out,a.allow_rebuild)
     except (OSError,ValueError,KeyError) as exc:
         result=dict(status='FAIL',errors=[str(exc)])
         Path(a.out).mkdir(parents=True,exist_ok=True)

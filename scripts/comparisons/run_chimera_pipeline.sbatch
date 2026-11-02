@@ -87,7 +87,11 @@ test -s "$out/results/assembly/chimeras/assembly_registry.tsv"
 test -s "$out/results/assembly/chimeras/review.tsv"
 test -s "$out/results/assembly_run_summary.md"
 if [[ -n "${CORE_INTEGRATION_BASELINE:-}" ]]; then
+    audit_options=()
+    if [[ "${CORE_INTEGRATION_ALLOW_REBUILD:-false}" == true ]]; then
+        audit_options+=(--allow-rebuild)
+    fi
     python3 "$repo/scripts/comparisons/audit_core_integration.py" \
         --baseline "$CORE_INTEGRATION_BASELINE" --results "$out/results" \
-        --trace "$out/trace.tsv" --out "$out"
+        --trace "$out/trace.tsv" --out "$out" "${audit_options[@]}"
 fi

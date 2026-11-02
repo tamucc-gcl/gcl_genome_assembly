@@ -16,6 +16,7 @@ class IntegrationAuditTests(unittest.TestCase):
         rows=[]
         for hap in ['hap1','hap2']:
             fai=root/(hap+'.fai');fai.write_text('chr1\t1000\t0\t1000\t1001\n')
+            (root/(hap+'.fasta')).write_text('>chr1\n'+'A'*1000+'\n')
             rows.append(dict(id=hap,sample='individual',taxid='1',completion='finalized',haplotype=hap,
                              ploidy=2,fasta=str(root/(hap+'.fasta')),fai=str(fai)))
         manifest=dict(assemblies=rows,cohorts=[dict(taxid='1',ready=True)])
@@ -55,6 +56,30 @@ class IntegrationAuditTests(unittest.TestCase):
             data['assemblies'][0]['fasta']='changed.fasta';data['cohorts'][0]['ready']=False;path.write_text(json.dumps(data))
             result=mod.audit(*args);self.assertEqual(result['status'],'FAIL')
             self.assertTrue(any('admission' in e for e in result['errors']));self.assertTrue(any('fasta' in e for e in result['errors']))
+
+    def test_planned_rebuild_allows_new_locations_but_checks_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args=self.setup_run(Path(tmp));path=args[1]/'assembly_eligibility.json';data=json.loads(path.read_text())
+            rebuilt=Path(tmp)/'rebuilt.fasta';rebuilt.write_bytes(Path(data['assemblies'][0]['fasta']).read_bytes())
+            data['assemblies'][0]['fasta']=str(rebuilt);path.write_text(json.dumps(data))
+            args[2].write_text('name\tstatus\texit\tworkdir\nPANGENOME:CACTUS_PANGENOME (1)\tCOMPLETED\t0\t-\n')
+            result=mod.audit(*args,allow_rebuild=True)
+            self.assertEqual(result['status'],'PASS');self.assertEqual(result['graph_construction_cached'],0)
+            self.assertEqual(result['graph_construction_rebuilt'],1)
+            rebuilt.write_text('>chr1\n'+'C'*1000+'\n')
+            result=mod.audit(*args,allow_rebuild=True)
+            self.assertEqual(result['status'],'FAIL')
+            self.assertIn('hap1: final FASTA content changed',result['errors'])
+
+    def test_planned_rebuild_still_rejects_changed_graph_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args=self.setup_run(Path(tmp))
+            path=args[1]/'pangenome/1/representation/source_audit.json'
+            data=json.loads(path.read_text());data['chromosome_scale_paths_requiring_review']=99
+            path.write_text(json.dumps(data))
+            result=mod.audit(*args,allow_rebuild=True)
+            self.assertEqual(result['status'],'FAIL')
+            self.assertTrue(any('source-audit disposition changed' in e for e in result['errors']))
 
 
 if __name__=='__main__':unittest.main()
