@@ -63,6 +63,10 @@ process SCAFFOLD_HIC {
     yahs_args+=("-l" "${min_contig_len}")
     yahs_args+=("-r" "${resolutions}")
 
+    # Run the requested resolutions rather than letting transient node free RAM
+    # silently select a different assembly. Real allocation failures must fail.
+    yahs_args+=("--no-mem-check")
+
     # NOTE: -q is suppressed for BAMs not name-sorted (YaHS behavior). Keep it,
     # but be aware it may not take effect depending on your BAM sort order.
     yahs_args+=("-q" "${min_mapq}")
@@ -95,8 +99,15 @@ process SCAFFOLD_HIC {
     echo "  enzyme: ${enzyme ?: 'none'}"
     echo "  no_contig_ec: ${no_contig_ec}"
     echo "  no_scaffold_ec: ${no_scaffold_ec}"
+    echo "  memory_policy: requested resolutions; fail on allocation failure"
 
     yahs "${assembly_fasta}" "${bam}" "\${yahs_args[@]}" 2>&1 | tee "${meta.id}${round_suffix}.yahs.log"
+
+    # Defensive check for a tool/build that still skips a round but exits zero.
+    if grep -Eq 'No(t)? enough memory|[Oo]ut of memory|[Cc]annot allocate memory' "${meta.id}${round_suffix}.yahs.log"; then
+        echo '[ERROR] YaHS reported insufficient memory; refusing incomplete scaffolding outputs.' >&2
+        exit 70
+    fi
 
     # Standardize names
     mv "${prefix}_scaffolds_final.fa"  "${meta.id}${round_suffix}_scaffolds.fa"

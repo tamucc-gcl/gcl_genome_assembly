@@ -23,6 +23,10 @@ python3 - "$(dirname "$0")/${1:-chimera_channel_reproduction.nf}" "$runtime/repr
 import sys
 from pathlib import Path
 source = Path(sys.argv[1]).read_text()
+if '__SCAFFOLDING_REPLAY__' in source:
+    source = (Path(sys.argv[3]) / 'scripts/comparisons/scaffolding_replay.nf').read_text()
+    source = source.replace("'../../modules/", "'__REPO__/modules/")
+    source = source.replace('${projectDir}/../../assets/', sys.argv[3] + '/assets/')
 if '__PANGENOME_REPORT_COLLECTION__' in source:
     main = (Path(sys.argv[3]) / 'main.nf').read_text()
     start = main.index('    ch_pangenome_report_for_report = PANGENOME.out.report')
@@ -71,6 +75,65 @@ elif [[ "${1:-}" == organelle_contract_checks.nf || "${1:-}" == taxonomy_contrac
     export ORG_CASE="${2:-circular}"
     mkdir -p "$runtime/organelle-launch"
     cd "$runtime/organelle-launch"
+elif [[ "${1:-}" == scaffolding_memory_checks.nf || "${1:-}" == scaffolding_replay_checks.nf ]]; then
+    mkdir -p "$runtime/scaffolding-tools" "$runtime/scaffolding-launch"
+    cat > "$runtime/scaffolding-tools/samtools" <<'EOF'
+#!/bin/bash
+printf 's\t4\t3\t4\t5\n' > "$2.fai"
+EOF
+    cat > "$runtime/scaffolding-tools/yahs" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+[[ "$1" != --version ]] || { echo 1.2.2-fixture; exit; }
+[[ " $* " == *' --no-mem-check '* ]] || exit 21
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == -o ]]; then prefix="$2"; break; fi
+    shift
+done
+if [[ "${SCAFFOLD_CASE:-}" == degraded ]]; then
+    echo '[I::run_scaffolding] No enough memory. Try lower resolutions... End of scaffolding round.'
+fi
+printf '>s\nACGT\n' > "${prefix}_scaffolds_final.fa"
+printf 's\t1\t4\t1\tW\ts\t1\t4\t+\n' > "${prefix}_scaffolds_final.agp"
+printf 'fixture' > "${prefix}.bin"
+EOF
+    chmod +x "$runtime/scaffolding-tools/"*
+    cat > "$runtime/scaffolding.config" <<EOF
+conda.enabled=false
+singularity.enabled=false
+docker.enabled=false
+trace.enabled=false
+report.enabled=false
+timeline.enabled=false
+dag.enabled=false
+params.outdir='$runtime/scaffolding-results/${2:-success}'
+params.publish_dir_mode='copy'
+process { executor='local'; cpus=1; memory='1 GB'; scratch=false; errorStrategy='terminate'; beforeScript='export PATH=$runtime/scaffolding-tools:\$PATH' }
+EOF
+    export SCAFFOLD_CASE="${2:-success}"
+    if [[ "${1:-}" == scaffolding_replay_checks.nf ]]; then
+        mkdir -p "$runtime/scaffolding-fixtures" "$runtime/scaffolding-results/replay"
+        printf '>s\nACGT\n' > "$runtime/scaffolding-fixtures/input.fa"
+        printf 'fixture' > "$runtime/scaffolding-fixtures/input.bin"
+        printf 's\t1\t4\t1\tW\ts\t1\t4\t+\n' > "$runtime/scaffolding-fixtures/expected.agp"
+        cat >> "$runtime/scaffolding.config" <<EOF
+params.outdir='$runtime/scaffolding-results/replay/results'
+params.replay_fasta='$runtime/scaffolding-fixtures/input.fa'
+params.replay_links='$runtime/scaffolding-fixtures/input.bin'
+params.replay_expected_agp='$runtime/scaffolding-fixtures/expected.agp'
+params.replay_assembly='fixture'
+params.yahs_round1_min_contig_bp=20000
+params.yahs_round1_min_mapq=10
+params.yahs_round1_resolutions='20000,50000'
+params.yahs_round1_rounds_per_resolution=null
+params.yahs_round1_enzyme=null
+params.yahs_round1_contig_ec=true
+params.yahs_round1_scaffold_ec=true
+EOF
+    fi
+    script="$runtime/reproduction.nf"
+    extra=(-c "$runtime/scaffolding.config")
+    cd "$runtime/scaffolding-launch"
 elif [[ "${1:-}" == provenance_checks.nf ]]; then
     cp reproduction.nf "$repo/.provenance-checks.nf"
     trap 'rm -f "$repo/.provenance-checks.nf"' EXIT

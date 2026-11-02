@@ -70,3 +70,53 @@ Keep category 7 integration acceptance open. First compare the retained old/new
 CLim scaffolding records. Then resume the normal pipeline with the report fixes
 and review any deliberate change to the accepted baseline explicitly. Do not
 launch another unrestricted graph rebuild to diagnose a missing task log.
+
+## Follow-up: retained scaffolding context identifies a skipped resolution
+
+The `core-integration-01-scaffolding-context.review.tar.gz` packet establishes
+that all inspected CLim refinement/scaffolding commands are identical, as are
+their recorded tool versions. YaHS is 1.2.2 in both runs. Round-one stdout is
+identical through input link loading and initial contig correction: 72,220,048
+read pairs, 34,904,189 intra links, 37,315,859 inter links and ten initial breaks.
+These matching summaries are strong evidence but not byte identity checks.
+
+The first differing scaffolding measurement is YaHS's detected RAM limit:
+18.715 GiB previously, 3.038 GiB in integration. At 20 kb, the new run estimates
+5.633 GiB required against 3.020 GiB remaining and reports:
+`No enough memory. Try lower resolutions... End of scaffolding round.`
+The old run executes this resolution. The new run skips it and moves to 50 kb.
+Both return success. Final round-one scaffold counts are 420 versus 1,076, with
+YaHS N50 72,461,392 versus 67,431,040 bp. The downstream changes are therefore
+consistent with a documented memory-dependent branch, not unexplained changes
+to the scaffolding command or evidence policy.
+
+Upstream sources for the tested version confirm that this is intentional YaHS
+behavior, not a proposed patch to YaHS itself:
+
+- [YaHS 1.2.2 memory option documentation](https://github.com/c-zhou/yahs/blob/v1.2.2/README.md)
+- [Memory estimates and fallback](https://github.com/c-zhou/yahs/blob/v1.2.2/yahs.c)
+- [Detected available memory](https://github.com/c-zhou/yahs/blob/v1.2.2/asset.c)
+
+The production wrapper now uses `--no-mem-check` in both rounds, so transient
+available memory cannot silently choose different requested resolutions. This
+does not disable OS/scheduler limits or supply additional physical memory. Real
+allocation failures must fail the task. A defensive log check rejects reported
+memory failures even if the tool exits zero. The resource request rises from
+8 to 16 GB for headroom above the old run's 6.012 GiB observed peak; larger
+genomes may require a user resource override. No join thresholds, restriction
+enzymes, contig correction, MAPQ or resolution list were changed.
+
+Controlled tests execute the production Nextflow module: normal outputs pass,
+the required flag is checked, and a zero-exit simulated fallback is rejected.
+The exact native replay entry also passes using controlled tools. These tests
+validate orchestration and error handling, not restoration of the real assembly.
+
+Before a full resume, the removable native replay hashes both old/new retained
+FASTA and BIN inputs and requires them to match. It then runs the production
+YaHS module once using the existing BIN, compares the resulting AGP exactly to
+the accepted round-one AGP, and packages the result. No mapping or graph jobs
+are launched. The old YaHS execution took 265 seconds, so this should be a small
+test plus hashing, scheduling and environment startup; native runtime is not
+guaranteed. Its actual result is still pending. A full run after the module fix
+will legitimately invalidate scaffolding and downstream tasks; do not promise
+that the graph will remain cached.
