@@ -13,16 +13,28 @@ workflow {
     def no=file('__REPO__/assets/NO_REPORT_INPUT')
     qc=Channel.empty()
     if(mode!='disabled') qc=Channel.value(file("${root}/qc.csv"))
+    graph=mode=='multispecies' ? Channel.fromList(['sharing_summary.tsv','sharing_report.md','source_sequences.tsv','source_audit.json','source_report.md'].collect { tuple('1',file("${root}/${it}")) }) : Channel.empty()
+    snails=mode!='disabled' ? Channel.fromList(data.assemblies.collect { tuple(it.id,'final',file("${root}/${it.id}_final_snail.svg")) }) : Channel.empty()
+    annotations=mode!='disabled' ? Channel.value(tuple([sample:'sample'],file("${root}/annotation.gb"))) : Channel.empty()
     MAIN_REPORTING(eligibility,expected,names,REPORT_PAINTINGS.out.blocks,qc,
-        Channel.value(no),Channel.value([no]),Channel.empty(),Channel.empty(),
+        Channel.value(no),Channel.value([no]),graph,Channel.empty(),
         Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),
-        Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.value(no))
+        annotations,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),snails,
+        Channel.value(data.assemblies.collect { [sample:it.sample,hifi:false,hic:false,shortread:false] }.unique { it.sample }),Channel.empty(),
+        Channel.value([file("${root}/software_versions.tsv"),file("${root}/run_provenance.json")]))
     MAIN_REPORTING.out.report.view { report ->
         assert report.text.contains('| sample | Finalized |')
         assert report.text.contains('## Chromosome structure')==(mode!='disabled')
         assert report.text.contains('## Assembly quality')==(mode!='disabled')
-        assert !report.text.contains('## Pangenome')
+        assert report.text.contains('sample_hap1_final_snail.svg')==(mode!='disabled')
+        assert !file("${report.parent}/reports/main/report_completeness.tsv").text.contains('\tMISSING\t')
+        assert file("${report.parent}/reports/main/artifact_registry.tsv").text.contains('provenance/software_versions.tsv')
+        assert report.text.contains('## Pangenome')==(mode=='multispecies')
         if(mode=='multispecies') {
+            assert file("${report.parent}/reports/main/needs_attention.tsv").text.contains('sample_hap1 / chr1_1')
+            assert !file("${report.parent}/reports/main/needs_attention.tsv").text.contains('sample_hap2 / chr1_1')
+            assert report.text.contains('Distinct graph sequence (Mb)')
+            assert report.text.contains('All 2 individuals')
             assert report.text.contains('chromosome_structure_1.png')
             assert report.text.contains('chromosome_structure_2.png')
             def scope=file("${report.parent}/reports/main/display_scope.tsv").readLines().drop(1)

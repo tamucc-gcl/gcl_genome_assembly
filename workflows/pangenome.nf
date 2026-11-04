@@ -11,6 +11,7 @@ workflow PANGENOME {
     main:
     ch_versions = Channel.empty()
     ch_report = Channel.empty()
+    ch_summary = Channel.empty()
     ch_manifest = Channel.empty()
     if (params.run_pangenome) {
         if (params.pangenome_gref != true || params.pangenome_gref_source != 'clip')
@@ -34,6 +35,7 @@ workflow PANGENOME {
             PANGENOME_ANALYSIS(PANGENOME_CONSTRUCTION.out.clip_stats_input,
                 PANGENOME_CONSTRUCTION.out.clip_sharing_input, ch_eligibility_manifest)
             ch_report = ch_report.mix(PANGENOME_ANALYSIS.out.report)
+            ch_summary = PANGENOME_ANALYSIS.out.summary
             PANGENOME_VARIANT_AUDIT(PANGENOME_CONSTRUCTION.out.variant_input,
                 file("${projectDir}/py_scripts/pangenome_variant_audit.py", checkIfExists: true))
             ch_report = ch_report.mix(PANGENOME_VARIANT_AUDIT.out.report)
@@ -65,6 +67,13 @@ workflow PANGENOME {
                     tuple(taxid, identities, paths, indexes, specs, mappings, evidence)
                 }, file("${projectDir}/py_scripts/pangenome_source_audit.py", checkIfExists: true))
             ch_report = ch_report.mix(PANGENOME_SOURCE_AUDIT.out.report)
+            ch_summary = ch_summary.mix(PANGENOME_SOURCE_AUDIT.out.files.flatMap { taxid,files ->
+                ['source_sequences.tsv','source_audit.json'].collect { name ->
+                    def source=files.find { it.name==name }
+                    if (!source) error "Missing graph review source: ${name}"
+                    tuple(taxid,source)
+                }
+            })
             // The legacy construction `cactus --version` row reports Toil, not Cactus.
             // Keep it in the build provenance but use the separately captured versions here.
             ch_versions = PANGENOME_ANALYSIS.out.versions.mix(PANGENOME_VARIANT_AUDIT.out.versions,
@@ -74,6 +83,7 @@ workflow PANGENOME {
     }
     emit:
     report = ch_report
+    summary = ch_summary
     manifest = ch_manifest
     versions = ch_versions
 }

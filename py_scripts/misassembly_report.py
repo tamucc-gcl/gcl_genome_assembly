@@ -21,6 +21,22 @@ def advice(event):
     return {'CUT':'Recommend cutting at the specified gap','RETAIN':'Keep intact — local continuity supported','SUSPECT':'Break favored — review the coordinate','REVIEW':'Review — no cut selected'}[event['recommendation']]
 
 
+def recorded_decision(event,assembly,manual_rows=(),verifications=()):
+    """Display recorded choices separately from source-bound detector advice."""
+    matched=[r for r in manual_rows if r.get('assembly')==assembly and
+             (r.get('event_id')==event['id'] or r.get('id')==event['id'])]
+    cuts=[r for r in matched if r.get('selected')=='YES' and r.get('review_disposition')=='CUT']
+    if cuts:
+        verified={(a.get('assembly'),a.get('id'),str(a.get('cut_bp')),a.get('assessment_sha256'))
+                  for v in verifications if v.get('exact_parent_reconstruction') is True for a in v.get('selected_actions',[])}
+        complete=all((r['assembly'],r['id'],str(r['cut_bp']),r.get('assessment_sha256')) in verified for r in cuts)
+        return ('Cut applied and verified' if complete else 'Cut selected; verification needed',
+                '; '.join(r['scaffold']+': '+bp(r['cut_bp'])+' bp' for r in cuts))
+    if any(r.get('review_disposition')=='RETAIN' for r in matched):return 'Retained by review',''
+    if any(r.get('review_disposition')=='DEFER' for r in matched):return 'Review deferred',''
+    return 'Review pending',''
+
+
 
 CONTROL_REASONS={
     'insufficient_independent_same_chromosome_context':'chromosome context incomplete',
@@ -148,13 +164,17 @@ def junction_card(event,assembly,cohort=False):
     return md
 
 
-def event_card(event,assembly,cohort=False,counterparts=(),manual_rows=()):
+def event_card(event,assembly,cohort=False,counterparts=(),manual_rows=(),verifications=()):
     preferred=event.get('preferred_region',event)
     cut=event.get('recommended_cut')
     location=(bp(cut['cut_bp'])+' bp (exact gap cut)') if cut else bp(preferred['lo'])+'–'+bp(preferred['hi'])+' bp (review range)'
-    md=['### '+(assembly+' · ' if cohort else '')+event['id']+' — '+event['left']+' → '+event['right'],'',
-        '**'+advice(event)+'.** '+event['reason'],'','**Decision location:** '+event['scaffold']+': '+location+'.','']
-    submitted=[r for r in manual_rows if r.get('assembly')==assembly and r.get('scaffold')==event['scaffold'] and r.get('selected')=='YES' and (r.get('event_id')==event['id'] or event.get('start',event['lo']-500000)<=int(r['cut_bp'])<=event.get('end',event['hi']+500000))]
+    status,selected_location=recorded_decision(event,assembly,manual_rows,verifications)
+    md=['### '+(assembly+' · ' if cohort else '')+event['id']+' — '+event['left']+' → '+event['right'],'']
+    if status!='Review pending':md+=['**Recorded decision: '+status+'.**'+(' '+selected_location+'.' if selected_location else ''),'']
+    md+=['**Original detector recommendation:** '+advice(event)+'. '+event['reason'],'',
+         '**Original assessment location:** '+event['scaffold']+': '+location+'.','']
+    submitted=[r for r in manual_rows if r.get('assembly')==assembly and r.get('selected')=='YES' and
+               (r.get('event_id')==event['id'] or r.get('id')==event['id'])]
     if submitted:md+=['**User-selected cut(s):** '+', '.join(bp(int(r['cut_bp']))+' bp ('+r['id']+')' for r in submitted)+'. Detector advice describes the original assembly.','']
     if cut:
         md+=['**Exact option:** '+cut['id']+'. '+('Automatic-cut prerequisites met.' if cut.get('automatic_cut_eligible') else 'Manual recommendation; automatic-cut prerequisites are not met.')+(' Submitted decisions are listed above.' if submitted else ' All cut selections remain NO.'),'']
@@ -375,6 +395,10 @@ def main():
         mapping=data['mapping']
         if mapping.get('bam'):manifest[assembly]=dict(bam=mapping['bam'],index=mapping['index'],fasta=data.get('assessment_fasta'),provenance=str((packet/'evidence.json').resolve()))
         result=result_summary(data)
+        if data['events'] and reviewed:
+            states=[recorded_decision(e,assembly,reviewed,applied)[0] for e in data['events']]
+            from collections import Counter
+            result=str(len(states))+' transitions; '+'; '.join(str(n)+' '+state.lower() for state,n in Counter(states).items())
         registry.append(dict(assembly=assembly,assessment_sha256=data['assessment_sha256'],assessment_fasta=data.get('assessment_fasta',''),coordinate_stage='pre_finishing',assessment_status=data['status'],detected_transitions=len(data['events']),review_candidates=sum(e['recommendation']!='RETAIN' for e in data['events']),retained_boundaries=sum(e['recommendation']=='RETAIN' for e in data['events']),rejected_screens=sum(v.get('kind')=='rejected_peer_transition' for v in data.get('minor_signals',[])),result=result))
         md=['# '+assembly+' — misassembly review','','[All assemblies](../../README.md) · [Manual decisions](../../cut-instructions.md)','', '**'+result+'.**','']
         chosen=[r for r in reviewed if r.get('assembly')==assembly and r.get('selected')=='YES']
@@ -389,7 +413,7 @@ def main():
                 screen.append([scaffold,len(individuals),format(100*max(fractions),'.1f')+'%' if fractions else 'Unavailable'])
             md+=['<details>','<summary>What was screened</summary>','']+mdtable(['Chromosome-scale scaffold','Individuals with chromosome assignments','Best assigned fraction'],screen)+['','An absence of detected transitions applies to the usable comparisons above. Unmapped sequence is not evidence of continuity.','</details>','']
         for event in sorted(data['events'],key=lambda e:e['recommendation']=='RETAIN'):
-            md+=['<a name="'+event['id'].lower()+'"></a>','']+event_card(event,assembly,counterparts=sister_context(event,data,all_data),manual_rows=reviewed)
+            md+=['<a name="'+event['id'].lower()+'"></a>','']+event_card(event,assembly,counterparts=sister_context(event,data,all_data),manual_rows=reviewed,verifications=applied)
             if (target/'plots'/(event['id']+'.detail.png')).exists():md+=['**Close-up of the priority location**','','![Close-up of measured support and review locations](plots/'+event['id']+'.detail.png)','','The close-up centers on a user-selected cut, the recommended gap, or the highest-priority review region. It does not select a cut.','']
             if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity, HiFi support, Hi-C support and telomeres](plots/'+event['id']+'.png)','','Blue and orange distinguish the focal chromosome pair consistently across haplotypes; other chromosomes are muted. Pale backgrounds show the independent-individual consensus assignment; ambiguous regions remain neutral. Yellow marks the original transition bracket. Purple regions and R labels show up to six highest-ranked nonexcluded assay locations (nearby labels are grouped); the table retains all assessed locations. Dashed purple lines mark R assay positions, not cut recommendations. Dashed red lines mark nonexcluded exact gap options; green solid lines mark submitted user-selected cuts. Broad yellow brackets are deliberately faint. Spanning molecules are HiFi reads. The Hi-C curves show binned support per library, not calibrated cut recommendations. Telomere counts are in the bottom panel. Gaps in curves mean unavailable measurements.','']
             md+=['<details>','<summary>Peer chromosome assignments</summary>','']+mdtable(['Assembly','Left → right','Local assignment','Role'],[
@@ -429,19 +453,23 @@ def main():
     all_events=[(d,e) for d in all_data for e in d['events']]
     events=sorted(all_events,key=lambda pair:pair[1]['recommendation']=='RETAIN')
     counts={k:sum(e['recommendation']==k for _,e in all_events) for k in ('CUT','RETAIN','SUSPECT','REVIEW')}
-    md=['# Chimera and misassembly review','',str(len(all_data))+' assemblies included; '+str(sum(d['status']=='assessed' for d in all_data))+' have usable cohort comparisons. **'+str(len(events))+' chromosome transitions detected: '+str(counts['CUT'])+' recommended cuts; '+str(counts['SUSPECT'])+' suspect misjoins; '+str(counts['REVIEW'])+' conflicting or incomplete assessments; '+str(counts['RETAIN'])+' provisionally keep intact.**','',
-        'Detected chromosome transitions remain listed even when local evidence favors keeping the sequence intact. Local continuity does not prove biological chromosome fusion. Cut options begin unselected. [Editable decisions](review.tsv) · [Cut instructions](cut-instructions.md)','',
+    md=['# Chimera and misassembly review','',str(len(all_data))+' assemblies included; '+str(sum(d['status']=='assessed' for d in all_data))+' have usable cohort comparisons. Original detector classifications: **'+str(len(events))+' chromosome transitions detected: '+str(counts['CUT'])+' recommended cuts; '+str(counts['SUSPECT'])+' suspect misjoins; '+str(counts['REVIEW'])+' conflicting or incomplete assessments; '+str(counts['RETAIN'])+' provisionally keep intact.**','',
+        'Detected chromosome transitions remain listed even when local evidence favors keeping the sequence intact. Local continuity does not prove biological chromosome fusion. First-pass cut options begin unselected; recorded decisions below take precedence over the original detector advice. [Editable decisions](review.tsv) · [Cut instructions](cut-instructions.md)','',
         '## Assembly overview','']+mdtable(['Assembly','Result','Evidence'],[[r['assembly'],r['result'],'[Report](assemblies/'+r['assembly']+'/report.md)'] for r in registry])
     if reviewed:
+        from collections import Counter
+        current=Counter(recorded_decision(e,d['assembly'],reviewed,applied)[0] for d,e in events)
+        md[2:2]=['**Recorded decisions:** '+'; '.join(str(n)+' '+state.lower() for state,n in current.items())+'.','']
         md+=['','## Submitted manual decisions','',str(sum(r.get('selected')=='YES' for r in reviewed))+' cuts selected; '+str(sum(len(v['selected_actions']) for v in applied))+' actions verified by exact sequence reconstruction. These evidence measurements describe the original pre-finishing assemblies. Corrected assemblies are reassigned and finished downstream.','']
     chosen=[r for r in reviewed if r.get('selected')=='YES']
     if chosen:md+=['']+mdtable(['Assembly / ID','Original scaffold','Cut, bp','Action','Reviewer / reason'],[[r['assembly']+' / '+r['id'],r['scaffold'],bp(int(r['cut_bp'])),r['action'],r['reviewer']+': '+r['reason']] for r in chosen])+['']
     if events:
-        md+=['','## Detected chromosome transitions and suggested actions','']+mdtable(['Assembly / event','Chromosomes','Suggested action','Decision location'],[
-            ['['+d['assembly']+' '+e['id']+'](assemblies/'+d['assembly']+'/report.md#'+e['id'].lower()+')',e['left']+' → '+e['right'],advice(e),
+        md+=['','## Detected chromosome transitions and decisions','']+mdtable(['Assembly / event','Chromosomes','Recorded decision','Original detector recommendation','Location (original coordinates)'],[
+            ['['+d['assembly']+' '+e['id']+'](assemblies/'+d['assembly']+'/report.md#'+e['id'].lower()+')',e['left']+' → '+e['right'],
+             recorded_decision(e,d['assembly'],reviewed,applied)[0],advice(e),recorded_decision(e,d['assembly'],reviewed,applied)[1] or
              e['scaffold']+': '+(bp(e['recommended_cut']['cut_bp'])+' bp (exact gap)' if e.get('recommended_cut') else bp(e.get('preferred_region',e)['lo'])+'–'+bp(e.get('preferred_region',e)['hi'])+' bp (review range)')] for d,e in events])
         md+=['','## Evidence for each decision','']
-        for d,e in events:md+=event_card(e,d['assembly'],cohort=True,counterparts=sister_context(e,d,all_data),manual_rows=reviewed)
+        for d,e in events:md+=event_card(e,d['assembly'],cohort=True,counterparts=sister_context(e,d,all_data),manual_rows=reviewed,verifications=applied)
     md+=['## Scope and reproducibility','',
          'Discovery compares all chromosome-scale scaffolds with the other assemblies, including screening the selected naming reference. The assigned-sequence arm threshold is recorded in each evidence packet; short islands remain in the audit. Individuals, not haplotypes, supply independent votes.', '',
          'HiFi continuity uses a grid of 1 kb probes with 1 kb flanks at MAPQ 20 and 30. Indels up to 50 bp are tolerated; larger indels and skipped regions interrupt support. Known scaffold N gaps are assessed separately. Retention can be supported by continuous or ≥95% supported regions with weak pockets no longer than 3 kb. These are explicit review heuristics, not proof of evolutionary fusion.', '',

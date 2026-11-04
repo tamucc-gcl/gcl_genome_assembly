@@ -38,6 +38,23 @@ launch_dir="${PROJECT_ROOT}/.nf/assembly"
 [[ "$mode" == validate ]] && launch_dir="${PROJECT_ROOT}/.nf/assembly-input-check"
 
 outdir="${PROJECT_ROOT}/genome_assembly"
+report_outdir="$outdir"
+extra_arguments=("${@:4}")
+for ((i=0; i<${#extra_arguments[@]}; i++)); do
+    case "${extra_arguments[i]}" in
+        --outdir) report_outdir="${extra_arguments[i+1]:?Missing --outdir value}" ;;
+        --outdir=*) report_outdir="${extra_arguments[i]#--outdir=}" ;;
+    esac
+done
+[[ "$report_outdir" == /* ]] || report_outdir="${PROJECT_ROOT}/$report_outdir"
+# Nextflow launches below .nf/assembly; keep caller-supplied output paths relative
+# to the project rather than accidentally publishing under that launch directory.
+for ((i=0; i<${#extra_arguments[@]}; i++)); do
+    case "${extra_arguments[i]}" in
+        --outdir) extra_arguments[i+1]="$report_outdir" ;;
+        --outdir=*) extra_arguments[i]="--outdir=$report_outdir" ;;
+    esac
+done
 
 echo "Project root  : ${PROJECT_ROOT}"
 echo "Sample sheet  : ${sample_sheet}"
@@ -78,7 +95,10 @@ nextflow -log "${PROJECT_ROOT}/logs/nextflow_${mode}_${SLURM_JOB_ID:-manual}.log
         --hic_readsets "${hic_readsets}" \
         --sample_sheet "${sample_sheet}" \
         --outdir "${outdir}" \
-        "${@:4}"
+        "${extra_arguments[@]}"
 
 cd "${PROJECT_ROOT}"
+if [[ "$mode" != validate ]]; then
+    python3 "${PROJECT_ROOT}/gcl_genome_assembly/py_scripts/validate_report.py" --root "$report_outdir"
+fi
 #bash scripts/utils/fasta_to_webshare.sh

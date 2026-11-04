@@ -820,10 +820,12 @@ workflow {
     if (params.run_report) {
         MAIN_REPORTING(ASSEMBLY_ELIGIBILITY.out.manifest,ch_input_status,
             FINALIZE_ASSEMBLY.out.name_map,REPORT_PAINTINGS.out.blocks,ch_qc_metrics,
-            CHIMERA.out.decisions,CHIMERA.out.verifications,PANGENOME.out.report,
+            CHIMERA.out.decisions,CHIMERA.out.verifications,PANGENOME.out.report.mix(PANGENOME.out.summary),
             ch_detailed_report,ch_viz_dotplot,ch_viz_riparian,ch_final_contact_maps,
             ORGANELLE.out.circular_map,ORGANELLE.out.stats,ORGANELLE.out.annotation,ORGANELLE.out.recovery_status,
-            ch_qc_plots,ch_teloclip_stats_for_report,ch_qc_report_html,RUN_PROVENANCE.out.versions)
+            ch_qc_plots,ch_teloclip_stats_for_report,ch_qc_report_html,ch_snail_final,
+            ch_input.map { meta,reads -> [sample:meta.sample.toString(),hifi:meta.hifi==true,hic:meta.hic==true,shortread:meta.shortread==true] }.toList(),
+            CHIMERA.out.registry,RUN_PROVENANCE.out.files)
     }
 }
 /*

@@ -4,6 +4,7 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=5
+set -euo pipefail
 
 #git clone git@github.com:tamucc-gcl/gcl_genome_assembly.git
 
@@ -19,3 +20,5 @@ nextflow run gcl_genome_assembly/main.nf \
     -resume \
     --sample_sheet ${sample_sheet} \
     --outdir ${outdir}
+
+python3 gcl_genome_assembly/py_scripts/validate_report.py --root "${outdir}"

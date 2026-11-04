@@ -87,13 +87,15 @@ has_pairwise <- !grepl("NO_PAIRWISE", basename(args$pairwise_summary)) &&
 has_pangenome <- !grepl("^NO_", basename(args$pangenome_report)) &&
                  file.exists(args$pangenome_report) && file.size(args$pangenome_report) > 0
 
+manifest_peek <- read_tsv(args$manifest, col_types=cols(.default="c"))
+has_visual <- any(manifest_peek$type %in% c("contact_map","dotplot","riparian","genomescope_plot"))
 sec_defs <- list(
-  list(key = "assemblies", title = "Final Genome Assemblies",             present = TRUE),
+  list(key = "assemblies", title = "Organism and Assembly Context",             present = TRUE),
   list(key = "qc",         title = "Assembly QC Summary",                 present = TRUE),
-  list(key = "visual",     title = "Visual Summary",                      present = TRUE),
+  list(key = "visual",     title = "Supporting Figures and Read Profiles",       present = has_visual),
   list(key = "stages",     title = "Assembly QC Across Pipeline Stages",  present = TRUE),
-  list(key = "mito",       title = "Mitochondrial Genome",                present = TRUE),
-  list(key = "telomere",   title = "Telomere Detection",                  present = TRUE),
+  list(key = "mito",       title = "Mitochondrial Genome",                present = !grepl("^NO_", basename(args$mito_stats)) && file.exists(args$mito_stats)),
+  list(key = "telomere",   title = "Telomere Detection",                  present = (!grepl("^NO_", basename(args$telomere_summary)) && file.exists(args$telomere_summary)) || (!grepl("^NO_", basename(args$teloclip_stats)) && file.exists(args$teloclip_stats))),
   list(key = "chimera",    title = "Chimeric Scaffold Detection",        present = has_chimera),
   list(key = "pairwise",   title = "Pairwise Alignment Summary",          present = has_pairwise),
   list(key = "pangenome",  title = "Pangenome",                           present = has_pangenome),
@@ -162,7 +164,7 @@ img_tag <- function(src, alt, width = args$img_width) {
 # Read manifest
 # =============================================================================
 message("Reading manifest: ", args$manifest)
-manifest <- read_tsv(args$manifest, col_types = cols(.default = "c"))
+manifest <- manifest_peek
 
 assemblies     <- manifest %>% filter(type == "assembly")
 snail_plots    <- manifest %>% filter(type == "snail")
@@ -293,7 +295,7 @@ md <- c(md,
 md <- c(md,
         sec_head("assemblies"),
         "",
-        "Final gap-filled, chromosome-level assemblies produced by the [gcl_genome_assembly](https://github.com/tamucc-gcl/gcl_genome_assembly) pipeline.",
+        "[Main results, final assembly downloads and chromosome name maps](assembly_report.md#final-assemblies-chromosome-name-maps-and-mitogenomes). This report provides supporting measurements and methods; finalized assemblies may have chromosome-scale or fragmented structure.",
         ""
 )
 
@@ -332,7 +334,7 @@ if (nrow(assemblies) > 0) {
   asm_table <- asm_table %>%
     select(Sample = sample_id, `Haplotype 1` = hap1, `Haplotype 2` = hap2)
   
-  md <- c(md, "### Assembly Files", "", make_markdown_table(asm_table), "")
+  md <- c(md, "[Final assembly and mitogenome files](assembly_report.md#final-assemblies-chromosome-name-maps-and-mitogenomes)", "")
 } else {
   md <- c(md, "*No final assemblies found in manifest.*", "")
 }
@@ -792,7 +794,8 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
       mutate(Status = replace_na(Status, "—")) %>%
       relocate(Status, .after = Sample)
 
-    md <- c(md, make_markdown_table(overview_wide), "")
+    md <- c(md, "[Final quality metrics](assembly_report.md#assembly-quality) · [All retained QC measurements](qc/assembly/assembly_qc_metrics.csv)", "",
+      make_markdown_table(verdict %>% transmute(Individual=sample_id, Status, Notes=if_else(flags=="", "No configured threshold flags", flags))), "")
 
     crit <- sprintf("BUSCO complete ≥ %g%%, QV ≥ %g, k-mer completeness ≥ %g%%",
                     thr_busco, thr_qv, thr_kmer)
@@ -953,11 +956,11 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
 # =============================================================================
 # Section 3: Visual Summary — per-sample table with hap1/hap2 columns
 # =============================================================================
+if (has_visual) {
 md <- c(md,
         sec_head("visual"),
         "",
-        "Each row shows one sample with snail plots, contact maps, the within-sample",
-        "haplotype-vs-haplotype dotplot, and riparian (ribbon) synteny plot.",
+        "[Final snail and mitogenome plots](assembly_report.md#assembly-and-mitogenome-plots) are shown together in the main report. Supporting contact maps, dotplots, ribbons and read profiles remain below.",
         ""
 )
 
@@ -975,7 +978,7 @@ pick_best_contact_map <- function(cmaps_for_hap) {
     slice(1)
 }
 
-has_snails <- nrow(snail_plots) > 0
+has_snails <- FALSE # Final snail plots are embedded in the main report.
 has_cmaps  <- nrow(contact_maps) > 0
 has_dots   <- nrow(dotplots) > 0
 has_riparian <- nrow(riparian_plots) > 0
@@ -1126,6 +1129,8 @@ if (nrow(genomescope_plots) > 0) {
   md <- c(md, "</table>", "")
 }
 
+}
+
 # =============================================================================
 # Section 4: QC trend plots + cross-stage table (only meaningful with >1 stage)
 # =============================================================================
@@ -1133,7 +1138,8 @@ n_stages <- if (!is.null(qc_data) && nrow(qc_data) > 0 && "stage" %in% names(qc_
               n_distinct(qc_data$stage) else 0L
 
 if (!is.null(qc_data) && nrow(qc_data) > 0) {
-  md <- c(md, sec_head("stages"), "")
+  md <- c(md, sec_head("stages"), "",
+    if (n_stages > 1) "[Signed changes between measured stages, with units and stage definitions](reports/main/assembly_stage_changes.md)" else character(), "")
 
   if (n_stages > 1) {
     plot_lines <- character()
@@ -1230,74 +1236,12 @@ if (!is.null(qc_data) && nrow(qc_data) > 0) {
 # into a single HTML table with one row per sample.
 # =============================================================================
 
-md <- c(md, sec_head("mito"), "")
-
-mito_stats <- NULL
-if (!grepl("NO_MITO_STATS", args$mito_stats, fixed = TRUE) &&
-    file.exists(args$mito_stats)) {
-  mito_stats <- tryCatch(
-    read_tsv(args$mito_stats, show_col_types = FALSE),
-    error = function(e) { message("WARNING: Could not read mito stats: ", e$message); NULL }
-  )
-}
-
-if (is.null(mito_stats) || nrow(mito_stats) == 0) {
-  md <- c(md, "*No mitochondrial genome assembly data available.*", "")
-} else {
-
-  # Build a single HTML table: Sample | Gene Map | Length | Circular | Genes | tRNAs | rRNAs | FASTA
-  md <- c(md,
-    "<table>",
-    "<tr>",
-    "  <th>Sample</th>",
-    "  <th>Gene Map</th>",
-    "  <th>Length (bp)</th>",
-    "  <th>Circular</th>",
-    "  <th>Genes</th>",
-    "  <th>tRNAs</th>",
-    "  <th>rRNAs</th>",
-    "  <th>GenBank</th>",
-    "</tr>"
-  )
-
-  for (i in seq_len(nrow(mito_stats))) {
-    row <- mito_stats[i, ]
-    sid <- row$sample_id
-
-    # Gene map image from manifest
-    map_row <- mito_gene_maps %>% filter(id == sid)
-    map_cell <- if (nrow(map_row) > 0) {
-      src <- rel_path(map_row$subdir[1], map_row$filename[1])
-      img_tag(src, paste("Mito gene map:", sid), width = args$img_width)
-    } else { "—" }
-
-    # FASTA link from manifest
-    mito_gb <- manifest %>% filter(type == "mito_genbank", id == sid)
-    gb_cell <- if (nrow(mito_gb) > 0) {
-      sprintf('<a href="%s">%s</a>',
-              rel_path(mito_gb$subdir[1], mito_gb$filename[1]),
-              mito_gb$filename[1])
-    } else { "—" }
-
-    # Format stats
-    length_fmt <- scales::comma(as.numeric(row$mitogenome_length))
-    circular_fmt <- ifelse(tolower(row$circular) == "yes", "Yes", row$circular)
-
-    md <- c(md, sprintf(
-      "<tr><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
-      sid, map_cell, length_fmt, circular_fmt,
-      row$gene_count, row$trna_count, row$rrna_count, gb_cell
-    ))
-  }
-
-  md <- c(md, "</table>", "")
-
-  # Mito filtering note
-  md <- c(md,
-    "Mitochondrial contigs were identified and removed from each haplotype",
-    "assembly prior to purge\\_dups, Inspector, decontamination, and scaffolding.",
-    ""
-  )
+if (sec_n("mito") %in% seq_along(.sec_present)) {
+  md <- c(md, sec_head("mito"), "",
+    "[Mitogenome lengths, recovery outcomes, maps and downloads](assembly_report.md#organelle-results)", "")
+  if (any(manifest$type == "mito_genbank")) md <- c(md,
+    "[Annotated loci, protein-coding genes, tRNAs and rRNAs](reports/main/organelle_annotations.md)", "",
+    "Feature counts are audited from the GenBank annotations by location and feature type. Text-occurrence counts from the assembly source summaries are not presented as gene counts.", "")
 }
 
 # =============================================================================
@@ -1309,7 +1253,9 @@ if (is.null(mito_stats) || nrow(mito_stats) == 0) {
 #   c) tidk density SVG plots per haplotype (from manifest)
 # =============================================================================
 
-md <- c(md, sec_head("telomere"), "")
+if (!is.na(sec_n("telomere"))) {
+md <- c(md, sec_head("telomere"), "",
+  "Telomere detection uses finalized assemblies and their final scaffold names. TIDK-derived lengths below are window spans, not exact FASTA lengths; use the main report inventory for exact sequence lengths. Teloclip extension statistics describe the preceding finishing operation, not additional final sequence.", "")
 
 # ---- 6a: Teloclip extension summary ----
 teloclip_path <- args$teloclip_stats
@@ -1433,7 +1379,7 @@ if (has_telo) {
       rename(
         Haplotype = haplotype_id,
         Scaffolds = scaffolds,
-        `Total Length` = total_length,
+        `Window-derived span` = total_length,
         `5' Telo` = telomere_5prime,
         `3' Telo` = telomere_3prime,
         Both = telomere_both,
@@ -1514,6 +1460,8 @@ if (has_telo) {
 # =============================================================================
 # Section 7: Pairwise Alignment Summary (collapsible)
 # =============================================================================
+}
+
 # =====================================================================================
 #  7. Chimeric Scaffold Detection
 # =====================================================================================
@@ -1532,8 +1480,7 @@ read_tsv_safe <- function(p, sentinel) {
 chim_cand <- read_tsv_safe(args$misassembly_registry, "NO_PAF")
 if (has_chimera && !is.null(chim_cand) && all(c("assembly", "result") %in% names(chim_cand))) {
   md <- c(md, sec_head("chimera"), "",
-          "The cohort-wide misassembly review reports evidence for cutting and retaining each detected transition. Decisions refer to original pre-finishing scaffold coordinates.", "",
-          make_markdown_table(chim_cand %>% transmute(Assembly = .data$assembly, Result = .data$result)), "",
+          "[Recorded decisions and verified cuts](assembly_report.md#assembly-decisions-and-changes) take precedence over the original detector advice. All chimera evidence and cut locations refer to original pre-finishing scaffolds, not renamed final coordinates.", "",
           "[Open the chimera evidence report and editable decisions](assembly/chimeras/README.md)", "")
 }
 
@@ -1648,9 +1595,12 @@ keys <- unique(keys)
 # --- Pangenome section (workstream F fragment); its number comes from the registry ---
 if (has_pangenome) {
   frag <- readLines(args$pangenome_report, warn = FALSE)
-  hi <- grep("^## Pangenome", frag)[1]
-  if (!is.na(hi)) frag[hi] <- sec_head("pangenome")
-  md <- c(md, "", frag)
+  taxa <- unique(str_match(frag, "^### Taxid ([^:]+):")[,2])
+  taxa <- taxa[!is.na(taxa)]
+  md <- c(md, sec_head("pangenome"), "",
+    "Biological analyses and technical validation are organized by species in the complete pangenome reports, rather than repeated here.", "",
+    if (length(taxa)) paste0("- [Pangenome report: taxid ", taxa,"]",
+      "(reports/main/pangenome_", taxa, ".md)") else "[Pangenome results](assembly_report.md#pangenome)", "")
 }
 
 

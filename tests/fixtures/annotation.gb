@@ -1,0 +1,17 @@
+LOCUS       fixture                  100 bp    DNA              UNK 01-JAN-1980
+DEFINITION  .
+ACCESSION   fixture
+VERSION     fixture
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     gene            1..70
+                     /product="tRNA-Phe"
+     tRNA            1..70
+                     /product="tRNA-Phe"
+ORIGIN
+        1 aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa
+       61 aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa aaaaaaaaaa
+//

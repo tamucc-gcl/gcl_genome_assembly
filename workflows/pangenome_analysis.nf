@@ -16,12 +16,14 @@ workflow PANGENOME_ANALYSIS {
     main:
     ch_versions = Channel.empty()
     ch_report = Channel.empty()
+    ch_summary = Channel.empty()
     PANGENOME_STATS(ch_clip_stats_input)
     if (params.pangenome_growth) {
         PANGENOME_SHARING(ch_clip_sharing_input,
             file("${projectDir}/py_scripts/pangenome_sharing.py", checkIfExists: true))
         ch_versions = PANGENOME_SHARING.out.versions
         ch_report = PANGENOME_SHARING.out.report
+        ch_summary = PANGENOME_SHARING.out.summary
         PANGENOME_SHARING_PLOTS(PANGENOME_SHARING.out.files,
             file("${projectDir}/r_scripts/pangenome_sharing_plots.R", checkIfExists: true))
         ch_versions = ch_versions.mix(PANGENOME_SHARING_PLOTS.out.versions)
@@ -66,4 +68,5 @@ workflow PANGENOME_ANALYSIS {
     stats = PANGENOME_STATS.out.vg_stats
     versions = ch_versions
     report = ch_report
+    summary = ch_summary
 }

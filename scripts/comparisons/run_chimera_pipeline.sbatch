@@ -27,7 +27,7 @@ finish() {
     for name in core_integration_check.md core_integration_check.json execution_environments.json; do
         [[ -f "$out/$name" ]] && files+=("$name")
     done
-    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/assembly_details.md results/assembly_eligibility.json results/assembly_eligibility.tsv results/assembly_eligibility.md results/references results/assembly/chimeras results/assembly/scaffold/teloclip results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
+    for name in nextflow.log trace.tsv results/assembly_run_summary.md results/assembly_report.md results/report_validation.md results/report_validation.json results/assembly_details.md results/assembly_eligibility.json results/assembly_eligibility.tsv results/assembly_eligibility.md results/references results/assembly/chimeras results/assembly/scaffold/teloclip results/qc/assembly results/qc/hifi results/qc/hic results/qc/shortread results/snail_plots results/reports; do
         [[ -e "$out/$name" ]] && files+=("$name")
     done
     for name in results/provenance results/pairwise_alignments; do

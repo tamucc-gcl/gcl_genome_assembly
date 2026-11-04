@@ -23,6 +23,18 @@ def fixture():
 
 
 class FinishedReviewTests(unittest.TestCase):
+    def test_recorded_decision_requires_matching_verified_action(self):
+        from misassembly_report import recorded_decision
+        event=fixture()['events'][0]
+        cut=dict(assembly='sample_hap1',event_id='C01',id='C01G01',selected='YES',review_disposition='CUT',
+                 scaffold='s',cut_bp='1100',assessment_sha256='hash')
+        verification=dict(exact_parent_reconstruction=True,selected_actions=[cut])
+        self.assertEqual(recorded_decision(event,'sample_hap1',[cut],[verification])[0],'Cut applied and verified')
+        verification['selected_actions']=[dict(cut,assessment_sha256='other')]
+        self.assertEqual(recorded_decision(event,'sample_hap1',[cut],[verification])[0],'Cut selected; verification needed')
+        retain=dict(cut,selected='NO',review_disposition='RETAIN')
+        self.assertEqual(recorded_decision(event,'sample_hap1',[retain],[])[0],'Retained by review')
+
     def test_nonloss_in_both_libraries_is_not_library_disagreement(self):
         option=fixture()['events'][0]['cut_options'][0]
         self.assertFalse(any('disagreement' in v for v in cut_prerequisites(option)))

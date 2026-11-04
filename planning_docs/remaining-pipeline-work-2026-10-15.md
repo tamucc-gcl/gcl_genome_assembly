@@ -5,6 +5,11 @@ PSMC design, current active workflows and the completed Crest QC evidence. It su
 abbreviated remaining-work summaries, without removing agreed extensions or changing their
 ordering. Optional means independently enabled per run, not forgotten from this roadmap.
 
+**Current 2026-11-04 summary and next Crest command:**
+[revamp-next-steps-2026-11-04.md](revamp-next-steps-2026-11-04.md).
+The canonical checkbox statuses below supersede historical checkpoint descriptions
+that still call previously accepted categories open.
+
 ## Completion checklist — the 13 agreed categories
 
 These IDs are the canonical progress checklist. Check a category only after its agreed
@@ -112,7 +117,10 @@ substeps remain recorded below and should not be repeated without a concrete rea
     coordinates and probes the installed extraction/sanitizing tools before
     graph construction. Production-02 must pass the existing recovery/accounting
     acceptance checks; no assembly or chimera changes are indicated.
-- [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
+- [ ] **6. Full Markdown report** — main report, decisions, input-aware completeness and
+  published-link checks are implemented and locally tested. Native main-report-02 acceptance,
+  the remaining detailed-figure/R rendering pass, alternate HiFi placement visualization and
+  final core interface/documentation freeze remain. See the current summary linked above.
 - [x] **7. Operational cleanup** — accepted 2026-11-04 from
   [core-integration-02](core-integration-02-assessment.md): 597 completed, 326 cached,
   zero failed/ignored/incomplete tasks. All ten final FASTA contents, indexes,

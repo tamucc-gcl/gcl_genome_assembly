@@ -141,3 +141,14 @@ mapping, chimera assessment and Cactus construction should reuse normal cache.
 The audit rejects an unexpected Cactus rebuild. Existing detailed reports are
 retained for the subsequent functionality/presentation review; this does not
 claim migration of all active Python renderers to R.
+
+## Subsequent report review
+
+The native main-report-01 run has now been inspected and its execution/evidence
+accounting accepted. Later presentation revisions, the selected separate-scale
+unplaced summary, individual-based tables, focused detailed reports, annotation
+feature-count audit and validation results are recorded in
+[main-report-01-assessment.md](main-report-01-assessment.md). That assessment supersedes
+the earlier "still need Crest review" status for the first report run. The latest
+reporting revisions have passed local real-data and Nextflow checks and await their
+next native integration run; the broader reporting category remains open for review.

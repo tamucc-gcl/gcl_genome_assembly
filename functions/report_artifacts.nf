@@ -1,4 +1,15 @@
 // Published artifact locations are explicit; task scratch paths are never report URLs.
+def graphReviewRows(source) {
+    def lines=source.readLines()
+    if (!lines) throw new IllegalArgumentException('Empty graph source audit table')
+    def columns=lines[0].split('\t',-1) as List
+    def flag=columns.indexOf('retention_review')
+    if (flag<0) throw new IllegalArgumentException('Graph source audit lacks retention_review')
+    ([lines[0]]+lines.drop(1).findAll { line ->
+        def fields=line.split('\t',-1)
+        fields.size()>flag && fields[flag]=='yes'
+    }).join('\n')+'\n'
+}
 def graphReportPath(taxid, name) {
     def folders=[
         'clipping_report.md':'representation', 'source_report.md':'representation',
