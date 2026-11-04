@@ -113,11 +113,19 @@ substeps remain recorded below and should not be repeated without a concrete rea
     graph construction. Production-02 must pass the existing recovery/accounting
     acceptance checks; no assembly or chimera changes are indicated.
 - [ ] **6. Full Markdown report** — integrate current-run artifacts, decisions, plots and statuses.
-- [ ] **7. Operational cleanup** — dependency/resource/cache/output cleanup and final integration acceptance.
+- [x] **7. Operational cleanup** — accepted 2026-11-04 from
+  [core-integration-02](core-integration-02-assessment.md): 597 completed, 326 cached,
+  zero failed/ignored/incomplete tasks. All ten final FASTA contents, indexes,
+  name maps, reference identity and graph admission match the accepted baseline.
+  The YaHS memory-dependent resolution skip is fixed and native replay restores
+  the accepted AGP exactly. Graph accounting passes with the original five source
+  review flags; five within-sample pairs produce all ten R comparison figures.
+  Always-on provenance and final Markdown execution pass. Remaining presentation,
+  link/decision integration and version-label issues are recorded for category 6.
   **Finalized comparison subgate accepted 2026-10-28:** full cohort, 13 completed
   tasks, no failures/retries; five pairs, all ten R figures inspected, input and
   retention tables reconcile. See [cohort acceptance](core-final-comparisons-r-all-01-assessment.md).
-  Remaining dependency/provenance cleanup and combined integration keep category 7 open.
+  This subgate is included in the accepted combined integration above.
 - [ ] **8. PSMC** — implement and accept both agreed input modes and reporting.
 - [ ] **9. BlobToolKit evidence and cleaning** — evidence first, separately validated cleaning.
 - [ ] **10. Graph self-mapping QC** — bounded supported mapping, metrics and report integration.

@@ -95,6 +95,8 @@ include { INPUT_PREPARATION } from './workflows/input_preparation.nf'
 include { INPUT_TAXONOMY } from './workflows/input_taxonomy.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
 include { RUN_PROVENANCE } from './workflows/run_provenance.nf'
+include { REPORT_PAINTINGS; MAIN_REPORTING } from './workflows/main_report.nf'
+include { graphReportPath; rebaseReportMarkdown } from './functions/report_artifacts.nf'
 include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
 include { SHARED_REFERENCE } from './modules/shared_reference.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
@@ -555,7 +557,7 @@ workflow {
         .flatMap { rows ->
             rows ? ['## Pangenome\n\n' + rows.sort { a,b ->
                 a[0].toString() <=> b[0].toString() ?: a[1].name <=> b[1].name
-            }.collect { taxid,md -> "### Taxid ${taxid}: ${md.name}\n\n${md.text}" }.join('\n\n')] : []
+            }.collect { taxid,md -> "### Taxid ${taxid}: ${md.name}\n\n" + rebaseReportMarkdown(md.text,graphReportPath(taxid,md.name)) }.join('\n\n')] : []
         }
         .collectFile(name:'pangenome_report.md',newLine:true)
         .ifEmpty(file("${projectDir}/assets/NO_PANGENOME",checkIfExists:true))
@@ -775,11 +777,14 @@ workflow {
     // ---- chimera tables for the report ---------------------------------------------
     // Built inside CHIMERA, which owns the channels they come from.
     ch_misassembly_registry_rpt = CHIMERA.out.registry
+    REPORT_PAINTINGS(ASSEMBLY_ELIGIBILITY.out.manifest)
+    ch_versions = ch_versions.mix(REPORT_PAINTINGS.out.versions)
     // Record software evidence even when QC or the full report is disabled.
     RUN_PROVENANCE(ch_versions)
 
     // Consumes outputs of both QC_PHASE and FINAL_VIZ, so it needs both.
-    if (qc_on && post_on) {
+    ch_detailed_report = Channel.empty()
+    if (params.run_report && qc_on && post_on) {
     REPORTING(
         ch_finalized_assembly,
         ch_snail_final,
@@ -807,9 +812,18 @@ workflow {
         RUN_PROVENANCE.out.versions,
         ch_summary_report_script
     )
+    ch_detailed_report = REPORTING.out.report
     }
     else {
-        log.info "[INFO] skipping REPORTING: it needs both QC and the post-assembly outputs"
+        log.info "[INFO] detailed assembly report needs QC and post-assembly outputs; main report is independent"
+    }
+    if (params.run_report) {
+        MAIN_REPORTING(ASSEMBLY_ELIGIBILITY.out.manifest,ch_input_status,
+            FINALIZE_ASSEMBLY.out.name_map,REPORT_PAINTINGS.out.blocks,ch_qc_metrics,
+            CHIMERA.out.decisions,CHIMERA.out.verifications,PANGENOME.out.report,
+            ch_detailed_report,ch_viz_dotplot,ch_viz_riparian,ch_final_contact_maps,
+            ORGANELLE.out.circular_map,ORGANELLE.out.stats,ORGANELLE.out.annotation,ORGANELLE.out.recovery_status,
+            ch_qc_plots,ch_teloclip_stats_for_report,ch_qc_report_html,RUN_PROVENANCE.out.versions)
     }
 }
 /*

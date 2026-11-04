@@ -197,6 +197,7 @@ workflow CHIMERA {
     broken = ch_broken
     registry = ch_registry_report
     decisions = ch_decision_report
+    verifications = ch_cut_verifications
     report = ch_evidence_report
     versions = ch_versions
 }

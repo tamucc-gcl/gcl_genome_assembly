@@ -978,7 +978,10 @@ results/
 | `assembly/final/<sample>_hap{1,2}.fasta` (or `_primary`) | Final assemblies, renamed and sorted |
 | `assembly/final/<sample>_hap1.name_map.tsv` | old → new scaffold names with length and class |
 | `assembly/harmonization/*.harmonized_name_map.tsv` | Cross-sample chromosome name assignment |
-| `assembly_report.md` | Full narrative report (see next section) |
+| `assembly_report.md` | Concise main Markdown report |
+| `assembly_details.md` | Detailed assembly report when QC and post-assembly outputs are enabled |
+| `reports/main/` | Combined structure figures, decision summary, artifact index and report metadata |
+| `reports/chromosome_painting/<taxid>/` | Final-coordinate mapping-chain evidence and painting tables |
 | `qc/assembly/assembly_qc_metrics.csv` | Machine-readable QC across every stage |
 | `reports/assembly_qc_report.html` | Interactive per-stage QC explorer |
 | `reports/software_versions.tsv` | Every tool version actually used in the run |
@@ -988,7 +991,27 @@ results/
 
 ## Reports
 
-`assembly_report.md` (repo root of `--outdir`) is the deliverable. Sections:
+`assembly_report.md` at the root of `--outdir` is the concise entry point. It has a
+native Markdown quality table (haplotypes on the same individual row), combined
+scaffold-length/chromosome-painting figures, recorded decisions and verified cuts,
+sample outcomes/downloads, graph links, organelle outcomes and provenance. Disabled
+sections are omitted. The evidence index links only artifacts supplied by the
+current invocation; it does not scan potentially stale publication directories.
+
+`--run_report true` is the default and is independent of `--run_post_assembly`.
+`--report_chromosome_painting true` enables final-to-shared-reference mapping for
+the combined figure; `--report_top_scaffolds 20` controls display scope, not evidence
+filtering. Every final scaffold remains in the inventory and painting table.
+The painting uses the current pairwise alignment preset, MAPQ and chain-length
+filters, with primary mapping-chain spans and one complete reference index.
+Uncovered regions remain unassigned; conflicting chromosome labels are ambiguous.
+Reference composites cannot supply an internal chromosome identity. The selected
+reference's own panel uses identity labels and is not independent alignment evidence.
+Painting does not rename assemblies, recommend cuts or alter graph inputs.
+
+The existing detailed assembly report is retained as `assembly_details.md` when
+both QC and post-assembly outputs are enabled. It preserves the following views
+while detailed-report presentation is reviewed separately:
 
 | § | Contents |
 |---|---|
@@ -1182,7 +1205,7 @@ into `head` bare, to avoid SIGPIPE.
 ## Citations
 
 Please cite the tools you actually used; `reports/software_versions.tsv` records exact versions per
-run, and §9 of `assembly_report.md` lists the references for every tool that ran.
+run; linked methods and provenance records accompany the main Markdown report.
 
 Core: **Nextflow** (Di Tommaso et al. 2017) · **hifiasm** (Cheng et al. 2021) · **SPAdes**
 (Prjibelski et al. 2020) · **redundans** (Pryszcz & Gabaldón 2016) · **Pilon** (Walker et al. 2014)

@@ -72,6 +72,15 @@ def audit(baseline,results,trace,out,allow_rebuild=False):
     for required in ['assembly_run_summary.md','assembly_report.md','reports/assembly_qc_report.html',
                      'provenance/run_provenance.json','provenance/software_versions.tsv','provenance/dependency_catalog.tsv']:
         if not (results/required).is_file():errors.append('Missing required output: '+required)
+    report_manifest=results/'reports/main/report_manifest.json'
+    if report_manifest.is_file():
+        report=json.loads(report_manifest.read_text())
+        if {r['id'] for r in report['assemblies']}!=set(after):errors.append('Main report assembly membership differs from final inventory')
+        if report['painting_required'] and set(report['expected_painting'])!=set(report['painted_assemblies']):
+            errors.append('Main report painting membership is incomplete')
+        for item in table(results/'reports/main/artifact_registry.tsv'):
+            if not (results/item['path']).is_file():errors.append('Main report artifact missing: '+item['path'])
+        notes.append('Main report membership, painting completeness and registered artifact targets checked.')
     contexts=[task_context(r['workdir']) for r in tasks if r.get('workdir') not in [None,'','-']]
     env=environment_inventory(contexts)
     (out/'execution_environments.json').write_text(json.dumps(dict(tasks=contexts,environments=env),indent=2)+'\n')

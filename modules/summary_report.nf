@@ -45,7 +45,7 @@ process SUMMARY_REPORT {
     path(summary_report_script) // R script to generate the summary report
 
     output:
-    path("assembly_report.md"), emit: report
+    path("assembly_details.md"), emit: report
 
     script:
     """
@@ -80,11 +80,11 @@ process SUMMARY_REPORT {
         --name_map ${name_map} \\
         --misassembly_registry ${misassembly_registry} \\
         --versions ${software_versions} \\
-        --output assembly_report.md
+        --output assembly_details.md
     """
 
     stub:
     """
-    touch assembly_report.md
+    touch assembly_details.md
     """
 }

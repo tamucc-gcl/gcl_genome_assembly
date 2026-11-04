@@ -136,6 +136,15 @@ EOF
     script="$runtime/reproduction.nf"
     extra=(-c "$runtime/scaffolding.config")
     cd "$runtime/scaffolding-launch"
+elif [[ "${1:-}" == main_report_checks.nf || "${1:-}" == main_compile_checks.nf ]]; then
+    python3 "$repo/tests/setup_main_report_checks.py" "$runtime" "${2:-enabled}"
+    cp reproduction.nf "$repo/.main-report-checks.nf"
+    trap 'rm -f "$repo/.main-report-checks.nf"' EXIT
+    script="$repo/.main-report-checks.nf"
+    extra=(-c "$runtime/main-report.config")
+    export MAIN_REPORT_CASE="${2:-enabled}"
+    mkdir -p "$runtime/main-report-launch"
+    cd "$runtime/main-report-launch"
 elif [[ "${1:-}" == provenance_checks.nf ]]; then
     cp reproduction.nf "$repo/.provenance-checks.nf"
     trap 'rm -f "$repo/.provenance-checks.nf"' EXIT

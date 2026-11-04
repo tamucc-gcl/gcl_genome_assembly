@@ -319,4 +319,6 @@ workflow REPORTING {
         ch_software_versions,
         ch_summary_report_script
     )
+    emit:
+    report = SUMMARY_REPORT.out.report
 }

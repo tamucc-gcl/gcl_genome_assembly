@@ -2,8 +2,10 @@
 
 The finalized comparison subgate is accepted. This is the next category 7 batch:
 run the accepted assembly/QC/graph and R comparison branches together, with an
-always-on software provenance collector. Category 7 remains pending native
-integration review. Category 6 is the subsequent unified Markdown reporting pass.
+always-on software provenance collector. Category 7 was accepted from the
+2026-11-04 [core-integration-02 review](core-integration-02-assessment.md).
+Category 6 is the subsequent unified Markdown reporting pass. Historical cache
+assumptions below are superseded by the integration assessments where corrected.
 
 ## Fixes and scope
 
