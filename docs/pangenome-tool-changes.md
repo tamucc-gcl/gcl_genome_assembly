@@ -249,8 +249,8 @@ Under each `pangenome/<taxid>/` output:
 
 Paths are relative to the repository or the run output as indicated. Detailed
 acceptance records are in [production-02 assessment](../planning_docs/core-graph-production-02-assessment.md),
-[chunk comparison](../planning_docs/core-graph-chunks-01-assessment.md) and
-[gate assessment](../planning_docs/core-graph-gates-01-assessment.md).
+[chunk comparison](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/core-graph-chunks-01-assessment.md) and
+[gate assessment](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/core-graph-gates-01-assessment.md).
 
 ## Diagnostic retirement and future upstream replacement
 

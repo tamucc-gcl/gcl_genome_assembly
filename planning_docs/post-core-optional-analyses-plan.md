@@ -145,7 +145,17 @@ Optional additions include alternative biological grouping, focused regional vie
 
 Keep cohort-wide sharing definitions fixed when selecting chromosomes/haplotypes for attribution. State distinct graph bp versus assembled copy bp and denominator; keep unplaced/composite sequence explicit. Regional totals may overlap and must not be silently summed as a partition. Synthetic paths are excluded from biological counts.
 
-Use published table exports before custom calculations. Validate on small known graphs before large node-by-group exports. Render PNG for Markdown and a suitable export format from existing tables. No unsupported openness classification, custom base-independent confidence bands, progressive-construction growth branch, individual population PCA or whole-genome 2D default.
+Use published table exports before custom calculations. Validate on small known graphs before large node-by-group exports. Render PNG for Markdown and a suitable export format from existing tables. Reimplement growth-model fits and explicit open/closed classification for haplotypes
+and individuals with minimum-size/fit guards, as agreed in the
+[next-pangenome follow-up](pangenome-qc-growth-followup.md). Explore confidence bands
+for both groupings in the same visit, distinguishing observed-cohort variability
+from fitted-model uncertainty. Also implement missing
+intrinsic graph-QC metrics and a supplementary pangenome MultiQC report linked from
+Markdown. The follow-up supersedes the earlier exclusion of openness classification
+and a separate pangenome MultiQC report. Do not restore the old independent-base
+uncertainty band. Progressive-construction experiments and 2D layouts remain
+retained prototypes to review, not new production defaults; individual population
+PCA is outside this descriptive growth-fit scope.
 
 Outputs/report: only figures answering a distinct question, their tables and a methods/denominator note. Plot-only changes reuse calculations. Expensive table exports require a bounded resource pilot.
 
@@ -219,8 +229,8 @@ Gene/repeat annotation remains external. General population analysis, routine ne
 - [BlobToolKit maintained repository and workflow recommendation](https://github.com/genomehubs/blobtoolkit)
 - [NCBI Foreign Contamination Screening](https://github.com/ncbi/fcs)
 - [PSMC detailed earlier design](completed-run-review-and-psmc-plan.md)
-- [SV implementation checkpoint](assembly-sv-integration-checkpoint.md)
-- [Core pangenome figure inventory](pangenome-figures-and-regional-plan.md)
-- [Earlier agreed decisions](assembly-pangenome-agreed-plan.md)
+- [SV implementation checkpoint](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/assembly-sv-integration-checkpoint.md)
+- [Core pangenome figure inventory](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/pangenome-figures-and-regional-plan.md)
+- [Earlier agreed decisions](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/assembly-pangenome-agreed-plan.md)
 
 Tool capabilities/compatibility must be rechecked at implementation against pinned releases; current upstream documentation is not proof that the installed version exposes every interface.

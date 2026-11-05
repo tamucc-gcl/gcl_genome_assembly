@@ -156,7 +156,7 @@ process CONTACT_MAP {
         echo "Balancing: ${do_balance}"
     } > ${meta.id}_${stage}_contact_stats.txt
 
-    cooler --version 2>&1 | sed 's/.*version //' > versions.tsv
+    cooler --version 2>&1 | awk 'BEGIN { printf "cooler\\t" } NF { gsub(/[[:space:]]+/," "); printf "%s%s",sep,\$0; sep=" " } END { printf "\\n" }' > versions.tsv
     """
 
     stub:

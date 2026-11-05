@@ -3,22 +3,8 @@
 #SBATCH --job-name=assembly_handler
 #SBATCH --time=4-00:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=5
+#SBATCH --cpus-per-task=1
 set -euo pipefail
-
-#git clone git@github.com:tamucc-gcl/gcl_genome_assembly.git
-
-module load nextflow/23.10.1
-module load miniconda3
-
-sample_sheet=data/samplesheet.csv
-outdir=genome_assembly
-
-
-nextflow run gcl_genome_assembly/main.nf \
-    -profile slurm \
-    -resume \
-    --sample_sheet ${sample_sheet} \
-    --outdir ${outdir}
-
-python3 gcl_genome_assembly/py_scripts/validate_report.py --root "${outdir}"
+project="${SLURM_SUBMIT_DIR:-$PWD}"
+bash "$project/gcl_genome_assembly/run_assembly_checkpoint.sbatch" \
+    "${1:-data/assembly_samplesheet.csv}" "${2:-NONE}" assembly "${@:3}"

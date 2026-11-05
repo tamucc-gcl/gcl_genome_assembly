@@ -16,6 +16,9 @@ cuts="$(realpath "${4:?Supply the accepted manual cut sheet}")"
 out="${5:?Supply the integration output directory}"
 [[ "$out" == /* ]] || out="$root/$out"
 mkdir -p "$out" logs
+python3 "$root/gcl_genome_assembly/scripts/comparisons/prepare_integration_params.py" \
+    --baseline "$CORE_INTEGRATION_BASELINE" --config "$root/gcl_genome_assembly/nextflow.config" \
+    --out "$out/baseline-params.json"
 cat > "$out/integration.config" <<EOF
 trace {
   fields = 'task_id,hash,native_id,name,status,exit,submit,duration,realtime,%cpu,peak_rss,peak_vmem,rchar,wchar,workdir,container'
@@ -23,6 +26,7 @@ trace {
 EOF
 bash "$root/gcl_genome_assembly/scripts/comparisons/run_chimera_pipeline.sbatch" \
     "$samples" "$hic" "$out" \
+    -params-file "$out/baseline-params.json" \
     --chimera_break "$cuts" \
     --run_pangenome true --pangenome_validate_only false --pangenome_regional_chunk_bp 25000 \
     --run_post_assembly true --run_pairwise_alignments true --pairwise_alignment_mode within_sample \

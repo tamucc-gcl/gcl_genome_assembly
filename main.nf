@@ -25,7 +25,7 @@ nextflow.enable.dsl=2
     PARAMETERS - FLATTENED FOR EASY COMMAND-LINE OVERRIDE
 ========================================================================================
     All parameters can now be overridden individually without affecting others.
-    Example: --decon_run_on_contigs true --decon_source_taxid 373251
+    Example: --qc_mode final_only --run_report true
     
     IMPORTANT: Place these BEFORE any conditional logic that uses params
 ========================================================================================
@@ -83,6 +83,12 @@ if (!params.sample_sheet) {
 }
 if (params.run_blobtools_evidence) {
     error 'BlobTools/decontamination evidence is unsupported pending its rebuild; set --run_blobtools_evidence false'
+}
+// Retired prototypes are not working optional analyses. Keep future scope explicit.
+['pangenome_2d_viz','pangenome_private_analysis','pangenome_classify',
+ 'pangenome_progressive','pangenome_untangle','pangenome_inv_rescue'].each { option ->
+    if (params.containsKey(option) && params[option] == true)
+        error "--${option} is not supported by the frozen core; see docs/core-interface.md and the extension roadmap."
 }
 
 /*
@@ -159,7 +165,6 @@ include { FIND_MITO_REFERENCE } from './modules/find_mito_reference.nf'
 
 
 include { SNAIL_PLOT as SNAIL_PLOT_FINAL } from './modules/snail_plot.nf'
-//include { SCAN_TELOMERES; COLLECT_TELOMERE_RESULTS } from './modules/scan_telomeres.nf'
 include { DOWNLOAD_BUSCO_DB } from './modules/download_busco_db.nf'
 include { FINAL_READ_EVIDENCE } from './workflows/final_read_evidence.nf'
 include { REPORTING } from './workflows/reporting.nf'
@@ -544,7 +549,7 @@ workflow {
     }
 
     // resolved organism name per taxid (RESOLVE_TAXONOMY -> ch_taxonomy; tax.name is the
-    // taxid-derived species, e.g. 373251 -> "Spratelloides delicatulus")
+    // Species names are derived from each sample's resolved taxonomy.)
     ch_species_by_taxid = ch_taxonomy.map { taxid, tax -> tuple(taxid.toString(), tax.name) }
 
     PANGENOME(ASSEMBLY_ELIGIBILITY.out.manifest)

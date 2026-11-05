@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ $# -eq 0 ]]; then set -- chimera_cohort_wiring_check.nf; fi
 runtime=/tmp/chimera-nxf-runtime
 mkdir -p "$runtime" "$runtime/assets"
 touch "$runtime/assets/NO_PAF" "$runtime/assets/NO_PAIRS"
@@ -19,10 +20,18 @@ printf 'old_name\tnew_name\tchromosome_member\ns\tchr1_1\tyes\n' > "$runtime/nam
 touch "$runtime/NO_PAIRS" "$runtime/a.fa" "$runtime/reads.fq" "$runtime/sample.hap1.p_ctg.gfa" "$runtime/lib.tsv" "$runtime/a.agp" "$runtime/a.pairs" "$runtime/calls.tsv"
 fi
 repo=$(cd "$(dirname "$0")/.." && pwd)
-python3 - "$(dirname "$0")/${1:-chimera_channel_reproduction.nf}" "$runtime/reproduction.nf" "$repo" <<'PY'
+python3 - "$(dirname "$0")/${1:-chimera_cohort_wiring_check.nf}" "$runtime/reproduction.nf" "$repo" <<'PY'
 import sys
 from pathlib import Path
 source = Path(sys.argv[1]).read_text()
+if '__TIDK_VERSION_STATEMENT__' in source:
+    repository=Path(sys.argv[3])
+    for marker,filename,tool in [('__TIDK_VERSION_STATEMENT__','tidk.nf','tidk'),
+                                 ('__COOLER_VERSION_STATEMENT__','contact_map.nf','cooler')]:
+        statements=[line.strip() for line in (repository/'modules'/filename).read_text().splitlines()
+                    if line.strip().startswith(tool+' --version') and '> versions.tsv' in line]
+        assert statements and len(set(statements))==1
+        source=source.replace(marker,statements[0])
 if '__SCAFFOLDING_REPLAY__' in source:
     source = (Path(sys.argv[3]) / 'scripts/comparisons/scaffolding_replay.nf').read_text()
     source = source.replace("'../../modules/", "'__REPO__/modules/")
@@ -145,7 +154,7 @@ elif [[ "${1:-}" == main_report_checks.nf || "${1:-}" == main_compile_checks.nf 
     export MAIN_REPORT_CASE="${2:-enabled}"
     mkdir -p "$runtime/main-report-launch"
     cd "$runtime/main-report-launch"
-elif [[ "${1:-}" == provenance_checks.nf ]]; then
+elif [[ "${1:-}" == provenance_checks.nf || "${1:-}" == version_record_checks.nf ]]; then
     cp reproduction.nf "$repo/.provenance-checks.nf"
     trap 'rm -f "$repo/.provenance-checks.nf"' EXIT
     script="$repo/.provenance-checks.nf"

@@ -21,8 +21,13 @@ sample_sheet="${1:-data/assembly_samplesheet.csv}"
 [[ "$sample_sheet" != /* ]] && sample_sheet="${PROJECT_ROOT}/${sample_sheet}"
 
 # The first argument remains the main sample sheet; the second is the optional Hi-C table.
-hic_readsets="${2:-data/hic_readsets.csv}"
-[[ "$hic_readsets" != /* ]] && hic_readsets="${PROJECT_ROOT}/${hic_readsets}"
+hic_readsets="${2:-}"
+[[ "$hic_readsets" == NONE ]] && hic_readsets=''
+hic_args=()
+if [[ -n "$hic_readsets" ]]; then
+    [[ "$hic_readsets" == /* ]] || hic_readsets="${PROJECT_ROOT}/${hic_readsets}"
+    hic_args=(--hic_readsets "$hic_readsets")
+fi
 mode="${3:-validate}"
 graph_enabled=false
 graph_validate_only=false
@@ -47,6 +52,7 @@ for ((i=0; i<${#extra_arguments[@]}; i++)); do
     esac
 done
 [[ "$report_outdir" == /* ]] || report_outdir="${PROJECT_ROOT}/$report_outdir"
+outdir="$report_outdir"
 # Nextflow launches below .nf/assembly; keep caller-supplied output paths relative
 # to the project rather than accidentally publishing under that launch directory.
 for ((i=0; i<${#extra_arguments[@]}; i++)); do
@@ -67,32 +73,10 @@ nextflow -log "${PROJECT_ROOT}/logs/nextflow_${mode}_${SLURM_JOB_ID:-manual}.log
     run "${PROJECT_ROOT}/gcl_genome_assembly/main.nf" \
         "${launch_args[@]}" \
         -w "${PROJECT_ROOT}/work" \
-        --publish_dir_mode 'link' \
-        --taxid 373251 \
-        --ploidy 2 \
-        --qc_mode 'none' \
-        --run_purge_dups true \
-        --run_hic_balance false \
-        --run_blobtools_evidence false \
-        --yahs_round1_enzyme 'GATC,CTNAG,TTAA,GANTC' \
-        --yahs_round2_enzyme 'GATC,CTNAG,TTAA,GANTC' \
-        --inspector_contig_min_contig_bp 25000 \
-        --inspector_contig_assemblyerror_min_bp 200000 \
-        --inspector_contig_min_assembly_error_bp 5000 \
-        --inspector_contig_max_assembly_error_bp 50000000 \
-        --inspector_scaffold_min_contig_bp 25000 \
-        --inspector_scaffold_assemblyerror_min_bp 2000000 \
-        --inspector_scaffold_min_assembly_error_bp 25000 \
-        --inspector_scaffold_max_assembly_error_bp 200000000 \
-        --run_final_hifi_mapping true \
-        --pairwise_alignment_mode 'all' \
-        --chimera_break false \
+        --publish_dir_mode 'symlink' \
         --run_pangenome "$graph_enabled" \
         --pangenome_validate_only "$graph_validate_only" \
-        --run_post_assembly false \
-        --pangenome_2d_viz false \
-        --harmonize_graph_rule 'plurality' \
-        --hic_readsets "${hic_readsets}" \
+        "${hic_args[@]}" \
         --sample_sheet "${sample_sheet}" \
         --outdir "${outdir}" \
         "${extra_arguments[@]}"

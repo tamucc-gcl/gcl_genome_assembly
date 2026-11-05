@@ -1,19 +1,10 @@
-/scratch
-/deprecated
-/patches
-/prelim_readme_docs
-/modules/deprecated
-/py_scripts/deprecated
-/workflows/deprecated
-/r_scripts/deprecated
-/planning_docs/deprecated
-/r_scripts/deprecated
-/modules/deprecated
+# Project-specific investigations and scientific artifacts are not pipeline source.
+/scratch/
+/comparisons/
+/chat_handoffs/
+/work/
+/.nextflow*
 
-# Python test/import caches
+# Python test/import caches.
 __pycache__/
 *.py[cod]
-
-# Generated comparison artifacts if collected inside this checkout
-/comparisons/
-/chat_handoffs

@@ -2,7 +2,7 @@
 
 **Superseded implementation:** the original Matplotlib/base-level alignment
 change below is historical. The current production implementation restores
-[pafr/gggenomes in R and mapping-chain synteny](final-comparisons-r-restoration-2026-10-28.md).
+[pafr/gggenomes in R and mapping-chain synteny](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/final-comparisons-r-restoration-2026-10-28.md).
 
 Category 7 implementation and local validation are complete for this branch.
 Native Crest acceptance remains pending. Categories 2/3/5 remain accepted;
@@ -95,5 +95,5 @@ in the category 6 report. Disabled report sections must stay absent.
 `core-final-comparisons-01` completed 13/13 tasks with no failures or retries.
 Final input fingerprints and five within-sample pairs reconcile. Sparse retained
 alignment evidence and presentation limitations prevent complete visualization
-acceptance; see [review and bounded follow-up](core-final-comparisons-01-assessment.md).
+acceptance; see [review and bounded follow-up](https://github.com/tamucc-gcl/gcl_genome_assembly/blob/341193c18878886ec18e26c3c843a44507e6162a/planning_docs/core-final-comparisons-01-assessment.md).
 No assembly or graph rebuild is indicated.

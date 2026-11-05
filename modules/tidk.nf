@@ -2,7 +2,7 @@
 ========================================================================================
     TIDK — TELOMERE IDENTIFICATION TOOLKIT
 ========================================================================================
-    Replaces the custom scan_telomeres.py with the published tidk toolkit
+    Uses the published tidk toolkit
     (Brown et al. 2025, Bioinformatics).
 
     Three processes:
@@ -54,7 +54,7 @@ process TIDK_EXPLORE {
         --maximum ${max_len} \\
         ${assembly_fasta} \\
         > ${haplotype_id}_tidk_explore.tsv
-    printf 'tidk\t%s\n' "\$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
+    tidk --version 2>&1 | awk 'BEGIN { printf "tidk\\t" } NF { gsub(/[[:space:]]+/," "); printf "%s%s",sep,\$0; sep=" " } END { printf "\\n" }' > versions.tsv
     """
 
     stub:
@@ -114,7 +114,7 @@ process TIDK_SEARCH {
         --extension bedgraph \\
         ${assembly_fasta}
     
-    printf 'tidk\t%s\n' "\$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
+    tidk --version 2>&1 | awk 'BEGIN { printf "tidk\\t" } NF { gsub(/[[:space:]]+/," "); printf "%s%s",sep,\$0; sep=" " } END { printf "\\n" }' > versions.tsv
     """
 
     stub:
@@ -160,7 +160,7 @@ process TIDK_PLOT {
         --width ${width} \\
         --output ${haplotype_id}_tidk
     
-    printf 'tidk\t%s\n' "\$(tidk --version 2>&1 | sed 's/tidk //')" > versions.tsv
+    tidk --version 2>&1 | awk 'BEGIN { printf "tidk\\t" } NF { gsub(/[[:space:]]+/," "); printf "%s%s",sep,\$0; sep=" " } END { printf "\\n" }' > versions.tsv
     """
 
     stub:

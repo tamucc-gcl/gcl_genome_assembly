@@ -1,40 +1,22 @@
-# Comparison helpers
+# Maintained acceptance helpers
 
-For targeted local alignment/Hi-C checks and stage-aware Inspector evidence
-collection, see [the regional exploration handoff](../../planning_docs/chimera-targeted-exploration.md).
-The regional script reads existing data and writes only a new comparisons directory;
-it does not modify assemblies or the production workflow.
+These removable helpers validate the real pipeline or prepare bounded fixtures. They
+are separate from production modules and are not required for a fresh pipeline run.
+Run cluster helpers from the project root containing `gcl_genome_assembly`, `data`
+and `work`. Scientific outputs belong in that project's `comparisons/` directory.
 
-Keep temporary review, collection and comparison scripts in this directory. They are separate from production pipeline modules.
+| Helper | Purpose |
+| --- | --- |
+| `run_core_integration.sbatch`, `audit_core_integration.py` | Cached full-pipeline acceptance against an explicit baseline |
+| `prepare_integration_params.py` | Explicit supported settings from baseline provenance; no hardcoded species/tuning |
+| `run_chimera_pipeline.sbatch` | Full architecture run and compact review archive; normal resume and symlink publication |
+| `prepare_shortread_smoke.py`, `run_shortread_smoke.sbatch`, `shortread_smoke.config` | Bounded or explicitly full shotgun input routing/assembly acceptance |
+| `run_identity_reference_checks.sbatch` | Native identity/reference contract checks |
+| `run_final_comparison_checks.sbatch` | Native final-assembly comparison checks |
+| `run_scaffolding_replay.sbatch`, `scaffolding_replay.nf` | Controlled replay of accepted YaHS inputs/AGP, without new assembly biology |
+| `make_sv_benchmark.py` | Generic known-answer fixture generator for deferred SV method validation |
 
-Run helpers from the cluster project root (the directory containing `gcl_genome_assembly`, `data`, `work`, and the result directories). Store all generated comparison artifacts under that project's `comparisons/` directory. Use a descriptive, timestamped prefix for each comparison; preserve earlier outputs until manually cleaned up.
-
-## Chimera comparison collector
-
-```bash
-bash gcl_genome_assembly/scripts/comparisons/collect_chimera_comparison.sh \
-    tst/genome_assembly_store \
-    genome_assembly
-```
-
-Arguments 3 and 4 specify the exact sample sheet and additional Hi-C table to
-include. For the current single-library checkpoint, use:
-
-```bash
-bash gcl_genome_assembly/scripts/comparisons/collect_chimera_comparison.sh \
-    comparisons/baselines/single_hic_repair_1501024 genome_assembly \
-    data/assembly_samplesheet_original.csv data/hic_readsets.none.csv
-```
-
-The archive records these supplied paths in `input_files.tsv`; the run log remains
-the evidence of which inputs were actually invoked. Both supplied files must exist.
-
-This collects existing reports without running analyses or changing pipeline results. Outputs are:
-
-- `comparisons/chimera-comparison-<timestamp>/`: inventory and provenance notes.
-- `comparisons/chimera-comparison-<timestamp>-reports.tar.gz`: upload this first.
-- `comparisons/chimera-comparison-<timestamp>-alignments.tar.gz`: existing reference alignments, when available; retain for follow-up.
-
-The result-directory arguments are project-relative. The defaults above are specific to the current comparison, not sample-specific analysis rules. Each future helper should document its inputs and follow the same output-directory convention.
-
-Existing archives created before this organization change remain valid and need not be recreated. Do not place assembly work/cache directories inside `comparisons/`.
+Old specimen-specific fusion batches, cache-recovery experiments and obsolete report
+launchers were removed. Git history retains them; do not restore them as production
+workflows. See [verification](../../docs/verification.md) and
+[retirement policy](../../docs/repository-layout.md).
