@@ -407,6 +407,7 @@ if(nrow(graph)>0) {
         ref_name <- if(length(ref)) ref[[1]]$id else 'Not selected'
         md <- c(md,paste0('**',species_label(taxid),'** · Reference: ',ref_name,' · ',sum(assemblies$taxid==taxid & assemblies$graph_member),' contributing assemblies.'),'')
         summaries <- artifacts |> filter(type=='pangenome_summary',id==.env$taxid)
+        sharing <- tibble()
         if(nrow(summaries)>0) {
             sharing <- read_tsv(I(summaries$content[[1]]),show_col_types=FALSE)
             sharing <- sharing |> filter(unit=='individual',class %in% c('core','softcore','shell','cloud')) |>
@@ -430,6 +431,11 @@ if(nrow(graph)>0) {
         # A single entry point retains every enabled biological and technical report.
         hub <- c(paste0('# Pangenome report · ',species_label(taxid)),'',
             paste0('Reference: **',ref_name,'**. See the linked analyses for their measurement definitions and limitations.'),'')
+        if(nrow(sharing)>0) hub <- c(hub,'## Sharing across individuals','',
+            md_table(sharing |> transmute(`Category`=as.character(class),`Found in`=frequency,
+                `Distinct graph sequence (Mb)`=sprintf('%.1f',bp/1e6),
+                `Graph sequence (%)`=sprintf('%.1f',percent_represented_graph_bp))),'',
+            'An individual carries sequence when it is represented in either included haplotype. These categories describe graph sequence, not proven biological novelty. Apparent absence can reflect assembly quality or graph representation. Chromosome-level unions may overlap and must not be summed.','')
         biological <- basename(rows$path) %in% c('sharing_report.md','sharing_figures.md','regional_report.md','regional_figures.md','comparison_report.md')
         for(section in c('Biological results','Technical validation and provenance')) {
             selected <- rows[if(section=='Biological results') biological else !biological,]

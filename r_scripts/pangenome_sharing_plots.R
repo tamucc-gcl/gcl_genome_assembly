@@ -22,10 +22,8 @@ read_panacus <- function(path) {
 }
 save_panels <- function(name, panels) {
   figure <- wrap_plots(panels, ncol = 2, guides = 'collect') & theme(legend.position = 'bottom')
-  walk(c('png', 'pdf'), function(ext) {
-    ggsave(file.path(output, str_c(name, '.', ext)), figure, width = 13, height = 6.5,
-           dpi = 180, bg = 'white')
-  })
+  ggsave(file.path(output,str_c(name,'.png')),figure,width=13,height=6.5,dpi=180,bg='white')
+  ggsave(file.path(output,str_c(name,'.pdf')),figure,width=13,height=6.5,bg='white',device=cairo_pdf)
 }
 sharing <- read_tsv(file.path(input, 'sharing_summary.tsv'), show_col_types = FALSE)
 thresholds <- sharing |> distinct(unit, denominator, core_min, softcore_min, shell_min)
@@ -75,17 +73,22 @@ save_panels('sharing_histogram', map(units, function(unit_name) {
 save_panels('sharing_partition', map(units, function(unit_name) {
   data <- sharing |> filter(unit == unit_name, class %in% tiers) |> mutate(class = factor(class, levels = tiers))
   ggplot(data, aes(class, percent_represented_graph_bp, fill = class)) + geom_col(width = 0.8) +
+    geom_text(aes(label=sprintf('%.1f%%\n%.1f Mb',percent_represented_graph_bp,bp/1e6)),vjust=-.3,size=3.5)+
     scale_fill_manual(values = palette, limits = tiers, drop = FALSE) +
-    scale_y_continuous(limits = c(0, 100), expand = expansion(mult = c(0, 0))) +
+    scale_y_continuous(limits = c(0, 100), expand = expansion(mult = c(0, 0.15))) +
     labs(title = str_c(str_to_title(unit_name), ' partition'), subtitle = threshold_label(unit_name),
          x = NULL, y = '% represented graph bp', fill = 'Sharing tier')
 }))
-write_lines(c('# CLIP sharing figures', '', '<details><summary>Growth and sharing</summary>', '',
+write_lines(c('# Sequence sharing across the cohort', '',
+  'These figures describe distinct sequence represented in the CLIP graph. Haplotype presence counts each assembly copy; individual presence counts a sequence once when either included haplotype carries it. Graph representation and assembly quality affect apparent absence.', '',
+  '## Accumulation as assemblies are added', '',
   '![Growth curves](growth.png)', '',
   'Panacus values are plotted directly, without openness fits or invented uncertainty bands. Growth quorum is evaluated at each cohort size and differs from the all-but-one softcore partition threshold.', '',
-  '![Sharing histogram](sharing_histogram.png)', '', '![Sharing partition](sharing_partition.png)', '',
+  '[Growth PDF](growth.pdf)', '', '## How widely sequence is shared', '',
+  '![Sharing histogram](sharing_histogram.png)', '', '[Histogram PDF](sharing_histogram.pdf)', '',
+  '## Sharing categories', '', '![Sharing partition](sharing_partition.png)', '', '[Partition PDF](sharing_partition.pdf)', '',
   'Histogram and partition colors use the same thresholds and precedence: core, softcore, shell, cloud. Private sequence is not an additional disjoint tier. Values describe graph representation, not biological novelty.', '',
-  'Source tables: [sharing summary](../sharing/sharing_summary.tsv), [haplotype growth](../sharing/haplotype.growth.tsv), [individual growth](../sharing/individual.growth.tsv).', '', '</details>'),
+  'Source tables: [sharing summary](../sharing/sharing_summary.tsv), [haplotype growth](../sharing/haplotype.growth.tsv), [individual growth](../sharing/individual.growth.tsv).'),
   file.path(output, 'sharing_figures.md'))
 packages <- c('tidyverse', 'ggplot2', 'patchwork')
 tibble(tool = c('R', packages), version = c(as.character(getRversion()), map_chr(packages, ~ as.character(packageVersion(.x))))) |>

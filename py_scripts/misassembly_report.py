@@ -3,6 +3,7 @@
 import argparse
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from misassembly_core import write_table,POLICY,table,cut_prerequisites
 
@@ -367,7 +368,7 @@ Run the same full pipeline with `--chimera_break /absolute/path/reviewed.tsv -re
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--packet',action='append',required=True);p.add_argument('--actions');p.add_argument('--verification',action='append',default=[]);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--packet',action='append',required=True);p.add_argument('--actions');p.add_argument('--verification',action='append',default=[]);p.add_argument('--junction-plotter');p.add_argument('--evidence-plotter');a=p.parse_args()
     packet_data=[(Path(value),json.loads((Path(value)/'evidence.json').read_text())) for value in sorted(a.packet)]
     all_data=[data for packet,data in packet_data]
     if len({d['assembly'] for d in all_data})!=len(all_data):raise ValueError('Duplicate assembly packet')
@@ -390,8 +391,23 @@ def main():
             from misassembly_plot import plot_event
             for event in data['events']:
                 selected=[r for r in reviewed if r.get('assembly')==assembly and r.get('scaffold')==event['scaffold'] and r.get('action') in ('UNJOIN_UNSUPPORTED','BREAK_PROBABLE_MISJOIN') and r.get('selected','YES')=='YES' and event.get('start',event['lo']-500000)<=int(r['cut_bp'])<=event.get('end',event['hi']+500000)]
-                plot_event(event,target,selected_cuts=selected)
-                plot_event(event,target,detail=True,selected_cuts=selected)
+                selected_path=target/'plots'/(event['id']+'.selected_cuts.json')
+                selected_path.write_text(json.dumps(selected),encoding='utf-8')
+                if a.evidence_plotter:
+                    from chimera_plot_data import export_contacts
+                    export_contacts(target,event)
+                    subprocess.run(['Rscript',a.evidence_plotter,str(target),event['id'],str(selected_path)],check=True)
+                else:
+                    plot_event(event,target,selected_cuts=selected)
+                    plot_event(event,target,detail=True,selected_cuts=selected)
+                if a.junction_plotter:
+                    from junction_plot_data import export
+                    if export(target,event):
+                        subprocess.run(['Rscript',a.junction_plotter,str(target),event['id'],str(selected_path)],check=True)
+            renderer_versions=target/'junction/placement_plot_versions.tsv'
+            if renderer_versions.is_file():versions.extend(table(renderer_versions))
+            renderer_versions=target/'plots/evidence_plot_versions.tsv'
+            if renderer_versions.is_file():versions.extend(table(renderer_versions))
         mapping=data['mapping']
         if mapping.get('bam'):manifest[assembly]=dict(bam=mapping['bam'],index=mapping['index'],fasta=data.get('assessment_fasta'),provenance=str((packet/'evidence.json').resolve()))
         result=result_summary(data)
@@ -414,8 +430,18 @@ def main():
             md+=['<details>','<summary>What was screened</summary>','']+mdtable(['Chromosome-scale scaffold','Individuals with chromosome assignments','Best assigned fraction'],screen)+['','An absence of detected transitions applies to the usable comparisons above. Unmapped sequence is not evidence of continuity.','</details>','']
         for event in sorted(data['events'],key=lambda e:e['recommendation']=='RETAIN'):
             md+=['<a name="'+event['id'].lower()+'"></a>','']+event_card(event,assembly,counterparts=sister_context(event,data,all_data),manual_rows=reviewed,verifications=applied)
+            placement='junction/'+event['id']+'.placements.png'
+            placement_md=[]
+            if (target/placement).is_file():
+                placement_md=['**HiFi placement confidence**','','![Primary and credible HiFi spans with competing placements]('+placement+')','',
+                     'Regional curves show primary placements. Competitive checks are available only at the labelled probes; overlapping count categories must not be added. Missing assays are NA, not zero. Other-haplotype matches alone do not invalidate a bridge. Consult the read-reach table above before treating absent unique-arm spans as evidence against continuity.',
+                     '', '[Plotted counts](junction/'+event['id']+'.placement_counts.tsv) · [PDF](junction/'+event['id']+'.placements.pdf)','']
             if (target/'plots'/(event['id']+'.detail.png')).exists():md+=['**Close-up of the priority location**','','![Close-up of measured support and review locations](plots/'+event['id']+'.detail.png)','','The close-up centers on a user-selected cut, the recommended gap, or the highest-priority review region. It does not select a cut.','']
             if (target/'plots'/(event['id']+'.png')).exists():md+=['![Chromosome identity, HiFi support, Hi-C support and telomeres](plots/'+event['id']+'.png)','','Blue and orange distinguish the focal chromosome pair consistently across haplotypes; other chromosomes are muted. Pale backgrounds show the independent-individual consensus assignment; ambiguous regions remain neutral. Yellow marks the original transition bracket. Purple regions and R labels show up to six highest-ranked nonexcluded assay locations (nearby labels are grouped); the table retains all assessed locations. Dashed purple lines mark R assay positions, not cut recommendations. Dashed red lines mark nonexcluded exact gap options; green solid lines mark submitted user-selected cuts. Broad yellow brackets are deliberately faint. Spanning molecules are HiFi reads. The Hi-C curves show binned support per library, not calibrated cut recommendations. Telomere counts are in the bottom panel. Gaps in curves mean unavailable measurements.','']
+            for suffix,label in [('', 'Regional overview PDF'),('.detail','Close-up PDF')]:
+                name='plots/'+event['id']+suffix+'.pdf'
+                if (target/name).is_file():md+=['['+label+']('+name+')','']
+            md+=placement_md
             md+=['<details>','<summary>Peer chromosome assignments</summary>','']+mdtable(['Assembly','Left → right','Local assignment','Role'],[
                 [t['peer'],str(t['left']['chrom'] or '?')+' → '+str(t['right']['chrom'] or '?'),'Confirmed' if t['qualified'] else 'Partial or ambiguous',
                  'Sister haplotype' if t['sample']==data['sample'] else 'Independent individual' if t['eligible'] else 'Context only'] for t in event['peer_tests']])+['','</details>','']
@@ -427,7 +453,8 @@ def main():
                 '', 'These rejected fusion hypotheses do not establish that every local adjacency is correct. Their exact measurements and original detector observations remain in evidence.json.','</details>','']
         scaffold_figures=sorted((target/'plots').glob('*.contacts.png'))
         if scaffold_figures:
-            md+=['## Scaffold contact maps','']
+            md+=['## Whole-scaffold contact maps','',
+                 'These maps pool the available Hi-C libraries across the original assessment scaffold. The per-library junction maps above show the local regions separately. Dark cells show measured zero counts; missing evidence is identified in the assay tables.','']
             for image in scaffold_figures:md+=['!['+image.stem+'](plots/'+image.name+')','']
         records=[('Alternative locations','alternative_locations.tsv'),('Actual bridging reads','bridging_reads.tsv'),('Read support','read_support.tsv'),('Hi-C counts','contact_support.tsv'),('Hi-C controls and exclusions','control_support.tsv'),('Chromosome assignments','chromosome_blocks.tsv'),('Telomere counts','telomeres.tsv'),('Full measurements and provenance','evidence.json')]
         links=['['+label+']('+name+')' for label,name in records if (target/name).is_file()]

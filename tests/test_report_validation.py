@@ -41,6 +41,31 @@ class ReportValidation(unittest.TestCase):
             (root/'reports/main/artifact_registry.tsv').write_text('type\tid\tpath\tnote\nassembly_details\trun\tdetail.md\t\n')
             self.assertTrue(any('missing.svg' in e for e in validate(root)['errors']))
 
+    def test_directory_navigation_is_valid_but_a_directory_is_not_an_image(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);self.fixture(root);(root/'contact_maps').mkdir()
+            with (root/'assembly_report.md').open('a') as h:h.write('[All contact maps](contact_maps/)\n')
+            self.assertEqual(validate(root)['status'],'PASS')
+            with (root/'assembly_report.md').open('a') as h:h.write('![Not a figure](contact_maps/)\n')
+            self.assertEqual(validate(root)['status'],'FAIL')
+
+    def test_missing_directory_navigation_still_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);self.fixture(root)
+            with (root/'assembly_report.md').open('a') as h:h.write('[Missing folder](missing_maps/)\n')
+            self.assertEqual(validate(root)['status'],'FAIL')
+
+    def test_linked_nested_reports_are_checked_and_cycles_terminate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);self.fixture(root);(root/'details').mkdir()
+            (root/'details/report.md').write_text('[Back](../assembly_report.md)\n![Evidence](missing.png)\n')
+            with (root/'assembly_report.md').open('a') as h:h.write('[Details](details/report.md)\n')
+            result=validate(root)
+            self.assertEqual(result['status'],'FAIL')
+            self.assertTrue(any('details/report.md: missing/empty target missing.png' in e for e in result['errors']))
+            (root/'details/missing.png').write_bytes(b'figure')
+            self.assertEqual(validate(root)['status'],'PASS')
+
     def test_published_symlink_to_work_directory_is_valid(self):
         with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as work:
             root=Path(temp);self.fixture(root)

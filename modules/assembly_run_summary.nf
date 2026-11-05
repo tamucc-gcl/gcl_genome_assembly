@@ -29,7 +29,7 @@ process ASSEMBLY_RUN_SUMMARY {
     }.join('\n')
     def state = expected.any { r -> r.status == 'invalid' || (r.status == 'accepted' && (bySample[r.sample] ?: []).size() != r.expected) }
         ? 'Incomplete: inspect sample statuses and execution logs.' : 'All accepted samples have their expected finalized assemblies.'
-    def chimeraSection = chimera_report.name == 'README.md' ? '''
+    def chimeraSection = chimera_report.toString().endsWith('README.md') ? '''
 ## Chimera review
 
 [Review detected chromosome joins, evidence and suggested actions](assembly/chimeras/README.md).

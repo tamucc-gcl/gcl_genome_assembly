@@ -116,6 +116,8 @@ process MISASSEMBLY_REVIEW {
     input:
     path(packets,stageAs:'packets??/*')
     path(helpers)
+    path(junction_plotter)
+    path(evidence_plotter)
     path(actions,stageAs:'actions/*')
     path(verifications,stageAs:'verified??/*')
     output:
@@ -132,6 +134,6 @@ process MISASSEMBLY_REVIEW {
     def actionArg = actions.name.endsWith('NO_PAIRS') ? '' : "--actions '${actions}'"
     def verificationArgs = (verifications instanceof List ? verifications : [verifications]).findAll { !it.name.endsWith('NO_PAIRS') }.collect { "--verification '${it}'" }.join(' ')
     """
-    python3 misassembly_report.py ${args} ${actionArg} ${verificationArgs}
+    python3 misassembly_report.py ${args} ${actionArg} ${verificationArgs} --junction-plotter '${junction_plotter}' --evidence-plotter '${evidence_plotter}'
     """
 }

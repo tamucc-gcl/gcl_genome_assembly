@@ -36,8 +36,8 @@ if (any(checks$rows != 4 | checks$classes != 4 | checks$totals != 1 | checks$bp_
 }
 theme_set(theme_minimal(base_size = 11) + theme(panel.grid.minor = element_blank()))
 save_plot <- function(name, figure, width = 13, height = 7) {
-  walk(c('png', 'pdf'), ~ ggsave(file.path(out, str_c(name, '.', .x)), figure,
-                               width = width, height = height, dpi = 180, bg = 'white'))
+  ggsave(file.path(out,str_c(name,'.png')),figure,width=width,height=height,dpi=180,bg='white')
+  ggsave(file.path(out,str_c(name,'.pdf')),figure,width=width,height=height,bg='white',device=cairo_pdf)
 }
 composition <- function(rows, key, title, name) {
   if (!nrow(rows)) return(FALSE)
@@ -95,8 +95,9 @@ heatmaps <- function(rows, name, title, mark_composites = FALSE) {
   figure <- wrap_plots(panels, ncol = 2) + plot_annotation(title = title,
     subtitle = if (mark_composites) 'Whole-scaffold naming groups; composite sequence is counted in its own row' else
       'Global cohort sharing thresholds; grey = no reported group, not biological absence',
-    caption = if (mark_composites) 'C = in chromosome-scale composite; + = separate pieces plus composite; ! = expected composite has no matching CLIP path group\nf = only smaller/fragmented composite labels. Grey without a symbol = no reported group. Symbols do not assign a percentage.' else
-      '! = present in final assembly, no matching CLIP path group; no percentage is available')
+    caption = if (mark_composites) paste('C = in chromosome-scale composite; + = separate pieces plus composite; ! = expected composite has no matching graph group.',
+      'f = only smaller/fragmented composite labels. Grey without a symbol = no reported group. Symbols do not assign a percentage.',sep='\n') else
+      '! = present in final assembly, no matching graph group; no percentage is available')
   save_plot(name, figure, width = max(13, length(haplotypes) * 0.7),
             height = max(9, length(chromosomes) * 0.5 + 4))
   TRUE
@@ -106,7 +107,9 @@ heatmaps(main_rows, 'chromosome_haplotype_sharing', 'Sharing by chromosome namin
 heatmaps(scoped |> filter(chromosome_scale_composite == 'yes'),
          'composite_haplotype_sharing', 'Chromosome-scale composite scaffold groups')
 write_lines(c('# Regional sharing figures', '',
-  '<details><summary>Haplotype and chromosome composition</summary>', '',
+  '## Reading these figures', '',
+  'Colours show measured sequence-sharing percentages. Grey means no reported group; it does not mean the chromosome is absent. Composite scaffold groups are kept separate rather than counted again in each chromosome row.', '',
+  '## Haplotype and chromosome composition', '',
   '![Haplotype composition](haplotype_composition.png)', '',
   '![Chromosome composition](chromosome_composition.png)', '',
   '![Chromosome-by-haplotype sharing](chromosome_haplotype_sharing.png)', '',
@@ -115,11 +118,13 @@ write_lines(c('# Regional sharing figures', '',
   '`!` flags a chromosome-scale composite present in the final assembly but absent under its expected name in CLIP regional groups (`+!` also has separately named pieces). This is missing graph representation requiring clipping/path checks, not biological absence. Missing measurements remain blank.', '',
   'Coverage thresholds use the entire cohort. Each unit counts distinct graph sequence once. Chromosome unions can overlap and must not be summed. Unplaced sequence is retained; private overlaps the tier classification and is not added as a fifth tier.', '',
   '[Chromosome representation table](chromosome_presence.tsv)', '',
-  '[Source table](../regional_sharing.tsv) | [Audit](../regional_audit.json)', '', '</details>', '',
-  if (has_composites) c('<details><summary>Chromosome-scale composite scaffold groups</summary>', '',
+  '[Source table](../regional_sharing.tsv) | [Audit](../regional_audit.json)', '',
+  '[Haplotype PDF](haplotype_composition.pdf) · [Chromosome PDF](chromosome_composition.pdf) · [Heatmap PDF](chromosome_haplotype_sharing.pdf)', '',
+  if (has_composites) c('## Chromosome-scale composite scaffold groups', '',
     'These groups contain scaffolds selected as chromosome-scale in a chromosome-scale final assembly. Composite labels are not split, double-counted across their named chromosomes, or interpreted as confirmed fusions.', '',
     '![Composite composition](composite_composition.png)', '',
-    '![Composite-by-haplotype sharing](composite_haplotype_sharing.png)', '', '</details>') else '',
+    '![Composite-by-haplotype sharing](composite_haplotype_sharing.png)', '',
+    '[Composition PDF](composite_composition.pdf) · [Heatmap PDF](composite_haplotype_sharing.pdf)') else '',
   '<details><summary>Other composite labels (supplementary)</summary>', '',
   str_glue('{n_distinct(other_composites$chromosome)} other composite naming groups are retained in the tables. Small scaffolds and assemblies without chromosome-scale structure are excluded from the main composite figures; names alone are not evidence of chromosome fusions.'), '',
   '[All other composite measurements](other_composite_sharing.tsv). No sequence is removed from the graph or global sharing counts.', '', '</details>'),

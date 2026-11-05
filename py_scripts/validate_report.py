@@ -51,14 +51,15 @@ def validate(root):
             if not path.is_file() or path.stat().st_size==0:errors.append('Registered artifact missing or empty: '+row['path'])
             if path.suffix.lower()=='.md':artifact_docs.append(path)
     docs=list(dict.fromkeys([root/'assembly_report.md',*(root/'reports/main').glob('*.md'),*artifact_docs]))
+    queued=set(docs)
     if not docs[0].is_file():errors.append('Main Markdown report missing')
     for doc in docs:
         if not doc.is_file():continue
         text=doc.read_text(encoding='utf-8')
         # Generated reports use inline Markdown links and HTML image tags.
-        links=re.findall(r'!?\[[^\]\n]*\]\(([^)\n]+)\)',text)
-        links+=re.findall(r'\b(?:src|href)=["\']([^"\']+)["\']',text)
-        for value in set(links):
+        links=[(value,marker=='!') for marker,value in re.findall(r'(!?)\[[^\]\n]*\]\(([^)\n]+)\)',text)]
+        links += [(value,attribute.lower()=='src') for attribute,value in re.findall(r'\b(src|href)=["\']([^"\']+)["\']',text,re.I)]
+        for value,is_image in set(links):
             value=html.unescape(value.strip().strip('<>'))
             url=urlsplit(value)
             if url.scheme or url.netloc:continue
@@ -68,8 +69,12 @@ def validate(root):
             if not target.is_relative_to(root):
                 errors.append(str(doc.relative_to(root))+': link escapes results directory: '+value);continue
             checked+=1
+            if not is_image and target.is_dir():
+                continue  # Directory navigation is a valid report link.
             if not target.is_file() or target.stat().st_size==0:
                 errors.append(str(doc.relative_to(root))+': missing/empty target '+value);continue
+            if target.suffix.lower()=='.md' and target not in queued:
+                queued.add(target);docs.append(target)
             if url.fragment and target.suffix.lower()=='.md' and unquote(url.fragment) not in anchors(target.read_text(encoding='utf-8')):
                 errors.append(str(doc.relative_to(root))+': unknown heading '+value)
     return dict(status='FAIL' if errors else 'PASS',errors=sorted(set(errors)),checked_links=checked)

@@ -1,9 +1,19 @@
 # Current revamp status and next native reporting test
 
+Latest update: the local detailed-figure batch is ready for one cached Crest test.
+Use [the detailed-report acceptance notes and current command](detailed-report-local-2026-11-05.md).
+The main-report-02 instructions below are retained as the prior checkpoint.
+
 This is the current summary of the canonical 13-category checklist in
 [remaining-pipeline-work-2026-10-15.md](remaining-pipeline-work-2026-10-15.md).
 Historical open/closed statements in older checkpoint narratives do not supersede
 the accepted category statuses at the top of that checklist.
+
+Update 2026-11-05: main-report-02 computation and retained evidence checks passed;
+the launcher failed on a valid directory link rejected by report validation. The
+validator is fixed locally, and the native postchecks still need to be run. See
+[the assessment and commands](main-report-02-assessment.md). Detailed figure work
+has started with retained HiFi competitive-placement evidence rendered in R.
 
 ## Next Crest run: main-report-02
 

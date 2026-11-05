@@ -183,7 +183,7 @@ workflow CHIMERA {
 
 
     if (detect_on) {
-        MISASSEMBLY_REVIEW(ch_review_input,helpers(core+['misassembly_report.py','misassembly_plot.py']),ch_action_review,ch_cut_verifications)
+        MISASSEMBLY_REVIEW(ch_review_input,helpers(core+['misassembly_report.py','misassembly_plot.py','junction_plot_data.py','misassembly_junction.py','chimera_plot_data.py']),file("${projectDir}/r_scripts/plot_junction_placements.R",checkIfExists:true),file("${projectDir}/r_scripts/plot_misassembly_evidence.R",checkIfExists:true),ch_action_review,ch_cut_verifications)
         ch_coordinate_report = MISASSEMBLY_REVIEW.out.coordinates
         ch_registry_report = MISASSEMBLY_REVIEW.out.registry
         ch_decision_report = MISASSEMBLY_REVIEW.out.decisions

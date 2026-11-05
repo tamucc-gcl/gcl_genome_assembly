@@ -144,6 +144,15 @@ claim migration of all active Python renderers to R.
 
 ## Subsequent report review
 
+User decision (2026-11-05): retain both the combined regional evidence figure and
+the new HiFi placement-confidence figure in the detailed chimera reports. They
+serve complementary purposes; do not remove either as redundant. The separate
+contact maps also remain. The placement figure now repeats the exact assay site
+IDs above its regional markers and below its bar groups. Ordered label spacing
+and leader lines distinguish nearly coincident probes without shifting the actual
+measurement coordinates. Purple markers remain assay probes, not selected cuts;
+green lines remain submitted cuts. This is a presentation-only change.
+
 The native main-report-01 run has now been inspected and its execution/evidence
 accounting accepted. Later presentation revisions, the selected separate-scale
 unplaced summary, individual-based tables, focused detailed reports, annotation
