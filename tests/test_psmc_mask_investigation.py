@@ -21,6 +21,34 @@ def paf(name,lo,hi,length=None,mapq=60,tp='P',scoring='s1:i:100\ts2:i:0'):
 
 
 class Investigation(unittest.TestCase):
+    def test_preset_override_changes_only_preset_and_preserves_make_threads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'diploid.mak';original='MM2_OPT=-xasm5 --cs -t$(N_THREADS)\n'
+            path.write_text(original)
+            for preset in ['asm10','asm20']:
+                self.assertEqual(mod.make_override(path,preset),['MM2_OPT=-x'+preset+' --cs -t$(N_THREADS)'])
+                self.assertEqual(path.read_text(),original)
+            self.assertEqual(mod.make_override(path,'asm5'),[])
+            path.write_text('MM2_OPT=-xunknown --cs\n')
+            with self.assertRaises(ValueError):mod.make_override(path,'asm10')
+
+    def test_paired_mask_comparison_reports_both_gains_and_losses(self):
+        counts=mod.paired_counts({'chr1':[(0,100)]},{'chr1':[(10,90)]},
+            {'chr1':[(20,80)]},{'chr1':[(0,40)]})
+        self.assertEqual(counts['both_confident_bp'],60)
+        self.assertEqual(counts['reproduced_only_bp'],40)
+        self.assertEqual(counts['original_only_bp'],20)
+
+    def test_record_identity_is_block_weighted_and_secondary_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'paf.gz'
+            rows=[paf('a',0,10000)+'\tde:f:0.01',paf('b',0,20000)+'\tde:f:0.04',paf('c',0,60000,tp='S')]
+            with gzip.open(path,'wt') as f:f.write('\n'.join(rows)+'\n')
+            q=mod.alignment_quality(path,root/'quality.tsv')[1]
+            self.assertEqual(q['records'],2)
+            self.assertEqual(q['weighted_identity'],1)
+            self.assertAlmostEqual(q['weighted_gap_compressed_divergence'],.03)
+
     def test_filter_boundaries_use_paf_block_length(self):
         for length,quality,expected in [(9999,60,2),(10000,4,3),(10000,5,4),(49999,60,4),(50000,5,5)]:
             self.assertEqual(mod.paf_level(paf('a',0,100000,length,quality).split('\t')),expected)

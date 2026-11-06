@@ -10,7 +10,7 @@ if type module >/dev/null 2>&1; then module load miniconda3; fi
 manifest=$(realpath "${1:?Supply manifest.json}")
 repo=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repository"])' "$manifest")
 mode="${2:-task}"
-if [[ "$mode" == report ]]; then
+if [[ "$mode" == report || "$mode" == report-presets ]]; then
     out=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["out"])' "$manifest")
     finish() {
         rc=$?
@@ -25,7 +25,7 @@ if [[ "$mode" == report ]]; then
         exit "$rc"
     }
     trap finish EXIT
-    python3 "$repo/scripts/comparisons/psmc_mask_investigation.py" report --manifest "$manifest"
+    python3 "$repo/scripts/comparisons/psmc_mask_investigation.py" "$mode" --manifest "$manifest"
 else
     index="${SLURM_ARRAY_TASK_ID:-${3:?Supply a task index when running interactively}}"
     prefix=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tasks"][int(sys.argv[2])]["env"])' "$manifest" "$index")

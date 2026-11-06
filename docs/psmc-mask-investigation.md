@@ -115,3 +115,48 @@ records, query identity, gap scope and actual native paftools mask agreement.
 `tests/run_psmc_mask_investigation_checks.py` uses a completed native PSMC fixture
 to test both PAF reuse and regeneration, Slurm spool-directory script execution,
 R rendering, incomplete-task failure and compact archive contents.
+
+## Assembly-preset comparison after the mask audit
+
+Use the completed investigation directory on Crest, where its raw PAFs remain,
+not the compact downloaded review archive. After syncing the repository, from
+the project root:
+
+```bash
+module load miniconda3
+bash gcl_genome_assembly/scripts/comparisons/submit_psmc_alignment_presets.sh \
+  comparisons/psmc-mask-investigation-03 \
+  comparisons/psmc-alignment-presets-04 \
+  Sde-CMat_203
+```
+
+This submits four unthrottled array tasks: asm10/hap1, asm10/hap2, asm20/hap1,
+asm20/hap2, with eight CPUs and 96 GB requested per task. Both asm5 controls
+are reused from the successful audit without remapping. The selected individual
+is an argument, not a dataset-specific rule. An after-any collector produces
+`comparisons/psmc-alignment-presets-04.review.tar.gz`, including failure evidence
+if any task fails. The existing HiFi comparison continues independently.
+
+Each trial uses the recorded analysis environment and the generated Dipcall
+PAF/mask target. A GNU make command-line override changes only `-xasm5` to the
+requested preset in `MM2_OPT`; no installed tool source or production setting
+is edited. The 50 kb mask/variant requirement, 10 kb coverage requirement,
+MAPQ 5 and overlap rules stay fixed. No SAM/BAM/VCF stage or PSMC fit is run.
+The collector verifies matching input hashes, scope, tool versions and filter
+rules; predicted masks must still reproduce actual paftools masks exactly.
+Gains and losses versus asm5 are measured rather than rejected as discrepancies.
+
+The report includes paired-mask gains/losses, per-haplotype exclusions, block
+length counts, block-weighted identity and gap-compressed divergence, commands,
+and provenance. Identity summaries include overlapping records and must not be
+read as unique genome coverage or heterozygosity. Greater retained coverage is
+evidence to examine, not automatic validation of a preset. These diagnostics
+produce no new PSMC input: adopting a preset requires rerunning the full Dipcall
+alignment/variant route consistently. Merely enlarging a BED mask against an
+older VCF could misclassify missed variants as homozygous reference.
+
+`tests/run_psmc_preset_checks.py` runs the four real native preset trials on a
+small completed mask fixture, checks actual minimap2 command logs, verifies
+unchanged controls and mask reconstruction, renders R/ggplot figures, and checks
+incomplete-task status and compact failure archives. It accepts `--source` and
+`--out` directories and uses the environments recorded in the source manifest.

@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import itertools
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -65,6 +66,97 @@ def intersect(a,b):
         else:j+=1
     return out
 def size(rows):return sum(hi-lo for lo,hi in rows)
+
+
+def task_name(job):
+    return '.'.join([job['sample']]+([job['preset']] if job.get('preset') else [])+[job['haplotype']])
+
+
+def paired_counts(scope,h1,h2,baseline):
+    q=Counter()
+    for name,regions in scope.items():
+        left=intersect(regions,h1.get(name,[]));right=intersect(regions,h2.get(name,[]));both=intersect(left,right)
+        old=intersect(regions,baseline.get(name,[]));common=intersect(both,old)
+        q.update(scope_bp=size(regions),both_confident_bp=size(both),hap1_only_bp=size(left)-size(both),
+            hap2_only_bp=size(right)-size(both),neither_bp=size(regions)-size(left)-size(right)+size(both),
+            original_confident_bp=size(old),reproduced_only_bp=size(both)-size(common),original_only_bp=size(old)-size(common))
+    return q
+
+
+def prepare_presets(a):
+    source=Path(a.source).resolve();m=read_json(required(source/'manifest.json'))
+    if read_json(required(source/'reports/status.json'))['status']!='PASS':raise ValueError('Source mask investigation did not pass')
+    out=Path(a.out).resolve()
+    if out.exists() and any(out.iterdir()):raise ValueError('Use a new preset-comparison directory')
+    selected=sorted((j for j in m['tasks'] if j['sample']==a.sample),key=lambda j:j['hap'])
+    if [j['hap'] for j in selected]!=[1,2]:raise ValueError('Expected two completed haplotypes for selected individual')
+    if len(set(a.presets))!=len(a.presets) or not a.presets:raise ValueError('Specify distinct trial presets')
+    controls=[];trials=[]
+    # Validate sources before creating or submitting any trial tasks.
+    for j in selected:
+        root=source/'tasks'/task_name(j)
+        q=read_json(required(root/'audit.json'))
+        if q['official_only_bp'] or q['predicted_only_bp']:raise ValueError('Source mask reconstruction disagrees')
+        if q.get('preset','asm5')!='asm5':raise ValueError('Expected asm5 control')
+        for p in [j['reference']['fasta'],j['reference']['fai'],*j['assemblies'],root/'raw'/f"diploid.{j['haplotype']}.paf.gz"]:required(p)
+        for name in ['scope.bed.gz','haplotype.bed','classification.bed.gz','contig_audit.tsv','alignment_records.tsv','commands.json']:required(root/name)
+        controls.append(dict(j,preset='asm5',source_directory=str(root),
+            source_paf=str(required(root/'raw'/f"diploid.{j['haplotype']}.paf.gz"))))
+    out.mkdir(parents=True,exist_ok=True)
+    for c in controls:
+        src=Path(c['source_directory']);dest=out/'tasks'/task_name(c);dest.mkdir(parents=True)
+        for name in ['scope.bed.gz','haplotype.bed','classification.bed.gz','contig_audit.tsv','alignment_records.tsv','commands.json']:
+            shutil.copyfile(src/name,dest/name)
+        q=read_json(src/'audit.json');q.update(preset='asm5',source_control=str(src),source_control_audit_sha256=digest(src/'audit.json'))
+        write_json(dest/'audit.json',q)
+    for preset in a.presets:
+        if preset not in ['asm10','asm20']:raise ValueError('Trials must use asm10 or asm20')
+        for j in selected:trials.append(dict(j,index=len(trials),preset=preset,cached_paf=None))
+    result=dict(schema_version=1,mode='alignment_presets',repository=str(REPO),out=str(out),
+        baseline=m['baseline'],plot_env=m['plot_env'],sample=a.sample,source=str(source),
+        controls=controls,tasks=trials)
+    write_json(out/'manifest.json',result)
+    table(out/'input_inventory.tsv',[dict(sample=j['sample'],preset=j['preset'],haplotype=j['haplotype'],
+        role='reused_control' if j['preset']=='asm5' else 'new_alignment',env=j['env']) for j in controls+trials],
+        ['sample','preset','haplotype','role','env'])
+    print(f"Prepared {len(trials)} new alignment tasks for {a.sample}; two asm5 controls reused without remapping.")
+
+
+def make_override(makefile,preset):
+    if preset not in ['asm5','asm10','asm20']:raise ValueError('Unsupported assembly preset')
+    if preset=='asm5':return []
+    options=re.findall(r'^MM2_OPT=(.*)$',Path(makefile).read_text(),re.M)
+    if len(options)!=1:raise ValueError('Expected one generated Dipcall MM2_OPT assignment')
+    changed,n=re.subn(r'(?<!\S)-xasm5(?!\S)','-x'+preset,options[0])
+    if n!=1:raise ValueError('Cannot isolate the standard asm5 preset in generated Dipcall options')
+    return ['MM2_OPT='+changed]
+
+
+def alignment_quality(paf,out):
+    groups=defaultdict(lambda:Counter())
+    with gzip.open(paf,'rt') as f:
+        for line in f:
+            if not line.strip():continue
+            fields=line.rstrip().split('\t')
+            if len(fields)<12:raise ValueError('Malformed PAF')
+            if fields[5]=='*' or paf_level(fields)<2 or int(fields[11])<5:continue
+            block=int(fields[10]);matches=int(fields[9])
+            if not 0<=matches<=block or block==0:raise ValueError('Invalid PAF identity counts')
+            label='<10kb' if block<10000 else '10-50kb' if block<50000 else '>=50kb'
+            g=groups[label];g.update(records=1,block_bp=block,matching_bp=matches)
+            values=[float(t[5:]) for t in fields[12:] if t.startswith('de:f:')]
+            if values:
+                if len(values)!=1 or not math.isfinite(values[0]) or not 0<=values[0]<=1:raise ValueError('Invalid PAF gap-compressed divergence')
+                g['divergence_weighted_sum']+=values[0]*block;g['divergence_weight_bp']+=block
+            else:g['divergence_missing_records']+=1
+    rows=[]
+    for label in ['<10kb','10-50kb','>=50kb']:
+        g=groups[label]
+        rows.append(dict(block_length=label,records=g['records'],block_bp=g['block_bp'],matching_bp=g['matching_bp'],
+            weighted_identity=g['matching_bp']/g['block_bp'] if g['block_bp'] else '',
+            weighted_gap_compressed_divergence=g['divergence_weighted_sum']/g['divergence_weight_bp'] if g['divergence_weight_bp'] else '',
+            divergence_missing_records=g['divergence_missing_records']))
+    table(out,rows,list(rows[0]));return rows
 
 
 def prepare(a):
@@ -236,7 +328,7 @@ def analyze(paf,caller_bed,fasta,job,out):
 def run_task(a):
     import pysam
     manifest=read_json(a.manifest);job=manifest['tasks'][a.index]
-    out=Path(manifest['out'])/'tasks'/f"{job['sample']}.{job['haplotype']}";out.mkdir(parents=True,exist_ok=True)
+    out=Path(manifest['out'])/'tasks'/task_name(job);out.mkdir(parents=True,exist_ok=True)
     spec=out/'task.json'
     if spec.exists() and read_json(spec)!=job:raise ValueError('Existing task directory belongs to different inputs')
     write_json(spec,job)
@@ -255,13 +347,17 @@ def run_task(a):
     with (work/'diploid.mak').open('w') as f:
         run(['run-dipcall','-a','-t',str(a.cpus),'diploid','reference.fa','hap1.fa','hap2.fa'],f)
     name=f"diploid.{job['haplotype']}";paf=work/(name+'.paf.gz')
+    preset=job.get('preset','asm5')
+    if preset!='asm5' and job['cached_paf']:raise ValueError('A new preset must not reuse an asm5 PAF')
     if job['cached_paf'] and not paf.exists():paf.symlink_to(required(job['cached_paf']))
     cmd=['make','-f','diploid.mak']
+    cmd+=make_override(work/'diploid.mak',preset)
     if job['cached_paf']:cmd+=['-o',name+'.paf.gz']
     run(cmd+[name+'.bed'])
     shutil.copyfile(work/(name+'.bed'),out/'haplotype.bed')
     with pysam.FastaFile(str(work/'reference.fa')) as fa:result=analyze(paf,out/'haplotype.bed',fa,job,out)
-    result.update(alignment_source='cached' if job['cached_paf'] else 'regenerated_PAF_only',
+    alignment_quality(paf,out/'alignment_quality.tsv')
+    result.update(preset=preset,alignment_source='cached' if job['cached_paf'] else 'regenerated_PAF_only',
         diagnostic_sha256=digest(__file__),scope_helper_sha256=digest(REPO/'py_scripts/psmc_input.py'),
         query_sha256=digest(job['assemblies'][job['hap']-1]),paf_sha256=digest(paf),
         minimap2_version=subprocess.check_output(['minimap2','--version'],env=env,text=True).strip(),
@@ -339,14 +435,76 @@ def report(a):
     if missing or disagreement:raise ValueError(f'Investigation {status}; inspect the report and task logs')
 
 
+def report_presets(a):
+    m=read_json(a.manifest);out=Path(m['out']);reports=out/'reports';reports.mkdir(exist_ok=True)
+    jobs=m['controls']+m['tasks'];audits={};missing=[];issues=[];states=[];qualities=[];pairs=[]
+    for j in jobs:
+        root=out/'tasks'/task_name(j)
+        if not (root/'audit.json').is_file():missing.append(task_name(j));continue
+        q=read_json(root/'audit.json');audits[j['preset'],j['hap']]=q
+        if q['official_only_bp'] or q['predicted_only_bp']:issues.append(task_name(j)+': mask reconstruction disagrees')
+        control=read_json(out/'tasks'/task_name(next(c for c in m['controls'] if c['hap']==j['hap']))/'audit.json')
+        for key in ['reference_sha256','query_sha256','scope_bp','thresholds','minimap2_version','paftools_sha256','run_dipcall_sha256','scope_helper_sha256']:
+            if q.get(key)!=control.get(key):issues.append(task_name(j)+': changed '+key)
+        paf=Path(j['source_paf']) if j['preset']=='asm5' else root/'raw'/f"diploid.{j['haplotype']}.paf.gz"
+        if digest(required(paf))!=q['paf_sha256']:raise ValueError('PAF changed since audit: '+str(paf))
+        quality=alignment_quality(paf,root/'alignment_quality.tsv')
+        qualities.extend(dict(preset=j['preset'],haplotype=j['haplotype'],**r) for r in quality)
+        states.extend(dict(preset=j['preset'],haplotype=j['haplotype'],state=s,label=l,bp=q['classification_bp'].get(s,0),
+            percent=100*q['classification_bp'].get(s,0)/q['scope_bp']) for s,l in zip(STATES,LABELS))
+    controls=[out/'tasks'/task_name(c) for c in m['controls']]
+    scope=load_bed(controls[0]/'scope.bed.gz')
+    old1=load_bed(controls[0]/'haplotype.bed');old2=load_bed(controls[1]/'haplotype.bed')
+    oldboth={n:intersect(old1.get(n,[]),old2.get(n,[])) for n in scope}
+    baseline=paired_counts(scope,old1,old2,load_bed(m['controls'][0]['original_diploid_bed']))
+    if baseline['reproduced_only_bp'] or baseline['original_only_bp']:issues.append('asm5 control no longer reproduces published mask')
+    for preset in dict.fromkeys(j['preset'] for j in jobs):
+        if any((preset,h) not in audits for h in [1,2]):continue
+        roots=[out/'tasks'/task_name(next(j for j in jobs if j['preset']==preset and j['hap']==h)) for h in [1,2]]
+        if load_bed(roots[0]/'scope.bed.gz')!=scope or load_bed(roots[1]/'scope.bed.gz')!=scope:
+            issues.append(preset+': changed scope intervals');continue
+        q=paired_counts(scope,load_bed(roots[0]/'haplotype.bed'),load_bed(roots[1]/'haplotype.bed'),oldboth)
+        pairs.append(dict(preset=preset,scope_bp=q['scope_bp'],hap1_confident_bp=q['both_confident_bp']+q['hap1_only_bp'],
+            hap2_confident_bp=q['both_confident_bp']+q['hap2_only_bp'],paired_confident_bp=q['both_confident_bp'],
+            paired_percent=100*q['both_confident_bp']/q['scope_bp'],gained_vs_asm5_bp=q['reproduced_only_bp'],lost_vs_asm5_bp=q['original_only_bp']))
+    table(reports/'paired_masks.tsv',pairs,['preset','scope_bp','hap1_confident_bp','hap2_confident_bp','paired_confident_bp','paired_percent','gained_vs_asm5_bp','lost_vs_asm5_bp'])
+    table(reports/'classification_summary.tsv',states,['preset','haplotype','state','label','bp','percent'])
+    table(reports/'alignment_quality.tsv',qualities,['preset','haplotype','block_length','records','block_bp','matching_bp','weighted_identity','weighted_gap_compressed_divergence','divergence_missing_records'])
+    status='INCOMPLETE' if missing else 'VALIDATION_FAILED' if issues else 'PASS'
+    write_json(reports/'status.json',dict(status=status,missing=missing,issues=issues,summary=list(audits.values())))
+    md=['# Assembly alignment preset comparison','',f"Individual: **{m['sample']}**. Test validation: **{status}**.",'',
+        'Only the minimap2 assembly preset changes. The 50 kb variant/mask requirement, 10 kb coverage requirement, MAPQ 5 and overlap rules remain unchanged. The two asm5 controls reuse the completed mask investigation. No production defaults or ongoing HiFi jobs are changed.','',
+        '| Preset | Hap1 mask, Mb | Hap2 mask, Mb | Paired mask, Mb | Paired scope % | Gained vs asm5, Mb | Lost vs asm5, Mb |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for q in pairs:md.append(f"| {q['preset']} | {q['hap1_confident_bp']/1e6:.2f} | {q['hap2_confident_bp']/1e6:.2f} | {q['paired_confident_bp']/1e6:.2f} | {q['paired_percent']:.2f} | {q['gained_vs_asm5_bp']/1e6:.2f} | {q['lost_vs_asm5_bp']/1e6:.2f} |")
+    md+=['','![Alignment support and exclusions](reports/preset_comparison.png)','',
+        'PASS means the tasks completed, inputs/tools matched the control and predicted masks reproduced actual paftools masks. It does not select a biologically validated winning preset. Gains and losses against asm5 are expected measurements, not validation errors.','',
+        '[Mask counts](reports/paired_masks.tsv) · [Exclusion counts](reports/classification_summary.tsv) · [Alignment lengths and identity](reports/alignment_quality.tsv) · [Validation and provenance](reports/status.json)','',
+        'Alignment identity and gap-compressed divergence are weighted by alignment-block length across primary, scoring-compatible records with MAPQ ≥5. These record-level summaries can count overlapping placements; they are not unique genome coverage or a genome-wide heterozygosity estimate. More retained sequence alone does not establish correct orthology.','',
+        'Inspect whether hap2 short blocks become longer, whether newly retained sequence is supported by plausible identity/divergence, and whether ambiguity increases. These mask-only tests do not produce replacement VCFs or PSMC fits. If a preset is adopted later, the full Dipcall alignment and variant-calling route must be rerun consistently.']
+    for j in jobs:
+        name=task_name(j)
+        md+=['',f"- {j['preset']} / {j['haplotype']}: [per-contig counts](tasks/{name}/contig_audit.tsv), [commands](tasks/{name}/commands.json), [audit](tasks/{name}/audit.json)."]
+    if missing:md+=['','Missing tasks: '+', '.join(missing)]
+    if issues:md+=['','Validation issues: '+ '; '.join(issues)]
+    (out/'README.md').write_text('\n'.join(md)+'\n',encoding='utf-8')
+    if states:subprocess.run([str(Path(m['plot_env'])/'bin/Rscript'),str(REPO/'r_scripts/plot_psmc_alignment_presets.R'),str(reports)],check=True)
+    if missing or issues:raise ValueError('Preset investigation '+status+'; inspect reports/status.json')
+    print('Report:',out/'README.md')
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True)
     q=sub.add_parser('prepare')
     for k in ['run','out','hifi-sample']:q.add_argument('--'+k,required=True)
     q.add_argument('--analysis-env');q.add_argument('--plot-env')
+    q=sub.add_parser('prepare-presets')
+    for k in ['source','out','sample']:q.add_argument('--'+k,required=True)
+    q.add_argument('--presets',nargs='+',choices=['asm10','asm20'],default=['asm10','asm20'])
     q=sub.add_parser('task');q.add_argument('--manifest',required=True);q.add_argument('--index',type=int,required=True);q.add_argument('--cpus',type=int,default=8)
     q=sub.add_parser('report');q.add_argument('--manifest',required=True)
-    a=p.parse_args();{'prepare':prepare,'task':run_task,'report':report}[a.command](a)
+    q=sub.add_parser('report-presets');q.add_argument('--manifest',required=True)
+    a=p.parse_args();{'prepare':prepare,'prepare-presets':prepare_presets,'task':run_task,'report':report,'report-presets':report_presets}[a.command](a)
 
 
 if __name__=='__main__':main()
