@@ -16,6 +16,9 @@ case="${PSMC_TEST_CASE:-enabled}"
 if [[ "$case" == all_skipped ]]; then
     printf 'sample\tmode\nhaploid_ind\tauto\n' > "$runtime/fixtures/manifest.tsv"
 fi
+if [[ "$case" == paired_hifi ]]; then
+    printf 'sample\tmode\nassembly_ind\thifi\n' > "$runtime/fixtures/manifest.tsv"
+fi
 python3 - "$repo" <<'PY'
 from pathlib import Path
 import sys

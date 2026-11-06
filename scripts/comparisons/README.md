@@ -15,6 +15,7 @@ and `work`. Scientific outputs belong in that project's `comparisons/` directory
 | `run_final_comparison_checks.sbatch` | Native final-assembly comparison checks |
 | `run_scaffolding_replay.sbatch`, `scaffolding_replay.nf` | Controlled replay of accepted YaHS inputs/AGP, without new assembly biology |
 | `make_sv_benchmark.py` | Generic known-answer fixture generator for deferred SV method validation |
+| `submit_psmc_mask_investigation.sh`, `run_psmc_mask_investigation.sbatch`, `psmc_mask_investigation.py` | Removable Bash/Slurm audit of Dipcall alignment/mask exclusions; recorded environments, exact trace paths, cached PAF reuse or PAF-only regeneration; [instructions](../../docs/psmc-mask-investigation.md) |
 
 Old specimen-specific fusion batches, cache-recovery experiments and obsolete report
 launchers were removed. Git history retains them; do not restore them as production

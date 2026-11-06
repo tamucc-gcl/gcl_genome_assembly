@@ -42,6 +42,12 @@ class PsmcContracts(unittest.TestCase):
         refs=self.refs();refs[0].update(id='a_primary',fasta='primary.fa')
         p=plan(dict(assemblies=[self.row(hap='primary')]),refs,[dict(sample='a',fastq='complete.fq')])
         self.assertEqual(p['jobs'][0]['mode'],'hifi')
+    def test_hifi_override_on_paired_individual_keeps_own_hap1_reference(self):
+        e=dict(assemblies=[self.row(),self.row(hap='hap2')])
+        p=plan(e,self.refs(),[dict(sample='a',fastq='full.fq')],{'a':dict(mode='hifi')})
+        self.assertEqual(p['jobs'][0]['mode'],'hifi')
+        self.assertEqual(p['jobs'][0]['reference']['id'],'a_hap1')
+        self.assertEqual(p['jobs'][0]['reads'],'full.fq')
     def test_true_haploid_rejected(self):
         p=plan(dict(assemblies=[self.row(hap='primary',ploidy=1)]),self.refs(),[dict(sample='a',fastq='reads')])
         self.assertIn('biologically diploid',p['skipped'][0]['reason'])
