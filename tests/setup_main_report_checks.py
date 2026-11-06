@@ -41,7 +41,7 @@ if case=='multispecies':
 (fixtures/'run_provenance.json').write_text('{"context":{"parameters":{"run_report":true}}}\n')
 (fixtures/'psmc').mkdir(exist_ok=True)
 (fixtures/'psmc/README.md').write_text('# PSMC evidence\n\nCurrent-run history and callable sequence.\n')
-(fixtures/'psmc/summary.tsv').write_text('sample\ttaxid\tmode\tstatus\treason\treference\tcallable_bp\theterozygous_snps\tscaling\treport\nsample\t1\tassemblies\tcompleted\t\tsample_hap1\t1000\t10\tunscaled\tpost_assembly/psmc/README.md\n')
+(fixtures/'psmc/summary.tsv').write_text('sample\ttaxid\tmode\tstatus\treason\treference\tcallable_bp\theterozygous_snps\tretained_callable_bp\tretained_scaffolds\tscaling\treport\nsample\t1\tassemblies\tcompleted\t\tsample_hap1\t1000\t10\t1000\t1\tunscaled\tpost_assembly/psmc/README.md\n')
 (fixtures/'sample_hap1_final_snail.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><circle cx="100" cy="100" r="80" /></svg>')
 for record in assemblies:
     (fixtures/(record['id']+'_final_snail.svg')).write_bytes((fixtures/'sample_hap1_final_snail.svg').read_bytes())

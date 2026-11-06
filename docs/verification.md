@@ -71,7 +71,10 @@ fixture values never enter production defaults. `verify_psmc_native.py` checks
 published scope/QC/files and upstream numerical scaling/iteration/tail agreement.
 
 Run `test_psmc_masking.py` with the pinned pysam/NumPy environment; a general
-environment without those readers explicitly skips those five tests. Known-answer
+environment without those readers explicitly skips their reader-dependent tests. Known-answer
 checks cover homozygous/heterozygous/unknown sites, complex flanks, duplicate-site
 masking, exact reference fingerprints and insufficient data. PSMC planning/scaling/
-bootstrap contract tests have no native-reader dependency.
+bootstrap contract tests have no native-reader dependency. The native fixture
+uses two distinct own-individual reference FASTAs/checksums, verifies both routes,
+and combines them in one species/scaling plot panel. Sparse fixtures also verify
+the upstream converter's exact 20% callable-base retention boundary.

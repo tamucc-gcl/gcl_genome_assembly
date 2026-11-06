@@ -531,7 +531,7 @@ workflow {
         }
     }, file("${projectDir}/py_scripts/shared_reference.py", checkIfExists: true),
        file("${projectDir}/py_scripts/pangenome_input_audit.py", checkIfExists: true))
-    PSMC_ANALYSIS(ASSEMBLY_ELIGIBILITY.out.manifest,SHARED_REFERENCE.out.manifest,READ_PREPARATION.out.hifi)
+    PSMC_ANALYSIS(ASSEMBLY_ELIGIBILITY.out.manifest,READ_PREPARATION.out.hifi)
     ch_versions = ch_versions.mix(PSMC_ANALYSIS.out.versions)
     ASSEMBLY_RUN_SUMMARY(ch_input_status,
         ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false),

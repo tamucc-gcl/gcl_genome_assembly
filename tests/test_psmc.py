@@ -11,6 +11,7 @@ from psmc_plan import plan,manifest_rows
 from psmc_results import parse,export,resample,pattern_groups
 from psmc_report_index import index
 from psmc_input import bed,genotype,genotype_confidence
+from psmc_reference import verify as verify_reference
 
 
 def fitted(iteration=2):
@@ -23,18 +24,23 @@ class PsmcContracts(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
     def tearDown(self):self.tmp.cleanup()
     def row(self,sample='a',hap='hap1',ploidy=2,taxid='1'):
-        return dict(sample=sample,haplotype=hap,ploidy=ploidy,taxid=taxid,completion='finalized',
+        return dict(id=sample+'_'+hap,sample=sample,haplotype=hap,ploidy=ploidy,taxid=taxid,completion='finalized',
                     representation='hic_phased',fasta=hap+'.fa',species='Species')
-    def refs(self):return [dict(taxid='1',id='ref',coordinate_stage='final',sha256='a'*64)]
+    def refs(self):return [dict(sample='a',taxid='1',id='a_hap1',fasta='hap1.fa',
+        coordinate_stage='final',sha256='a'*64,sequences=[dict(name='long',length=2000000)])]
     def test_pair_identity_not_graph_admission(self):
-        p=plan(dict(assemblies=[self.row(),self.row(hap='hap2')]),self.refs(),[])
+        e=dict(assemblies=[self.row(),self.row(hap='hap2')],
+            linear_references=[dict(sample='other',id='other_hap1')],cohorts=[dict(ready=False)])
+        p=plan(e,self.refs(),[])
         self.assertEqual(p['jobs'][0]['mode'],'assemblies')
+        self.assertEqual(p['jobs'][0]['reference']['id'],'a_hap1')
         self.assertIsNone(p['jobs'][0]['mutation_rate'])
     def test_individuals_never_paired(self):
         p=plan(dict(assemblies=[self.row(),self.row(sample='b',hap='hap2')]),self.refs(),[])
         self.assertEqual(len(p['skipped']),2)
     def test_single_diploid_full_reads(self):
-        p=plan(dict(assemblies=[self.row(hap='primary')]),self.refs(),[dict(sample='a',fastq='complete.fq')])
+        refs=self.refs();refs[0].update(id='a_primary',fasta='primary.fa')
+        p=plan(dict(assemblies=[self.row(hap='primary')]),refs,[dict(sample='a',fastq='complete.fq')])
         self.assertEqual(p['jobs'][0]['mode'],'hifi')
     def test_true_haploid_rejected(self):
         p=plan(dict(assemblies=[self.row(hap='primary',ploidy=1)]),self.refs(),[dict(sample='a',fastq='reads')])
@@ -58,6 +64,29 @@ class PsmcContracts(unittest.TestCase):
     def test_reference_final_hash_required(self):
         r=self.refs();r[0]['coordinate_stage']='scaffold'
         with self.assertRaises(ValueError):plan(dict(assemblies=[self.row(),self.row(hap='hap2')]),r,[])
+    def test_each_individual_uses_own_reference_despite_shared_species(self):
+        rows=[self.row(sample=s,hap=h) for s in ['a','b'] for h in ['hap1','hap2']]
+        for r in rows:r['fasta']=r['id']+'.fa'
+        refs=[dict(sample=s,taxid='1',id=s+'_hap1',fasta=s+'_hap1.fa',
+            coordinate_stage='final',sha256=c*64,sequences=[dict(name='long',length=2000000)]) for s,c in [('a','a'),('b','b')]]
+        p=plan(dict(assemblies=rows),refs,[])
+        self.assertEqual([j['reference']['id'] for j in p['jobs']],['a_hap1','b_hap1'])
+        self.assertNotEqual(p['jobs'][0]['reference']['sha256'],p['jobs'][1]['reference']['sha256'])
+        p=plan(dict(assemblies=rows),refs[:1],[])
+        self.assertEqual(p['skipped'][0]['sample'],'b') # no species-reference fallback
+    def test_foreign_reference_rejected_even_if_mislabeled_as_own(self):
+        refs=self.refs();refs[0].update(id='other_hap1',fasta='other.fa')
+        with self.assertRaisesRegex(ValueError,'same individual'):
+            plan(dict(assemblies=[self.row(),self.row(hap='hap2')]),refs,[])
+    def test_individual_reference_checksum_and_fai_validation(self):
+        fa=self.root/'own.fa';fa.write_text('>chr1\nACGTNNACGT\n')
+        fai=self.root/'own.fa.fai';fai.write_text('chr1\t10\t6\t10\t11\n')
+        selection=dict(sample='a',id='a_hap1',taxid='1',selection='own_hap1')
+        r=verify_reference(selection,fa,fai)
+        self.assertEqual(r['sha256'],hashlib.sha256(fa.read_bytes()).hexdigest())
+        self.assertEqual(r['sequences'],[dict(name='chr1',length=10)])
+        fai.write_text('chr1\t9\t6\t10\t11\n')
+        with self.assertRaisesRegex(ValueError,'disagree'):verify_reference(selection,fa,fai)
     def test_cross_species_identity_and_scaling(self):
         with self.assertRaises(ValueError):plan(dict(assemblies=[self.row(),self.row(hap='hap2',taxid='2')]),self.refs(),[])
         with self.assertRaises(ValueError):plan(dict(assemblies=[self.row(),self.row(sample='b',taxid='2')]),self.refs(),[],mutation_rate=1e-8,generation_time=1)
@@ -121,6 +150,29 @@ class PsmcContracts(unittest.TestCase):
     def test_missing_individual_report_rejected(self):
         p=self.root/'plan.json';p.write_text(json.dumps(dict(jobs=[dict(sample='a')],skipped=[])))
         with self.assertRaises(ValueError):index(p,[],self.root/'out')
+    def test_cohort_keeps_exported_curve_values_and_reports_unfitted_individuals(self):
+        p=self.root/'plan.json';p.write_text(json.dumps(dict(jobs=[dict(sample='a'),dict(sample='b')],skipped=[])))
+        dirs=[]
+        for sample,status in [('a','completed'),('b','not_fitted')]:
+            d=self.root/sample;d.mkdir();dirs.append(d)
+            (d/'summary.json').write_text(json.dumps(dict(sample=sample,taxid='1',mode='assemblies',status=status,
+                reference='ref',callable_bp=100,heterozygous_snps=2,retained_callable_bp=80,retained_scaffolds=1,
+                scaling='unscaled',report='report.md')))
+        source='fit\tkind\ttime\tpopulation\tscaling\nobserved\tobserved\t0.001234\t0.005678\tunscaled\n'
+        (dirs[0]/'curves.tsv').write_text(source)
+        index(p,dirs,self.root/'out')
+        with (self.root/'out/combined_curves.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
+        self.assertEqual(len(rows),1)
+        self.assertEqual((rows[0]['time'],rows[0]['population']),('0.001234','0.005678'))
+        self.assertEqual(rows[0]['sample'],'a')
+        self.assertEqual((dirs[0]/'curves.tsv').read_text(),source)
+        with (self.root/'out/summary.tsv').open() as f:summary=list(csv.DictReader(f,delimiter='\t'))
+        self.assertEqual(summary[1]['status'],'not_fitted')
+    def test_all_skipped_has_no_phantom_cohort_figure(self):
+        p=self.root/'plan.json';p.write_text(json.dumps(dict(jobs=[],skipped=[dict(sample='a',taxid='1',reason='haploid')])))
+        index(p,[],self.root/'out')
+        self.assertFalse((self.root/'out/combined_curves.tsv').exists())
+        self.assertNotIn('combined_history.png',(self.root/'out/README.md').read_text())
 
 
 if __name__=='__main__':unittest.main()

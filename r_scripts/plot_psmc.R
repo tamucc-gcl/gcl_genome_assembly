@@ -11,15 +11,18 @@ scaled <- !is.null(context$mutation_rate)
 summary <- list(sample=context$sample,taxid=context$taxid,mode=context$mode,
     reference=context$reference_id,status=if(ready) 'completed' else 'not_fitted',
     reason=qc$reason,callable_bp=qc$callable_bp,heterozygous_snps=qc$heterozygous_snps,
+    retained_callable_bp=qc$psmc_retained_callable_bp,retained_scaffolds=qc$segments,
+    retained_contigs=paste(qc$retained_contigs,collapse=', '),missing_bin_fraction=qc$missing_bin_fraction,
     scaling=if(scaled) 'years / Ne' else 'unscaled',
     report=paste0('post_assembly/psmc/',context$taxid,'/',context$sample,'/report/report.md'))
 md <- c(paste0('# PSMC: ',context$sample),'',
     paste0('Species: ',context$species,' (taxid ',context$taxid,'). Input mode: **',context$mode,'**.'),'',
     paste0('Reference: **',context$reference_id,'**. SHA256: `',context$reference_sha256,'`.'),'',
+    paste0('Reference selection: `',context$reference_selection,'`. [Own reference provenance](../reference/reference.json).'),'',
     '| Measurement | Value |','| --- | --- |',
     paste0('| Outcome | ',summary$status,' |'),
     paste0('| Assembly representation | ',context$representation,' |'),
-    paste0('| Callable sequence | ',format(qc$callable_bp,scientific=FALSE,trim=TRUE),' bp |'),
+    paste0('| Callable sequence before conversion | ',format(qc$callable_bp,scientific=FALSE,trim=TRUE),' bp |'),
     paste0('| Callable fraction of selected non-gap scope | ',sprintf('%.2f%%',100*qc$callable_fraction),' |'),
     paste0('| Heterozygous SNPs | ',format(qc$heterozygous_snps,scientific=FALSE,trim=TRUE),' |'),
     paste0('| Heterozygosity per callable bp | ',if(is.null(qc$heterozygosity)) 'Not measurable' else signif(qc$heterozygosity,5),' |'),
@@ -28,6 +31,24 @@ md <- c(paste0('# PSMC: ',context$sample),'',
     paste0('| Unknown PSMC bins | ',sprintf('%.2f%%',100*qc$missing_bin_fraction),' |'),
     paste0('| Bin size | ',qc$bin_size,' bp |'),
     paste0('| Scaling | ',summary$scaling,' |'),'')
+if(qc$psmc_retained_callable_bp < qc$callable_bp) md <- c(md,
+    paste0('**Input scope warning:** conversion retained ',qc$segments,' scaffolds and ',
+      format(qc$psmc_retained_callable_bp,scientific=FALSE,trim=TRUE),' callable bp of ',
+      format(qc$callable_bp,scientific=FALSE,trim=TRUE),' available before conversion. Completion does not establish representative genomic scope.'),'')
+if(length(qc$retained_contigs)) md <- c(md,paste0('Retained scaffolds: ',paste(qc$retained_contigs,collapse=', ')), '')
+if(!is.null(qc$mask_audit_totals)) {
+    a <- qc$mask_audit_totals
+    md <- c(md,'## Where sequence was lost','',
+       '| Stage | Callable bp remaining |','| --- | ---: |',
+       paste0('| Selected non-gap scope | ',qc$scope_bp,' |'),
+       if(!is.null(a$confident_scope_bp)) paste0('| Inside Dipcall confident regions | ',a$confident_scope_bp,' |'),
+       paste0('| After simple genotype checks | ',a$after_simple_genotypes_bp,' |'),
+       paste0('| After complex-variant masking | ',a$after_simple_genotypes_bp-a$complex_mask_loss_bp,' |'),
+       paste0('| After duplicate-position masking | ',qc$callable_bp,' |'),
+       paste0('| On sequences retained by fq2psmcfa | ',qc$psmc_retained_callable_bp,' |'),'',
+       '[Per-scaffold mask losses](../input/mask_audit.tsv) · [Conversion retention and rejection reasons](../input/conversion_audit.tsv)','',
+       'fq2psmcfa requires at least 20% callable bases across each whole input scaffold, in addition to its minimum good-base count. Unknown intervals retain their original lengths.','')
+}
 if(ready) {
     curves <- read.delim(file.path(args[[3]],'curves.tsv'),check.names=FALSE)
     if(!all(c('fit','kind','time','population','scaling') %in% names(curves)) ||

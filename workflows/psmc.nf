@@ -1,10 +1,9 @@
-include { PSMC_PLAN; PSMC_ASSEMBLY_CALL; PSMC_MAP_HIFI; PSMC_READ_CALL; PSMC_INPUT;
+include { PSMC_REFERENCE; PSMC_PLAN; PSMC_ASSEMBLY_CALL; PSMC_MAP_HIFI; PSMC_READ_CALL; PSMC_INPUT;
           PSMC_FIT; PSMC_SPLIT; PSMC_BOOTSTRAP; PSMC_EXPORT; PSMC_RENDER; PSMC_INDEX } from '../modules/psmc.nf'
 
 workflow PSMC_ANALYSIS {
     take:
     eligibility
-    references
     hifi
     main:
     reports=Channel.empty();versions=Channel.empty()
@@ -58,9 +57,35 @@ workflow PSMC_ANALYSIS {
             min_mapq:params.psmc_min_mapq,min_baseq:params.psmc_min_baseq,max_pileup_depth:params.psmc_max_pileup_depth]
         def fit_settings=[iterations:params.psmc_iterations,max_time:params.psmc_max_time,
                           ratio:params.psmc_theta_rho_ratio,pattern:params.psmc_pattern]
+        own_references=eligibility.flatMap { path ->
+            new groovy.json.JsonSlurperClassic().parseText(path.text).assemblies.groupBy { it.sample }.values().findAll { rows ->
+                rows.every { it.completion=='finalized' && it.ploidy==2 } &&
+                (rows.size()==1 || (rows.size()==2 && rows*.haplotype.toSet()==['hap1','hap2'].toSet()))
+            }.collect { rows ->
+                def row=rows.find { it.haplotype=='hap1' } ?: rows[0]
+                def selection=[id:row.id,sample:row.sample,taxid:row.taxid,species:row.species,
+                    haplotype:row.haplotype,fasta:row.fasta,fai:row.fai,
+                    selection:rows.size()==2 ? 'own_hap1' : 'own_sole_assembly']
+                tuple(selection,file(row.fasta,checkIfExists:true),file(row.fai,checkIfExists:true))
+            }
+        }
+        if(params.psmc_manifest) {
+            selected_samples=Channel.value(file(params.psmc_manifest,checkIfExists:true))
+                .splitCsv(header:true,sep:'\t').map { row ->
+                    def key=row.keySet().find { it.replace('\uFEFF','')=='sample' }
+                    if(key==null) error 'PSMC manifest requires sample column'
+                    tuple(row[key].toString().trim(),true)
+                }
+            own_references=own_references.map { selection,fa,fai -> tuple(selection.sample,selection,fa,fai) }
+                .join(selected_samples).map { sample,selection,fa,fai,selected -> tuple(selection,fa,fai) }
+        }
+        PSMC_REFERENCE(own_references,file("${projectDir}/py_scripts/psmc_reference.py",checkIfExists:true),
+            file("${projectDir}/py_scripts/pangenome_input_audit.py",checkIfExists:true))
         PSMC_PLAN(eligibility,
-            references.map { taxid,path -> new groovy.json.JsonSlurperClassic().parseText(path.text) }.toList(),
-            hifi.map { meta,fq -> [sample:meta.sample.toString(),fastq:fq.toString()] }.toList(),
+            PSMC_REFERENCE.out.reference.map { selection,path -> new groovy.json.JsonSlurperClassic().parseText(path.text) }
+                .toList().map { rows -> rows.sort { a,b -> a.sample <=> b.sample } },
+            hifi.map { meta,fq -> [sample:meta.sample.toString(),fastq:fq.toString()] }
+                .toList().map { rows -> rows.sort { a,b -> a.sample <=> b.sample } },
             params.psmc_manifest ? file(params.psmc_manifest,checkIfExists:true) : absent,
             file("${projectDir}/py_scripts/psmc_plan.py",checkIfExists:true))
         jobs=PSMC_PLAN.out.plan.flatMap { path -> new groovy.json.JsonSlurperClassic().parseText(path.text).jobs }
@@ -103,6 +128,7 @@ workflow PSMC_ANALYSIS {
             .groupTuple().map { key,metas,paths -> tuple(key.getGroupTarget(),metas[0],paths) }
             .join(scaling).map { id,m,paths,s -> tuple(m,paths,s) },helper)
         plot_context=jobs.map { j -> tuple(j.id,meta_for(j)+[mutation_rate:j.mutation_rate,generation_time:j.generation_time,
+            reference_selection:j.reference.selection,
             iteration:params.psmc_plot_iteration,bootstrap_count:params.psmc_bootstraps]) }
         ready_reports=PSMC_EXPORT.out.curves.map { m,dir -> tuple(m.id,m,dir) }
             .join(assessed.ready.map { m,dir -> tuple(m.id,dir) })
@@ -112,7 +138,9 @@ workflow PSMC_ANALYSIS {
             .map { id,m,input,curves,context -> tuple(m,input,curves,context) },
             file("${projectDir}/r_scripts/plot_psmc.R",checkIfExists:true))
         versions=versions.mix(PSMC_RENDER.out.versions)
-        PSMC_INDEX(PSMC_PLAN.out.plan,PSMC_RENDER.out.report.map { m,dir -> dir }.toList(),index_helper)
+        PSMC_INDEX(PSMC_PLAN.out.plan,PSMC_RENDER.out.report.map { m,dir -> dir }.toList(),index_helper,
+            file("${projectDir}/r_scripts/plot_psmc_cohort.R",checkIfExists:true))
+        versions=versions.mix(PSMC_INDEX.out.versions)
         reports=PSMC_INDEX.out.report.mix(PSMC_INDEX.out.summary)
     }
     emit:

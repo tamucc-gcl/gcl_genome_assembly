@@ -58,6 +58,12 @@ finish() {
                 -name '*.png' -o -name '*.pdf' -o -name '*.svg' -o \
                 -name '*.json' -o -name '*.tsv' -o -name '*.txt' \) -print0)
     fi
+    # Retain the small caller mask to attribute PSMC callability losses without
+    # packaging the much larger VCF, BAM or consensus sequences.
+    if [[ -d "$out/results/post_assembly/psmc" ]]; then
+        while IFS= read -r -d '' name; do files+=("${name#"$out/"}"); done < <(
+            find -L "$out/results/post_assembly/psmc" -path '*/genotypes/*.dip.bed' -type f -size -20M -print0)
+    fi
     # Compact graph reports, provenance, summary tables and figures. Graphs, indexes,
     # alignments, VCFs and large per-node tables remain in the selected results directory.
     if [[ -d "$out/results/pangenome" ]]; then

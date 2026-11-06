@@ -3,6 +3,8 @@ import argparse
 import gzip
 import hashlib
 import json
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -57,6 +59,15 @@ class Masking(unittest.TestCase):
         self.assertEqual(seq[30],'A') # known homozygote inside confident BED
         qc=json.loads((self.root/'out/input_qc.json').read_text())
         self.assertEqual(qc['heterozygous_snps'],1)
+        audit=qc['mask_audit_totals']
+        self.assertEqual(audit['scope_bp'],370)
+        self.assertEqual(audit['confident_scope_bp'],350)
+        self.assertEqual(audit['simple_genotype_loss_bp'],2)
+        self.assertEqual(audit['complex_mask_loss_bp'],12)
+        self.assertEqual(audit['callable_bp'],336)
+        self.assertEqual(audit['scope_bp'],audit['outside_confident_bp']+
+            audit['simple_genotype_loss_bp']+audit['complex_mask_loss_bp']+
+            audit['duplicate_mask_loss_bp']+audit['callable_bp'])
     def test_read_absence_does_not_become_homozygous_reference(self):
         self.args.mode='hifi'
         d=self.root/'depth.tsv';d.write_text('#rname\tstartpos\tendpos\tmeandepth\nlong\t1\t400\t8\n')
@@ -83,6 +94,8 @@ class Masking(unittest.TestCase):
         prepare(self.args)
         self.assertEqual(self.consensus()[15:26],'N'*11)
         self.assertEqual(json.loads((self.root/'out/input_qc.json').read_text())['duplicate_position_records_masked'],1)
+        audit=json.loads((self.root/'out/input_qc.json').read_text())['mask_audit_totals']
+        self.assertEqual(audit['duplicate_mask_loss_bp'],11)
     def test_poor_callability_explicit_not_fitted(self):
         out=Path(self.args.out);out.mkdir()
         (out/'input_qc.json').write_text(json.dumps(dict(callable_bp=0,callable_fraction=0,heterozygous_snps=0)))
@@ -90,6 +103,25 @@ class Masking(unittest.TestCase):
         (out/'contig_qc.tsv').write_text('contig\tcallable_bp\nc\t0\n')
         finalize(argparse.Namespace(out=str(out),min_callable_bp=10,min_callable_fraction=.1,min_hets=1,bin_size=100))
         qc=json.loads((out/'input_qc.json').read_text());self.assertEqual(qc['status'],'not_fitted')
+
+    @unittest.skipUnless(shutil.which('fq2psmcfa'),'Requires native upstream converter')
+    def test_native_converter_twenty_percent_boundary_and_retention_audit(self):
+        # Exercise sparse input, unlike the dense assembly/read smoke fixtures.
+        out=Path(self.args.out);out.mkdir()
+        source=self.root/'sparse.fa'
+        counts={'below':199,'exact':200,'above':201}
+        source.write_text(''.join('>'+name+'\nR'+'A'*(n-1)+'N'*(1000-n)+'\n' for name,n in counts.items()))
+        with (out/'input.psmcfa').open('w') as dest:
+            subprocess.run(['fq2psmcfa','-g','10',str(source)],stdout=dest,check=True)
+        (out/'contig_qc.tsv').write_text('contig\tlength_bp\tcallable_bp\theterozygous_snps\tstatus\n'+
+            ''.join(f'{name}\t1000\t{n}\t1\tassessed\n' for name,n in counts.items()))
+        (out/'input_qc.json').write_text(json.dumps(dict(callable_bp=600,callable_fraction=.2,heterozygous_snps=3)))
+        finalize(argparse.Namespace(out=str(out),min_callable_bp=1,min_callable_fraction=.1,min_hets=1,bin_size=100))
+        qc=json.loads((out/'input_qc.json').read_text())
+        self.assertEqual(qc['retained_contigs'],['above','exact'])
+        self.assertEqual(qc['psmc_retained_callable_bp'],401)
+        self.assertEqual(qc['conversion_lost_callable_bp'],199)
+        self.assertIn('below_20_percent_callable',(out/'conversion_audit.tsv').read_text())
 
 
 if __name__=='__main__':unittest.main()

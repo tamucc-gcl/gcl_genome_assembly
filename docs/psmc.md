@@ -1,15 +1,23 @@
 # Optional PSMC demographic history
 
 Implementation status: integrated into `main.nf` and tested with native tools on
-bounded known-input fixtures. Biological Crest acceptance is pending. This does
+bounded known-input fixtures. The first Crest pilot completed, but unexpectedly
+low callability and scaffold retention require investigation before biological
+acceptance. This does
 not change the accepted assembly, chimera or core graph procedures.
 
 ## Enable and select inputs
 
 Set `--run_psmc true`. PSMC is independent of `run_pangenome`, `qc_mode`,
 `run_post_assembly` and contact-map/visualization controls. Disabled PSMC registers
-no analysis tasks. The always-on shared final linear reference supplies the same
-coordinate frame whether or not a graph is built; graph VCF/GREF is not used.
+no analysis tasks. Each individual uses one of its **own finalized assemblies**
+as its reference. With a finalized hap1/hap2 pair, hap1 is chosen deterministically;
+with a sole assembly, that assembly is used. This does not assert that hap1 has
+better quality. PSMC does not use the species graph reference, graph VCF or GREF.
+The `PSMC_REFERENCE` jobs verify the selected FASTA against its FAI and record
+the assembly ID, individual, selection reason, SHA256 and sequence dictionary.
+The planner rejects a reference belonging to another individual. Changing the
+species graph's reference does not change PSMC reference selection.
 
 `--psmc_mode auto` chooses paired-assembly mode when both same-individual
 haplotypes are finalized, otherwise the complete-HiFi route for a single diploid
@@ -38,7 +46,9 @@ Only `sample` is mandatory. Omitted columns/blank values use global defaults.
 When a manifest is supplied, only its listed individuals are analyzed. Duplicate
 or unknown samples and unknown columns fail explicitly. BED paths are resolved
 relative to the original manifest location; coordinates are zero-based half-open
-on the exact selected final reference. Wrong names or out-of-range intervals fail.
+on that individual's exact selected final reference. Recheck any BED prepared
+against a different reference: identical chromosome names do not imply identical
+coordinates. Wrong names or out-of-range intervals fail.
 
 ## Scaling and fitting controls
 
@@ -68,6 +78,9 @@ one global species-specific assumption is not silently broadcast across taxa.
 | `psmc_seed` | 1729 | Derives stable per-individual/per-replicate resampling seeds |
 
 Guard thresholds are operational floors, not guarantees of demographic power.
+The upstream converter also requires **at least 20% callable bases per whole
+input sequence**, independently of `psmc_min_good_bases`. This fixed rule is
+audited in `conversion_audit.tsv`; lowering a global guard does not override it.
 Insufficient callable data or an input without both homozygous/heterozygous bins
 produces a **not fitted** report with retained evidence. A failed requested tool
 or malformed/truncated fit fails the pipeline rather than becoming an empty plot.
@@ -82,6 +95,16 @@ silently exclude sequence. Its confident BED defines where homozygous reference
 can be assumed. Called SNPs supply homozygous alternate or heterozygous IUPAC
 bases. Filtered/missing calls and indel/complex reference spans plus five-base
 flanks remain unknown. Gaps are always unknown.
+
+Dipcall's confident BED is stricter than alignment coverage: each haplotype
+must have one qualifying >=50 kb alignment, with no other >=10 kb alignment
+covering that position. Repeats, fragmented mappings and competing placements
+can therefore remove aligned sequence. `mask_audit.tsv` records, per scaffold,
+selected non-gap scope, confidence-mask losses, simple-genotype losses,
+complex-variant losses and duplicate-position losses. These are sequential,
+non-overlapping loss counts; no mapping/quality thresholds are relaxed to improve
+retention. Read-mode audits report callable bases after genotype checks rather
+than inventing a Dipcall confidence mask.
 
 The read route maps the individual's **complete HiFi read set** using minimap2
 `map-hifi`, then uses bcftools 1.21's general diploid multiallelic caller with
@@ -126,9 +149,18 @@ pins are separate in `environments/psmc_plot.yaml`.
 Published outputs are under `post_assembly/psmc/`:
 
 - `README.md`, `summary.tsv`, `psmc_plan.json`: current-run results/skips and input selection;
+- `combined_history.png/pdf`: observed individual curves together, with logarithmic
+  time and size axes; species/scaling groups have separate panels, and own-reference
+  IDs do not split comparable individuals into separate panels;
+- `individual_histories.png/pdf`: companion panels with bootstraps and individual
+  size scales; unfitted/skipped individuals are explicitly listed without curves;
+- `combined_curves.tsv`: unchanged exported curve values with individual identities;
 - `<taxid>/<sample>/genotypes/`: VCF/index, Dipcall confident BED or read-depth table;
+- `<taxid>/<sample>/reference/`: verified individual reference JSON and Markdown;
 - `<taxid>/<sample>/input/`: masked diploid FASTA, callable BED, PSMCFA,
   per-contig QC, input status and provenance;
+- `<taxid>/<sample>/input/mask_audit.tsv`, `conversion_audit.tsv`: stage-by-stage
+  mask losses, retained scaffold names and converter rejection reasons;
 - `<taxid>/<sample>/fits/`: observed/bootstrap PSMC outputs and resampling records;
 - `<taxid>/<sample>/report/`: Markdown, PNG/PDF, curve table, interval diagnostics
   and explicit fit/iteration/scaling manifest.
@@ -143,36 +175,44 @@ input. It does not include uncertainty in mutation rate, generation time,
 heterozygote detection or the PSMC model. No confidence ribbon is invented from
 ten pilot curves.
 
-## First Crest pilot
+## First Crest pilot (historical)
 
-Use the accepted core baseline and normal main-pipeline launcher/cache. This runs
-all eligible individuals through automatic mode, so this project's five paired
-assemblies use Dipcall. Scaling parameters remain null. It is a biological pilot,
-not a completed PSMC acceptance claim.
+`core-psmc-01` completed with a shared species reference. That reference policy
+departed from the intended own-individual workflow and has been corrected.
+Retain that pilot as comparison evidence; use a new output directory below.
+
+After the paired-route pilot, compare a manifest-selected individual's complete
+HiFi route against its assembly route in a distinct output directory. Do not
+concurrently resume two runs using the same shared launch/session directory.
+
+## Pilot callability audit and combined figures
+
+The first pilot completed operationally but retained only one scaffold in three
+individuals and none in another. The initial 9–21% callability needs attribution;
+it is not accepted as an intrinsic limitation of these assemblies. See the
+[assessment and implemented diagnostics](../planning_docs/core-psmc-01-assessment.md).
+After syncing, resume the production pipeline with own-individual references,
+mask-loss counters and cohort figures, retaining current quality thresholds:
 
 ```bash
 cd /work/birdlab/GCL/spratelloides_delicatulus_genome
-mkdir -p logs
 sbatch gcl_genome_assembly/scripts/comparisons/run_core_integration.sbatch \
   data/assembly_samplesheet.csv data/hic_readsets.csv \
-  comparisons/core-freeze-01/results \
+  comparisons/core-psmc-01/results \
   data/chimera_reviews/Sde-CTlk_104.v8.reviewed.tsv \
-  comparisons/core-psmc-01 \
+  comparisons/core-psmc-02 \
   --run_report true --report_chromosome_painting true \
   --run_psmc true --psmc_bootstraps 10 \
   --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-observable-contact-v7/results/assembly/chimeras/mapping_manifest.json"
 ```
 
-Assembly, scaffolding, accepted cuts, graph construction and existing read evidence
-should stay cached. New jobs are PSMC planning, per-individual Dipcall and input
-conversion, observed fits and up to eight simultaneous bootstrap tasks, exports,
-figures and dependent reports/provenance. Mappings/fits may be substantial; inspect
-the first trace before making runtime promises. Return
-`comparisons/core-psmc-01.review.tar.gz`.
-
-After the paired-route pilot, compare a manifest-selected individual's complete
-HiFi route against its assembly route in a distinct output directory. Do not
-concurrently resume two runs using the same shared launch/session directory.
+Assembly/scaffolding, accepted manual cuts and core graph work should stay cached.
+PSMC reference verification runs per individual. Dipcall calls must rerun for
+changed reference inputs, followed by masking, fits and plots; ordinary Nextflow
+cache rules still apply to unchanged inputs. Scaling parameters remain null.
+Return `comparisons/core-psmc-02.review.tar.gz`. Compare pre/post mask losses and
+retention before interpreting histories. Own references remove an unnecessary
+between-individual comparison but do not guarantee adequate callability.
 
 ## Methods sources
 

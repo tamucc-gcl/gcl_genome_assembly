@@ -1,4 +1,4 @@
-"""Plan optional PSMC jobs using final biological identities and shared references."""
+"""Plan optional PSMC jobs using each individual's own verified final reference."""
 import argparse
 import csv
 import json
@@ -42,9 +42,9 @@ def manifest_rows(path):
 
 def plan(eligibility, references, reads, overrides=None, mode='auto', mutation_rate=None, generation_time=None,min_contig_bp=1000000):
     overrides = overrides or {}
-    refs = {str(r['taxid']): r for r in references}
+    refs = {r['sample']: r for r in references}
     if len(refs) != len(references):
-        raise ValueError('Duplicate shared-reference taxid')
+        raise ValueError('Duplicate individual PSMC reference')
     readmap = {}
     for r in reads:
         if r['sample'] in readmap:
@@ -82,9 +82,9 @@ def plan(eligibility, references, reads, overrides=None, mode='auto', mutation_r
             reason = 'Standard PSMC requires a biologically diploid individual'
         elif len(final) != len(rows):
             reason = 'Expected finalized assembly representation is incomplete'
-        elif taxid not in refs:
-            reason = 'No shared final linear reference available'
-        elif 'sequences' in refs[taxid] and not any(r['length']>=min_contig_bp for r in refs[taxid]['sequences']):
+        elif sample not in refs:
+            reason = 'No own verified final reference available'
+        elif not any(r['length']>=min_contig_bp for r in refs[sample]['sequences']):
             reason = 'No reference scaffolds meet the PSMC minimum length'
         elif chosen == 'assemblies' and not pair:
             reason = 'Assembly mode requires both same-individual haplotypes'
@@ -100,9 +100,12 @@ def plan(eligibility, references, reads, overrides=None, mode='auto', mutation_r
         if reason:
             skipped.append(dict(sample=sample, taxid=taxid, status='skipped', reason=reason))
             continue
-        ref = refs[taxid]
+        ref = refs[sample]
+        expected_ref = next((r for r in final if r['haplotype']=='hap1'),final[0])
+        if (str(ref['taxid'])!=taxid or ref['id']!=expected_ref['id'] or ref['fasta']!=expected_ref['fasta']):
+            raise ValueError('PSMC reference must be the selected final assembly of the same individual')
         if ref.get('coordinate_stage') != 'final' or not re.fullmatch(r'[0-9a-f]{64}', ref.get('sha256','')):
-            raise ValueError('Shared PSMC reference lacks verified final identity')
+            raise ValueError('Individual PSMC reference lacks verified final identity')
         jobs.append(dict(id=sample, sample=sample, taxid=taxid, species=rows[0].get('species',''),
                          mode=chosen, reference=ref, assemblies=[r['fasta'] for r in final],
                          reads=readmap.get(sample), representation=final[0]['representation'],

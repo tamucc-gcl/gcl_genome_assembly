@@ -86,7 +86,7 @@ def prepare(a):
         maximum=a.max_depth or max(minimum,math.ceil(mean_depth*2))
         if maximum<minimum:raise ValueError('Maximum PSMC depth is below minimum')
     else:minimum=maximum=None
-    rows=[];confidence_counts={'GQ':0,'PL_separation':0,'unavailable':0};overlapping=0
+    rows=[];audit=[];confidence_counts={'GQ':0,'PL_separation':0,'unavailable':0};overlapping=0
     with gzip.open(out/'diploid.fa.gz','wt',encoding='ascii') as consensus, (out/'callable.bed').open('w') as maskout:
         for name,length in lengths.items():
             if length<a.min_contig_bp:
@@ -98,12 +98,14 @@ def prepare(a):
             if exclusion is not None:
                 for lo,hi in exclusion[name]:scope[lo:hi]=False
             scope &= np.isin(ref,[b'A',b'C',b'G',b'T'])
+            scope_bp=int(scope.sum())
             seq=np.full(length,b'N',dtype='S1')
             if confident is not None:
                 conf=np.zeros(length,dtype=bool)
                 for lo,hi in confident[name]:conf[lo:hi]=True
                 seq[scope & conf]=ref[scope & conf]
-            bad=[];snps=0;previous=-1
+            baseline=int((seq!=b'N').sum())
+            bad=[];duplicates=[];snps=0;previous=-1;record_counts={'complex':0,'duplicate':0,'simple':0}
             records=vcf.fetch(name) if name in vcf.header.contigs else []
             for r in records:
                 pos=r.start
@@ -111,7 +113,8 @@ def prepare(a):
                 if ref[pos:pos+len(r.ref)].tobytes().decode()!=r.ref.upper():raise ValueError('VCF REF disagrees with final reference')
                 if pos<previous:raise ValueError('Unsorted VCF records')
                 if pos==previous:
-                    bad.append((max(0,pos-a.indel_padding),min(length,r.stop+a.indel_padding)))
+                    duplicates.append((max(0,pos-a.indel_padding),min(length,r.stop+a.indel_padding)))
+                    record_counts['duplicate']+=1
                     overlapping+=1
                     continue
                 previous=pos
@@ -120,7 +123,9 @@ def prepare(a):
                 complex_site=any((len(x)!=1 or x.upper() not in 'ACGT') and x not in ['<*>','<NON_REF>'] for x in alleles)
                 if complex_site:
                     bad.append((max(0,pos-a.indel_padding),min(length,r.stop+a.indel_padding)))
+                    record_counts['complex']+=1
                     continue
+                record_counts['simple']+=1
                 passed=not (set(r.filter)-{'PASS','.'})
                 base=genotype(alleles,gt) if passed else None
                 if a.mode=='hifi':
@@ -134,17 +139,32 @@ def prepare(a):
                 # A variant outside Dipcall's confident BED must remain unknown.
                 allowed=scope[pos] and (confident is None or conf[pos])
                 seq[pos]=(base or 'N').encode() if allowed else b'N'
+            before_complex=int((seq!=b'N').sum())
             for lo,hi in bad:seq[lo:hi]=b'N'
+            after_complex=int((seq!=b'N').sum())
+            for lo,hi in duplicates:seq[lo:hi]=b'N'
             callable_mask=seq!=b'N'
             for lo,hi in runs(callable_mask):maskout.write(f'{name}\t{lo}\t{hi}\n')
             callable_bp=int(callable_mask.sum());snps=int(np.isin(seq,[x.encode() for x in 'MRWSYK']).sum())
             rows.append(dict(contig=name,length_bp=length,scope_bp=int(scope.sum()),callable_bp=callable_bp,
                              heterozygous_snps=snps,status='assessed'))
+            audit.append(dict(contig=name,length_bp=length,scope_bp=scope_bp,
+                confident_scope_bp=baseline if confident is not None else '',
+                outside_confident_bp=scope_bp-baseline if confident is not None else '',
+                after_simple_genotypes_bp=before_complex,
+                simple_genotype_loss_bp=baseline-before_complex if confident is not None else '',
+                complex_mask_loss_bp=before_complex-after_complex,
+                duplicate_mask_loss_bp=after_complex-callable_bp,
+                callable_bp=callable_bp,heterozygous_snps=snps,
+                simple_records=record_counts['simple'],complex_records=record_counts['complex'],
+                duplicate_records=record_counts['duplicate']))
             consensus.write('>'+name+'\n')
             data=seq.tobytes().decode()
             for i in range(0,length,80):consensus.write(data[i:i+80]+'\n')
     with (out/'contig_qc.tsv').open('w',newline='') as f:
         w=csv.DictWriter(f,fieldnames=list(rows[0]) if rows else ['contig'],delimiter='\t');w.writeheader();w.writerows(rows)
+    with (out/'mask_audit.tsv').open('w',newline='',encoding='utf-8') as f:
+        w=csv.DictWriter(f,fieldnames=list(audit[0]) if audit else ['contig'],delimiter='\t');w.writeheader();w.writerows(audit)
     total=sum(r['scope_bp'] for r in rows);called=sum(r['callable_bp'] for r in rows);hets=sum(r['heterozygous_snps'] for r in rows)
     status=dict(mode=a.mode,reference_sha256=digest.hexdigest(),coordinate_stage='final',scope_bp=total,
                 callable_bp=called,callable_fraction=called/total if total else 0,heterozygous_snps=hets,
@@ -152,6 +172,8 @@ def prepare(a):
                 min_depth=minimum,max_depth=maximum,min_contig_bp=a.min_contig_bp,
                 min_gq=a.min_gq,genotype_confidence_counts=confidence_counts,
                 duplicate_position_records_masked=overlapping,
+                mask_audit_totals={k:sum(r[k] for r in audit) for k in audit[0]
+                    if k!='contig' and all(isinstance(r[k],int) for r in audit)} if audit else {},
                 genotype_confidence_rule='GQ when provided; otherwise PL runner-up minus called-genotype PL (likelihood separation, not posterior GQ)',
                 min_allele_balance=a.min_allele_balance,indel_padding=a.indel_padding,
                 include_bed=a.include,exclude_bed=a.exclude,
@@ -170,8 +192,22 @@ def finalize(a):
         if set(line)-set(counts):raise ValueError('Invalid fq2psmcfa output alphabet')
         for c in counts:counts[c]+=line.count(c)
     usable=counts['K']+counts['T']
-    with (out/'contig_qc.tsv').open() as f:
-        retained_callable=sum(int(r['callable_bp']) for r in csv.DictReader(f,delimiter='\t') if r['contig'] in retained)
+    with (out/'contig_qc.tsv').open(encoding='utf-8') as f:
+        rows=list(csv.DictReader(f,delimiter='\t'))
+    if retained-set(r['contig'] for r in rows):raise ValueError('PSMC sequence absent from input scope')
+    retained_callable=sum(int(r['callable_bp']) for r in rows if r['contig'] in retained)
+    retained_hets=sum(int(r.get('heterozygous_snps',0)) for r in rows if r['contig'] in retained)
+    conversion=[]
+    for r in rows:
+        keep=r['contig'] in retained
+        length=int(r.get('length_bp',0));called=int(r['callable_bp'])
+        reason='retained' if keep else ('below_min_contig_bp' if r.get('status')=='below_min_contig_bp'
+            else 'below_20_percent_callable' if length and called/length<.2 else 'below_min_good_bases')
+        conversion.append(dict(contig=r['contig'],length_bp=length,callable_bp=called,
+            callable_fraction=called/length if length else '',retained='yes' if keep else 'no',reason=reason))
+    with (out/'conversion_audit.tsv').open('w',newline='',encoding='utf-8') as f:
+        w=csv.DictWriter(f,fieldnames=['contig','length_bp','callable_bp','callable_fraction','retained','reason'],delimiter='\t')
+        w.writeheader();w.writerows(conversion)
     reasons=[]
     if qc['callable_bp']<a.min_callable_bp:reasons.append('insufficient_callable_bp')
     if retained_callable<a.min_callable_bp:reasons.append('insufficient_callable_bp_retained_by_fq2psmcfa')
@@ -180,6 +216,9 @@ def finalize(a):
     if not counts['K'] or not counts['T']:reasons.append('PSMC_requires_homozygous_and_heterozygous_bins')
     qc.update(status='ready' if not reasons else 'not_fitted',reason='; '.join(reasons),bin_size=a.bin_size,
               bins=counts,usable_bins=usable,segments=segments,psmc_retained_callable_bp=retained_callable,
+              retained_contigs=sorted(retained),psmc_retained_heterozygous_snps=retained_hets,
+              conversion_lost_callable_bp=qc['callable_bp']-retained_callable,
+              fq2psmcfa_min_sequence_callable_fraction=.2,
               missing_bin_fraction=counts['N']/sum(counts.values()) if sum(counts.values()) else 1)
     (out/'input_qc.json').write_text(json.dumps(qc,indent=2)+'\n')
 

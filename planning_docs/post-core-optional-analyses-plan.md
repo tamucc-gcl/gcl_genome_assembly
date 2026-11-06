@@ -68,7 +68,7 @@ Use tidyverse/ggplot2 for maintained R plots and patchwork for combined figures.
 
 ### Inputs and eligibility
 
-Use a linear final assembly reference shared with the species graph when that reference exists, never a synthetic GREF path. With one diploid individual, select between its phased assemblies using documented available quality evidence and deterministic tie-breaking; allow an explicit override. A single FASTA from a diploid individual is distinct from a biologically haploid individual, which is unsupported for standard PSMC.
+Use one of the analyzed individual's own final assemblies: deterministically hap1 for a finalized pair, or its sole assembly otherwise. This policy was corrected after the first PSMC pilot; the species graph reference is independent. Selection is not a quality ranking. A single FASTA from a diploid individual is distinct from a biologically haploid individual, which is unsupported for standard PSMC. See docs/psmc.md for the implemented contract.
 
 Two phased assemblies from the same individual use the Dipcall route and its confident-region BED. One assembly plus the same individual's complete HiFi reads uses diploid genotype calling. Do not use haplotype-assigned reads alone to infer diploid heterozygosity. Short-read PSMC is not part of the initial addition. Record partial-phasing limitations.
 

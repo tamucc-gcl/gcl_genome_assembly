@@ -7,7 +7,7 @@ The accepted core freeze remains complete.
 ## Implemented scope
 
 - Default-off `PSMC_ANALYSIS` in the real main pipeline, independent of graph,
-  QC and visualization toggles; verified final shared linear references.
+  QC and visualization toggles; verified own-individual final references.
 - Paired same-individual assembly route with Dipcall 0.3 and its confident BED;
   complete-HiFi route with minimap2 2.28 and bcftools 1.21 all-site diploid calls.
 - Long scaffolds only; sex/autosome identification is not required. Optional BED
@@ -65,7 +65,15 @@ mutation rate or generation time is embedded in production code.
 
 ## Crest acceptance still needed
 
-Run the documented cached full-pipeline pilot with the five paired individuals,
+The first pilot ran with the shared reference and needs callability investigation;
+see [the assessment](core-psmc-01-assessment.md). Own-reference selection is now
+verified per individual; the combined plot groups by species/scaling rather than
+reference ID. Thirty-three contract/masking tests and the two-route native fixture
+with distinct own-reference checksums pass. Manifest-only skips do not hash
+unselected assemblies. Original verification counts above describe the first
+implementation, not completion of biological acceptance.
+
+Run the documented resumed full-pipeline pilot with the five paired individuals,
 long reference scaffolds, null scaling parameters and ten replicates. Inspect
 actual callability, heterozygosity, interval information, curves, resources,
 published links and retained core cache identity. Then compare a selected complete-

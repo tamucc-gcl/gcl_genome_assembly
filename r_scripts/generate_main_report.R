@@ -455,7 +455,8 @@ if(nrow(psmc)>0) {
     if(nrow(records)!=1) stop('PSMC report requires exactly one current-run summary')
     tab <- read_tsv(I(records$content[[1]]),col_types=cols(.default=col_character()),show_col_types=FALSE)
     md <- c(md,md_table(tab |> transmute(Individual=sample,Mode=mode,Result=status,
-        `Callable bp`=callable_bp,Scaling=scaling,Details=if_else(!is.na(report) & nzchar(report),link('Report',report),reason))),
+        `Callable bp retained for fitting`=retained_callable_bp,`Retained scaffolds`=retained_scaffolds,
+        Scaling=scaling,Details=if_else(!is.na(report) & nzchar(report),link('Report',report),reason))),
         '', 'Scaling values are explicit inputs. Unscaled histories do not assume a mutation rate or generation time. Long-scaffold scope may include sex-linked sequence.','')
 }
 md <- c(md,'## Detailed evidence','',link('All available figures and reports','reports/main/evidence_index.md'),'')

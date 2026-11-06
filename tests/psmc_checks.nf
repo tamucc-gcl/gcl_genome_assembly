@@ -3,7 +3,6 @@ include { PSMC_ANALYSIS } from '__REPO__/workflows/psmc.nf'
 workflow {
     def root=file(params.psmc_fixture)
     PSMC_ANALYSIS(Channel.value(file("${root}/eligibility.json")),
-        Channel.value(tuple('1',file("${root}/reference.json"))),
         Channel.value(tuple([sample:'read_ind'],file("${root}/complete.fastq"))))
     PSMC_ANALYSIS.out.report.view { p ->
         if(p.name=='summary.tsv') {

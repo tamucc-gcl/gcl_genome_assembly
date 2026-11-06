@@ -53,6 +53,7 @@ process {
  scratch=false
  withName: '.*' { cpus=2; memory='2 GB' }
  withName: '.*PSMC_RENDER' { beforeScript='export PATH=$rbin:$bin:\$PATH' }
+ withName: '.*PSMC_INDEX' { beforeScript='export PATH=$rbin:$bin:\$PATH' }
 }
 EOF
 extra=()

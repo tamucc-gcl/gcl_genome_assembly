@@ -1,5 +1,4 @@
 """Bounded native fixtures: paired assemblies, complete HiFi reads and haploid skip."""
-import hashlib
 import json
 from pathlib import Path
 import random
@@ -14,7 +13,9 @@ def setup(directory):
     alternate=list(ref)
     for i in range(150,249900,173):alternate[i]=rng.choice([b for b in 'ACGT' if b!=ref[i]])
     alternate=''.join(alternate)
-    for name,sequence in [('hap1',ref),('hap2',alternate)]:
+    own_read_reference=list(ref)
+    own_read_reference[2000]=next(b for b in 'ACGT' if b!=own_read_reference[2000])
+    for name,sequence in [('hap1',ref),('hap2',alternate),('read_reference',''.join(own_read_reference))]:
         p=root/(name+'.fa')
         p.write_text('>long_scaffold\n'+sequence+'\n>short_piece\n'+'A'*1000+'\n')
         pysam.faidx(str(p))
@@ -26,16 +27,11 @@ def setup(directory):
     rows=[]
     for sample,ploidy,haps in [('assembly_ind',2,['hap1','hap2']),('read_ind',2,['primary']),('haploid_ind',1,['primary'])]:
         for hap in haps:
-            source='hap2' if hap=='hap2' else 'hap1'
+            source='read_reference' if sample=='read_ind' else 'hap2' if hap=='hap2' else 'hap1'
             rows.append(dict(id=sample+'_'+hap,sample=sample,taxid='1',species='Fixture species',ploidy=ploidy,
                              haplotype=hap,representation='hic_phased' if len(haps)==2 else 'collapsed_or_primary',
-                             completion='finalized',fasta=str(root/(source+'.fa'))))
+                             completion='finalized',fasta=str(root/(source+'.fa')),fai=str(root/(source+'.fa.fai'))))
     (root/'eligibility.json').write_text(json.dumps(dict(assemblies=rows)))
-    reference=dict(id='assembly_ind_hap1',sample='assembly_ind',taxid='1',species='Fixture species',
-                   fasta=str(root/'hap1.fa'),fai=str(root/'hap1.fa.fai'),coordinate_stage='final',
-                   sequences=[dict(name='long_scaffold',length=250000),dict(name='short_piece',length=1000)],
-                   sha256=hashlib.sha256((root/'hap1.fa').read_bytes()).hexdigest())
-    (root/'reference.json').write_text(json.dumps(reference))
     (root/'manifest.tsv').write_text('sample\tmode\nassembly_ind\tassemblies\nread_ind\thifi\nhaploid_ind\tauto\n')
     (root/'reads.json').write_text(json.dumps([dict(sample='read_ind',fastq=str(fq))]))
     return root

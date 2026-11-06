@@ -13,7 +13,7 @@ The supported core is defined by [interface 1.0](../docs/core-interface.md).
 | 5. Core pangenome | Accepted | [Production graph acceptance](core-graph-production-02-assessment.md) and [tool-change rationale](../docs/pangenome-tool-changes.md); five known representation flags retained |
 | 6. Unified Markdown reporting and freeze | Accepted | [Core-freeze-01](core-freeze-01-assessment.md): native PASS, 875 cached/64 completed tasks, 543 report links, zero version-record issues and unchanged selected evidence |
 | 7. Operational cleanup | Accepted | [Combined integration](core-integration-02-assessment.md); ordinary Nextflow cache handling and exact YaHS replay |
-| 8. PSMC | Implemented; Crest biological acceptance pending | Both input routes pass native fixtures, masks/unknowns, seeded bootstrap jobs, upstream scaling comparison and report integration; [pilot instructions](../docs/psmc.md) |
+| 8. PSMC | Pilot completed; callability investigation open | Initial 9–21% callability and converter scaffold losses need attribution; stage-loss audits and combined R figures implemented; [pilot assessment](core-psmc-01-assessment.md), [resumed run](../docs/psmc.md#pilot-callability-audit-and-combined-figures) |
 | 9. BlobToolKit evidence / cleaning | Planned | Rebuild evidence first; separately validate explicit cleaning and its downstream invalidation |
 | 10. Graph QC | Planned | Bounded read-to-graph self-mapping plus separately scheduled missing intrinsic graph metrics; [agreed QC/MultiQC scope](pangenome-qc-growth-followup.md) |
 | 11. Private/accessory evidence | Planned | Distinguish individual/haplotype privacy, missing representation and detection power |

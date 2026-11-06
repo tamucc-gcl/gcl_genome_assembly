@@ -1,4 +1,28 @@
 /* Optional PSMC: stable expensive inputs, separate masks/fits/bootstrap/plots. */
+process PSMC_REFERENCE {
+    tag "${selection.sample}"
+    cpus 1
+    memory '2 GB'
+    time '2h'
+    conda 'conda-forge::python=3.11'
+    publishDir "${params.outdir}/post_assembly/psmc/${selection.taxid}/${selection.sample}/reference", mode: params.publish_dir_mode
+    input:
+    tuple val(selection), path(fasta, stageAs:'reference.fa'), path(fai, stageAs:'reference.fa.fai')
+    path verifier
+    path fasta_inspector
+    output:
+    tuple val(selection), path('reference.json'), emit: reference
+    path 'reference.md', emit: report
+    script:
+    """
+    set -euo pipefail
+    cat > selection.json <<'PSMC_REFERENCE_SELECTION'
+${groovy.json.JsonOutput.toJson(selection)}
+PSMC_REFERENCE_SELECTION
+    python3 ${verifier} --selection selection.json --fasta ${fasta} --fai ${fai}
+    """
+}
+
 process PSMC_PLAN {
     cpus 1
     memory '2 GB'
@@ -213,6 +237,7 @@ process PSMC_BOOTSTRAP {
     path version_helper
     output:
     tuple val(meta), path('bootstrap_*.psmc'), emit: model
+    tuple val(meta), path('bootstrap_*.resampling.json'), emit: resampling
     path 'versions.tsv', emit: versions
     script:
     def name=String.format('bootstrap_%04d',replicate as int)
@@ -276,19 +301,27 @@ process PSMC_INDEX {
     cpus 1
     memory '2 GB'
     time '1h'
-    conda 'conda-forge::python=3.11'
+    conda "${projectDir}/environments/psmc_plot.yaml"
     publishDir "${params.outdir}/post_assembly/psmc", mode: params.publish_dir_mode,
         pattern:'psmc/*', saveAs:{it.replaceFirst('^psmc/','')}
     input:
     path plan
     path directories, stageAs:'reports/report??'
     path helper
+    path renderer
     output:
     path 'psmc/README.md', emit: report
     path 'psmc/summary.tsv', emit: summary
+    path 'psmc/*.png', optional:true, emit: figures
+    path 'psmc/*.pdf', optional:true, emit: pdfs
+    path 'psmc/combined_curves.tsv', optional:true, emit: curves
+    path 'psmc/psmc_plan.json', emit: plan_copy
+    path 'versions.tsv', emit: versions
     script:
     """
     set -euo pipefail
     python3 ${helper} index --plan ${plan} --directories ${directories} --out psmc
+    Rscript ${renderer} psmc
+    printf 'R\\t%s\\n' "\$(Rscript --version 2>&1)" > versions.tsv
     """
 }

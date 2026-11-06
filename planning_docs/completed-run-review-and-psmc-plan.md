@@ -22,15 +22,15 @@ After review, preserve old logs/small reports and keep work/cache/history intact
 
 ## Scope and scheduling of PSMC
 
-Add optional POST_ASSEMBLY_ANALYSES -> PSMC_ANALYSIS after final assembly acceptance, as batch 6A after shared reference selection is stabilized in batch 4. It is an explicit, bounded exception to the earlier exclusion of individual-level population analyses; broader population genetics remains outside scope. Default run_psmc=false. This is a plan addition, not an implemented workflow.
+Add optional POST_ASSEMBLY_ANALYSES -> PSMC_ANALYSIS after final assembly acceptance. It is an explicit, bounded exception to the earlier exclusion of individual-level population analyses; broader population genetics remains outside scope. Default run_psmc=false. This original design is superseded by the implementation in docs/psmc.md.
 
 The PSMC flag must work independently of run_pangenome, qc_mode and optional visualization switches. Disabled means no mappings, calling, bootstrap or plotting tasks registered. Enabled but unsupported inputs yield a reasoned skip; failed requested analysis is not represented as a successful empty plot.
 
-### Shared reference selection
+### Individual reference selection (corrected 2026-11-06)
 
-Extract a species reference manifest upstream of both pangenome construction and PSMC. The current audit selects a reference only after cohort readiness; that must change to serve single-individual analyses. Record assembly ID, species, final FASTA identity/checksum, selection metrics and reasons.
+PSMC uses a reference from the individual being analyzed, independently of the species graph reference and cohort readiness. Record assembly ID, species, individual, final FASTA identity/checksum, sequence dictionary and selection reason.
 
-For an eligible multi-individual graph cohort, both consumers use exactly the same final reference regardless of whether graph construction runs. Never use a synthetic GREF path as the PSMC reference. For a single phased diploid individual, rank its two final haplotypes using available quality evidence plus contiguity/gap burden and a deterministic tie-break; report when quality metrics are unavailable rather than treating N50 as proof. Permit an explicit reference override. With one assembly representation, use that assembly if suitable. A fragmented fallback may permit PSMC but does not relax chromosome-scale graph requirements. Keep species isolated.
+Use the individual's own hap1 for a finalized pair, or its sole assembly otherwise. This deterministic choice is not a quality ranking. The previous shared-reference design departed from the user's intended example and was corrected after the first pilot. Do not restore it. Different individual references do not prevent combining demographic curves. Keep species and scaling groups separate, and retain per-individual masks and reference provenance.
 
 ### Input modes
 
