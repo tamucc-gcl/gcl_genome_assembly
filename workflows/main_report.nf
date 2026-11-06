@@ -53,6 +53,7 @@ workflow MAIN_REPORTING {
     input_capabilities
     chimera_registry
     versions
+    psmc_reports
     main:
     def artifact={ type,id,path -> [type:type,id:id.toString(),path:path.toString()] }
     def annotation_helper=file("${projectDir}/py_scripts/annotation_counts.py",checkIfExists:true)
@@ -63,7 +64,10 @@ workflow MAIN_REPORTING {
          path:review ? "pangenome/${taxid}/representation/${md.name}".toString() : md.name=='sharing_summary.tsv' ? "pangenome/${taxid}/sharing/sharing_summary.tsv".toString() : graphReportPath(taxid,md.name),
          content:md.name=='source_sequences.tsv' ? graphReviewRows(md) : review || md.name=='sharing_summary.tsv' ? md.text : '',
          note:md.name=='source_report.md' ? (md.readLines().find { it.startsWith('Status:') } ?: '') : '']
-    }.mix(detailed_report.map { md -> artifact('assembly_details','run',md.name) })
+    }.mix(psmc_reports.map { p ->
+        [type:p.name=='summary.tsv' ? 'psmc_summary' : 'psmc',id:'run',
+         path:"post_assembly/psmc/${p.name}".toString(),content:p.name=='summary.tsv' ? p.text : '']
+    }).mix(detailed_report.map { md -> artifact('assembly_details','run',md.name) })
       .mix(dotplots.map { a,b,p -> artifact('dotplot',"${a} / ${b}","pairwise_alignments/${p.name}") })
       .mix(ribbons.map { a,b,p -> artifact('ribbon',"${a} / ${b}","pairwise_alignments/${p.name}") })
       .mix(contacts.flatMap { m,stage,files -> (files instanceof List ? files : [files]).collect { p ->
@@ -94,7 +98,7 @@ workflow MAIN_REPORTING {
         contact_resolutions:(params.hic_plot_resolutions ?: '1000000,500000,250000,100000').toString(),
         comparisons_enabled:params.run_post_assembly != false && params.run_pairwise_alignments,
         comparison_mode:(params.pairwise_alignment_mode ?: 'within_sample').toString(),
-        graph_enabled:params.run_pangenome,graph_validate_only:params.pangenome_validate_only] }
+        graph_enabled:params.run_pangenome,graph_validate_only:params.pangenome_validate_only,psmc_enabled:params.run_psmc] }
     MAIN_REPORT(eligibility,expected,name_maps.map { m,p -> p }.toList(),
         paintings.flatMap { m,ref,tsv,json -> [tsv,json] }.toList(),
         qc_metrics.ifEmpty(fallback),decisions,verifications,registry,context,versions,

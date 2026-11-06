@@ -50,3 +50,28 @@ no unintended scientific-output changes, and no new version-format issues.
 Use the review archive to inspect actual figures and retained evidence. Review archives
 omit full assemblies and graph/index products, so full identity acceptance happens
 on the cluster rather than by pretending omitted local files are present.
+
+## Optional PSMC checks
+
+The [PSMC interface and Crest pilot](psmc.md) distinguish native fixture success
+from biological acceptance. The new helper is a removable native test, not a
+second production entry point:
+
+```bash
+PSMC_TEST_BIN=/path/to/pinned/psmc/env/bin \
+PSMC_R_BIN=/path/to/pinned/R/env/bin \
+bash tests/run_psmc_native_checks.sh
+```
+
+It uses the existing local Java/Nextflow test runtime (override its paths with
+`PSMC_JAVA`/`PSMC_NEXTFLOW_JAR` if needed), real Dipcall/minimap2/bcftools/PSMC
+and R. No test stand-in replaces the scientific commands. `resume` checks reuse;
+`scale` tests a nondefault mutation rate and fractional generation time. These
+fixture values never enter production defaults. `verify_psmc_native.py` checks
+published scope/QC/files and upstream numerical scaling/iteration/tail agreement.
+
+Run `test_psmc_masking.py` with the pinned pysam/NumPy environment; a general
+environment without those readers explicitly skips those five tests. Known-answer
+checks cover homozygous/heterozygous/unknown sites, complex flanks, duplicate-site
+masking, exact reference fingerprints and insufficient data. PSMC planning/scaling/
+bootstrap contract tests have no native-reader dependency.

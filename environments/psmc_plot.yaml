@@ -1,0 +1,7 @@
+name: psmc_plot
+channels:
+  - conda-forge
+dependencies:
+  - r-base=4.3.3
+  - r-ggplot2=3.5.2
+  - r-jsonlite=2.0.0

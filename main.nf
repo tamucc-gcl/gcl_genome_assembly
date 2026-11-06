@@ -105,6 +105,7 @@ include { REPORT_PAINTINGS; MAIN_REPORTING } from './workflows/main_report.nf'
 include { graphReportPath; rebaseReportMarkdown } from './functions/report_artifacts.nf'
 include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
 include { SHARED_REFERENCE } from './modules/shared_reference.nf'
+include { PSMC_ANALYSIS } from './workflows/psmc.nf'
 include { forkHaplotypeMeta } from './functions/meta.nf'
 
 /*
@@ -530,6 +531,8 @@ workflow {
         }
     }, file("${projectDir}/py_scripts/shared_reference.py", checkIfExists: true),
        file("${projectDir}/py_scripts/pangenome_input_audit.py", checkIfExists: true))
+    PSMC_ANALYSIS(ASSEMBLY_ELIGIBILITY.out.manifest,SHARED_REFERENCE.out.manifest,READ_PREPARATION.out.hifi)
+    ch_versions = ch_versions.mix(PSMC_ANALYSIS.out.versions)
     ASSEMBLY_RUN_SUMMARY(ch_input_status,
         ch_finalized_assembly.map { meta, fa -> [sample: meta.sample, id: meta.id, name: fa.name] }.collect(flat: false),
         CHIMERA.out.coordinate_report, ASSEMBLY_ELIGIBILITY.out.report, CHIMERA.out.report)
@@ -830,7 +833,7 @@ workflow {
             ORGANELLE.out.circular_map,ORGANELLE.out.stats,ORGANELLE.out.annotation,ORGANELLE.out.recovery_status,
             ch_qc_plots,ch_teloclip_stats_for_report,ch_qc_report_html,ch_snail_final,
             ch_input.map { meta,reads -> [sample:meta.sample.toString(),hifi:meta.hifi==true,hic:meta.hic==true,shortread:meta.shortread==true] }.toList(),
-            CHIMERA.out.registry,RUN_PROVENANCE.out.files)
+            CHIMERA.out.registry,RUN_PROVENANCE.out.files,PSMC_ANALYSIS.out.report)
     }
 }
 /*

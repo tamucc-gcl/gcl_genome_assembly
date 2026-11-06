@@ -20,3 +20,8 @@ Old specimen-specific fusion batches, cache-recovery experiments and obsolete re
 launchers were removed. Git history retains them; do not restore them as production
 workflows. See [verification](../../docs/verification.md) and
 [retirement policy](../../docs/repository-layout.md).
+
+The same integration launcher can enable `--run_psmc true` against an accepted
+baseline. It runs the production PSMC workflow and packages compact PSMC evidence;
+see [PSMC controls and pilot](../../docs/psmc.md). No separate production PSMC
+launcher or project-specific assembly rebuild is required.

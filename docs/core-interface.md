@@ -161,6 +161,12 @@ true fusion. Graph representation flags are not automatic assembly-edit requests
 
 ## Failures, caches and version records
 
+The additive [PSMC extension](psmc.md) is available with `run_psmc=false` by
+default, independently of the frozen core controls. It adds published evidence
+under `post_assembly/psmc/` and a main-report section only when enabled. Both
+scaling parameters default to null; long-scaffold scope requires no sex-chromosome
+identification. See its separate native-versus-biological acceptance status.
+
 Requested task failures retry according to resource policy and then stop. Unsupported
 input routes and inadequate scope must have explicit status/reason. Missing measurements
 must not be fabricated as zero. Do not mark a failed analysis complete because a report exists.

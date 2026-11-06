@@ -16,12 +16,13 @@ workflow {
     graph=mode=='multispecies' ? Channel.fromList(['sharing_summary.tsv','sharing_report.md','source_sequences.tsv','source_audit.json','source_report.md'].collect { tuple('1',file("${root}/${it}")) }) : Channel.empty()
     snails=mode!='disabled' ? Channel.fromList(data.assemblies.collect { tuple(it.id,'final',file("${root}/${it.id}_final_snail.svg")) }) : Channel.empty()
     annotations=mode!='disabled' ? Channel.value(tuple([sample:'sample'],file("${root}/annotation.gb"))) : Channel.empty()
+    psmc=mode=='psmc' ? Channel.fromList([file("${root}/psmc/README.md"),file("${root}/psmc/summary.tsv")]) : Channel.empty()
     MAIN_REPORTING(eligibility,expected,names,REPORT_PAINTINGS.out.blocks,qc,
         Channel.value(no),Channel.value([no]),graph,Channel.empty(),
         Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),
         annotations,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),snails,
         Channel.value(data.assemblies.collect { [sample:it.sample,hifi:false,hic:false,shortread:false] }.unique { it.sample }),Channel.empty(),
-        Channel.value([file("${root}/software_versions.tsv"),file("${root}/run_provenance.json")]))
+        Channel.value([file("${root}/software_versions.tsv"),file("${root}/run_provenance.json")]),psmc)
     MAIN_REPORTING.out.report.view { report ->
         assert report.text.contains('| sample | Finalized |')
         assert report.text.contains('## Chromosome structure')==(mode!='disabled')
@@ -30,6 +31,7 @@ workflow {
         assert !file("${report.parent}/reports/main/report_completeness.tsv").text.contains('\tMISSING\t')
         assert file("${report.parent}/reports/main/artifact_registry.tsv").text.contains('provenance/software_versions.tsv')
         assert report.text.contains('## Pangenome')==(mode=='multispecies')
+        assert report.text.contains('## Demographic history (PSMC)')==(mode=='psmc')
         if(mode=='multispecies') {
             assert file("${report.parent}/reports/main/needs_attention.tsv").text.contains('sample_hap1 / chr1_1')
             assert !file("${report.parent}/reports/main/needs_attention.tsv").text.contains('sample_hap2 / chr1_1')

@@ -64,7 +64,15 @@ functionality; removing a prototype does not cancel its roadmap requirement.
 - `git diff --check` and shell syntax checks pass. Rendering calculations were not
   edited in this cleanup; their native acceptance remains detailed-report-01.
 
-## Final cached Crest confirmation
+## Native confirmation accepted
+
+[Core-freeze-01 assessment](../planning_docs/core-freeze-01-assessment.md): native
+SUCCESS, core audit PASS, 875 cached/64 completed tasks, graph construction cached,
+543 report links valid and zero version-record issues. All 84 selected baseline
+evidence files were byte-identical. The command below records the accepted test;
+it is not an instruction to repeat it before starting PSMC.
+
+## Accepted cached Crest confirmation command
 
 Sync deletions as well as modified/new files. Keep the project-level reviewed cuts,
 accepted results, `.nf/assembly` session and work directory intact. Do not copy an

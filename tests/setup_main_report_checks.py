@@ -39,6 +39,9 @@ if case=='multispecies':
 (fixtures/'source_report.md').write_text('# Source representation\n\nStatus: **REVIEW**. 1 chromosome-scale path requires review.\n')
 (fixtures/'software_versions.tsv').write_text('tool\tversion\nfixture\t1\n')
 (fixtures/'run_provenance.json').write_text('{"context":{"parameters":{"run_report":true}}}\n')
+(fixtures/'psmc').mkdir(exist_ok=True)
+(fixtures/'psmc/README.md').write_text('# PSMC evidence\n\nCurrent-run history and callable sequence.\n')
+(fixtures/'psmc/summary.tsv').write_text('sample\ttaxid\tmode\tstatus\treason\treference\tcallable_bp\theterozygous_snps\tscaling\treport\nsample\t1\tassemblies\tcompleted\t\tsample_hap1\t1000\t10\tunscaled\tpost_assembly/psmc/README.md\n')
 (fixtures/'sample_hap1_final_snail.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><circle cx="100" cy="100" r="80" /></svg>')
 for record in assemblies:
     (fixtures/(record['id']+'_final_snail.svg')).write_bytes((fixtures/'sample_hap1_final_snail.svg').read_bytes())
@@ -54,6 +57,7 @@ report.enabled=false
 timeline.enabled=false
 dag.enabled=false
 params.run_report=true
+params.run_psmc={'true' if case=='psmc' else 'false'}
 params.report_chromosome_painting={'false' if case=='disabled' else 'true'}
 params.report_top_scaffolds=20
 params.qc_mode='{'none' if case=='disabled' else 'final_only'}'

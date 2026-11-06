@@ -18,6 +18,7 @@ reporting integration. Execution acceptance does not imply biological completene
 - [Pangenome tool corrections and biological rationale](docs/pangenome-tool-changes.md)
 - [Canonical completion checklist](planning_docs/remaining-pipeline-work-2026-10-15.md)
 - [Agreed optional extensions](planning_docs/post-core-optional-analyses-plan.md)
+- [PSMC inputs, controls, evidence and first Crest pilot](docs/psmc.md)
 - [R/ggplot2 plotting convention](planning_docs/r-plotting-conventions.md)
 
 ## Quick start
@@ -70,6 +71,12 @@ Core pangenome outputs include construction/identity audits, sequence accounting
 sharing/growth, regional attribution, descriptive comparisons and variant export audits.
 Graph representation flags are not automatic assembly-edit recommendations. Biological
 interpretation of private sequence and structural variants remains an extension.
+
+Optional PSMC is implemented behind `--run_psmc true`, independently of graph/QC
+toggles. It supports paired same-individual assemblies or a diploid assembly plus
+complete HiFi reads, long-scaffold scope, explicit callability, separately scheduled
+bootstraps and R figures. Mutation rate and generation time default to null for
+unscaled output. Native fixture checks pass; biological Crest acceptance is pending.
 
 ## Resume and validation
 

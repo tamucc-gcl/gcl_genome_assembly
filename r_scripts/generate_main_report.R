@@ -448,6 +448,16 @@ if(nrow(graph)>0) {
         md <- c(md,link('Complete pangenome report: biological results and technical validation',paste0('reports/main/',hub_name)),'')
     }
 }
+psmc <- artifacts |> filter(type=='psmc')
+if(nrow(psmc)>0) {
+    md <- c(md,'## Demographic history (PSMC)','',link('PSMC histories, input scope and callable-region evidence',psmc$path[[1]]),'')
+    records <- artifacts |> filter(type=='psmc_summary')
+    if(nrow(records)!=1) stop('PSMC report requires exactly one current-run summary')
+    tab <- read_tsv(I(records$content[[1]]),col_types=cols(.default=col_character()),show_col_types=FALSE)
+    md <- c(md,md_table(tab |> transmute(Individual=sample,Mode=mode,Result=status,
+        `Callable bp`=callable_bp,Scaling=scaling,Details=if_else(!is.na(report) & nzchar(report),link('Report',report),reason))),
+        '', 'Scaling values are explicit inputs. Unscaled histories do not assume a mutation rate or generation time. Long-scaffold scope may include sex-linked sequence.','')
+}
 md <- c(md,'## Detailed evidence','',link('All available figures and reports','reports/main/evidence_index.md'),'')
 if(any(artifacts$type=='chimera_registry')) md <- c(md,link('Chimera screening scope and coverage','reports/main/assessment_coverage.md'),'')
 if(stage_changes_present) md <- c(md,link('What changed across assembly stages','reports/main/assembly_stage_changes.md'),'')
@@ -509,6 +519,7 @@ themes <- list('Assembly quality'=c('interactive_qc','snail','stage_qc'),
     'Chromosome structure and comparisons'=c('dotplot','ribbon','contact_map','telomere_extension','chimera_registry'),
     'Organelle assemblies'=c('organelle','organelle_annotation','annotation_counts','annotation_loci','organelle_stats','organelle_recovery'),
     'Pangenome'=c('pangenome','pangenome_summary','graph_review_rows','graph_review_audit'),
+    'Demographic history'=c('psmc','psmc_summary'),
     'Methods and provenance'=c('provenance'),'Additional reports'=c('assembly_details'))
 themes[['Additional reports']] <- c(themes[['Additional reports']],setdiff(unique(artifacts$type),unlist(themes)))
 for(theme in names(themes)) {
@@ -614,6 +625,7 @@ if(isTRUE(spec$run$contract_enabled)) {
             check_output(name,id,isTRUE(spec$run$graph_enabled),any(artifacts$type=='pangenome' & artifacts$id==id & basename(artifacts$path)==name),isTRUE(cohort$ready),'Requires an admitted graph cohort')
     }
 } else check_output('Run-control contract','run',TRUE,FALSE,FALSE,'Original run controls unavailable; output expectations not inferred')
+check_output('PSMC report','run',isTRUE(spec$run$psmc_enabled),nrow(psmc)>0)
 write_tsv(checks,file.path(out,'report_completeness.tsv'))
 missing <- checks |> filter(Status=='MISSING')
 if(nrow(missing)>0) attention <- bind_rows(attention,missing |> transmute(Area='Report completeness',Item=Entity,Issue=paste('Expected output missing:',Feature),Details=link('Completeness checks','reports/main/report_completeness.md')))
