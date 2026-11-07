@@ -19,6 +19,9 @@ fi
 if [[ "$case" == paired_hifi ]]; then
     printf 'sample\tmode\nassembly_ind\thifi\n' > "$runtime/fixtures/manifest.tsv"
 fi
+if [[ "$case" == assemblies_only ]]; then
+    printf 'sample\tmode\nassembly_ind\tassemblies\n' > "$runtime/fixtures/manifest.tsv"
+fi
 python3 - "$repo" <<'PY'
 from pathlib import Path
 import sys
@@ -36,8 +39,11 @@ dag.enabled=false
 trace.enabled=false
 params.run_psmc=$([[ "$case" == disabled ]] && echo false || echo true)
 params.psmc_test_case='$case'
+params.psmc_assembly_preset='${PSMC_TEST_ASSEMBLY_PRESET:-asm5}'
 params.psmc_fixture='$runtime/fixtures'
 params.psmc_manifest='$runtime/fixtures/manifest.tsv'
+params.psmc_final_eligibility='$runtime/fixtures/eligibility.json'
+params.psmc_mode='$([[ "$case" == assemblies_only ]] && echo assemblies || echo auto)'
 params.psmc_min_contig_bp=100000
 params.psmc_min_good_bases=10000
 params.psmc_min_callable_bp=10000
@@ -72,8 +78,10 @@ for p in java.lang java.io java.nio java.net java.util java.util.concurrent.lock
     opens+=("--add-opens=java.base/$p=ALL-UNNAMED")
 done
 cd "$runtime"
+entry="$repo/.psmc-native-check.nf"
+if [[ "$case" == assemblies_only ]]; then entry="$repo/psmc_from_final.nf"; fi
 JAVA_TOOL_OPTIONS="${opens[*]} --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED" \
     "$java" "${opens[@]}" --add-exports java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED \
     --add-opens java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED -jar "$nxf" \
-    -log "$runtime/nextflow-${1:-initial}.log" run "$repo/.psmc-native-check.nf" \
+    -log "$runtime/nextflow-${1:-initial}.log" run "$entry" \
     -c "$runtime/local.config" -ansi-log false "${extra[@]}"

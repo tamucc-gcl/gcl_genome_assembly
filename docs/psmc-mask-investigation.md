@@ -160,3 +160,46 @@ small completed mask fixture, checks actual minimap2 command logs, verifies
 unchanged controls and mask reconstruction, renders R/ggplot figures, and checks
 incomplete-task status and compact failure archives. It accepts `--source` and
 `--out` directories and uses the environments recorded in the source manifest.
+
+## Full variant calling and PSMC comparison
+
+After the successful preset-mask comparison, run:
+
+```bash
+module load miniconda3
+bash gcl_genome_assembly/scripts/comparisons/submit_psmc_full_presets.sh \
+  comparisons/psmc-alignment-presets-04 \
+  comparisons/psmc-full-presets-05
+```
+
+This prepares the audited individual and scope automatically and submits two
+independent Nextflow controllers. Each invokes the **production PSMC workflow**
+through the removable `psmc_from_final.nf` comparison entry, using accepted final
+eligibility/FASTA inputs. Core assembly/graph work is not invoked. This is a
+bounded test of the same modules used by `main.nf`, not a second implementation
+of Dipcall, masking or fitting. The normal pipeline exposes the same
+`psmc_assembly_preset` parameter.
+
+Both PAF/mask and SAM/VCF targets are regenerated consistently for each preset,
+followed by PSMC input filtering, observed fitting, ten parallel-scheduled
+bootstrap replicates, export, and R figures/reports. Other fitting settings are
+inherited from baseline run provenance, input filters and optional scope BEDs
+from the audited source. Scaling remains null. The preparation checks that the
+baseline final assembly paths match those tested. Own-reference verification
+then runs normally. New VCF/BED outputs remain available outside the archive.
+
+Separate launch/work directories avoid sharing an active Nextflow session with
+each other or the HiFi comparison. This intentionally does not resume the main
+pipeline session; no expensive upstream assembly jobs are registered. Resources,
+environments and per-process Slurm scheduling come from the production config.
+Bootstraps are separate jobs under the existing `psmc_bootstrap_max_forks` limit.
+
+Return both archives:
+
+- `comparisons/psmc-full-presets-05/asm10.review.tar.gz`
+- `comparisons/psmc-full-presets-05/asm20.review.tar.gz`
+
+Review final callability and exclusion reasons, heterozygosity and curve changes
+against asm5 and the independent HiFi comparison before choosing a production
+default. More mask coverage alone is insufficient to validate the newly added
+sequence. The main default remains unchanged while testing.

@@ -52,6 +52,15 @@ coordinates. Wrong names or out-of-range intervals fail.
 
 ## Scaling and fitting controls
 
+`--psmc_assembly_preset asm5|asm10|asm20` selects the minimap2 preset for the
+paired-assembly route. The default remains `asm5` pending biological acceptance.
+The selected preset applies consistently to both PAF/mask and SAM/VCF targets,
+without editing installed Dipcall files or changing its confidence thresholds.
+The exact make override is retained in `genotypes/dipcall_settings.json` and the
+command log; assembly-route metadata also records the preset. Changing it
+invalidates the assembly caller and its downstream inputs/fits, not HiFi mapping.
+See the [bounded preset comparisons](psmc-mask-investigation.md) for validation.
+
 `psmc_mutation_rate` (per nucleotide per generation) and `psmc_generation_time`
 (years) both default to **null**. With both unset, output is explicitly unscaled:
 time is `t * theta_per_base`, and size is `lambda * theta_per_base`. Set both to

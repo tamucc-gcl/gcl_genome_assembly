@@ -17,6 +17,7 @@ and `work`. Scientific outputs belong in that project's `comparisons/` directory
 | `make_sv_benchmark.py` | Generic known-answer fixture generator for deferred SV method validation |
 | `submit_psmc_mask_investigation.sh`, `run_psmc_mask_investigation.sbatch`, `psmc_mask_investigation.py` | Removable Bash/Slurm audit of Dipcall alignment/mask exclusions; recorded environments, exact trace paths, cached PAF reuse or PAF-only regeneration; [instructions](../../docs/psmc-mask-investigation.md) |
 | `submit_psmc_alignment_presets.sh` | Removable parallel asm10/asm20 comparison against completed asm5 mask controls; fixed confidence rules, paired-mask gains/losses and R/ggplot evidence; [instructions](../../docs/psmc-mask-investigation.md#assembly-preset-comparison-after-the-mask-audit) |
+| `submit_psmc_full_presets.sh`, `prepare_psmc_full_presets.py`, `run_psmc_full_preset.sbatch`, root `psmc_from_final.nf` | Removable full asm10/asm20 comparisons through the production PSMC workflow on accepted final inputs; separate Nextflow sessions and unchanged mask rules; [instructions](../../docs/psmc-mask-investigation.md#full-variant-calling-and-psmc-comparison) |
 
 Old specimen-specific fusion batches, cache-recovery experiments and obsolete report
 launchers were removed. Git history retains them; do not restore them as production

@@ -64,20 +64,23 @@ process PSMC_ASSEMBLY_CALL {
         pattern: 'calls/*', saveAs: { it.replaceFirst('^calls/','') }
     input:
     tuple val(meta), path(reference, stageAs:'reference.fa'), path(haplotypes, stageAs:'haplotypes/*')
+    val alignment_preset
+    path caller
     path helper
     output:
     tuple val(meta), path('reference.fa'), path('calls/diploid.dip.vcf.gz'), path('calls/diploid.dip.vcf.gz.tbi'),
         path('calls/diploid.dip.bed'), path('calls/NO_DEPTH'), emit: calls
+    path 'calls/dipcall_settings.json', emit: settings
+    path 'calls/dipcall.log', emit: log
     path 'versions.tsv', emit: versions
     script:
     """
     set -euo pipefail
     samtools faidx reference.fa
-    run-dipcall -a -t ${Math.max(1, (task.cpus as int).intdiv(2))} diploid reference.fa ${haplotypes[0]} ${haplotypes[1]} > diploid.mak
-    make -j2 -f diploid.mak > dipcall.log 2>&1
+    python3 ${caller} --preset '${alignment_preset}' --threads-per-hap ${Math.max(1, (task.cpus as int).intdiv(2))} --haplotypes ${haplotypes[0]} ${haplotypes[1]}
     bcftools index --tbi diploid.dip.vcf.gz
     mkdir calls
-    cp diploid.dip.vcf.gz diploid.dip.vcf.gz.tbi diploid.dip.bed dipcall.log calls/
+    cp diploid.dip.vcf.gz diploid.dip.vcf.gz.tbi diploid.dip.bed dipcall.log dipcall_settings.json calls/
     touch calls/NO_DEPTH
     python3 ${helper} versions --tools dipcall minimap2 samtools bcftools
     """

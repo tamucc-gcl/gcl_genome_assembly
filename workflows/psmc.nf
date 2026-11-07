@@ -9,6 +9,7 @@ workflow PSMC_ANALYSIS {
     reports=Channel.empty();versions=Channel.empty()
     if(params.run_psmc) {
         if(!(params.psmc_mode in ['auto','assemblies','hifi'])) error 'psmc_mode must be auto, assemblies or hifi'
+        if(!(params.psmc_assembly_preset in ['asm5','asm10','asm20'])) error 'psmc_assembly_preset must be asm5, asm10 or asm20'
         ['psmc_min_contig_bp','psmc_bin_size','psmc_min_good_bases','psmc_min_callable_bp','psmc_min_hets',
          'psmc_iterations','psmc_max_time','psmc_theta_rho_ratio','psmc_bootstrap_block_bp','psmc_bootstrap_max_forks',
          'psmc_max_pileup_depth'].each { key ->
@@ -90,10 +91,11 @@ workflow PSMC_ANALYSIS {
             file("${projectDir}/py_scripts/psmc_plan.py",checkIfExists:true))
         jobs=PSMC_PLAN.out.plan.flatMap { path -> new groovy.json.JsonSlurperClassic().parseText(path.text).jobs }
         def meta_for={ j -> [id:j.id,sample:j.sample,taxid:j.taxid,species:j.species,mode:j.mode,
-            reference_id:j.reference.id,reference_sha256:j.reference.sha256,representation:j.representation] }
+            reference_id:j.reference.id,reference_sha256:j.reference.sha256,representation:j.representation] +
+            (j.mode=='assemblies' ? [assembly_preset:params.psmc_assembly_preset] : [:]) }
         PSMC_ASSEMBLY_CALL(jobs.filter { it.mode=='assemblies' }.map { j ->
             tuple(meta_for(j),file(j.reference.fasta,checkIfExists:true),j.assemblies.collect { file(it,checkIfExists:true) })
-        },version_helper)
+        },params.psmc_assembly_preset,file("${projectDir}/py_scripts/psmc_dipcall.py",checkIfExists:true),version_helper)
         PSMC_MAP_HIFI(jobs.filter { it.mode=='hifi' }.map { j ->
             tuple(meta_for(j),file(j.reference.fasta,checkIfExists:true),file(j.reads,checkIfExists:true))
         },version_helper)

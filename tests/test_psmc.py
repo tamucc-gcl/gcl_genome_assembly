@@ -12,6 +12,16 @@ from psmc_results import parse,export,resample,pattern_groups
 from psmc_report_index import index
 from psmc_input import bed,genotype,genotype_confidence
 from psmc_reference import verify as verify_reference
+from psmc_dipcall import override as dipcall_override
+
+
+class DipcallPreset(unittest.TestCase):
+    def test_complete_call_override_keeps_other_options_and_threads(self):
+        text='MM2_OPT=-xasm5 --cs -t$(N_THREADS)\n'
+        for preset in ['asm5','asm10','asm20']:
+            self.assertEqual(dipcall_override(text,preset),'MM2_OPT=-x'+preset+' --cs -t$(N_THREADS)')
+        with self.assertRaises(ValueError):dipcall_override(text,'asm100')
+        with self.assertRaises(ValueError):dipcall_override('MM2_OPT=-xchanged\n','asm10')
 
 
 def fitted(iteration=2):
