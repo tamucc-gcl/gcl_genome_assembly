@@ -203,3 +203,44 @@ Review final callability and exclusion reasons, heterozygosity and curve changes
 against asm5 and the independent HiFi comparison before choosing a production
 default. More mask coverage alone is insufficient to validate the newly added
 sequence. The main default remains unchanged while testing.
+
+## Genotype reliability on shared and preset-specific scope
+
+Use the completed full runs and, optionally, an existing completed HiFi mapping:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_psmc_reliability.sbatch \
+  comparisons/psmc-full-presets-05 \
+  comparisons/psmc-reliability-06 \
+  --hifi-run comparisons/psmc-hifi-comparison-03
+```
+
+The HiFi run may still be calling variants; its mapping must have completed.
+Only the exact successful mapping work directory recorded in its trace is used.
+The own-reference hash is checked against both full assembly runs and the
+retained mapping reference. No task is stopped, modified or rerun. Inputs are
+read-only; the audit does not require the large files in a downloaded archive.
+
+This removable diagnostic streams the two retained masked diploid consensuses,
+preserving exact reference coordinates. It counts shared, asm10-only, asm20-only
+and neither-callable regions; reproduces both callable totals; compares actual
+unphased genotypes; and reports heterozygosity by region. Shared heterozygote-site
+agreement is reported separately so agreeing homozygous-reference calls cannot
+hide differences relevant to PSMC. One-Mb window tables and an R/ggplot figure
+show where disagreement occurs.
+
+With a HiFi run supplied, the audit checks up to 500 deterministically sampled
+positions per group: shared discordant calls, shared agreeing heterozygotes,
+asm10-only heterozygotes and asm20-only heterozygotes. Exact per-base molecule
+counts and quality/observability criteria are reported. This is direct read
+support, not independent sequencing validation; it uses the same reads involved
+in assembly and a single-haplotype reference. BAQ is disabled for these direct
+counts, explicitly distinct from production variant calling. Group sampling is
+stratified, so pooled support fractions are not genome-wide error-rate estimates.
+No cuts, input masks, calls or PSMC parameters are changed by the audit.
+
+Return `comparisons/psmc-reliability-06.review.tar.gz`. It contains the Markdown
+report, region/window tables, sampled molecule evidence, provenance and R figure.
+Without `--hifi-run`, genotype agreement is assessed and read support is marked
+unavailable. Neither agreement nor increased callable coverage alone establishes
+which preset is biologically correct.

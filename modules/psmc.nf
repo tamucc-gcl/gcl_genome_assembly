@@ -111,8 +111,8 @@ process PSMC_MAP_HIFI {
 
 process PSMC_READ_CALL {
     tag "${meta.id}"
-    cpus 4
-    memory '16 GB'
+    cpus { Math.min(2*(params.psmc_read_call_workers as int), params.max_cpus as int) }
+    memory { "${Math.max(16, (task.cpus as int)*2)} GB" }
     time '72h'
     conda "${projectDir}/environments/psmc.yaml"
     publishDir "${params.outdir}/post_assembly/psmc/${meta.taxid}/${meta.id}/genotypes", mode: params.publish_dir_mode,
@@ -120,24 +120,22 @@ process PSMC_READ_CALL {
     input:
     tuple val(meta), path(reference, stageAs:'reference.fa'), path(bam), path(bai)
     val filters
+    val workers
+    path caller
     path helper
     output:
     tuple val(meta), path('reference.fa'), path('calls/diploid.vcf.gz'), path('calls/diploid.vcf.gz.tbi'),
         path('calls/NO_CONFIDENT_BED'), path('calls/depth.tsv'), emit: calls
+    path 'calls/calling_manifest.json', emit: manifest
+    path 'calls/calling.log', emit: log
     path 'versions.tsv', emit: versions
     script:
     """
     set -euo pipefail
     samtools faidx reference.fa
-    mkdir calls
-    samtools coverage -q ${filters.mapq} -Q ${filters.baseq} ${bam} > calls/depth.tsv
-    awk -v minimum=${filters.min_contig_bp} '\$2 >= minimum {print \$1 "\\t0\\t" \$2}' reference.fa.fai > long_scaffolds.bed
-    test -s long_scaffolds.bed
-    bcftools mpileup -Ou -f reference.fa -q ${filters.mapq} -Q ${filters.baseq} \\
-        -R long_scaffolds.bed -d ${filters.max_pileup_depth} -a FORMAT/DP,FORMAT/AD ${bam} \\
-        | bcftools call --ploidy 2 -m -A --keep-unseen-allele -a GQ -Oz -o calls/diploid.vcf.gz
-    bcftools index --tbi calls/diploid.vcf.gz
-    touch calls/NO_CONFIDENT_BED
+    python3 ${caller} --reference reference.fa --bam ${bam} --out calls \\
+        --min-contig-bp ${filters.min_contig_bp} --mapq ${filters.mapq} --baseq ${filters.baseq} \\
+        --max-pileup-depth ${filters.max_pileup_depth} --cpus ${task.cpus} --workers ${workers}
     python3 ${helper} versions --tools samtools bcftools
     """
 }

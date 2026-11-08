@@ -52,6 +52,25 @@ coordinates. Wrong names or out-of-range intervals fail.
 
 ## Scaling and fitting controls
 
+HiFi pileup/calling now runs whole reference scaffolds concurrently within each
+`PSMC_READ_CALL` task. `psmc_read_call_workers` defaults to 8; actual concurrency
+is capped by scaffold count and half the allocated CPUs (one pileup/call pair
+per worker). The process requests up to twice the requested workers in CPUs,
+bounded by `max_cpus`, and scales its memory request with that CPU budget. Entire
+scaffolds preserve calling context and avoid internal chunk-boundary artifacts.
+All mapping, quality, depth and diploid-calling options are unchanged. Outputs
+are concatenated in reference-FAI order and indexed. The published
+`genotypes/calling_manifest.json` and `calling.log` record scaffold commands,
+timings, concurrency and stderr. Individual shard VCFs stay internal to the task.
+Native tests require record-for-record equality with the previous serial command,
+including an empty scaffold and nonalphabetical reference order. Missing or
+failed shards fail the task rather than producing a partial successful VCF.
+
+Changing this implementation invalidates read calling and downstream results on
+the next resume, while unchanged HiFi mappings remain reusable. It does not
+alter an already-running task. The parallel approach is the default for future
+runs; setting one worker provides a serial comparison with the same logic.
+
 `--psmc_assembly_preset asm5|asm10|asm20` selects the minimap2 preset for the
 paired-assembly route. The default remains `asm5` pending biological acceptance.
 The selected preset applies consistently to both PAF/mask and SAM/VCF targets,

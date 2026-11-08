@@ -12,7 +12,7 @@ workflow PSMC_ANALYSIS {
         if(!(params.psmc_assembly_preset in ['asm5','asm10','asm20'])) error 'psmc_assembly_preset must be asm5, asm10 or asm20'
         ['psmc_min_contig_bp','psmc_bin_size','psmc_min_good_bases','psmc_min_callable_bp','psmc_min_hets',
          'psmc_iterations','psmc_max_time','psmc_theta_rho_ratio','psmc_bootstrap_block_bp','psmc_bootstrap_max_forks',
-         'psmc_max_pileup_depth'].each { key ->
+         'psmc_max_pileup_depth','psmc_read_call_workers'].each { key ->
             if((params[key] as double)<=0) error "${key} must be positive"
         }
         ['psmc_min_depth','psmc_max_depth','psmc_min_mapq','psmc_min_baseq','psmc_min_gq','psmc_indel_padding',
@@ -22,7 +22,7 @@ workflow PSMC_ANALYSIS {
         ['psmc_min_contig_bp','psmc_bin_size','psmc_min_good_bases','psmc_min_callable_bp','psmc_min_hets',
          'psmc_iterations','psmc_bootstraps','psmc_plot_iteration','psmc_bootstrap_block_bp','psmc_bootstrap_max_forks',
          'psmc_seed','psmc_min_depth','psmc_max_depth','psmc_min_mapq','psmc_min_baseq','psmc_min_gq',
-         'psmc_indel_padding','psmc_max_pileup_depth'].each { key ->
+         'psmc_indel_padding','psmc_max_pileup_depth','psmc_read_call_workers'].each { key ->
             def value=params[key] as double
             if(!Double.isFinite(value) || value!=Math.rint(value)) error "${key} must be a finite integer"
         }
@@ -101,7 +101,8 @@ workflow PSMC_ANALYSIS {
         },version_helper)
         PSMC_READ_CALL(PSMC_MAP_HIFI.out.bam,
             [mapq:params.psmc_min_mapq,baseq:params.psmc_min_baseq,max_pileup_depth:params.psmc_max_pileup_depth,
-             min_contig_bp:params.psmc_min_contig_bp],version_helper)
+             min_contig_bp:params.psmc_min_contig_bp],params.psmc_read_call_workers,
+            file("${projectDir}/py_scripts/psmc_read_call.py",checkIfExists:true),version_helper)
         call_inputs=PSMC_ASSEMBLY_CALL.out.calls.mix(PSMC_READ_CALL.out.calls)
             .map { m,fa,vcf,tbi,bed,depth -> tuple(m.id,m,fa,vcf,tbi,bed,depth) }
             .join(jobs.map { j -> tuple(j.id,
