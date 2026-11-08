@@ -12,10 +12,21 @@ from psmc_results import parse,export,resample,pattern_groups
 from psmc_report_index import index
 from psmc_input import bed,genotype,genotype_confidence
 from psmc_reference import verify as verify_reference
-from psmc_dipcall import override as dipcall_override
+from psmc_dipcall import override as dipcall_override,alignment_threshold
 
 
 class DipcallPreset(unittest.TestCase):
+    def test_length_override_updates_both_masks_and_both_sam_filters_only(self):
+        text=('$(ROOT)/k8 $(ROOT)/dipcall-aux.js samflt $< | sort\n'*2+
+              'gzip -dc $< | $(ROOT)/paftools.js call - 2> $@.vst | gzip\n'*2)
+        for minimum in [10000,20000,50000]:
+            changed=alignment_threshold(text,minimum)
+            self.assertEqual(changed.count(f'samflt -L {minimum} '),2)
+            self.assertEqual(changed.count(f'call -L {minimum} '),2)
+            self.assertEqual(changed.replace(f' -L {minimum}',''),text)
+        with self.assertRaises(ValueError):alignment_threshold(text,9999)
+        with self.assertRaises(ValueError):alignment_threshold(text.replace('samflt','changed'),20000)
+
     def test_complete_call_override_keeps_other_options_and_threads(self):
         text='MM2_OPT=-xasm5 --cs -t$(N_THREADS)\n'
         for preset in ['asm5','asm10','asm20']:

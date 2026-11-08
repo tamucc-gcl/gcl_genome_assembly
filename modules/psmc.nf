@@ -57,7 +57,7 @@ PSMC_READS
 process PSMC_ASSEMBLY_CALL {
     tag "${meta.id}"
     cpus { Math.min(16, params.max_cpus as int) }
-    memory '32 GB'
+    memory { params.psmc_assembly_preset=='asm20' ? '192 GB' : '96 GB' }
     time '48h'
     conda "${projectDir}/environments/psmc.yaml"
     publishDir "${params.outdir}/post_assembly/psmc/${meta.taxid}/${meta.id}/genotypes", mode: params.publish_dir_mode,
@@ -65,6 +65,7 @@ process PSMC_ASSEMBLY_CALL {
     input:
     tuple val(meta), path(reference, stageAs:'reference.fa'), path(haplotypes, stageAs:'haplotypes/*')
     val alignment_preset
+    val minimum_alignment
     path caller
     path helper
     output:
@@ -72,15 +73,16 @@ process PSMC_ASSEMBLY_CALL {
         path('calls/diploid.dip.bed'), path('calls/NO_DEPTH'), emit: calls
     path 'calls/dipcall_settings.json', emit: settings
     path 'calls/dipcall.log', emit: log
+    path 'calls/dipcall.makefile.diff', emit: makefile_diff
     path 'versions.tsv', emit: versions
     script:
     """
     set -euo pipefail
     samtools faidx reference.fa
-    python3 ${caller} --preset '${alignment_preset}' --threads-per-hap ${Math.max(1, (task.cpus as int).intdiv(2))} --haplotypes ${haplotypes[0]} ${haplotypes[1]}
+    python3 ${caller} --preset '${alignment_preset}' --min-alignment-bp ${minimum_alignment} --threads-per-hap ${Math.max(1, (task.cpus as int).intdiv(2))} --haplotypes ${haplotypes[0]} ${haplotypes[1]}
     bcftools index --tbi diploid.dip.vcf.gz
     mkdir calls
-    cp diploid.dip.vcf.gz diploid.dip.vcf.gz.tbi diploid.dip.bed dipcall.log dipcall_settings.json calls/
+    cp diploid.dip.vcf.gz diploid.dip.vcf.gz.tbi diploid.dip.bed dipcall.log dipcall_settings.json dipcall.makefile.diff calls/
     touch calls/NO_DEPTH
     python3 ${helper} versions --tools dipcall minimap2 samtools bcftools
     """

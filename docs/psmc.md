@@ -80,6 +80,19 @@ command log; assembly-route metadata also records the preset. Changing it
 invalidates the assembly caller and its downstream inputs/fits, not HiFi mapping.
 See the [bounded preset comparisons](psmc-mask-investigation.md) for validation.
 
+`--psmc_assembly_min_alignment_bp` defaults to **50000**. It sets both the
+paftools mask/variant alignment threshold and the Dipcall SAM-filter alignment
+threshold. Values must be integers at least 10000. The 10 kb coverage/ambiguity
+threshold and MAPQ 5 remain unchanged. The helper validates and edits exactly
+two mask and two SAM-filter recipes in the run's generated makefile; installed
+package files are untouched. `genotypes/dipcall.makefile.diff` and
+`dipcall_settings.json` retain the precise changes and threshold values.
+Never enlarge a mask alone while retaining calls made with a different threshold.
+The assembly caller requests 192 GB with asm20 and 96 GB otherwise, calibrated
+from observed Crest peaks; normal Nextflow process configuration can override
+resource requests for other genome sizes. Threshold and preset defaults are
+unchanged pending acceptance of the experimental comparisons.
+
 `psmc_mutation_rate` (per nucleotide per generation) and `psmc_generation_time`
 (years) both default to **null**. With both unset, output is explicitly unscaled:
 time is `t * theta_per_base`, and size is `lambda * theta_per_base`. Set both to

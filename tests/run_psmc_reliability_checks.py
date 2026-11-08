@@ -28,8 +28,8 @@ def main():
     assert result['shared_genotype_agreement']==1
     assert result['shared_het_genotype_agreement']==1
     with (report/'sampled_read_support.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
-    assert len(rows)==20 and all(r['asm10_support']==r['asm20_support'] for r in rows)
-    assert any(r['asm10_support']=='supported' for r in rows)
+    assert len(rows)==20 and all(r['left_support']==r['right_support'] for r in rows)
+    assert any(r['left_support']=='supported' for r in rows)
     assert (report/'reliability.png').stat().st_size>1000
     print('PASS: complete consensus comparison, exact callable reproduction, mapped read support and rendered R report')
 

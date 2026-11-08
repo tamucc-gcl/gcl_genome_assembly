@@ -244,3 +244,60 @@ report, region/window tables, sampled molecule evidence, provenance and R figure
 Without `--hifi-run`, genotype agreement is assessed and read support is marked
 unavailable. Neither agreement nor increased callable coverage alone establishes
 which preset is biologically correct.
+
+## Full 20 kb and 10 kb length trials with asm20
+
+After syncing, from the project root:
+
+```bash
+module load miniconda3
+bash gcl_genome_assembly/scripts/comparisons/submit_psmc_length_tests.sh \
+  comparisons/psmc-full-presets-05 \
+  comparisons/psmc-length-tests-07 \
+  comparisons/psmc-hifi-comparison-03
+```
+
+The existing completed `asm20` run is the retained 50 kb control. Two fresh
+Nextflow sessions run the production PSMC workflow with `asm20` and 20 kb / 10 kb
+minimum assembly-alignment lengths, respectively. All other input filters,
+scope, mutation/generation scaling, fitting settings, bootstrap count and seed
+are cloned from that control. No assemblies or HiFi mappings are rebuilt. PAF
+and SAM alignments/calls are regenerated, with matching explicit thresholds in
+both mask and variant-filter recipes. The installed tools remain unchanged.
+The parameter is general purpose; the chosen individual comes from source run
+metadata, not a sample-specific rule.
+
+Each trial automatically triggers a reliability audit against the 50 kb control,
+using the completed HiFi BAM from the third argument. Its variant-calling step
+can still be running or failed: only the successful mapping and verified matching
+reference are required. Both trials and their subsequent audits can overlap.
+The same seeded site sampling, genotype concordance and direct read-support
+criteria are used. Reliability TSVs now use `left` / `right` columns and record
+their actual run labels explicitly in `summary.json` and the Markdown report;
+there is no legacy-output parser.
+
+An after-any collector produces:
+
+```text
+comparisons/psmc-length-tests-07.review.tar.gz
+```
+
+The archive's `review/README.md` compares final callable sequence,
+heterozygosity, retained scaffolds and observed PSMC histories. It links both
+reliability reports. Compact provenance, generated-recipe diffs, all fit files,
+input QC, per-window evidence, sampled molecule counts and R figures are retained;
+large consensus, VCF, BAM and work directories stay on Crest. Failed or incomplete
+workflows/audits produce an explicitly incomplete combined review rather than a
+completion PASS. Trial completion does not establish biological acceptance.
+
+The collector/controller log paths and submitted job IDs are printed by the
+submission script. Per-trial outputs also remain in `asm20_20kb/` and
+`asm20_10kb/` for normal Nextflow inspection. Fresh production runs still default
+to asm5 and 50 kb until the experimental settings are accepted.
+
+Native checks include a planted 30 kb / 15 kb alignment fixture: each region must
+gain both confident mask coverage and its matching heterozygous call only at the
+appropriate threshold. Full native PSMC workflow runs exercise both new settings.
+`tests/run_psmc_length_batch_checks.py` verifies preparation, actual retained
+outputs, automatic-equivalent reliability audits, R rendering, compact collection
+and explicit failed-audit status.

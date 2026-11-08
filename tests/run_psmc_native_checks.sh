@@ -40,6 +40,7 @@ trace.enabled=false
 params.run_psmc=$([[ "$case" == disabled ]] && echo false || echo true)
 params.psmc_test_case='$case'
 params.psmc_assembly_preset='${PSMC_TEST_ASSEMBLY_PRESET:-asm5}'
+params.psmc_assembly_min_alignment_bp=${PSMC_TEST_MIN_ALIGNMENT_BP:-50000}
 params.psmc_fixture='$runtime/fixtures'
 params.psmc_manifest='$runtime/fixtures/manifest.tsv'
 params.psmc_final_eligibility='$runtime/fixtures/eligibility.json'

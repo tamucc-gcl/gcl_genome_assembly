@@ -9,10 +9,11 @@ set -euo pipefail
 module load nextflow/23.10.1
 module load miniconda3
 comparison=$(realpath "${1:?Supply the prepared full-comparison directory}")
-preset="${2:?Supply asm10 or asm20}"
-[[ "$preset" == asm10 || "$preset" == asm20 ]]
+preset="${2:?Supply the prepared run label}"
+[[ "$preset" =~ ^[A-Za-z0-9_-]+$ ]]
 repo=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repository"])' "$comparison/comparison.json")
 out="$comparison/$preset"
+test -s "$out/params.json"
 finish() {
     rc=$?
     trap - EXIT

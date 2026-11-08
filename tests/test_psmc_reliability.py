@@ -15,9 +15,9 @@ class Reliability(unittest.TestCase):
         scope=np.array([True]*6+[False]);rows,candidates=mod.compare_block(a,b,scope)
         q={r['region']:r for r in rows}
         self.assertEqual(q['shared']['bp'],3);self.assertEqual(q['shared']['discordant'],1)
-        self.assertEqual(q['shared']['het_vs_hom'],1);self.assertEqual(q['shared']['asm10_hets'],2)
-        self.assertEqual(q['shared']['asm20_hets'],1);self.assertEqual(q['asm10_only']['bp'],1)
-        self.assertEqual(q['asm20_only']['bp'],2);self.assertEqual(q['neither']['bp'],0)
+        self.assertEqual(q['shared']['het_vs_hom'],1);self.assertEqual(q['shared']['left_hets'],2)
+        self.assertEqual(q['shared']['right_hets'],1);self.assertEqual(q['left_only']['bp'],1)
+        self.assertEqual(q['right_only']['bp'],2);self.assertEqual(q['neither']['bp'],0)
         self.assertEqual(int(candidates['shared_discordant'].sum()),1)
 
     def test_read_support_requires_observability_and_both_het_alleles(self):
