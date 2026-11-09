@@ -1,11 +1,23 @@
 # Optional PSMC demographic history
 
-Implementation status: integrated into `main.nf`; native fixtures and the Mat
-alignment-length/read-support pilot passed. Current assembly-route defaults are
-`asm20` and a 10 kb minimum alignment. Full-cohort acceptance is pending. The
-completed HiFi comparator retains more sequence but produces a materially
-different history; biological method agreement is not yet established. Accepted
-assembly, chimera and core graph procedures are unchanged.
+Implementation status: **accepted**, following native checks, the completed
+HiFi pilot and full five-individual main-pipeline cohort acceptance. Assembly-route
+defaults are `asm20` and a 10 kb minimum alignment; both remain configurable.
+
+The accepted default policy is Dipcall for two finalized haplotype assemblies
+from the same diploid individual, and complete-HiFi mapping/calling against an
+own reference when only one assembly representation is available. Both routes
+remain supported; `psmc_mode` can explicitly select either applicable method.
+Here a single haplotype assembly still represents a **diploid biological
+individual**. Standard PSMC is not enabled for biologically haploid samples.
+
+The difference between the pilot's assembly-derived and read-derived histories
+is an **open biological/methodological question**, deferred rather than an
+implementation acceptance blocker. Neither route is asserted to be a truth set
+or interchangeable with the other. Matched-callable-scope fits may be revisited
+later; no additional PSMC investigation is required to close this implementation
+pass. Preserve method, mask and parameter provenance when reporting results.
+Accepted assembly, chimera and core graph procedures are unchanged.
 
 ## Enable and select inputs
 
@@ -116,7 +128,7 @@ The assembly caller requests 192 GB with asm20 and 96 GB otherwise, calibrated
 from observed Crest peaks; normal Nextflow process configuration can override
 resource requests for other genome sizes. The defaults are general-purpose
 parameters, not sample-specific rules; use alternative values for sensitivity
-checks or other datasets. Full-cohort acceptance of the new defaults is pending.
+checks or other datasets. The five-individual cohort acceptance passed with these defaults.
 
 `psmc_mutation_rate` (per nucleotide per generation) and `psmc_generation_time`
 (years) both default to **null**. With both unset, output is explicitly unscaled:

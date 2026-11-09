@@ -16,17 +16,36 @@ The reported 102.64 Mb duplicate-position mask loss in the HiFi route includes
 conservative masking around same-position records; this is not proof of duplicated
 input files and should be interpreted alongside the indel/multirecord semantics.
 
-The next acceptance is the normal main.nf run on all eligible individuals, with
-own references, ordinary cache reuse and ten pilot bootstraps. A single-individual
-manifest inherited from prior tests is explicitly cleared by the cohort launcher.
-All expected individuals must appear in planning/results or explicit skips.
-All planned individuals get sampled HiFi support from their verified published
-final mapping. Concurrent supplementary audits isolate the pilot's 10–20 kb
-increment and compare completed HiFi versus assembly genotypes. Method overlays
-use original callable scopes. If histories still disagree, matched-scope fits
-are a separate unresolved sensitivity check.
+The full main.nf cohort run passed: five individuals, observed fits and ten
+bootstraps each (55 verified fit hashes/complete iterations), ten unchanged final
+assemblies, 940 cached and 86 completed tasks, and the core graph reused from
+cache. All-individual sampled heterozygote read support was 95.2–96.8% among
+observable sampled sites. The focused 10–20 kb increment retained 61.04 Mb and
+all 20 kb genotypes; 437/478 observable sampled new heterozygotes were supported.
+Pla lost 1.21 Mb at the existing per-scaffold conversion guard; other individuals
+lost none. Functional cohort acceptance is complete.
 
-Core assembly/QC/graph acceptance remains unchanged. Category 8 is not marked
-complete until full-cohort results have been reviewed. Removable acceptance
-helpers are documented in docs/psmc-mask-investigation.md; normal fresh runs
-need only the standard PSMC params, not these comparison directories.
+## Accepted decision
+
+On 2026-11-09 the user accepted closing this implementation pass with both
+published methods retained as defensible supported options. Auto routing remains:
+
+- Two finalized haplotype assemblies from one diploid individual: Dipcall,
+  with the accepted configurable asm20 / 10 kb defaults.
+- One finalized assembly representation from a diploid individual: complete-HiFi
+  mapping/calling against that individual's own reference.
+- Biologically haploid samples remain unsupported for standard diploid PSMC.
+
+The completed pilot's method-history discrepancy remains an open biological/
+methodological question. The shared 655.09 Mb had 95.985% heterozygote-focused
+agreement; the same mapped reads used for the read route favored that route at
+487/500 sampled disagreements versus 2/500 for Dipcall. This is read consistency,
+not independent truth. Do not claim method equivalence or identical accuracy.
+A future matched-scope fit comparison is optional follow-up, not required work
+for the current pipeline implementation acceptance. Do not schedule more PSMC
+investigations automatically merely because this question remains open.
+
+Core assembly/QC/graph acceptance is unchanged. Category 8 is accepted. Removable
+acceptance helpers remain documented in docs/psmc-mask-investigation.md; normal
+fresh runs require only standard pipeline inputs and PSMC params, not the
+project-specific comparison directories.
