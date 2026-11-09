@@ -1,10 +1,27 @@
 """Fixture tools validate orchestration; real R rendering and painting projector run."""
+import csv
 import json
 from pathlib import Path
 import sys
 
 root=Path(sys.argv[1]);case=sys.argv[2]
 fixtures=root/'main-report-fixtures';fixtures.mkdir(exist_ok=True)
+
+# Exercise the production module's singleton staged-path behavior with actual
+# decisions present. Renderer-only fixtures cannot catch Groovy Path iteration.
+(fixtures/'NO_PAIRS').write_text('No cuts selected\n')
+columns=['assembly','id','event_id','selected','review_disposition','cut_bp','assessment_sha256','chromosomes','scaffold','reason']
+cut_cases=case in ('single_cut_review','multi_cut_review')
+decision_rows=[['sample_hap1','C01','C01','YES' if cut_cases else 'NO',
+                'CUT' if cut_cases else 'PENDING','500' if cut_cases else '',
+                'hash','chr1 -> chr2','old','Reviewed cut' if cut_cases else '']]
+if case=='multi_cut_review':
+    decision_rows.append(['sample_hap2','C01','C01','YES','CUT','500','hash','chr1 -> chr2','old','Reviewed cut'])
+with (fixtures/'review.tsv').open('w',newline='') as handle:
+    writer=csv.writer(handle,delimiter='\t');writer.writerow(columns);writer.writerows(decision_rows)
+for row in decision_rows:
+    (fixtures/(row[0]+'.verification.json')).write_text(json.dumps(dict(exact_parent_reconstruction=True,
+        selected_actions=[dict(zip(columns,row))] if row[3]=='YES' else [])))
 tools=root/'main-report-tools';tools.mkdir(exist_ok=True)
 minimap=tools/'minimap2'
 minimap.write_text('''#!/usr/bin/env python3

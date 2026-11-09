@@ -17,8 +17,13 @@ workflow {
     snails=mode!='disabled' ? Channel.fromList(data.assemblies.collect { tuple(it.id,'final',file("${root}/${it.id}_final_snail.svg")) }) : Channel.empty()
     annotations=mode!='disabled' ? Channel.value(tuple([sample:'sample'],file("${root}/annotation.gb"))) : Channel.empty()
     psmc=mode=='psmc' ? Channel.fromList([file("${root}/psmc/README.md"),file("${root}/psmc/summary.tsv")]) : Channel.empty()
+    def reviewMode=mode in ['uncut_review','single_cut_review','multi_cut_review']
+    def decisionFile=reviewMode ? file("${root}/review.tsv") : no
+    def verificationFiles=mode=='single_cut_review' ? [file("${root}/sample_hap1.verification.json")] :
+        mode=='multi_cut_review' ? [file("${root}/sample_hap1.verification.json"),file("${root}/sample_hap2.verification.json")] :
+        [file("${root}/NO_PAIRS")]
     MAIN_REPORTING(eligibility,expected,names,REPORT_PAINTINGS.out.blocks,qc,
-        Channel.value(no),Channel.value([no]),graph,Channel.empty(),
+        Channel.value(decisionFile),Channel.value(verificationFiles),graph,Channel.empty(),
         Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),
         annotations,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),snails,
         Channel.value(data.assemblies.collect { [sample:it.sample,hifi:false,hic:false,shortread:false] }.unique { it.sample }),Channel.empty(),
@@ -32,6 +37,13 @@ workflow {
         assert file("${report.parent}/reports/main/artifact_registry.tsv").text.contains('provenance/software_versions.tsv')
         assert report.text.contains('## Pangenome')==(mode=='multispecies')
         assert report.text.contains('## Demographic history (PSMC)')==(mode=='psmc')
+        if(reviewMode) {
+            assert report.text.contains('## Assembly decisions and changes')
+            assert report.text.contains(mode=='uncut_review' ? 'Review pending' : 'Cut applied and verified')
+            def spec=new groovy.json.JsonSlurper().parse(file("${report.parent}/report_spec.json"))
+            assert spec.verifications.size()==(mode=='multi_cut_review' ? 2 : 1)
+            assert spec.verifications.every { it.startsWith('verification/') && file("${report.parent}/${it}").isFile() }
+        }
         if(mode=='multispecies') {
             assert file("${report.parent}/reports/main/needs_attention.tsv").text.contains('sample_hap1 / chr1_1')
             assert !file("${report.parent}/reports/main/needs_attention.tsv").text.contains('sample_hap2 / chr1_1')

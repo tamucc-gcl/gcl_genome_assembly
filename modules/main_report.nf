@@ -19,10 +19,15 @@ process MAIN_REPORT {
     path 'assembly_report.md',emit: report
     path 'reports/main',emit: assets
     script:
+    // A singleton staged path is a Path, which Groovy can iterate by path
+    // component. Normalize it before collect (verification/NO_PAIRS is ONE file).
+    def fileNames = { value ->
+        (value instanceof Collection ? value : [value]).collect { it.toString() }
+    }
     def spec=[eligibility:eligibility.toString(),expected:expected,artifacts:artifacts,run:context,
-        name_maps:name_maps.collect { it.toString() },paintings:paintings.collect { it.toString() },
+        name_maps:fileNames(name_maps),paintings:fileNames(paintings),
         qc:qc_metrics.toString(),decisions:decisions.toString(),
-        verifications:verifications.collect { it.toString() },versions:versions.toString()]
+        verifications:fileNames(verifications),versions:fileNames(versions)]
     """
     set -euo pipefail
     export TZ="\${TZ:-UTC}"

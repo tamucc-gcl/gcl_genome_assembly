@@ -14,13 +14,44 @@ The supported core is defined by [interface 1.0](../docs/core-interface.md).
 | 6. Unified Markdown reporting and freeze | Accepted | [Core-freeze-01](core-freeze-01-assessment.md): native PASS, 875 cached/64 completed tasks, 543 report links, zero version-record issues and unchanged selected evidence |
 | 7. Operational cleanup | Accepted | [Combined integration](core-integration-02-assessment.md); ordinary Nextflow cache handling and exact YaHS replay |
 | 8. PSMC | Accepted | Five individuals, 55 verified fits, core integration and read-support audits passed. Auto routes paired haplotypes to Dipcall and a sole assembly from a diploid individual to HiFi. Method-history disagreement is a deferred open question, not an implementation blocker; [assessment and decision](psmc-methods-and-cohort-acceptance-2026-11-09.md) |
-| 9. BlobToolKit evidence / cleaning | Planned | Rebuild evidence first; separately validate explicit cleaning and its downstream invalidation |
+| 9. BlobToolKit evidence / cleaning | Design agreed; implementation pending | Protein + targeted nucleotide evidence after FCS/before scaffolding; reviewed whole-sequence/internal removal; optional final check; shared storeDir DBs and contig-only stopping control. See [scope](post-core-optional-analyses-plan.md#agreed-implementation-scope--2026-11-09) |
 | 10. Graph QC | Planned | Bounded read-to-graph self-mapping plus separately scheduled missing intrinsic graph metrics; [agreed QC/MultiQC scope](pangenome-qc-growth-followup.md) |
 | 11. Private/accessory evidence | Planned | Distinguish individual/haplotype privacy, missing representation and detection power |
 | 12. Graph SV interpretation / supplementary SyRI | Planned | Known-answer method validation and bounded pilot; active SyRI route remains a pilot |
 | 13. Additional graph products / presentation | Planned | Restore pangenome MultiQC; haplotype/individual growth fits, open/closed summary and confidence-band exploration; [agreed scope](pangenome-qc-growth-followup.md) |
 
 ## Core freeze and cleanup
+
+### Final production cleanup — required, pending
+
+At the user's request on 2026-11-09, finishing the revamp includes a complete
+production-tree cleanup after the remaining features and acceptance runs are
+finished. Earlier operational-cleanup acceptance does not close this final gate.
+
+- Inventory runtime dependencies from `main.nf`, supported entry points, modules,
+  workflows, scripts, environment files and assets. Keep only the implementations
+  actually used by the supported production pipeline, plus essential user docs
+  and configuration.
+- Remove test-only SBATCH launchers/wrappers, standalone diagnostic Nextflow
+  entries, comparison helpers, fixtures, acceptance harnesses, temporary patches,
+  mockups and superseded implementation/assessment plans from the final production
+  tree. Do not retain them merely because they were useful during development;
+  Git history can preserve their provenance. Development-only material that is
+  still needed must be moved outside the streamlined production tree.
+- Review `scripts/comparisons/`, test entry points such as `psmc_from_final.nf`,
+  `run_assembly_checkpoint.sbatch` and other convenience launchers explicitly.
+  Production usage must remain ordinary `nextflow run main.nf`; project SBATCH
+  scripts belong in the project directory, not as a required extra launch layer.
+- Revisit the intentionally retained variant/private/progressive-graph/2D
+  prototypes after their planned categories: integrate the selected code or
+  remove the unused implementations. No permanent collection of uncalled
+  prototypes, abandoned variants or unused vendor patches.
+- Preserve scientific results and project-owned inputs. Preserve the pipeline
+  sketches explicitly requested by the user; their update is separate work.
+- After pruning, verify a direct Nextflow launch, normal `-resume`, parameter
+  documentation, supported optional analyses and report links. Remove obsolete
+  references/imports along with the removed files. Final acceptance requires a
+  streamlined runtime dependency inventory with no accidental test dependencies.
 
 The main/detailed reports, both chimera evidence figures, per-library junction maps,
 sharing/representation figures and input-aware missingness are integrated. Four cuts

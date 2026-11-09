@@ -161,6 +161,75 @@ Outputs/report: only figures answering a distinct question, their tables and a m
 
 ## 10. BlobTools/decontamination workflow resurrection
 
+### Agreed implementation scope — 2026-11-09
+
+These are implementation requirements, not claims that the current optional
+branch is runnable. Preserve existing FCS screening/cleaning behavior.
+
+Standalone source-bound review preparation, removal/splitting and search-window
+preparation are now implemented in `py_scripts/contamination_review.py` with
+known-sequence tests. See [tool usage and status](../docs/contamination.md). No
+main-workflow integration or database/search acceptance is claimed by this batch.
+Expected-host summary rank defaults to phylum, configurable. Shared databases
+follow the existing `diamond` / new `blast` collection-release layout and shared
+`ncbi_taxonomy`. Read-only inspection of the annotation downloader identifies
+`swissprot.dmnd` as complete Swiss-Prot built without explicit taxonomy mappings
+or a release/checksum manifest. Keep it untouched; prepare the agreed reference-
+proteome contamination bundle separately. The user confirms `proteins.dmnd` is
+unused; it is excluded from reuse, not deleted.
+
+- Primary evidence and optional reviewed cleaning run after contig refinement/FCS
+  and before Hi-C scaffolding, for both HiFi and shotgun assemblies. An independent,
+  optional final-assembly evidence pass checks the actual finished sequences; it
+  does not silently clean or feed back into an earlier stage.
+- Use taxonomy-aware UniProt reference-proteome protein searches plus targeted
+  NCBI nucleotide searches. Target selection must be explicit and recorded: include
+  unresolved protein assignments, non-host/conflicting assignments and locally
+  discordant windows. Missing protein hits are a search trigger, not a contaminant
+  call. Preserve coordinates, multiple useful hits, searched/unsearched status,
+  assigned/aligned bp and coverage rather than reducing each scaffold to one hit.
+- Database download/build processes produce task-local bundles and use native
+  `storeDir` under a caller-selected database root, following the BUSCO/annotation
+  pattern. Store the database, required indexes/taxonomic mappings and manifest as
+  a mandatory complete output bundle. Record source, release/download identity,
+  checksums, taxonomy identity and build-tool versions. Support supplied compatible
+  bundles; do not equate an annotation Swiss-Prot DB with the selected evidence DB.
+  Use distinct release paths, no silent refresh, no new download when disabled,
+  and no direct writes into the shared final database directory during builds.
+- Cleaning supports reviewed whole-sequence removal and internal interval removal.
+  Internal removal splits the retained flanks into separate records; it must never
+  concatenate them into a newly invented adjacency. Terminal intervals trim the
+  affected end. Use one explicit 0-based, half-open coordinate convention, assembly
+  checksum/stage binding, stable action IDs, selection and reviewer reasons. Reject
+  overlapping/conflicting or out-of-bounds selected actions before writing outputs.
+  Retain removed FASTA, retained-piece coordinate maps, action audit and exact bp
+  accounting. The empty-selection case preserves the original sequence identities.
+- The first cleaning implementation is reviewed/manual. No automatic deletion
+  policy is enabled merely by a non-host match, low coverage or unusual GC.
+- Add a general, explicit contig-stage stopping control (proposed interface:
+  `--stop_after contigs`, default full workflow). It publishes the post-refinement/
+  decontamination contigs, evidence/review sheet, provenance and stage-appropriate
+  summary/QC, without scheduling Hi-C scaffolding, harmonization, scaffold chimera
+  assessment, gap filling/telomere extension, graph construction, PSMC or other
+  downstream analyses. Reports must describe contigs as contigs, not finalized
+  chromosomes; downstream sections are absent. Hi-C use inside hifiasm remains
+  governed by the assembly inputs and is distinct from subsequent scaffolding.
+  Continuing a later full run uses ordinary Nextflow resume; keep upstream workflow
+  task identities stable. A downstream final-only option must not override the stop.
+  Apply cleanup at the same boundary regardless of whether the caller stops there.
+- Parallelize independent assemblies and balanced search chunks; merge results
+  deterministically. Reuse read mappings only for identical input assembly identity.
+  Render new summary figures with pinned R/ggplot2 dependencies separately from
+  evidence generation. The evidence-only pass must not hold assembly output pending
+  human review; a supplied reviewed action sheet enables a separate cleaning run.
+
+Acceptance includes a contig-only native run proving zero downstream task
+submissions, followed by a resumed full run proving expected upstream reuse; known
+internal/terminal/whole-sequence removals with retained+removed bp reconstruction;
+disabled/prebuilt/stored database cases; and report/plot inspection. The current
+production chimera run and its subsequent accepted-cut full run stay separate from
+this extension until the new implementation is validated.
+
 ### Scope and separation
 
 Rebuild the currently nonfunctional optional BlobTools/decontamination-evidence branch, likely from scratch. This does not mean the existing production contamination-removal tools are all nonfunctional. Inventory their roles and outputs before deciding what to reuse, replace or retire.
