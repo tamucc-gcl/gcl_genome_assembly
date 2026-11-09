@@ -1,12 +1,34 @@
 # Optional PSMC demographic history
 
-Implementation status: integrated into `main.nf` and tested with native tools on
-bounded known-input fixtures. The first Crest pilot completed, but unexpectedly
-low callability and scaffold retention require investigation before biological
-acceptance. This does
-not change the accepted assembly, chimera or core graph procedures.
+Implementation status: integrated into `main.nf`; native fixtures and the Mat
+alignment-length/read-support pilot passed. Current assembly-route defaults are
+`asm20` and a 10 kb minimum alignment. Full-cohort acceptance is pending. The
+completed HiFi comparator retains more sequence but produces a materially
+different history; biological method agreement is not yet established. Accepted
+assembly, chimera and core graph procedures are unchanged.
 
 ## Enable and select inputs
+
+All settings below live in the normal `nextflow.config` params block and may be
+set on the command line or in a Nextflow parameter file. Key current defaults:
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `run_psmc` | `false` | Enable PSMC independently of graph/post-assembly switches |
+| `psmc_mode` | `auto` | Same-individual paired assemblies, or supported complete-HiFi fallback |
+| `psmc_assembly_preset` | `asm20` | Minimap2 preset for both PAF/masks and SAM/variant calls |
+| `psmc_assembly_min_alignment_bp` | `10000` | Minimum assembly-alignment length in both filters |
+| `psmc_min_contig_bp` | `1000000` | Reference scaffold inclusion; distinct from alignment length |
+| `psmc_bootstraps` | `10` | Pilot replicate count; explicitly request 100 for a full analysis |
+| `psmc_bootstrap_max_forks` | `8` | Concurrent bootstrap Slurm tasks; increase within available resources |
+| `psmc_read_call_workers` | `8` | Concurrent whole-scaffold callers for the HiFi route |
+| `psmc_mutation_rate`, `psmc_generation_time` | `null`, `null` | Leave both unset for unscaled results |
+
+The remaining mask, depth, quality, interval-pattern and fitting controls remain
+in the same params block. For example, `--psmc_assembly_preset asm10
+--psmc_assembly_min_alignment_bp 20000` overrides the new defaults without
+editing pipeline code. A normal fresh run does not need comparison directories,
+cache manifests or a project-specific PSMC selection sheet.
 
 Set `--run_psmc true`. PSMC is independent of `run_pangenome`, `qc_mode`,
 `run_post_assembly` and contact-map/visualization controls. Disabled PSMC registers
@@ -56,7 +78,9 @@ HiFi pileup/calling now runs whole reference scaffolds concurrently within each
 `PSMC_READ_CALL` task. `psmc_read_call_workers` defaults to 8; actual concurrency
 is capped by scaffold count and half the allocated CPUs (one pileup/call pair
 per worker). The process requests up to twice the requested workers in CPUs,
-bounded by `max_cpus`, and scales its memory request with that CPU budget. Entire
+bounded by `max_cpus`, and budgets 24 GB per concurrent worker after an observed
+18.1 GB serial peak on Crest. Normal process configuration can override this
+resource request for other data. Entire
 scaffolds preserve calling context and avoid internal chunk-boundary artifacts.
 All mapping, quality, depth and diploid-calling options are unchanged. Outputs
 are concatenated in reference-FAI order and indexed. The published
@@ -72,7 +96,7 @@ alter an already-running task. The parallel approach is the default for future
 runs; setting one worker provides a serial comparison with the same logic.
 
 `--psmc_assembly_preset asm5|asm10|asm20` selects the minimap2 preset for the
-paired-assembly route. The default remains `asm5` pending biological acceptance.
+paired-assembly route. The default is `asm20`, following the Mat reliability and length pilot.
 The selected preset applies consistently to both PAF/mask and SAM/VCF targets,
 without editing installed Dipcall files or changing its confidence thresholds.
 The exact make override is retained in `genotypes/dipcall_settings.json` and the
@@ -80,7 +104,7 @@ command log; assembly-route metadata also records the preset. Changing it
 invalidates the assembly caller and its downstream inputs/fits, not HiFi mapping.
 See the [bounded preset comparisons](psmc-mask-investigation.md) for validation.
 
-`--psmc_assembly_min_alignment_bp` defaults to **50000**. It sets both the
+`--psmc_assembly_min_alignment_bp` defaults to **10000**. It sets both the
 paftools mask/variant alignment threshold and the Dipcall SAM-filter alignment
 threshold. Values must be integers at least 10000. The 10 kb coverage/ambiguity
 threshold and MAPQ 5 remain unchanged. The helper validates and edits exactly
@@ -90,8 +114,9 @@ package files are untouched. `genotypes/dipcall.makefile.diff` and
 Never enlarge a mask alone while retaining calls made with a different threshold.
 The assembly caller requests 192 GB with asm20 and 96 GB otherwise, calibrated
 from observed Crest peaks; normal Nextflow process configuration can override
-resource requests for other genome sizes. Threshold and preset defaults are
-unchanged pending acceptance of the experimental comparisons.
+resource requests for other genome sizes. The defaults are general-purpose
+parameters, not sample-specific rules; use alternative values for sensitivity
+checks or other datasets. Full-cohort acceptance of the new defaults is pending.
 
 `psmc_mutation_rate` (per nucleotide per generation) and `psmc_generation_time`
 (years) both default to **null**. With both unset, output is explicitly unscaled:

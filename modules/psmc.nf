@@ -114,7 +114,7 @@ process PSMC_MAP_HIFI {
 process PSMC_READ_CALL {
     tag "${meta.id}"
     cpus { Math.min(2*(params.psmc_read_call_workers as int), params.max_cpus as int) }
-    memory { "${Math.max(16, (task.cpus as int)*2)} GB" }
+    memory { "${Math.max(24, Math.max(1,(task.cpus as int).intdiv(2))*24)} GB" }
     time '72h'
     conda "${projectDir}/environments/psmc.yaml"
     publishDir "${params.outdir}/post_assembly/psmc/${meta.taxid}/${meta.id}/genotypes", mode: params.publish_dir_mode,

@@ -292,8 +292,8 @@ completion PASS. Trial completion does not establish biological acceptance.
 
 The collector/controller log paths and submitted job IDs are printed by the
 submission script. Per-trial outputs also remain in `asm20_20kb/` and
-`asm20_10kb/` for normal Nextflow inspection. Fresh production runs still default
-to asm5 and 50 kb until the experimental settings are accepted.
+`asm20_10kb/` for normal Nextflow inspection. Current production defaults are
+asm20 and 10 kb following the Mat pilot; both remain explicit parameters.
 
 Native checks include a planted 30 kb / 15 kb alignment fixture: each region must
 gain both confident mask coverage and its matching heterozygous call only at the
@@ -301,3 +301,67 @@ appropriate threshold. Full native PSMC workflow runs exercise both new settings
 `tests/run_psmc_length_batch_checks.py` verifies preparation, actual retained
 outputs, automatic-equivalent reliability audits, R rendering, compact collection
 and explicit failed-audit status.
+
+## Full main-pipeline cohort acceptance
+
+The assembly-route defaults are now asm20 / 10 kb and remain configurable as
+ordinary Nextflow params. Run all current individuals through the real `main.nf`
+with normal cache reuse:
+
+```bash
+sbatch gcl_genome_assembly/scripts/comparisons/run_psmc_cohort.sbatch \
+  data/assembly_samplesheet.csv data/hic_readsets.csv \
+  comparisons/psmc-hifi-comparison-03/results \
+  data/chimera_reviews/Sde-CTlk_104.v8.reviewed.tsv \
+  comparisons/core-psmc-cohort-08 \
+  comparisons/psmc-length-tests-07 \
+  comparisons/psmc-hifi-comparison-03 \
+  --psmc_bootstrap_max_forks 20 \
+  --chimera_hifi_bam_manifest "$PWD/comparisons/chimera-observable-contact-v7/results/assembly/chimeras/mapping_manifest.json"
+```
+
+The first five arguments follow the accepted integration launcher: sample sheet,
+Hi-C readsets, accepted results, reviewed cuts and new output directory. The
+sixth and seventh identify the completed length and HiFi pilot runs used only by
+removable acceptance checks. These project-specific paths are not new production
+pipeline requirements. Additional arguments are passed to the ordinary pipeline.
+
+Preparation explicitly clears the inherited single-individual PSMC manifest,
+resets method selection to auto, selects asm20 / 10 kb, and leaves scaling null.
+All other supported baseline settings are retained. The expected cohort is read
+from eligibility metadata; no individual is hardcoded. The full main pipeline
+reuses its regular launch directory, work directory and cache. Assembly, graph,
+QC and reference acceptance checks still run; expensive unchanged steps should
+remain cached. Cohort planning/results must cover every expected individual,
+including explicit scientific skips rather than silently dropping them.
+
+After the pipeline completes, separate Slurm tasks run concurrently to assess:
+
+- Each planned individual's actual masked input: 500 sampled heterozygotes and
+  500 homozygous-reference controls, using its already-published own-reference
+  final HiFi mapping. Mapping/reference SHA256 and sequence dictionaries are
+  checked, and the population heterozygote count is reproduced before sampling.
+- The pilot's focused 20 kb versus current-cohort comparison, isolating the
+  additional 10–20 kb sequence under the default threshold.
+- The pilot's completed HiFi versus current assembly-route genotypes, plus a
+  method-history overlay using the retained curve tables. These histories use
+  their respective callable scopes and are not a matched-scope validation.
+
+The supplementary audits share the same molecule-count implementation and
+observability rules as the accepted reliability pilot. They do not change calls,
+masks, references or fits. Published final BAMs are reused; no additional read
+mapping or variant calling is needed for these checks. Their environments come
+from exact successful PSMC task provenance, not installation at task runtime.
+
+Return both automatically produced archives:
+
+- `comparisons/core-psmc-cohort-08.review.tar.gz`: normal full-pipeline review,
+  including all-individual PSMC tables, histories, fits and provenance.
+- `comparisons/core-psmc-cohort-08.psmc-checks.review.tar.gz`: cohort coverage
+  validation, per-individual read support, focused length and method comparisons.
+
+The controller waits for the supplementary Slurm tasks and emits an incomplete
+checks archive if any are missing or fail. Read support is corroboration, not
+independent sequencing truth. The completed Mat HiFi comparison retains 80.84%
+and has 1.181% heterozygosity, but its history differs materially from assembly
+PSMC; resolving that difference remains biological method validation.

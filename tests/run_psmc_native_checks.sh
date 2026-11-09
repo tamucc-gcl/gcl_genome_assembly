@@ -66,6 +66,9 @@ process {
  withName: '.*PSMC_INDEX' { beforeScript='export PATH=$rbin:$bin:\$PATH' }
 }
 EOF
+if [[ "$case" == cohort ]]; then
+    printf '\nparams.psmc_manifest=null\n' >> "$runtime/local.config"
+fi
 extra=()
 if [[ "${1:-}" == resume || "${1:-}" == scale ]]; then extra+=(-resume); fi
 if [[ "${1:-}" == scale ]]; then

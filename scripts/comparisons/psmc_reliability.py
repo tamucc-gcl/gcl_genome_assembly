@@ -45,6 +45,27 @@ def support(code,counts,minimum=10):
     return 'supported'
 
 
+def read_support(bam,sites,lengths,genotype_columns=('left','right')):
+    """Direct molecule counts shared by paired and single-input diagnostic audits."""
+    import pysam
+    with pysam.AlignmentFile(str(bam)) as reads:
+        if dict(zip(reads.references,reads.lengths))!=lengths:raise ValueError('HiFi BAM sequence dictionary differs')
+        for row in sites:
+            name=row['scaffold'];pos=row['pos_1based']-1;molecules={}
+            for col in reads.pileup(name,pos,pos+1,truncate=True,stepper='samtools',min_mapping_quality=20,min_base_quality=20,max_depth=10000,compute_baq=False):
+                if col.reference_pos!=pos:continue
+                for item in col.pileups:
+                    if item.is_del or item.is_refskip or item.query_position is None:continue
+                    read=item.alignment
+                    if read.mapping_quality<20 or read.query_qualities is None or read.query_qualities[item.query_position]<20:continue
+                    value=read.query_sequence[item.query_position].upper()
+                    if value in 'ACGT':molecules.setdefault(read.query_name,set()).add(value)
+            bases=Counter(next(iter(v)) for v in molecules.values() if len(v)==1)
+            result=dict(row,molecules=sum(bases.values()),**{b:bases[b] for b in 'ACGT'})
+            result.update({key+'_support':support(row[key],bases) for key in genotype_columns})
+            yield result
+
+
 def hifi_bam(run,sample,reference_hash):
     run=Path(run);plan=json.loads((run/'results/post_assembly/psmc/psmc_plan.json').read_text())
     job=next(j for j in plan['jobs'] if j['sample']==sample and j['mode']=='hifi')
@@ -149,21 +170,9 @@ def main():
     write_table(out/'regions.tsv',counts,fields);write_table(out/'windows.tsv',windows,['scaffold','start','end']+fields)
     sites=[]
     if bam:
-        with pysam.AlignmentFile(str(bam)) as reads:
-            if dict(zip(reads.references,reads.lengths))!=lengths:raise ValueError('HiFi BAM sequence dictionary differs')
-            for group,items in reservoir.items():
-                for _,name,pos,ref,x,y in sorted(items,key=lambda r:(r[1],r[2])):
-                    molecules={}
-                    for col in reads.pileup(name,pos,pos+1,truncate=True,stepper='samtools',min_mapping_quality=20,min_base_quality=20,max_depth=10000,compute_baq=False):
-                        if col.reference_pos!=pos:continue
-                        for item in col.pileups:
-                            if item.is_del or item.is_refskip or item.query_position is None:continue
-                            read=item.alignment;value=read.query_sequence[item.query_position].upper()
-                            if read.mapping_quality<20 or read.query_qualities is None or read.query_qualities[item.query_position]<20:continue
-                            if value in 'ACGT':molecules.setdefault(read.query_name,set()).add(value)
-                    bases=Counter(next(iter(v)) for v in molecules.values() if len(v)==1)
-                    sites.append(dict(group=group,scaffold=name,pos_1based=pos+1,reference=ref,left=x,right=y,
-                        molecules=sum(bases.values()),**{b:bases[b] for b in 'ACGT'},left_support=support(x,bases),right_support=support(y,bases)))
+        selected=[dict(group=group,scaffold=name,pos_1based=pos+1,reference=ref,left=x,right=y)
+            for group,items in reservoir.items() for _,name,pos,ref,x,y in sorted(items,key=lambda r:(r[1],r[2]))]
+        sites=list(read_support(bam,selected,lengths))
         write_table(out/'sampled_read_support.tsv',sites,['group','scaffold','pos_1based','reference','left','right','molecules','A','C','G','T','left_support','right_support'])
     else:
         for group,items in reservoir.items():

@@ -31,6 +31,11 @@ md <- c(paste0('# PSMC: ',context$sample),'',
     paste0('| Unknown PSMC bins | ',sprintf('%.2f%%',100*qc$missing_bin_fraction),' |'),
     paste0('| Bin size | ',qc$bin_size,' bp |'),
     paste0('| Scaling | ',summary$scaling,' |'),'')
+if(context$mode=='assemblies') md <- c(md,
+    '| Assembly-calling setting | Value |','| --- | --- |',
+    paste0('| Minimap2 preset | ',context$assembly_preset,' |'),
+    paste0('| Minimum alignment for masks and variant filters | ',context$assembly_min_alignment_bp,' bp |'),'',
+    '[Exact caller settings](../genotypes/dipcall_settings.json) · [Generated-command changes](../genotypes/dipcall.makefile.diff)','')
 if(qc$psmc_retained_callable_bp < qc$callable_bp) md <- c(md,
     paste0('**Input scope warning:** conversion retained ',qc$segments,' scaffolds and ',
       format(qc$psmc_retained_callable_bp,scientific=FALSE,trim=TRUE),' callable bp of ',
