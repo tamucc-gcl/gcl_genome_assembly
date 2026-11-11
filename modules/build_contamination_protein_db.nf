@@ -5,6 +5,8 @@ process BUILD_CONTAMINATION_PROTEIN_DB {
     cpus 16
     memory '64 GB'
     time '48h'
+    // Build on shared work storage so the database does not rely on node-local stage-out.
+    scratch false
     storeDir { "${db_root}/diamond/uniprot_reference_proteomes/${release}" }
 
     input:
