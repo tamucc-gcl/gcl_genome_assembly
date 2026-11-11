@@ -448,15 +448,28 @@ if(nrow(graph)>0) {
         md <- c(md,link('Complete pangenome report: biological results and technical validation',paste0('reports/main/',hub_name)),'')
     }
 }
-psmc <- artifacts |> filter(type=='psmc')
+psmc <- artifacts |> filter(type=='psmc', basename(path)=='README.md')
 if(nrow(psmc)>0) {
     md <- c(md,'## Demographic history (PSMC)','',link('PSMC histories, input scope and callable-region evidence',psmc$path[[1]]),'')
+    cohort_figure <- artifacts |> filter(type=='psmc', basename(path)=='combined_history.png')
+    if(nrow(cohort_figure)>0) {
+        md <- c(md,paste0('![PSMC demographic histories for fitted individuals](',cohort_figure$path[[1]],')'),'')
+    }
     records <- artifacts |> filter(type=='psmc_summary')
     if(nrow(records)!=1) stop('PSMC report requires exactly one current-run summary')
     tab <- read_tsv(I(records$content[[1]]),col_types=cols(.default=col_character()),show_col_types=FALSE)
+    if(!'scope_bp' %in% names(tab)) tab$scope_bp <- rep(NA_character_,nrow(tab))
+    retained_bp <- as.numeric(tab$retained_callable_bp)
+    scope_bp <- as.numeric(tab$scope_bp)
+    retained_pct <- rep(NA_real_,nrow(tab))
+    measurable <- !is.na(retained_bp) & !is.na(scope_bp) & scope_bp>0
+    retained_pct[measurable] <- 100 * retained_bp[measurable] / scope_bp[measurable]
     md <- c(md,md_table(tab |> transmute(Individual=sample,Mode=mode,Result=status,
-        `Callable bp retained for fitting`=retained_callable_bp,`Retained scaffolds`=retained_scaffolds,
+        `Callable sequence retained (Mb)`=if_else(is.na(retained_bp),NA_character_,sprintf('%.2f',retained_bp/1e6)),
+        `Retained (% of PSMC scope)`=if_else(is.na(retained_pct),NA_character_,sprintf('%.2f%%',retained_pct)),
+        `Retained scaffolds`=retained_scaffolds,
         Scaling=scaling,Details=if_else(!is.na(report) & nzchar(report),link('Report',report),reason))),
+        '', 'Retention is callable bases on sequences retained for fitting divided by the selected non-gap reference bases before callability filtering.',
         '', 'Scaling values are explicit inputs. Unscaled histories do not assume a mutation rate or generation time. Long-scaffold scope may include sex-linked sequence.','')
 }
 md <- c(md,'## Detailed evidence','',link('All available figures and reports','reports/main/evidence_index.md'),'')

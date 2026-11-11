@@ -21,10 +21,10 @@ def index(plan_path,result_directories,out):
     for r in plan['skipped']:
         rows.append(dict(sample=r['sample'],taxid=r['taxid'],mode='not_run',status='skipped',reason=r['reason'],reference='',callable_bp='',heterozygous_snps='',scaling='',report=''))
     for sample,r in sorted(by_id.items()):
-        rows.append({k:r.get(k,'') for k in ['sample','taxid','mode','status','reason','reference','callable_bp','heterozygous_snps',
+        rows.append({k:r.get(k,'') for k in ['sample','taxid','mode','status','reason','reference','scope_bp','callable_bp','heterozygous_snps',
             'retained_callable_bp','retained_scaffolds','retained_contigs','missing_bin_fraction','scaling','report']})
     out=Path(out);out.mkdir(parents=True,exist_ok=True)
-    fields=['sample','taxid','mode','status','reason','reference','callable_bp','heterozygous_snps',
+    fields=['sample','taxid','mode','status','reason','reference','scope_bp','callable_bp','heterozygous_snps',
         'retained_callable_bp','retained_scaffolds','retained_contigs','missing_bin_fraction','scaling','report']
     with (out/'summary.tsv').open('w',newline='',encoding='utf-8') as f:
         w=csv.DictWriter(f,fieldnames=fields,delimiter='\t');w.writeheader();w.writerows(rows)

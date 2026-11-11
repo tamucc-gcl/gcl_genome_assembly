@@ -16,7 +16,7 @@ workflow {
     graph=mode=='multispecies' ? Channel.fromList(['sharing_summary.tsv','sharing_report.md','source_sequences.tsv','source_audit.json','source_report.md'].collect { tuple('1',file("${root}/${it}")) }) : Channel.empty()
     snails=mode!='disabled' ? Channel.fromList(data.assemblies.collect { tuple(it.id,'final',file("${root}/${it.id}_final_snail.svg")) }) : Channel.empty()
     annotations=mode!='disabled' ? Channel.value(tuple([sample:'sample'],file("${root}/annotation.gb"))) : Channel.empty()
-    psmc=mode=='psmc' ? Channel.fromList([file("${root}/psmc/README.md"),file("${root}/psmc/summary.tsv")]) : Channel.empty()
+    psmc=mode=='psmc' ? Channel.fromList(['README.md','summary.tsv','combined_history.png'].collect { file("${root}/psmc/${it}") }) : Channel.empty()
     def reviewMode=mode in ['uncut_review','single_cut_review','multi_cut_review']
     def decisionFile=reviewMode ? file("${root}/review.tsv") : no
     def verificationFiles=mode=='single_cut_review' ? [file("${root}/sample_hap1.verification.json")] :
@@ -37,6 +37,8 @@ workflow {
         assert file("${report.parent}/reports/main/artifact_registry.tsv").text.contains('provenance/software_versions.tsv')
         assert report.text.contains('## Pangenome')==(mode=='multispecies')
         assert report.text.contains('## Demographic history (PSMC)')==(mode=='psmc')
+        assert report.text.contains('![PSMC demographic histories for fitted individuals](post_assembly/psmc/combined_history.png)')==(mode=='psmc')
+        if(mode=='psmc') assert report.text.contains('| sample | assemblies | completed | 7.50 | 75.00% | 1 |')
         if(reviewMode) {
             assert report.text.contains('## Assembly decisions and changes')
             assert report.text.contains(mode=='uncut_review' ? 'Review pending' : 'Cut applied and verified')

@@ -149,7 +149,10 @@ workflow PSMC_ANALYSIS {
         PSMC_INDEX(PSMC_PLAN.out.plan,PSMC_RENDER.out.report.map { m,dir -> dir }.toList(),index_helper,
             file("${projectDir}/r_scripts/plot_psmc_cohort.R",checkIfExists:true))
         versions=versions.mix(PSMC_INDEX.out.versions)
-        reports=PSMC_INDEX.out.report.mix(PSMC_INDEX.out.summary)
+        cohort_figure=PSMC_INDEX.out.figures.flatMap { files ->
+            (files instanceof Collection ? files : [files]).findAll { it.name=='combined_history.png' }
+        }
+        reports=PSMC_INDEX.out.report.mix(PSMC_INDEX.out.summary,cohort_figure)
     }
     emit:
     report=reports

@@ -10,7 +10,7 @@ ready <- identical(qc$status,'ready')
 scaled <- !is.null(context$mutation_rate)
 summary <- list(sample=context$sample,taxid=context$taxid,mode=context$mode,
     reference=context$reference_id,status=if(ready) 'completed' else 'not_fitted',
-    reason=qc$reason,callable_bp=qc$callable_bp,heterozygous_snps=qc$heterozygous_snps,
+    reason=qc$reason,scope_bp=qc$scope_bp,callable_bp=qc$callable_bp,heterozygous_snps=qc$heterozygous_snps,
     retained_callable_bp=qc$psmc_retained_callable_bp,retained_scaffolds=qc$segments,
     retained_contigs=paste(qc$retained_contigs,collapse=', '),missing_bin_fraction=qc$missing_bin_fraction,
     scaling=if(scaled) 'years / Ne' else 'unscaled',
