@@ -13,6 +13,7 @@ params.taxonomy_dir = null
 params.protein_db_dir = null
 params.nucleotide_db = null
 params.coverage_bam = null
+params.coverage_tsv = null
 params.window_bp = 100000
 params.chunk_bp = 5000000
 params.outdir = 'contamination-evidence'
@@ -26,6 +27,8 @@ workflow {
         !(params.chunk_bp.toString() ==~ /[1-9][0-9]*/) ||
         params.chunk_bp.toLong() < params.window_bp.toLong())
         error 'Supply a positive taxid and window size, with chunk size at least as large as the window'
+    if (params.coverage_bam && params.coverage_tsv)
+        error 'Supply either --coverage_bam or --coverage_tsv'
     def fasta = file(params.fasta, checkIfExists: true)
     def bundle = file(params.protein_db_dir, checkIfExists: true).toAbsolutePath()
     def database = file(bundle.resolve('reference_proteomes.dmnd'), checkIfExists: true).toString()
@@ -33,6 +36,7 @@ workflow {
     def taxdump = file(params.taxonomy_dir, checkIfExists: true).toAbsolutePath().toString()
     def ntDb = params.nucleotide_db ? file(params.nucleotide_db).toAbsolutePath().toString() : ''
     def bam = params.coverage_bam ? file(params.coverage_bam, checkIfExists: true) : []
+    def coverage = params.coverage_tsv ? file(params.coverage_tsv, checkIfExists: true) : []
     def helpers = ['contamination_review.py', 'contamination_evidence.py'].collect {
         file("${projectDir}/../../py_scripts/${it}", checkIfExists: true)
     }
@@ -50,8 +54,9 @@ workflow {
         nucleotide = CONTAMINATION_BLASTN.out
     }
     CONTAMINATION_REPORT(CONTAMINATION_PREPARE.out.queries, CONTAMINATION_PREPARE.out.metrics,
-        CONTAMINATION_SELECT_NUCLEOTIDE.out, nucleotide, ntDb, bam, taxdump,
+        CONTAMINATION_SELECT_NUCLEOTIDE.out, nucleotide, ntDb, bam, coverage, taxdump,
         params.taxid, params.host_rank, manifest, helpers)
     CONTAMINATION_DIAGNOSTICS(CONTAMINATION_REPORT.out, plotter)
-    CONTAMINATION_BLOBDIR(fasta, CONTAMINATION_REPORT.out, !!params.coverage_bam, taxdump, params.taxid, helpers)
+    CONTAMINATION_BLOBDIR(fasta, CONTAMINATION_REPORT.out,
+        !!(params.coverage_bam || params.coverage_tsv), taxdump, params.taxid, helpers)
 }

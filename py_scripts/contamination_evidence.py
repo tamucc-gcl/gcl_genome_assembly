@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 import csv
 import json
 from pathlib import Path
+import shutil
 
 from contamination_review import FIELDS, digest, records, write_record, write_table
 
@@ -287,6 +288,7 @@ def summarize(args):
     for row in review:
         row["sequence_evidence"] = statuses[row["sequence"]]
     write_table(args.out / "review.tsv", review, FIELDS + ["sequence_evidence", "support", "hit_lineages"])
+    shutil.copyfile(args.selected / "targets.fasta", args.out / "nucleotide_targets.fasta")
     with (args.out / "blob_hits.tsv").open("w") as handle:
         for hit in protein:
             if any(value.isdigit() and int(value) > 0 for value in hit["taxids"].split(";")):
@@ -295,10 +297,12 @@ def summarize(args):
                     f"\t{hit['start0']+1}\t{hit['end0']}\n")
     counts = Counter(row["protein_evidence"] for row in assigned)
     supported = [row for row in review if row.get("support")]
+    target_bp = sum(int(row["end0"]) - int(row["start0"]) for row in targets.values())
     metadata = dict(source, host_taxid=args.taxid, host_rank=args.host_rank,
                     protein_windows=dict(counts), nucleotide_target_windows=len(targets),
+                    nucleotide_target_bp=target_bp,
                     nucleotide_status=("searched" if targets else "no-targets") if args.nucleotide_hits else "not-run",
-                    coverage="provided-bam" if args.coverage else "unavailable",
+                    coverage=args.coverage_source if args.coverage else "unavailable",
                     protein_database=json.loads(args.database.read_text()),
                     nucleotide_database=args.nucleotide_db or None)
     (args.out / "evidence.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -306,7 +310,9 @@ def summarize(args):
         f"# Contamination evidence — {source['assembly']}", "",
         f"Coordinate stage: `{source['stage']}`. Coordinates are 0-based, half-open.", "",
         f"Host comparison: NCBI taxid {args.taxid}, {args.host_rank}. "
-        f"Nucleotide follow-up: {metadata['nucleotide_status']} ({len(targets):,} targeted windows). "
+        f"Nucleotide follow-up: {metadata['nucleotide_status']} "
+        f"({len(targets):,} windows, {target_bp:,} of {source['source_bp']:,} bp "
+        f"or {100 * target_bp / source['source_bp']:.1f}%). "
         f"Read coverage: {metadata['coverage']}.", "",
         "| Protein evidence | Windows |", "| --- | ---: |",
         *(f"| {status} | {counts[status]:,} |" for status in sorted(counts)), "",
@@ -326,7 +332,8 @@ def summarize(args):
             if supported else []
         ),
         "See the [window assignments](windows.tsv), [protein hits](protein_hits.tsv) and "
-        "[nucleotide hits](nucleotide_hits.tsv) for intervals and supporting matches.", "",
+        "[nucleotide hits](nucleotide_hits.tsv) for intervals and supporting matches. "
+        "[Target FASTA](nucleotide_targets.fasta).", "",
         "## Diagnostics", "",
         "![Blob diagnostic](../diagnostics/blob.png)", "",
         "![Cumulative sequence by evidence](../diagnostics/cumulative.png)", "",
@@ -365,6 +372,7 @@ def main():
             for name in ("selected", "metrics", "database"):
                 sub.add_argument("--" + name, type=Path, required=True)
             sub.add_argument("--coverage", type=Path)
+            sub.add_argument("--coverage-source", default="provided-bam")
             sub.add_argument("--nucleotide-hits", type=Path)
             sub.add_argument("--nucleotide-db")
     args = parser.parse_args()

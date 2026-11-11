@@ -124,6 +124,7 @@ process CONTAMINATION_REPORT {
     path nt_hits
     val nt_db
     path bam
+    path coverage_table
     val taxdump
     val host
     val rank
@@ -135,7 +136,8 @@ process CONTAMINATION_REPORT {
 
     script:
     def depth = bam ? "samtools coverage -q 20 --ff UNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY ${quote(bam)} > coverage.tsv" : ''
-    def cov = bam ? '--coverage coverage.tsv' : ''
+    def cov = bam ? '--coverage coverage.tsv' :
+        (coverage_table ? "--coverage ${quote(coverage_table)} --coverage-source provided-coverage-table" : '')
     def nt = nt_hits ? "--nucleotide-hits ${quote(nt_hits)} --nucleotide-db ${quote(nt_db)}" : ''
     """
     ${depth}

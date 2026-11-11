@@ -201,17 +201,76 @@ All-ambiguous sequences remain in the evidence tables and are listed in
 Coverage uses primary reads at MAPQ ≥20, omitting duplicates and QC failures.
 Without coverage the static plot shows GC vs sequence length.
 
-For a real pilot, supply a bounded set of actual post-FCS contigs, the sample
-taxid, and a broader taxonomy-aware protein database. Use a BAM mapped to the
-exact FASTA if available. The pilot checks that BAM sequence names and lengths
-match and does not establish sequence identity from a BAM header alone.
-`--nucleotide_db` is the prefix of a local, taxonomy-enabled BLAST database.
-Omit it to see the selected targets without running nucleotide searches.
-Windows with no protein hit, unresolved taxonomy, non-host or mixed evidence
-are targeted. On a whole genome this can be a large fraction of the assembly,
-so use a bounded input for the pilot. Protein and nucleotide hit scores are
-kept separate. The report uses a configurable host rank (default phylum), and
-review intervals reflect alignment evidence rather than proven breakpoints.
+## Run the bounded CTlk pilot on Crest
+
+Run from the assembly project root. The helper uses the production trace to
+resolve the retained hap1 FCS output and matching contig QC coverage table.
+It selects whole contigs across length and GC strata, up to 30 Mb total.
+The selection deliberately includes GC extremes, so its counts describe the
+pilot subset. The selection manifest records each original contig and the
+reason it was included. The protein panel covers three fish, an arthropod,
+two fungi and two bacteria. Its source URLs, UniProt release and checksums are
+recorded separately.
+
+```bash
+module load nextflow/23.10.1 miniconda3
+(
+  set -euo pipefail
+  pipeline="$PWD/gcl_genome_assembly"
+  pilot="$PWD/comparisons/contamination-ctlk-pilot-01"
+  taxonomy=/work/birdlab/databases/ncbi_taxonomy
+  prepare="$pipeline/scripts/comparisons/prepare_contamination_real_pilot.py"
+  mkdir -p "$pilot"
+
+  ( [[ -f "$pilot/inputs/selection.json" ]] || python3 "$prepare" contigs \
+      --assembly Sde-CTlk_104_hap1 --use-trace-coverage --out "$pilot/inputs" ) &
+  contigs_pid=$!
+  ( [[ -f "$pilot/panel/panel.json" ]] || python3 "$prepare" panel --out "$pilot/panel" ) &
+  panel_pid=$!
+  wait "$contigs_pid"
+  wait "$panel_pid"
+
+  sha=$(sha256sum "$pilot/panel/proteins.faa.gz" | cut -d' ' -f1)
+  nextflow -log "$pilot/db.nextflow.log" -c "$pipeline/nextflow.config" run \
+    "$pipeline/scripts/comparisons/contamination_protein_db.nf" -profile slurm \
+    -w "$pilot/work" --outdir "$pilot/db_run" --contamination_db_root "$pilot/db" \
+    --taxonomy_dir "$taxonomy" --proteome_source "$pilot/panel/proteins.faa.gz" \
+    --proteome_sha256 "$sha" --proteome_format fasta --proteome_release ctlk-panel-01
+
+  nt=()
+  if [[ -n "${CONTAMINATION_NT_DB:-}" ]]; then
+    nt=(--nucleotide_db "$CONTAMINATION_NT_DB")
+  fi
+  nextflow -log "$pilot/evidence.nextflow.log" -c "$pipeline/nextflow.config" run \
+    "$pipeline/scripts/comparisons/contamination_evidence.nf" -profile slurm \
+    -w "$pilot/work" --outdir "$pilot/results" \
+    --assembly Sde-CTlk_104_hap1 --taxid 373251 --taxonomy_dir "$taxonomy" \
+    --fasta "$pilot/inputs/contigs.fasta" --coverage_tsv "$pilot/inputs/coverage.tsv" \
+    --protein_db_dir "$pilot/db/diamond/uniprot_reference_proteomes/ctlk-panel-01" \
+    "${nt[@]}"
+)
+```
+
+The pilot reuses mean depths from production `samtools coverage` defaults.
+The FASTA and coverage table must have identical sequence names and lengths
+before subsetting. If only the coverage table is unavailable, omit
+`--use-trace-coverage` during preparation and `--coverage_tsv` during the
+evidence run. The R plot will use GC versus length.
+
+Set `CONTAMINATION_NT_DB` to the absolute prefix of an existing taxonomy-enabled
+local BLAST database to search the targets in this run. Without it the report
+lists target windows, total target bp, and a FASTA for follow-up. A panel of
+eight proteomes can establish that the search and reporting work on real
+contigs, but gives limited taxonomic sensitivity and specificity. Use the
+protein and nucleotide evidence tables to evaluate individual calls. Review
+intervals describe aligned sequence, and the pilot review sheet is bound to
+the subset FASTA. Carrying any decision to the full post-FCS FASTA requires a
+new source-bound review.
+
+Open `comparisons/contamination-ctlk-pilot-01/results/review/README.md`. For
+review, return `inputs/selection.json`, `inputs/selected.tsv`,
+`panel/proteomes.tsv`, the Markdown and TSV/JSON files in `results/review`,
+and both PNGs in `results/diagnostics`.
 
 ## Remaining implementation steps
 
