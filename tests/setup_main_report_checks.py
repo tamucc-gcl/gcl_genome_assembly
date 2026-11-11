@@ -51,6 +51,7 @@ if case=='multispecies':
 (fixtures/'qc.csv').write_text('sample_id,stage,analysis,metric,hap1,hap2,both\n'+''.join(s+',final,'+analysis+','+metric+','+str(value)+','+str(value)+',NA\n' for s in sorted({r['sample'] for r in assemblies}) for analysis,metric,value in [('quast','N50',1000),('busco','complete',95),('busco','total_busco',100)]))
 (fixtures/'sharing_summary.tsv').write_text('unit\tdenominator\tclass\tbp\tpercent_represented_graph_bp\tcore_min\tsoftcore_min\tshell_min\nindividual\t2\tcore\t1000\t100\t2\t1\t2\n')
 (fixtures/'sharing_report.md').write_text('# Sharing evidence\n')
+(fixtures/'pangenome_manifest.tsv').write_text('role\tgraph\tfile\nbiological_gbz\tclip\t1.gbz\nvariant_gbz\tgref_clip\t1.gref.gbz\n')
 (fixtures/'source_sequences.tsv').write_text('assembly\tsequence\tsource_bp\tclip_retained_path_bp\tretained_path_fraction\tretention_review\nsample_hap1\tchr1_1\t1000\t500\t0.5\tyes\nsample_hap2\tchr1_1\t1000\t1000\t1\tno\n')
 (fixtures/'source_audit.json').write_text('{"status":"REVIEW","min_retained_fraction_screen":0.8}\n')
 (fixtures/'source_report.md').write_text('# Source representation\n\nStatus: **REVIEW**. 1 chromosome-scale path requires review.\n')

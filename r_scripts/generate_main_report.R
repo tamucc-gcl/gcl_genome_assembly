@@ -406,6 +406,11 @@ if(nrow(graph)>0) {
         ref <- keep(elig$linear_references,function(x) as.character(x$taxid)==taxid)
         ref_name <- if(length(ref)) ref[[1]]$id else 'Not selected'
         md <- c(md,paste0('**',species_label(taxid),'** · Reference: ',ref_name,' · ',sum(assemblies$taxid==taxid & assemblies$graph_member),' contributing assemblies.'),'')
+        gbz <- artifacts |> filter(type=='pangenome_gbz',id==.env$taxid)
+        if(nrow(gbz)>0) {
+            md <- c(md,link('Download the pangenome graph (CLIP GBZ)',gbz$path[[1]]),'',
+                'For short-read mapping with vg Giraffe, use this graph with matching mapping indexes. [Giraffe indexing and mapping guide](https://github.com/vgteam/vg/wiki/Mapping-short-reads-with-Giraffe)','')
+        }
         summaries <- artifacts |> filter(type=='pangenome_summary',id==.env$taxid)
         sharing <- tibble()
         if(nrow(summaries)>0) {

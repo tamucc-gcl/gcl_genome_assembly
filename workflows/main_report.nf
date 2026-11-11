@@ -58,13 +58,17 @@ workflow MAIN_REPORTING {
     def artifact={ type,id,path -> [type:type,id:id.toString(),path:path.toString()] }
     def annotation_helper=file("${projectDir}/py_scripts/annotation_counts.py",checkIfExists:true)
     ANNOTATION_AUDIT(annotations,annotation_helper)
-    registry=graph_reports.map { taxid,md ->
+    registry=graph_reports.filter { taxid, product -> product.name!='pangenome_manifest.tsv' }.map { taxid,md ->
         def review=md.name in ['source_sequences.tsv','source_audit.json']
         [type:md.name=='sharing_summary.tsv' ? 'pangenome_summary' : md.name=='source_sequences.tsv' ? 'graph_review_rows' : md.name=='source_audit.json' ? 'graph_review_audit' : 'pangenome',id:taxid.toString(),
          path:review ? "pangenome/${taxid}/representation/${md.name}".toString() : md.name=='sharing_summary.tsv' ? "pangenome/${taxid}/sharing/sharing_summary.tsv".toString() : graphReportPath(taxid,md.name),
          content:md.name=='source_sequences.tsv' ? graphReviewRows(md) : review || md.name=='sharing_summary.tsv' ? md.text : '',
          note:md.name=='source_report.md' ? (md.readLines().find { it.startsWith('Status:') } ?: '') : '']
-    }.mix(psmc_reports.map { p ->
+    }.mix(graph_reports.filter { taxid, product -> product.name=='pangenome_manifest.tsv' }.flatMap { taxid, manifest ->
+        manifest.readLines().drop(1).collect { it.split('\t', -1) }
+            .findAll { it[0]=='biological_gbz' && it[1]=='clip' }
+            .collect { artifact('pangenome_gbz',taxid,"pangenome/${taxid}/${it[2]}") }
+    }).mix(psmc_reports.map { p ->
         [type:p.name=='summary.tsv' ? 'psmc_summary' : 'psmc',id:'run',
          path:"post_assembly/psmc/${p.name}".toString(),content:p.name=='summary.tsv' ? p.text : '']
     }).mix(detailed_report.map { md -> artifact('assembly_details','run',md.name) })
