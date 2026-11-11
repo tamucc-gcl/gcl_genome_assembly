@@ -2,12 +2,11 @@
 
 ## Implementation status
 
-The standalone tools cover reviewed cleaning, building a reference-proteome
-database, screening a FASTA, and reporting protein and targeted nucleotide
-evidence. They are **not yet called by `main.nf`**. The search pilot accepts a
-prepared local BLAST nucleotide database and optional assembly-matched coverage
-BAM. Shared nucleotide database setup, pipeline-generated coverage, and the
-contig-only stopping control are subsequent work.
+The standalone tools cover reviewed cleaning, shared reference database setup,
+whole-assembly MEGABLAST, translated protein searches, and targeted BLASTN.
+They are **not yet called by `main.nf`**. The search accepts an assembly-matched
+coverage BAM or a retained `samtools coverage` table. Main-pipeline coverage
+generation and the contig-only stopping control are subsequent work.
 The existing FCS workflow is unchanged. Do not enable the currently blocked
 `run_blobtools_evidence` flag yet.
 
@@ -16,6 +15,11 @@ It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.
 
 ## Prepare an editable review sheet
+
+For the real CTlk test, start with [Run the bounded CTlk pilot on Crest](#run-the-bounded-ctlk-pilot-on-crest).
+That workflow prepares the review sheet for you. The standalone command below
+uses example paths and assembly IDs. Substitute an existing FASTA and a writable
+output directory when running it on another assembly.
 
 ```bash
 python3 gcl_genome_assembly/py_scripts/contamination_review.py prepare \
@@ -194,8 +198,9 @@ nextflow -log "$pilot/evidence.nextflow.log" -c "$pipeline/nextflow.config" run 
 Open `results/review/README.md`. Compare sequence labels, nucleotide targets,
 and the unselected intervals with `fixture/expected.json`. The planted
 non-host interval in `mixed` is **[960, 1560)**. The report embeds the R-rendered
-GC/coverage and cumulative sequence plots. The BlobToolKit dataset in
-`results/blobdir` includes protein-hit taxonomy and the combined review category.
+GC/coverage plot with span-weighted margins and a cumulative sequence plot. The
+BlobToolKit dataset in `results/blobdir` includes MEGABLAST taxonomy where
+available, protein evidence as fallback, and the combined review category.
 All-ambiguous sequences remain in the evidence tables and are listed in
 `blobdir_exclusions.tsv` because BlobToolKit requires measurable GC.
 Coverage uses primary reads at MAPQ ≥20, omitting duplicates and QC failures.
@@ -258,7 +263,7 @@ before subsetting. If only the coverage table is unavailable, omit
 evidence run. The R plot will use GC versus length.
 
 Set `CONTAMINATION_NT_DB` to the absolute prefix of an existing taxonomy-enabled
-local BLAST database to search the targets in this run. Without it the report
+local BLAST database to enable whole-input MEGABLAST and targeted BLASTN. Without it the report
 lists target windows, total target bp, and a FASTA for follow-up. A panel of
 eight proteomes can establish that the search and reporting work on real
 contigs, but gives limited taxonomic sensitivity and specificity. Use the
@@ -272,29 +277,73 @@ review, return `inputs/selection.json`, `inputs/selected.tsv`,
 `panel/proteomes.tsv`, the Markdown and TSV/JSON files in `results/review`,
 and both PNGs in `results/diagnostics`.
 
+## Run the whole post-FCS haplotype with NCBI nt on Crest
+
+Supplying `--nt_db_root` and `--nt_release` enables managed setup. The default
+collection is NCBI `nt`. The workflow downloads the exact catalog snapshot
+advertised for that date using `update_blastdb.pl`, opens the resulting BLAST v5
+database, and stores the complete bundle under
+`<nt_db_root>/blast/nt/<nt_release>/database/`. Future runs using that label
+reuse the stored database, even after NCBI publishes a newer snapshot. For a
+fresh download the date must match the current catalog. The manifest records
+the catalog entry, volume inventory, and BLAST version. An explicit
+`--nucleotide_db /absolute/path/to/nt` instead uses an existing database.
+
+The full `nt` download requires substantial shared space. Check the catalog
+for the currently advertised date and sizes before launching:
+
+```bash
+curl -fsSL https://ftp.ncbi.nlm.nih.gov/blast/db/blastdb-metadata-1-1.json |
+  python3 -c 'import json, sys; x=next(x for x in json.load(sys.stdin) if x["dbname"]=="nt"); print(x["last-updated"][:10], "compressed GB", round(x["bytes-total-compressed"]/1e9), "expanded GB", round(x["bytes-total"]/1e9))'
+```
+
+This command uses the full post-FCS FASTA and coverage paths recorded by the
+earlier subset pilot. Set `NT_RELEASE` to the date shown above and set
+`PROTEIN_DB_DIR` to the intended shared DIAMOND bundle if available. Otherwise
+the run uses the eight-proteome pilot panel and establishes whole-input
+execution against `nt` while full protein-database benchmarking remains separate.
+
+```bash
+module load nextflow/23.10.1 miniconda3
+NT_RELEASE=YYYY-MM-DD
+(
+  set -euo pipefail
+  pipeline="$PWD/gcl_genome_assembly"
+  pilot="$PWD/comparisons/contamination-ctlk-pilot-01"
+  run="$PWD/comparisons/contamination-ctlk-whole-01"
+  selection="$pilot/inputs/selection.json"
+  fasta=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$selection")
+  coverage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["coverage_source"])' "$selection")
+  protein="${PROTEIN_DB_DIR:-$pilot/db/diamond/uniprot_reference_proteomes/ctlk-panel-01}"
+  mkdir -p "$run"
+  nextflow -log "$run/nextflow.log" -c "$pipeline/nextflow.config" run \
+    "$pipeline/scripts/comparisons/contamination_evidence.nf" -profile slurm \
+    -w "$run/work" --outdir "$run/results" \
+    --assembly Sde-CTlk_104_hap1 --stage post_fcs --taxid 373251 \
+    --taxonomy_dir /work/birdlab/databases/ncbi_taxonomy \
+    --fasta "$fasta" --coverage_tsv "$coverage" --protein_db_dir "$protein" \
+    --nt_db_root /work/birdlab/databases --nt_collection nt --nt_release "$NT_RELEASE"
+)
+```
+
+MEGABLAST searches every eligible window in parallel, including windows with
+host-compatible protein hits. Eligible windows contain at least 100 A/C/G/T
+bases and retain original sequence coordinates. The optional targeted
+`blastn` pass (disable with `--targeted_blastn false`) searches windows with
+non-host, mixed, or unresolved taxonomic hits. A window with no hits from
+either screen stays visible in the no-hit counts. Reports preserve all three
+hit tables separately and list candidate bp separately from contig span.
+The result includes sequence-span-weighted GC and depth margins, plus
+contig counts, span, and N50 by displayed taxonomic group.
+
 ## Remaining implementation steps
 
-1. Prepare the shared nucleotide BLAST bundle with native `storeDir`.
-   Follow the shared database layout
-   (`diamond/<collection>/<release>`, `blast/<collection>/<release>`, existing
-   `ncbi_taxonomy`). Read-only inspection of the annotation pipeline confirms its
-   `modules/diamond.nf` downloads the current complete Swiss-Prot FASTA and builds
-   `swissprot.dmnd` with plain `diamond makedb --in ... --db ...`, stored via
-   `storeDir`. That builder does not supply taxonomy mappings/nodes/names or retain
-   a database release/checksum manifest; its DIAMOND dependency is not pinned in
-   the download/search labels. Annotation uses the index for protein descriptions
-   and repeat-library filtering. This identifies the source collection/build recipe,
-   not the precise release or binary version of the existing Crest file.
-   Leave this annotation database untouched. The agreed reference-proteome
-   contamination collection is a separate taxonomy-aware bundle, not an alias for
-   complete Swiss-Prot. The user confirms `proteins.dmnd` is unused; exclude it
-   from the reuse plan without deleting or modifying it.
-2. Run the known mixture and a bounded real-contig pilot on Crest. Evaluate
+1. Verify the whole-haplotype run on Crest with the intended databases. Evaluate
    window-boundary sensitivity and the size of the nucleotide target set.
-3. Add pipeline-generated HiFi or shotgun coverage, the pre-scaffolding workflow,
+2. Add pipeline-generated HiFi or shotgun coverage, the pre-scaffolding workflow,
    and the general contig-stage stopping control.
    Test zero downstream task submissions and subsequent normal cache reuse.
-4. Validate reviewed cleaning/downstream invalidation and the optional final check.
+3. Validate reviewed cleaning/downstream invalidation and the optional final check.
 
 Local foundation checks:
 

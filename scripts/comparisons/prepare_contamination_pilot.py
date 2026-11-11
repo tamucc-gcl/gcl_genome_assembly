@@ -46,7 +46,7 @@ def main():
         sequence_evidence={"host": "host-compatible", "foreign": "non-host", "mixed": "mixed",
                            "no_match": "unresolved", "ambiguous": "unresolved"},
         non_host_intervals={"foreign": [120, 720], "mixed": [960, 1560]},
-        nucleotide_target_sequences=["foreign", "mixed", "no_match"]), indent=2) + "\n")
+        nucleotide_target_sequences=["foreign", "mixed"]), indent=2) + "\n")
 
 
 if __name__ == "__main__":

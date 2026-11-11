@@ -11,9 +11,10 @@ import shutil
 from contamination_review import FIELDS, digest, records, write_record, write_table
 
 
-HIT_FIELDS = ["query", "sequence", "start0", "end0", "strand", "subject", "taxids",
+HIT_FIELDS = ["query", "sequence", "start0", "end0", "strand", "subject", "subject_title", "taxids",
               "evalue", "bitscore", "identity_pct", "lineage_at_host_rank", "host_relation"]
-WINDOW_FIELDS = ["query", "sequence", "start0", "end0", "protein_evidence", "nucleotide_target"]
+WINDOW_FIELDS = ["query", "sequence", "start0", "end0", "protein_evidence", "megablast_evidence",
+                 "nucleotide_target"]
 
 
 def table(path):
@@ -111,7 +112,7 @@ def search_hits(paths, windows, args):
     for path in paths:
         with path.open(encoding="utf-8") as handle:
             for line in handle:
-                query, subject, taxids, qstart, qend, score, evalue, identity = line.rstrip("\n").split("\t")
+                query, subject, taxids, qstart, qend, score, evalue, identity, title = line.rstrip("\n").split("\t", 8)
                 window = windows[query]
                 start, end = sorted((int(qstart), int(qend)))
                 if start < 1 or end > int(window["end0"]) - int(window["start0"]):
@@ -121,7 +122,7 @@ def search_hits(paths, windows, args):
                 start0 = int(window["start0"])
                 hits.append((ids, dict(zip(HIT_FIELDS, [
                     query, window["sequence"], start0 + start - 1, start0 + end,
-                    "+" if int(qstart) <= int(qend) else "-", subject, taxids,
+                    "+" if int(qstart) <= int(qend) else "-", subject, title, taxids,
                     evalue, float(score), identity, "", "",
                 ]))))
     host, groups, names = taxonomy(args.taxdump, args.host_rank, args.taxid, taxa)
@@ -178,35 +179,91 @@ def select(args):
     windows = {row["query"]: row for row in table(args.prepared / "windows.tsv")}
     hits = search_hits(args.hits, windows, args)
     grouped = grouped_hits(hits)
+    mega_hits = search_hits(args.megablast_hits, windows, args) if args.megablast_hits else []
+    mega_grouped = grouped_hits(mega_hits)
     targets = defaultdict(list)
     assignments = []
     for query, window in windows.items():
         status = relationship(grouped.get(query, [])) if window["status"] == "search" else "insufficient-acgt"
-        follow = status in {"no-hit", "unresolved", "mixed", "non-host"}
-        assignments.append(dict(window, protein_evidence=status, nucleotide_target="YES" if follow else "NO"))
+        mega = "not-run"
+        if args.megablast:
+            mega = (relationship(mega_grouped.get(query, [])) if window["status"] == "search"
+                    else "insufficient-acgt")
+        review_states = {"unresolved", "mixed", "non-host"}
+        follow = bool({status, mega} & review_states)
+        if not args.megablast:
+            follow = follow or status == "no-hit"
+        assignments.append(dict(window, protein_evidence=status, megablast_evidence=mega,
+                                nucleotide_target="YES" if follow else "NO"))
         if follow:
             targets[window["sequence"]].append(window)
     args.out.mkdir()
     write_table(args.out / "protein_hits.tsv", hits, HIT_FIELDS)
+    write_table(args.out / "megablast_hits.tsv", mega_hits, HIT_FIELDS)
     write_table(args.out / "windows.tsv",
                 ({field: row[field] for field in WINDOW_FIELDS} for row in assignments), WINDOW_FIELDS)
     with (args.out / "targets.fasta").open("w") as output:
         for header, sequence in records(args.fasta):
             for row in targets[header.split()[0]]:
-                write_record(output, row["query"], sequence[int(row["start0"]):int(row["end0"])])
+                fragment = sequence[int(row["start0"]):int(row["end0"])]
+                write_record(output, row["query"], fragment)
+                with (args.out / f"target_{row['chunk']}").open("a") as chunk:
+                    write_record(chunk, row["query"], fragment)
+
+
+def retained_hits(path):
+    hits = table(path)
+    for hit in hits:
+        for key, convert in (("bitscore", float), ("start0", int), ("end0", int)):
+            hit[key] = convert(hit[key])
+    return hits
+
+
+def lineage_group(hits, no_hits):
+    by_lineage = defaultdict(list)
+    for hit in hits:
+        lineage = hit["lineage_at_host_rank"]
+        if lineage and ";" not in lineage:
+            by_lineage[lineage].append((hit["start0"], hit["end0"]))
+    weights = {}
+    for lineage, spans in by_lineage.items():
+        covered, end = 0, 0
+        for lo, hi in sorted(spans):
+            covered += max(0, hi - max(lo, end))
+            end = max(hi, end)
+        weights[lineage] = covered
+    if not weights:
+        return "no-hit" if no_hits else "unresolved"
+    best = max(weights, key=weights.get)
+    return best if weights[best] >= .8 * sum(weights.values()) else "conflicting"
+
+
+def taxon_summary(metrics):
+    groups = defaultdict(list)
+    for row in metrics:
+        groups[row["plot_taxon"]].append(int(row["length_bp"]))
+    for group, sizes in sorted(groups.items(), key=lambda item: (-sum(item[1]), item[0])):
+        total, cumulative = sum(sizes), 0
+        for length in sorted(sizes, reverse=True):
+            cumulative += length
+            if 2 * cumulative >= total:
+                yield dict(group=group, contigs=len(sizes), span_bp=total, n50_bp=length)
+                break
 
 
 def summarize(args):
     assigned = table(args.selected / "windows.tsv")
     windows = {row["query"]: row for row in assigned}
     targets = {key: row for key, row in windows.items() if row["nucleotide_target"] == "YES"}
-    nucleotide = search_hits([args.nucleotide_hits], targets, args) if args.nucleotide_hits else []
+    nucleotide = search_hits(args.nucleotide_hits, targets, args) if args.nucleotide_hits else []
     nt_by_query = grouped_hits(nucleotide)
-    protein = table(args.selected / "protein_hits.tsv")
-    for hit in protein:
-        for key, convert in (("bitscore", float), ("start0", int), ("end0", int)):
-            hit[key] = convert(hit[key])
+    protein = retained_hits(args.selected / "protein_hits.tsv")
+    mega = retained_hits(args.selected / "megablast_hits.tsv")
     protein_by_query = grouped_hits(protein)
+    mega_by_query = grouped_hits(mega)
+    plot_hits = defaultdict(list)
+    mega_sequences = {hit["sequence"] for hits in mega_by_query.values() for hit in hits
+                      if hit["lineage_at_host_rank"]}
     by_sequence = defaultdict(set)
     review_intervals = defaultdict(list)
     for row in assigned:
@@ -214,16 +271,27 @@ def summarize(args):
         nt = relationship(nt_by_query.get(query, []))
         if row["nucleotide_target"] != "YES":
             nt = "not-targeted"
-        elif not args.nucleotide_hits:
+        elif not args.targeted:
             nt = "not-run"
         row["nucleotide_evidence"] = nt
-        by_sequence[row["sequence"]].update([row["protein_evidence"], nt])
+        by_sequence[row["sequence"]].update([row["protein_evidence"], row["megablast_evidence"], nt])
+        plotting = mega_by_query if row["sequence"] in mega_sequences else protein_by_query
+        plot_hits[row["sequence"]].extend(plotting.get(query, []))
         for method, hits in (("protein", protein_by_query.get(query, [])),
+                             ("megablast", mega_by_query.get(query, [])),
                              ("nucleotide", nt_by_query.get(query, []))):
             for hit in hits:
                 if hit["host_relation"] in {"non-host", "mixed"}:
+                    span = hit["end0"] - hit["start0"]
+                    competing = hit["host_relation"] == "mixed" or any(
+                        other["host_relation"] == "host-compatible"
+                        and other["bitscore"] >= .9 * hit["bitscore"]
+                        and min(hit["end0"], other["end0"]) - max(hit["start0"], other["start0"]) >= .8 * span
+                        for other in hits
+                    )
                     review_intervals[row["sequence"]].append((
-                        hit["start0"], hit["end0"], method, hit["lineage_at_host_rank"]))
+                        hit["start0"], hit["end0"], method, hit["lineage_at_host_rank"],
+                        "same-locus host competitor" if competing else "distinct non-host hit"))
 
     source = json.loads((args.prepared / "source.json").read_text())
     metrics = table(args.metrics / "sequence_metrics.tsv")
@@ -234,8 +302,11 @@ def summarize(args):
                 name = row["#rname"]
                 if name in depths or int(row["startpos"]) != 1:
                     raise ValueError(f"Invalid coverage row: {name}")
-                depths[name] = (int(row["endpos"]), row["meandepth"])
-        if {name: length for name, (length, _) in depths.items()} != {
+                length, covered = int(row["endpos"]), row.get("covbases")
+                if covered is not None and not 0 <= int(covered) <= length:
+                    raise ValueError(f"Invalid covered bases for {name}: {covered}")
+                depths[name] = (length, row["meandepth"], covered)
+        if {name: values[0] for name, values in depths.items()} != {
             row["sequence"]: int(row["length_bp"]) for row in metrics
         }:
             raise ValueError("Coverage BAM sequence names and lengths differ from the evidence FASTA")
@@ -253,15 +324,18 @@ def summarize(args):
             status = "host-compatible"
         else:
             status = "unresolved"
-        row.update(mean_depth=depths.get(name, (0, "NA"))[1], evidence=status)
+        _, depth, covered = depths.get(name, (0, "NA", None))
+        row.update(mean_depth=depth, read_covered_bp=covered if covered is not None else "NA", evidence=status,
+                   plot_taxon=lineage_group(plot_hits[name], "no-hit" in states and not plot_hits[name]))
         intervals = []
-        for lo, hi, method, lineage in sorted(review_intervals[name]):
+        for lo, hi, method, lineage, context in sorted(review_intervals[name]):
             if intervals and lo <= intervals[-1][1]:
-                start, stop, methods, lineages = intervals[-1]
-                intervals[-1] = (start, max(hi, stop), methods | {method}, lineages | {lineage})
+                start, stop, methods, lineages, contexts = intervals[-1]
+                intervals[-1] = (start, max(hi, stop), methods | {method}, lineages | {lineage},
+                                 contexts | {context})
             else:
-                intervals.append((lo, hi, {method}, {lineage}))
-        for lo, hi, methods, lineages in intervals:
+                intervals.append((lo, hi, {method}, {lineage}, {context}))
+        for lo, hi, methods, lineages, contexts in intervals:
             if lo == 0 and hi == int(row["length_bp"]):
                 action = whole_sequence[name]
             else:
@@ -271,13 +345,17 @@ def summarize(args):
                 ]))
                 review.append(action)
             action.update(support=", ".join(sorted(methods)),
-                          hit_lineages="; ".join(sorted(lineages - {""})))
+                          hit_lineages="; ".join(sorted(lineages - {""})),
+                          hit_context="; ".join(sorted(contexts)))
 
     args.out.mkdir()
     write_table(args.out / "windows.tsv", assigned, WINDOW_FIELDS + ["nucleotide_evidence"])
     write_table(args.out / "protein_hits.tsv", protein, HIT_FIELDS)
+    write_table(args.out / "megablast_hits.tsv", mega, HIT_FIELDS)
     write_table(args.out / "nucleotide_hits.tsv", nucleotide, HIT_FIELDS)
     write_table(args.out / "sequence_evidence.tsv", metrics, list(metrics[0]))
+    summaries = list(taxon_summary(metrics))
+    write_table(args.out / "taxon_summary.tsv", summaries, ["group", "contigs", "span_bp", "n50_bp"])
     write_table(args.out / "blob_sequence_evidence.tsv", (row for row in metrics if int(row["acgt_bp"])),
                 list(metrics[0]))
     write_table(args.out / "blobdir_exclusions.tsv", (
@@ -287,10 +365,12 @@ def summarize(args):
     statuses = {row["sequence"]: row["evidence"] for row in metrics}
     for row in review:
         row["sequence_evidence"] = statuses[row["sequence"]]
-    write_table(args.out / "review.tsv", review, FIELDS + ["sequence_evidence", "support", "hit_lineages"])
+    write_table(args.out / "review.tsv", review, FIELDS + ["sequence_evidence", "support", "hit_lineages", "hit_context"])
     shutil.copyfile(args.selected / "targets.fasta", args.out / "nucleotide_targets.fasta")
+    if args.nucleotide_manifest:
+        shutil.copyfile(args.nucleotide_manifest, args.out / "nucleotide_database.json")
     with (args.out / "blob_hits.tsv").open("w") as handle:
-        for hit in protein:
+        for hit in (hit for hits in plot_hits.values() for hit in hits):
             if any(value.isdigit() and int(value) > 0 for value in hit["taxids"].split(";")):
                 handle.write("\t".join(str(hit[key]) for key in
                     ["sequence", "taxids", "bitscore", "subject", "evalue"]) +
@@ -298,10 +378,16 @@ def summarize(args):
     counts = Counter(row["protein_evidence"] for row in assigned)
     supported = [row for row in review if row.get("support")]
     target_bp = sum(int(row["end0"]) - int(row["start0"]) for row in targets.values())
+    flagged_bp = sum(int(row["end0"]) - int(row["start0"]) for row in supported)
+    covered_bp = (sum(int(row["read_covered_bp"]) for row in metrics)
+                  if all(row["read_covered_bp"] != "NA" for row in metrics) else None)
+    mega_counts = Counter(row["megablast_evidence"] for row in assigned)
     metadata = dict(source, host_taxid=args.taxid, host_rank=args.host_rank,
                     protein_windows=dict(counts), nucleotide_target_windows=len(targets),
                     nucleotide_target_bp=target_bp,
-                    nucleotide_status=("searched" if targets else "no-targets") if args.nucleotide_hits else "not-run",
+                    megablast_windows=dict(mega_counts), flagged_interval_bp=flagged_bp,
+                    read_covered_bp=covered_bp,
+                    nucleotide_status=("searched" if targets else "no-targets") if args.targeted else "not-run",
                     coverage=args.coverage_source if args.coverage else "unavailable",
                     protein_database=json.loads(args.database.read_text()),
                     nucleotide_database=args.nucleotide_db or None)
@@ -314,8 +400,14 @@ def summarize(args):
         f"({len(targets):,} windows, {target_bp:,} of {source['source_bp']:,} bp "
         f"or {100 * target_bp / source['source_bp']:.1f}%). "
         f"Read coverage: {metadata['coverage']}.", "",
-        "| Protein evidence | Windows |", "| --- | ---: |",
-        *(f"| {status} | {counts[status]:,} |" for status in sorted(counts)), "",
+        *(["[Managed nucleotide database provenance](nucleotide_database.json).", ""]
+          if args.nucleotide_manifest else []),
+        *([f"**Bases covered by reads: {covered_bp:,} of {source['source_bp']:,} bp "
+           f"({100 * covered_bp / source['source_bp']:.1f}%).**", ""] if covered_bp is not None else []),
+        "| Window evidence | Protein | MEGABLAST |", "| --- | ---: | ---: |",
+        *(f"| {status} | {counts[status]:,} | {mega_counts[status]:,} |"
+          for status in sorted(counts.keys() | mega_counts.keys())), "",
+        f"**Flagged interval span: {flagged_bp:,} bp** across {len(supported):,} review rows.", "",
         "## Sequences with non-host or mixed evidence", "",
         "| Sequence | Length (bp) | Evidence | Mean read depth |", "| --- | ---: | --- | ---: |",
         *(f"| {row['sequence'].replace('|', '&#124;')} | {int(row['length_bp']):,} | "
@@ -324,20 +416,30 @@ def summarize(args):
         (f"Showing {min(len(supported), 30):,} of {len(supported):,} supported review rows. "
          "Use the review sheet for all rows.") if supported else "No non-host or mixed hit intervals were identified.", "",
         *(
-            ["| Sequence | Interval (bp) | Search evidence | Hit lineages |",
-             "| --- | --- | --- | --- |"]
+            ["| Sequence | Interval (bp) | Search evidence | Hit lineages | Local context |",
+             "| --- | --- | --- | --- | --- |"]
             + [f"| {row['sequence'].replace('|', '&#124;')} | [{int(row['start0']):,}, {int(row['end0']):,}) | "
-               f"{row['support']} | {row['hit_lineages'].replace('|', '&#124;')} |" for row in supported[:30]]
+               f"{row['support']} | {row['hit_lineages'].replace('|', '&#124;')} | {row['hit_context']} |"
+               for row in supported[:30]]
             + [""]
             if supported else []
         ),
         "See the [window assignments](windows.tsv), [protein hits](protein_hits.tsv) and "
-        "[nucleotide hits](nucleotide_hits.tsv) for intervals and supporting matches. "
+        "[MEGABLAST hits](megablast_hits.tsv) and [targeted nucleotide hits](nucleotide_hits.tsv) "
+        "for intervals and supporting matches. "
         "[Target FASTA](nucleotide_targets.fasta).", "",
         "## Diagnostics", "",
+        "Taxon groups use the union of aligned intervals per lineage. A lineage must account for "
+        "at least 80% of the summed lineage spans to color a contig. MEGABLAST is used where it "
+        "provides a ranked hit, with protein as fallback. Candidate span above counts only flagged intervals.", "",
+        "| Taxon group | Contigs | Contig span (bp) | N50 (bp) |", "| --- | ---: | ---: | ---: |",
+        *(f"| {row['group'].replace('|', '&#124;')} | {row['contigs']:,} | "
+          f"{row['span_bp']:,} | {row['n50_bp']:,} |" for row in summaries[:12]), "",
         "![Blob diagnostic](../diagnostics/blob.png)", "",
         "![Cumulative sequence by evidence](../diagnostics/cumulative.png)", "",
-        "[BlobToolKit dataset](../blobdir/) with protein-hit taxonomy and the review categories. "
+        "[Taxon counts, span and N50](taxon_summary.tsv). "
+        "[BlobToolKit dataset](../blobdir/) with MEGABLAST taxonomy where available, "
+        "protein evidence as fallback, and the separate review categories. "
         "[Sequences without measurable GC](blobdir_exclusions.tsv) remain in the evidence tables.", "",
         "Review [proposed intervals and whole-sequence options](review.tsv). Every row starts at `NO`. "
         "Change coordinates as needed and supply a reviewer and reason for each selected action.", "",
@@ -368,13 +470,17 @@ def main():
         if command == "select":
             sub.add_argument("--fasta", type=Path, required=True)
             sub.add_argument("--hits", type=Path, nargs="*", default=[])
+            sub.add_argument("--megablast-hits", type=Path, nargs="*", default=[])
+            sub.add_argument("--megablast", action="store_true")
         else:
             for name in ("selected", "metrics", "database"):
                 sub.add_argument("--" + name, type=Path, required=True)
             sub.add_argument("--coverage", type=Path)
             sub.add_argument("--coverage-source", default="provided-bam")
-            sub.add_argument("--nucleotide-hits", type=Path)
+            sub.add_argument("--nucleotide-hits", type=Path, nargs="*", default=[])
+            sub.add_argument("--targeted", action="store_true")
             sub.add_argument("--nucleotide-db")
+            sub.add_argument("--nucleotide-manifest", type=Path)
     args = parser.parse_args()
     if args.command == "verify-database":
         identity = json.loads(args.database.read_text())
