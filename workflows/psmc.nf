@@ -140,10 +140,12 @@ workflow PSMC_ANALYSIS {
             iteration:params.psmc_plot_iteration,bootstrap_count:params.psmc_bootstraps]) }
         ready_reports=PSMC_EXPORT.out.curves.map { m,dir -> tuple(m.id,m,dir) }
             .join(assessed.ready.map { m,dir -> tuple(m.id,dir) })
-            .map { id,m,curves,input -> tuple(id,m,input,curves) }
-        skipped_reports=assessed.not_fitted.map { m,input -> tuple(m.id,m,input,absent) }
+            .join(PSMC_FIT.out.model.map { m,fit -> tuple(m.id,fit) })
+            .map { id,m,curves,input,fit -> tuple(id,m,input,curves,fit) }
+        skipped_reports=assessed.not_fitted.map { m,input -> tuple(m.id,m,input,absent,absent) }
         PSMC_RENDER(ready_reports.mix(skipped_reports).join(plot_context)
-            .map { id,m,input,curves,context -> tuple(m,input,curves,context) },
+            .map { id,m,input,curves,fit,context -> tuple(m,input,curves,fit,context) },
+            helper,file("${projectDir}/py_scripts/psmc_diagnostics.py",checkIfExists:true),
             file("${projectDir}/r_scripts/plot_psmc.R",checkIfExists:true))
         versions=versions.mix(PSMC_RENDER.out.versions)
         PSMC_INDEX(PSMC_PLAN.out.plan,PSMC_RENDER.out.report.map { m,dir -> dir }.toList(),index_helper,

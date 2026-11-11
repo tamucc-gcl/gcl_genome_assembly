@@ -58,13 +58,15 @@ def pattern_groups(pattern):
 
 
 def parse(path):
-    blocks=[];current=None;skip=None;pattern=None
+    blocks=[];current=None;skip=None;pattern=None;version=None
     for line in Path(path).read_text().splitlines():
         if line.startswith('MM'):
             found=re.search(r'skip:(\d+)',line)
             if found:skip=int(found[1])
             found=re.search(r'pattern:([^,\s]+)',line)
             if found:pattern=found[1]
+            found=re.match(r'MM\s+Version:\s*(\S+)',line)
+            if found:version=found[1]
         fields=line.split()
         if not fields:continue
         if fields[0]=='RD':
@@ -76,6 +78,9 @@ def parse(path):
             if fields[0]=='TR':current['theta']=values[0];current['rho']=values[1]
             elif fields[0]=='DT':current['dt']=values[0]
             else:current['rows'].append(values)
+        elif fields[0]=='LK' and current is not None and current['iteration']>0:
+            likelihood=float(fields[1])
+            if math.isfinite(likelihood):current['log_likelihood']=likelihood
         elif fields[0]=='//' and current is not None:
             if not current.get('theta',0)>0 or not current['rows']:raise ValueError('Incomplete/invalid PSMC iteration')
             indices=[int(r[0]) for r in current['rows']]
@@ -89,7 +94,7 @@ def parse(path):
     if len({b['iteration'] for b in blocks})!=len(blocks):raise ValueError('Duplicate PSMC iteration')
     groups=pattern_groups(pattern)
     if any(len(b['rows'])!=sum(groups) for b in blocks):raise ValueError('PSMC interval count disagrees with pattern')
-    return dict(skip=skip,pattern=pattern,blocks=blocks)
+    return dict(skip=skip,pattern=pattern,blocks=blocks,version=version)
 
 
 def export(files,out,iteration,bin_size,mutation_rate=None,generation_time=None,show_last=False,expected_bootstraps=0):

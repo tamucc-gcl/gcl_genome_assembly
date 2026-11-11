@@ -11,7 +11,7 @@ import os
 import shutil
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'py_scripts'))
-from psmc_results import export,read_fasta
+from psmc_results import export,parse,pattern_groups,read_fasta
 from run_provenance import collect
 
 
@@ -30,8 +30,29 @@ def main():
         d=published/'1'/sample
         for name in ['input/callable.bed','input/diploid.fa.gz','input/input.psmcfa','input/input_qc.json',
                      'input/provenance.json','report/history.png','report/history.pdf','report/report.md',
-                     'report/curves.tsv','report/interval_qc.tsv','fits/observed.psmc']:
+                     'report/curves.tsv','report/interval_qc.tsv','fits/observed.psmc',
+                     'report/psmc_qc.tsv','report/psmc_intervals.tsv','report/psmc_iterations.tsv',
+                     'report/psmc_history_support.png','report/psmc_recombination_support.png',
+                     'report/psmc_likelihood.png']:
             assert (d/name).stat().st_size>0,name
+        report = (d/'report/report.md').read_text(encoding='utf-8')
+        for image in ('psmc_history_support.png','psmc_recombination_support.png','psmc_likelihood.png'):
+            assert any(line.startswith('![') and line.endswith(f']({image})') for line in report.splitlines()),image
+        assert 'psmc_diagnostics.pdf' not in report
+        assert not (d/'report/psmc_diagnostics.pdf').exists()
+        observed = parse(d/'fits/observed.psmc')
+        selected = next(block for block in observed['blocks'] if block['iteration']==a.iteration)
+        with (d/'report/psmc_intervals.tsv').open() as handle:
+            intervals = list(csv.DictReader(handle, delimiter='\t'))
+        assert len(intervals)==len(pattern_groups(observed['pattern']))
+        assert intervals[-1]['time_end']==''
+        for interval in intervals:
+            first = int(interval['first_atomic_interval'])
+            stop = int(interval['last_atomic_interval']) + 1
+            assert float(interval['expected_recombinations'])==sum(row[3] for row in selected['rows'][first:stop])
+        with (d/'report/psmc_iterations.tsv').open() as handle:
+            history = list(csv.DictReader(handle, delimiter='\t'))
+        assert history[0]['log_likelihood']=='' and history[-1]['log_likelihood']
         qc=json.loads((d/'input/input_qc.json').read_text())
         reference=json.loads((d/'reference/reference.json').read_text())
         expected=a.root/'fixtures'/('hap1.fa' if sample=='assembly_ind' else 'read_reference.fa')
@@ -39,7 +60,9 @@ def main():
         assert reference['sha256']==hashlib.sha256(expected.read_bytes()).hexdigest()==qc['reference_sha256']
         references.append(reference['sha256'])
         assert qc['status']=='ready' and qc['heterozygous_snps']>20 and qc['psmc_retained_callable_bp']>10000
-        if sample=='assembly_ind':assert qc['heterozygous_snps']==true_hets
+        if sample=='assembly_ind':
+            assert qc['heterozygous_snps']==true_hets
+            assert qc['mask_audit_totals']['outside_confident_callable_bp']==0
         else:assert .95*true_hets<=qc['heterozygous_snps']<=1.05*true_hets
         assert 'short_piece' not in (d/'input/callable.bed').read_text()
         if sample=='read_ind':assert qc['genotype_confidence_counts']['PL_separation']>0

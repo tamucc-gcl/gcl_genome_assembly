@@ -144,6 +144,8 @@ def prepare(a):
             after_complex=int((seq!=b'N').sum())
             for lo,hi in duplicates:seq[lo:hi]=b'N'
             callable_mask=seq!=b'N'
+            # Audit the emitted consensus at base resolution, before binning.
+            outside_confident_callable_bp=int(np.count_nonzero(callable_mask & ~conf)) if confident is not None else ''
             for lo,hi in runs(callable_mask):maskout.write(f'{name}\t{lo}\t{hi}\n')
             callable_bp=int(callable_mask.sum());snps=int(np.isin(seq,[x.encode() for x in 'MRWSYK']).sum())
             rows.append(dict(contig=name,length_bp=length,scope_bp=int(scope.sum()),callable_bp=callable_bp,
@@ -151,6 +153,7 @@ def prepare(a):
             audit.append(dict(contig=name,length_bp=length,scope_bp=scope_bp,
                 confident_scope_bp=baseline if confident is not None else '',
                 outside_confident_bp=scope_bp-baseline if confident is not None else '',
+                outside_confident_callable_bp=outside_confident_callable_bp,
                 after_simple_genotypes_bp=before_complex,
                 simple_genotype_loss_bp=baseline-before_complex if confident is not None else '',
                 complex_mask_loss_bp=before_complex-after_complex,

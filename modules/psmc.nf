@@ -284,17 +284,23 @@ process PSMC_RENDER {
     publishDir "${params.outdir}/post_assembly/psmc/${meta.taxid}/${meta.id}", mode: params.publish_dir_mode,
         pattern:'report'
     input:
-    tuple val(meta), path(input), path(curves), val(context)
+    tuple val(meta), path(input), path(curves, stageAs:'curve_data/*'), path(observed), val(context)
+    path results_helper
+    path diagnostics
     path renderer
     output:
     tuple val(meta), path('report'), emit: report
     path 'versions.tsv', emit: versions
     script:
+    def scale_options=context.mutation_rate==null ? '' : "--mutation-rate ${context.mutation_rate} --generation-time ${context.generation_time}"
     """
     set -euo pipefail
     cat > context.json <<'PSMC_CONTEXT'
 ${groovy.json.JsonOutput.toJson(context)}
 PSMC_CONTEXT
+    fit_options=()
+    if [[ -f observed.psmc ]]; then fit_options=(--observed observed.psmc); fi
+    python3 ${diagnostics} --input-dir ${input} --out report --iteration ${context.iteration} "\${fit_options[@]}" ${scale_options}
     Rscript ${renderer} context.json ${input} ${curves} report
     printf 'R\\t%s\\n' "\$(Rscript --version 2>&1)" > versions.tsv
     """

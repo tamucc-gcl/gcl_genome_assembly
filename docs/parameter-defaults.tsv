@@ -24,7 +24,7 @@ psmc_indel_padding	5
 psmc_iterations	25
 psmc_max_time	15
 psmc_theta_rho_ratio	5
-psmc_pattern	'4+25*2+4+6'
+psmc_pattern	'1+1+1+1+25*2+4+6'
 psmc_plot_iteration	20
 psmc_show_last_interval	false
 psmc_bootstraps	10

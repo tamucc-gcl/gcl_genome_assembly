@@ -145,7 +145,7 @@ one global species-specific assumption is not silently broadcast across taxa.
 | `psmc_min_callable_fraction` | 0.1 | Fraction of selected non-gap scope |
 | `psmc_min_hets` | 1,000 | Minimum heterozygous SNP guard |
 | `psmc_iterations` | 25 | Fitting iterations; output must reach the requested iteration |
-| `psmc_pattern` | `4+25*2+4+6` | Upstream example, not an organism-specific optimization |
+| `psmc_pattern` | `1+1+1+1+25*2+4+6` | Fit the four youngest atomic intervals separately (31 free size parameters) |
 | `psmc_max_time` | 15 | Initial maximum scaled coalescent time |
 | `psmc_theta_rho_ratio` | 5 | Initial theta/rho ratio |
 | `psmc_plot_iteration` | 20 | Explicit selected complete iteration |
@@ -165,6 +165,36 @@ or malformed/truncated fit fails the pipeline rather than becoming an empty plot
 Per-parameter-group expected recombination diagnostics are exported; groups below
 the upstream advisory of about ten are highlighted for review, not automatically
 removed. Iteration/pattern choices need biological review after the pilot.
+
+### Individual observed-fit diagnostics
+
+Each individual report includes `psmc_qc.tsv` with input callability, masking,
+heterozygosity and bin occupancy. Reference coverage by usable bins uses the
+entire selected reference assembly as the denominator and accounts for partial
+terminal bins. Bins marked K or T can contain masked bases. In assembly mode the
+base-level audit counts any callable consensus bases outside the Dipcall confident
+BED before conversion. The input table is also available for individuals that
+do not pass the fit guards.
+
+Fitted individuals also get `psmc_intervals.tsv`, `psmc_iterations.tsv` and three
+PNGs embedded in the report showing the observed history colored by interval
+support, recombinations across time and log-likelihood by iteration. Interval
+metrics use the selected plotting iteration and include the open-ended terminal
+group. Expected recombinations are summed across each free interval group.
+Counts below 10 are insufficient, 10 to below 20 warrant caution, and counts of
+20 or more define the reported temporal endpoints. These endpoints can span
+intervening groups with weaker support. The observed fit is retained in full.
+Convergence metrics compare the final iteration to five rounds earlier, or to
+the earliest available round for shorter fits. PSMC's recorded likelihood
+precedes the parameter update for each round. No convergence cutoff is applied.
+
+Screening flags are for review. Input flags use 50% selected-scope callability,
+50% masking among retained bins and a per-base heterozygosity range of 0.01–2%.
+The recent-peak screen checks the first five groups for a local maximum at
+least twice the size of both immediate neighbors. For demographic interpretation,
+compare plausible alternate patterns on the same input when a peak matters.
+Population structure can also produce peak-and-decline patterns.
+See [Hilgers et al.](https://doi.org/10.1016/j.cub.2024.09.028).
 
 ## Genotypes and callable sequence
 
