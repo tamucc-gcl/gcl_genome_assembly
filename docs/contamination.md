@@ -2,10 +2,12 @@
 
 ## Implementation status
 
-The standalone preparation/cleaning foundation and the reference-proteome
-database builder are implemented. They are **not yet called by `main.nf`**.
-Nucleotide database preparation, assembly searches, coverage integration,
-classification, reports and the contig-only stopping control are subsequent work.
+The standalone tools cover reviewed cleaning, building a reference-proteome
+database, screening a FASTA, and reporting protein and targeted nucleotide
+evidence. They are **not yet called by `main.nf`**. The search pilot accepts a
+prepared local BLAST nucleotide database and optional assembly-matched coverage
+BAM. Shared nucleotide database setup, pipeline-generated coverage, and the
+contig-only stopping control are subsequent work.
 The existing FCS workflow is unchanged. Do not enable the currently blocked
 `run_blobtools_evidence` flag yet.
 
@@ -143,10 +145,78 @@ isoform members. Budget temporary space for the archive, combined search inputs
 and built index. When taxonomy is intentionally refreshed, use a new storage
 release label to preserve the previous database and its recorded snapshot.
 
-## Agreed next implementation steps
+## Run the known-answer search pilot on Crest
 
-1. Pilot the taxonomy-aware reference-proteome DIAMOND bundle and prepare the
-   nucleotide BLAST bundle with native `storeDir`. Follow the shared database layout
+From the assembly project root, prepare a fixture and a fresh protein database.
+The fixture plants host, bacterial, and mixed sequences, and includes no-hit and
+all-ambiguous controls. The bacterial coding sequence is on the reverse strand.
+
+```bash
+module load nextflow/23.10.1 miniconda3
+pipeline="$PWD/gcl_genome_assembly"
+pilot="$PWD/comparisons/contamination-evidence-pilot-01"
+taxonomy=/work/birdlab/databases/ncbi_taxonomy
+mkdir -p "$pilot"
+python3 "$pipeline/scripts/comparisons/prepare_contamination_pilot.py" "$pilot/fixture"
+sha=$(sha256sum "$pilot/fixture/proteins.faa" | cut -d' ' -f1)
+nextflow -log "$pilot/db.nextflow.log" -c "$pipeline/nextflow.config" run \
+  "$pipeline/scripts/comparisons/contamination_protein_db.nf" -profile slurm \
+  -w "$pilot/work" --outdir "$pilot/db_run" --contamination_db_root "$pilot/db" \
+  --taxonomy_dir "$taxonomy" --proteome_source "$pilot/fixture/proteins.faa" \
+  --proteome_sha256 "$sha" --proteome_format fasta --proteome_release known-answer-01
+```
+
+Prepare the tiny local BLAST database and the test BAM once:
+
+```bash
+conda create -y -p "$pilot/fixture_tools" -c conda-forge -c bioconda \
+  'blast=2.16.0' 'samtools=1.21'
+conda run -p "$pilot/fixture_tools" makeblastdb -dbtype nucl -parse_seqids \
+  -in "$pilot/fixture/nucleotide.fasta" \
+  -taxid_map "$pilot/fixture/nucleotide_taxids.tsv" -out "$pilot/fixture/nt"
+conda run -p "$pilot/fixture_tools" samtools view -b \
+  -o "$pilot/fixture/reads.bam" "$pilot/fixture/reads.sam"
+```
+
+Launch the evidence workflow:
+
+```bash
+nextflow -log "$pilot/evidence.nextflow.log" -c "$pipeline/nextflow.config" run \
+  "$pipeline/scripts/comparisons/contamination_evidence.nf" -profile slurm \
+  -w "$pilot/work" --outdir "$pilot/results" \
+  --assembly known_answer --fasta "$pilot/fixture/assembly.fasta" \
+  --taxid 7955 --taxonomy_dir "$taxonomy" \
+  --protein_db_dir "$pilot/db/diamond/uniprot_reference_proteomes/known-answer-01" \
+  --nucleotide_db "$pilot/fixture/nt" --coverage_bam "$pilot/fixture/reads.bam" \
+  --window_bp 2000 --chunk_bp 2000
+```
+
+Open `results/review/README.md`. Compare sequence labels, nucleotide targets,
+and the unselected intervals with `fixture/expected.json`. The planted
+non-host interval in `mixed` is **[960, 1560)**. The report embeds the R-rendered
+GC/coverage and cumulative sequence plots. The BlobToolKit dataset in
+`results/blobdir` includes protein-hit taxonomy and the combined review category.
+All-ambiguous sequences remain in the evidence tables and are listed in
+`blobdir_exclusions.tsv` because BlobToolKit requires measurable GC.
+Coverage uses primary reads at MAPQ ≥20, omitting duplicates and QC failures.
+Without coverage the static plot shows GC vs sequence length.
+
+For a real pilot, supply a bounded set of actual post-FCS contigs, the sample
+taxid, and a broader taxonomy-aware protein database. Use a BAM mapped to the
+exact FASTA if available. The pilot checks that BAM sequence names and lengths
+match and does not establish sequence identity from a BAM header alone.
+`--nucleotide_db` is the prefix of a local, taxonomy-enabled BLAST database.
+Omit it to see the selected targets without running nucleotide searches.
+Windows with no protein hit, unresolved taxonomy, non-host or mixed evidence
+are targeted. On a whole genome this can be a large fraction of the assembly,
+so use a bounded input for the pilot. Protein and nucleotide hit scores are
+kept separate. The report uses a configurable host rank (default phylum), and
+review intervals reflect alignment evidence rather than proven breakpoints.
+
+## Remaining implementation steps
+
+1. Prepare the shared nucleotide BLAST bundle with native `storeDir`.
+   Follow the shared database layout
    (`diamond/<collection>/<release>`, `blast/<collection>/<release>`, existing
    `ncbi_taxonomy`). Read-only inspection of the annotation pipeline confirms its
    `modules/diamond.nf` downloads the current complete Swiss-Prot FASTA and builds
@@ -160,14 +230,12 @@ release label to preserve the previous database and its recorded snapshot.
    contamination collection is a separate taxonomy-aware bundle, not an alias for
    complete Swiss-Prot. The user confirms `proteins.dmnd` is unused; exclude it
    from the reuse plan without deleting or modifying it.
-2. Search windows, select/record targeted nucleotide follow-up, and incorporate
-   source-compatible HiFi or shotgun coverage. Expected-host rank defaults to
-   phylum, configurable. Non-host assignments are review evidence, not deletion.
-3. Produce a Markdown report, R/ggplot2 figures and BlobToolKit dataset. Test known
-   mixtures and real contigs on Crest before main-workflow integration.
-4. Add the pre-scaffolding workflow and general contig-stage stopping control.
+2. Run the known mixture and a bounded real-contig pilot on Crest. Evaluate
+   window-boundary sensitivity and the size of the nucleotide target set.
+3. Add pipeline-generated HiFi or shotgun coverage, the pre-scaffolding workflow,
+   and the general contig-stage stopping control.
    Test zero downstream task submissions and subsequent normal cache reuse.
-5. Validate reviewed cleaning/downstream invalidation and the optional final check.
+4. Validate reviewed cleaning/downstream invalidation and the optional final check.
 
 Local foundation checks:
 
