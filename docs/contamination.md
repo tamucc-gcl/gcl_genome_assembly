@@ -2,8 +2,9 @@
 
 ## Implementation status
 
-The standalone preparation/cleaning foundation is implemented. It is **not yet
-called by `main.nf`**. Database preparation, taxonomic searches, coverage integration,
+The standalone preparation/cleaning foundation and the reference-proteome
+database builder are implemented. They are **not yet called by `main.nf`**.
+Nucleotide database preparation, assembly searches, coverage integration,
 classification, reports and the contig-only stopping control are subsequent work.
 The existing FCS workflow is unchanged. Do not enable the currently blocked
 `run_blobtools_evidence` flag yet.
@@ -105,10 +106,47 @@ the search pilot. The manifest records source identity, parameters and the windo
 boundary policy. No nucleotide follow-up selection or biological classification
 is performed by this preparation command.
 
+## Pilot the reference-proteome database build on Crest
+
+Use a small combined FASTA of canonical UniProt reference proteome proteins for
+the first run. Keep the original UniProt headers, including their `OX=` taxon IDs.
+A gzipped FASTA is accepted. Use an absolute path on Crest and a pilot release
+name distinct from the full collection. From the assembly project directory:
+
+```bash
+module load nextflow/23.10.1 miniconda3
+pipeline="$PWD/gcl_genome_assembly"
+pilot=/absolute/path/to/pilot_reference_proteomes.fasta.gz
+sha=$(sha256sum "$pilot" | cut -d' ' -f1)
+nextflow -c "$pipeline/nextflow.config" run \
+  "$pipeline/scripts/comparisons/contamination_protein_db.nf" -profile slurm \
+  --outdir "$PWD/comparisons/contamination-protein-pilot-01" \
+  --contamination_db_root /work/birdlab/databases \
+  --proteome_source "$pilot" --proteome_sha256 "$sha" \
+  --proteome_release pilot-01 --proteome_format fasta
+```
+
+The two mandatory stored outputs are `reference_proteomes.dmnd` and
+`protein_database.json`, under
+`diamond/uniprot_reference_proteomes/pilot-01` in the selected database root.
+The builder uses the shared `ncbi_taxonomy` directory by default and the
+existing taxonomy downloader if nodes or names are absent. An explicit
+`--taxonomy_dir` selects another location. The manifest records input and
+database checksums, taxonomy file checksums, DIAMOND version, sequence totals,
+and the taxid recovered in a test search. Repeat the same command to exercise
+Nextflow's native `storeDir` reuse.
+
+For the full collection, supply a release-specific local archive or HTTPS URL
+with its expected SHA256 and set `--proteome_format tar`. The archive reader
+streams canonical `UP…_<taxid>.fasta[.gz]` members and skips CDS and additional
+isoform members. Budget temporary space for the archive, combined search inputs
+and built index. When taxonomy is intentionally refreshed, use a new storage
+release label to preserve the previous database and its recorded snapshot.
+
 ## Agreed next implementation steps
 
-1. Prepare taxonomy-aware reference-proteome DIAMOND and nucleotide BLAST bundles
-   with native `storeDir`; preserve existing FCS. Follow the shared database layout
+1. Pilot the taxonomy-aware reference-proteome DIAMOND bundle and prepare the
+   nucleotide BLAST bundle with native `storeDir`. Follow the shared database layout
    (`diamond/<collection>/<release>`, `blast/<collection>/<release>`, existing
    `ncbi_taxonomy`). Read-only inspection of the annotation pipeline confirms its
    `modules/diamond.nf` downloads the current complete Swiss-Prot FASTA and builds
