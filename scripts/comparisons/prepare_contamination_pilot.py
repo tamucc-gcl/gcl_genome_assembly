@@ -43,8 +43,9 @@ def main():
             if name != "ambiguous":
                 sam.write(f"{name}_read\t0\t{name}\t1\t60\t100M\t*\t0\t0\t{seq[:100]}\t{'I'*100}\n")
     (args.out / "expected.json").write_text(json.dumps(dict(
-        sequence_evidence={"host": "host-compatible", "foreign": "non-host", "mixed": "mixed",
-                           "no_match": "unresolved", "ambiguous": "unresolved"},
+        sequence_evidence={"host": "host-compatible", "foreign": "concordant non-host",
+                           "mixed": "concordant non-host",
+                           "no_match": "no-hit", "ambiguous": "unresolved"},
         non_host_intervals={"foreign": [120, 720], "mixed": [960, 1560]},
         nucleotide_target_sequences=["foreign", "mixed"]), indent=2) + "\n")
 

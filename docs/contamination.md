@@ -328,13 +328,40 @@ NT_RELEASE=YYYY-MM-DD
 
 MEGABLAST searches every eligible window in parallel, including windows with
 host-compatible protein hits. Eligible windows contain at least 100 A/C/G/T
-bases and retain original sequence coordinates. The optional targeted
-`blastn` pass (disable with `--targeted_blastn false`) searches windows with
-non-host, mixed, or unresolved taxonomic hits. A window with no hits from
-either screen stays visible in the no-hit counts. Reports preserve all three
-hit tables separately and list candidate bp separately from contig span.
-The result includes sequence-span-weighted GC and depth margins, plus
-contig counts, span, and N50 by displayed taxonomic group.
+bases and retain original sequence coordinates. The default run finishes the
+searches after BLASTX and MEGABLAST. The Markdown report prioritizes concordant
+and extended non-host evidence and reports the distinct non-host aligned bases
+and their percentage of each contig. Window classifications and all hit and
+manual review rows are available as TSVs.
+
+Read the planned follow-up query count and base total in
+`results/review/README.md` and inspect the exact coordinates in
+`results/review/nucleotide_targets.tsv`. To run this plan, resume with
+`--targeted_blastn true`. It includes up to one locus per source window, with
+500 bp of flanking sequence where available within that window. A locus
+qualifies with at least 1 kb of distinct non-host hit coverage or at least
+250 bp of overlapping distinct hits from both screens in the same taxonomic
+group. The plan prioritizes concordance and limits the total query span with
+`--contamination_followup_max_bp` (default 100,000 bp). Targets are packed into
+roughly 25 kb search batches. All review actions still require human selection.
+
+Reports preserve the three hit tables separately. The diagnostics include
+sequence-span-weighted GC and depth margins and contig counts, span, and N50
+by displayed taxonomic group.
+
+### Search concurrency
+
+| Parameter | Default | Concurrent tasks per Nextflow run |
+| --- | ---: | --- |
+| `--contamination_blastx_max_forks` | 8 | DIAMOND BLASTX chunks |
+| `--contamination_blastn_max_forks` | 8 | MEGABLAST chunks and, separately, targeted BLASTN chunks |
+
+Each search task requests 8 CPUs. BLASTX and MEGABLAST can overlap, so at the
+defaults they can run up to 16 search tasks together. Both limits accept positive
+integers. The current standalone entry point takes one assembly. When wiring
+the cohort workflow, feed chunks from all haplotypes through a single invocation
+of each search process so every haplotype shares its process's limit. Separate
+Nextflow runs have independent limits.
 
 ## Remaining implementation steps
 

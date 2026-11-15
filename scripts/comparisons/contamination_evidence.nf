@@ -18,14 +18,22 @@ params.nucleotide_db = null
 params.nt_db_root = null
 params.nt_release = null
 params.nt_collection = 'nt'
-params.targeted_blastn = true
+params.targeted_blastn = false
+params.contamination_followup_max_bp = 100000
 params.coverage_bam = null
 params.coverage_tsv = null
 params.window_bp = 100000
 params.chunk_bp = 5000000
+params.contamination_blastx_max_forks = 8
+params.contamination_blastn_max_forks = 8
 params.outdir = 'contamination-evidence'
 
 workflow {
+    ['contamination_blastx_max_forks', 'contamination_blastn_max_forks', 'contamination_followup_max_bp'].each { name ->
+        def value = params[name].toString()
+        if (!value.isInteger() || value.toInteger() < 1)
+            error "Supply a positive integer for --${name}"
+    }
     if (!params.fasta || !params.assembly || !params.taxid ||
         !params.taxonomy_dir || !params.protein_db_dir)
         error 'Supply --fasta, --assembly, --taxid, --taxonomy_dir and --protein_db_dir'
@@ -58,7 +66,9 @@ workflow {
         ntManifest = VERIFY_CONTAMINATION_NT.out.manifest
     }
     def mega = managed || !!params.nucleotide_db
-    def targeted = mega && params.targeted_blastn.toString().toBoolean()
+    def targeted = params.targeted_blastn.toString().toBoolean()
+    if (targeted && !mega)
+        error 'Targeted BLASTN requires a nucleotide database'
     def bam = params.coverage_bam ? file(params.coverage_bam, checkIfExists: true) : []
     def coverage = params.coverage_tsv ? file(params.coverage_tsv, checkIfExists: true) : []
     def helpers = ['contamination_review.py', 'contamination_evidence.py'].collect {
@@ -77,7 +87,7 @@ workflow {
         megaHits = CONTAMINATION_MEGABLAST.out.collect().ifEmpty([])
     }
     CONTAMINATION_SELECT_NUCLEOTIDE(fasta, CONTAMINATION_PREPARE.out.queries, hits, megaHits, mega,
-        taxdump, params.taxid, params.host_rank, helpers)
+        params.contamination_followup_max_bp, taxdump, params.taxid, params.host_rank, helpers)
     def nucleotide = []
     if (targeted) {
         CONTAMINATION_TARGETED_BLASTN(CONTAMINATION_SELECT_NUCLEOTIDE.out.chunks.flatten(), ntDb, 'blastn')

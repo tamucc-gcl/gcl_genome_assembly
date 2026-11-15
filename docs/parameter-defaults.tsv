@@ -4,6 +4,8 @@ report_chromosome_painting	true
 report_top_scaffolds	20
 run_psmc	false
 psmc_mode	'auto'
+psmc_assembly_preset	'asm20'
+psmc_assembly_min_alignment_bp	10000
 psmc_manifest	null
 psmc_mutation_rate	null
 psmc_generation_time	null
@@ -19,6 +21,7 @@ psmc_min_gq	20
 psmc_min_depth	0
 psmc_max_depth	0
 psmc_max_pileup_depth	10000
+psmc_read_call_workers	8
 psmc_min_allele_balance	0.2
 psmc_indel_padding	5
 psmc_iterations	25
@@ -31,6 +34,8 @@ psmc_bootstraps	10
 psmc_bootstrap_block_bp	5000000
 psmc_bootstrap_max_forks	8
 psmc_seed	1729
+contamination_blastx_max_forks	8
+contamination_blastn_max_forks	8
 max_cpus	64
 max_memory	'700 GB'
 max_time	'240.h'

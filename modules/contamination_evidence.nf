@@ -38,6 +38,7 @@ process CONTAMINATION_PREPARE {
 
 process CONTAMINATION_BLASTX {
     tag "${chunk.name}"
+    maxForks (params.contamination_blastx_max_forks as int)
     conda 'bioconda::diamond=2.1.14'
     cpus 8
     memory '24 GB'
@@ -70,6 +71,7 @@ process CONTAMINATION_SELECT_NUCLEOTIDE {
     path hits
     path mega_hits
     val mega_enabled
+    val followup_max_bp
     val taxdump
     val host
     val rank
@@ -86,12 +88,14 @@ process CONTAMINATION_SELECT_NUCLEOTIDE {
     """
     python3 contamination_evidence.py select --fasta ${quote(fasta)} --prepared ${quote(queries)} \
         --taxdump ${quote(taxdump)} --taxid ${host} --host-rank ${quote(rank)} \
-        --out selected ${megaFlag} --hits ${hitArgs} --megablast-hits ${megaArgs}
+        --out selected --followup-max-bp ${followup_max_bp} ${megaFlag} \
+        --hits ${hitArgs} --megablast-hits ${megaArgs}
     """
 }
 
 process CONTAMINATION_BLASTN {
     tag "${mode}/${chunk.name}"
+    maxForks (params.contamination_blastn_max_forks as int)
     conda 'bioconda::blast=2.16.0'
     cpus 8
     memory '16 GB'
