@@ -160,6 +160,27 @@ process CONTAMINATION_REPORT {
     """
 }
 
+process CONTAMINATION_REBUILD_REPORT {
+    conda 'conda-forge::python=3.11'
+    memory '8 GB'
+    time '8h'
+    publishDir "${params.outdir}", mode: 'copy'
+
+    input:
+    path previous, stageAs: 'prior'
+    path fasta
+    path helpers
+
+    output:
+    path 'review'
+
+    script:
+    """
+    python3 contamination_evidence.py rebuild-report --previous ${quote(previous)} \
+        --fasta ${quote(fasta)} --out review
+    """
+}
+
 process CONTAMINATION_DIAGNOSTICS {
     conda 'conda-forge::r-base=4.3.3 conda-forge::r-ggplot2=3.5.2 conda-forge::r-patchwork=1.3.0'
     memory '4 GB'
@@ -175,7 +196,8 @@ process CONTAMINATION_DIAGNOSTICS {
 
     script:
     """
-    Rscript ${quote(plotter)} ${quote(review.resolve('sequence_evidence.tsv'))} diagnostics
+    Rscript ${quote(plotter)} ${quote(review.resolve('sequence_evidence.tsv'))} diagnostics \
+        ${quote(review.resolve('locus_plot_hits.tsv'))}
     """
 }
 

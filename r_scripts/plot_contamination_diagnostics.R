@@ -92,3 +92,46 @@ cumulative <- ggplot(curves, aes(rank, cumulative_bp / divisor, color = evidence
          color = "Taxonomic group") +
     theme_bw(base_size = 12)
 ggsave(file.path(args[2], "cumulative.png"), cumulative, width = 8, height = 5, dpi = 180, bg = "white")
+
+if (length(args) >= 3) {
+    loci <- read.delim(args[3], check.names = FALSE)
+    locus_dir <- file.path(args[2], "loci")
+    dir.create(locus_dir, showWarnings = FALSE)
+    for (hits in split(loci, loci$action_id)) {
+        first <- hits[1, ]
+        window_label <- "BLASTN query span"
+        hits$track <- sprintf("%s | %s (%s)\n%.1f%% identity | %g bits",
+                              hits$method, hits$group, hits$subject, hits$identity_pct, hits$bitscore)
+        tracks <- unique(c(hits$track, if (!is.na(first$blastn_start0)) window_label))
+        hits$track <- factor(hits$track, levels = rev(tracks))
+        flank <- max(100, round(.12 * (first$interval_end0 - first$interval_start0)))
+        limits <- c(max(0, min(hits$start0, first$interval_start0 - flank, first$blastn_start0, na.rm = TRUE)),
+                    min(first$contig_bp, max(hits$end0, first$interval_end0 + flank, first$blastn_end0, na.rm = TRUE)))
+        plot <- ggplot(hits, aes(y = track)) +
+            annotate("rect", xmin = first$interval_start0, xmax = first$interval_end0,
+                     ymin = -Inf, ymax = Inf, fill = "#F4E8C8") +
+            geom_vline(xintercept = c(first$interval_start0, first$interval_end0),
+                       color = "#946B26", linetype = "dashed") +
+            geom_segment(aes(x = start0, xend = end0, yend = track, color = role), linewidth = 2) +
+            scale_color_manual(values = c("Non-host" = "#B25618", "Host-compatible" = "#156C91",
+                                         "Alternative taxon" = "#774B94", "Mixed taxids" = "#6B5570")) +
+            scale_y_discrete(limits = rev(tracks)) +
+            scale_x_continuous(labels = scales::label_number(big.mark = ",")) +
+            coord_cartesian(xlim = limits) +
+            labs(title = paste(first$action_id, first$sequence, sep = "  |  "),
+                 subtitle = sprintf("Shaded interval under review [%s, %s)",
+                                    format(first$interval_start0, big.mark = ","),
+                                    format(first$interval_end0, big.mark = ",")),
+                 x = "Original contig coordinate (bp)", y = NULL, color = NULL,
+                 caption = "Bars show query-coordinate spans. Compare scores within each search.") +
+            theme_bw(base_size = 11) +
+            theme(legend.position = "bottom", panel.grid.major.y = element_blank(),
+                  axis.ticks.y = element_blank())
+        if (!is.na(first$blastn_start0)) {
+            plot <- plot + annotate("segment", x = first$blastn_start0, xend = first$blastn_end0,
+                                    y = window_label, yend = window_label, color = "#5E6573")
+        }
+        ggsave(file.path(locus_dir, paste0(first$action_id, ".png")), plot,
+               width = 10, height = max(3.5, 2.2 + .48 * length(tracks)), dpi = 150, bg = "white")
+    }
+}

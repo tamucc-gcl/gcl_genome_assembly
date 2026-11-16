@@ -6,7 +6,9 @@ from collections import Counter, defaultdict
 import csv
 import json
 from pathlib import Path
+from shlex import quote
 import shutil
+from types import SimpleNamespace
 
 from contamination_review import FIELDS, digest, records, write_record, write_table
 
@@ -17,7 +19,14 @@ WINDOW_FIELDS = ["query", "sequence", "start0", "end0", "protein_evidence", "meg
                  "nucleotide_target"]
 TARGET_FIELDS = ["query", "sequence", "start0", "end0", "hit_start0", "hit_end0", "evidence"]
 CONTIG_REVIEW_FIELDS = ["non_host_hit_bp", "distinct_non_host_bp", "distinct_non_host_pct",
-                        "competing_hit_bp"]
+                        "competing_hit_bp", "host_aligned_bp", "host_aligned_pct",
+                        "dominant_non_host_group", "dominant_non_host_bp", "whole_contig_candidate"]
+SEARCH_LABELS = {"protein": "BLASTX", "megablast": "MEGABLAST", "nucleotide": "BLASTN"}
+LOCUS_REVIEW_FIELDS = ["non_host_match", "host_match", "alternative_non_host_taxa",
+                       "search_agreement", "blastn_followup", "review_reason"]
+PLOT_FIELDS = ["action_id", "sequence", "interval_start0", "interval_end0", "contig_bp",
+               "method", "role", "group", "subject", "start0", "end0", "identity_pct", "bitscore",
+               "blastn_start0", "blastn_end0"]
 
 
 def table(path):
@@ -171,15 +180,24 @@ def relationship(hits):
     return "unresolved" if hits else "no-hit"
 
 
-def grouped_hits(hits):
+def group_by_query(hits):
     result = defaultdict(list)
     for hit in hits:
         result[hit["query"]].append(hit)
-    return {query: informative_hits(values) for query, values in result.items()}
+    return result
+
+
+def grouped_hits(hits):
+    return {query: informative_hits(values) for query, values in group_by_query(hits).items()}
 
 
 def overlap(left, right):
     return min(left["end0"], right["end0"]) - max(left["start0"], right["start0"])
+
+
+def comparable_hit(reference, other):
+    return (other["bitscore"] >= .9 * reference["bitscore"]
+            and overlap(reference, other) >= .8 * (reference["end0"] - reference["start0"]))
 
 
 def candidate_hits(hits):
@@ -188,8 +206,7 @@ def candidate_hits(hits):
             continue
         competing = hit["host_relation"] == "mixed" or any(
             other["host_relation"] == "host-compatible"
-            and other["bitscore"] >= .9 * hit["bitscore"]
-            and overlap(hit, other) >= .8 * (hit["end0"] - hit["start0"])
+            and comparable_hit(hit, other)
             for other in hits
         )
         yield hit, competing
@@ -220,18 +237,21 @@ def ranked_loci(protein, mega, nucleotide=()):
         else:
             groups.append(dict(start0=hit["start0"], end0=hit["end0"], hits=[item]))
     for locus in groups:
-        hits = locus.pop("hits")
+        hits = locus["hits"]
         distinct = [(hit, method) for hit, method, competing in hits if not competing]
         locus["distinct_spans"] = [(hit["start0"], hit["end0"]) for hit, _ in distinct]
         locus["competing_spans"] = [(hit["start0"], hit["end0"]) for hit, _, competing in hits if competing]
         locus["distinct_bp"] = span_union(locus["distinct_spans"])
-        locus["concordant"] = any(
-            other_method != method and hit["lineage_at_host_rank"]
-            and hit["lineage_at_host_rank"] == other["lineage_at_host_rank"]
-            and ";" not in hit["lineage_at_host_rank"] and overlap(hit, other) >= 250
+        agreement = {
+            frozenset((method, other_method))
             for i, (hit, method) in enumerate(distinct)
             for other, other_method in distinct[i + 1:]
-        )
+            if other_method != method and hit["lineage_at_host_rank"]
+            and hit["lineage_at_host_rank"] == other["lineage_at_host_rank"]
+            and ";" not in hit["lineage_at_host_rank"] and overlap(hit, other) >= 250
+        }
+        locus["concordant"] = any("protein" in pair for pair in agreement)
+        locus["nucleotide_agreement"] = frozenset(("megablast", "nucleotide")) in agreement
         locus["methods"] = {method for _, method, _ in hits}
         locus["lineages"] = {hit["lineage_at_host_rank"] for hit, _, _ in hits} - {""}
         locus["context"] = (
@@ -247,6 +267,164 @@ def ranked_loci(protein, mega, nucleotide=()):
         else:
             locus["priority"] = "competing hits only"
     return groups
+
+
+def locus_comparison(locus, hosts):
+    non_host_rows, host_rows, alternative_rows = [], [], []
+    plot_hits = []
+    any_host = False
+    for method, label in SEARCH_LABELS.items():
+        candidates = [hit for hit, source, _ in locus["hits"] if source == method]
+        best = max(candidates, key=lambda hit: (hit["bitscore"], overlap(locus, hit)), default=None)
+        overlapping = [hit for hit in hosts.get(method, ()) if overlap(best or locus, hit) > 0]
+        host = max(overlapping, key=lambda hit: (
+            bool(best and comparable_hit(best, hit)), hit["bitscore"], overlap(best or locus, hit)
+        ), default=None)
+        if best:
+            plot_hits.append((label, "Mixed taxids" if best["host_relation"] == "mixed" else "Non-host", best))
+            non_host_rows.append(f"{label} {describe_hit(best, overlap(locus, best))}")
+            alternatives = {}
+            for hit in sorted(candidates, key=lambda hit: -hit["bitscore"]):
+                group = hit["lineage_at_host_rank"]
+                if group and group != best["lineage_at_host_rank"] and comparable_hit(best, hit):
+                    alternatives.setdefault(group, hit)
+            if alternatives:
+                alternative_rows.append(f"{label} " + ", ".join(sorted(alternatives)))
+                plot_hits.extend((label, "Alternative taxon", hit) for hit in list(alternatives.values())[:2])
+        if host:
+            plot_hits.append((label, "Host-compatible", host))
+            any_host = True
+            span = "bp overlapping non-host hit" if best else "bp in interval"
+            qualifier = " (comparable score and span)" if best and comparable_hit(best, host) else ""
+            host_rows.append(f"{label} {describe_hit(host, overlap(best or locus, host), span)}{qualifier}")
+        elif best:
+            host_rows.append(f"{label} no overlapping host hit found")
+
+    if not locus["distinct_bp"]:
+        reason = "Lower priority — host evidence competes at the same locus"
+    elif locus["competing_spans"]:
+        reason = "Compare alignments — competing host evidence at this locus"
+    elif any_host:
+        reason = "Compare alignments — an overlapping host hit was also found"
+    elif locus["priority"] == "short non-host signal":
+        reason = "Lower priority — short non-host alignment"
+    else:
+        reason = "Inspect interval — no overlapping host hit found"
+    agreement = []
+    if locus["concordant"]:
+        agreement.append("Protein and nucleotide agree")
+    if locus["nucleotide_agreement"]:
+        agreement.append("Both nucleotide searches agree (same nt database)")
+    return dict(non_host_match=" · ".join(non_host_rows), host_match=" · ".join(host_rows),
+                alternative_non_host_taxa=" · ".join(alternative_rows),
+                search_agreement="; ".join(agreement) or "No matching cross-search evidence",
+                review_reason=reason, plot_hits=plot_hits)
+
+
+def describe_hit(hit, bp, span="bp in interval"):
+    return (f"{hit['lineage_at_host_rank'] or 'Unresolved taxon'} ({hit['subject']}), "
+            f"{bp:,} {span}, {float(hit['identity_pct']):.1f}% identity, {hit['bitscore']:g} bits")
+
+
+def markdown_cell(value):
+    return value.replace("|", "&#124;").replace(" · ", "<br>")
+
+
+INTERVAL_RANKING = (
+    "The table ranks concordant protein and nucleotide evidence first, then extended non-host evidence. "
+    "Within each group, more distinct non-host bases rank higher. Ties favor a larger fraction of "
+    "the contig covered by that interval, then a longer interval. The remaining concordant or extended "
+    "intervals also qualify for review. Short hits and competing-only hits rank lower in the full sheet."
+)
+
+
+def interval_review_guide(host_rank):
+    return [
+        f"**Where host matches come from.** Each search returns subject taxids. The taxonomy lookup traces them "
+        f"to the configured host rank ({host_rank}). A hit is host-compatible when its usable taxids all resolve "
+        f"to the same group as the assembly taxid at that rank. A match at phylum can come from another species "
+        "in that phylum. The host column shows overlapping host-compatible hits from the searches named in the row.",
+        "",
+        "**How to decide.**",
+        "",
+        "1. **Compare the same bases.** A host hit covering most of the non-host hit at a similar score weakens "
+        "the case for removal. Compare bit scores within the same search. Identity is measured in amino acids "
+        "for BLASTX and nucleotides for MEGABLAST and BLASTN.",
+        "2. **Check whether the non-host assignment is consistent.** Look for a coherent stretch of aligned "
+        "sequence and a consistent group across matches. Agreement between protein and nucleotide evidence adds "
+        "support. Agreement between MEGABLAST and BLASTN tests sensitivity against the same database. "
+        "Several similarly scored taxa or sparse coverage favor leaving the interval unselected for further review.",
+        "3. **Choose the scope of any removal.** A strong local signal calls for review of that interval. Use "
+        "the whole-contig section for evidence spanning most of a contig. "
+        "[Confirm the coordinates and record a decision](#confirm-coordinates-and-record-a-decision).",
+        "",
+        "The table shows a representative non-host hit and the best overlapping host hit per search. "
+        "An absent host hit means that search returned no overlapping host-compatible alignment.",
+        "",
+    ]
+
+
+REVIEW_ACTION_GUIDE = [
+    "## Confirm coordinates and record a decision", "",
+    "1. Open the [review sheet (TSV)](review.tsv) and find the **Review ID** from this report. "
+    "Check the contig name and the `start0` and `end0` columns against the evidence.",
+    "2. Use the original **post-FCS FASTA** for a post-FCS report. Coordinates are 0-based and half-open. "
+    "The interval `[100, 200)` corresponds to bases 101 through 200 in a 1-based viewer. "
+    "Confirm the interval on the source contig and edit the coordinates if the evidence supports a different boundary.",
+    "3. For a local removal use `REMOVE_INTERVAL`. For an entire contig use `REMOVE_SEQUENCE` with "
+    "`start0=0` and `end0` equal to the contig length. Set `selected` to `YES` only on the chosen rows "
+    "and fill in `reviewer` and `reason`. Save a reviewed copy as TSV. Leave unresolved intervals at `NO`.",
+    "",
+    "To add a manual removal, use a new action ID and copy the assembly, stage and "
+    "source FASTA checksum from the matching source assembly. Selected intervals on the same contig must be disjoint.",
+    "",
+]
+
+
+def review_apply_guide(source):
+    return [
+        "### Apply the reviewed decisions", "",
+        "Run this from the assembly project directory with the exact FASTA used to create the report. "
+        "Replace the FASTA and reviewed TSV paths and choose a new output directory.", "",
+        "```bash",
+        "python3 gcl_genome_assembly/py_scripts/contamination_review.py apply \\",
+        '  --fasta "/path/to/original.fasta" \\',
+        f"  --assembly {quote(source['assembly'])} --stage {quote(source['stage'])} \\",
+        '  --review "/path/to/reviewed.tsv" \\',
+        '  --out "/path/to/cleaned-output"',
+        "```", "",
+        "The command checks the assembly, stage, and FASTA checksum before writing "
+        "`retained.fasta` and the removal audit. Applying a reviewed sheet is a standalone step today. "
+        "The assembly Nextflow command will take the reviewed sheet once the post-FCS cleanup step is integrated.",
+        "",
+    ]
+
+
+def whole_contig_evidence(spans_by_group, distinct_bp, host_bp, length):
+    group, bp = max(((group, span_union(spans)) for group, spans in spans_by_group.items()),
+                    key=lambda item: (item[1], item[0]), default=("", 0))
+    candidate = bool(length and 2 * bp >= length and 5 * bp >= 4 * distinct_bp
+                     and 10 * host_bp <= length)
+    return dict(dominant_non_host_group=group, dominant_non_host_bp=bp,
+                whole_contig_candidate="YES" if candidate else "NO")
+
+
+def blastn_result(locus, target, hits, searched):
+    if not searched:
+        return "", False
+    if not target or overlap(locus, target) <= 0:
+        return "BLASTN: outside follow-up", False
+    covered = overlap(locus, target)
+    if any(method == "nucleotide" for _, method, _ in locus["hits"]):
+        status = "non-host or mixed hit listed"
+    elif any(overlap(locus, hit) > 0 and hit["host_relation"] == "host-compatible" for hit in hits):
+        status = "overlapping host hit found"
+    elif any(overlap(locus, hit) > 0 for hit in hits):
+        status = "overlapping hits did not meet review criteria"
+    else:
+        status = "no overlapping hit found"
+    nominated = dict(start0=target["hit_start0"], end0=target["hit_end0"])
+    return f"BLASTN: {status} ({covered:,} bp of interval searched)", overlap(locus, nominated) > 0
 
 
 PRIORITY = {name: i for i, name in enumerate(
@@ -358,21 +536,36 @@ def taxon_summary(metrics):
                 break
 
 
-def summarize(args):
+def summarize(args, translated_nucleotide_hits=None, previous=None):
     assigned = table(args.selected / "windows.tsv")
-    windows = {row["query"]: row for row in assigned}
     targets = {row["query"]: row for row in table(args.selected / "nucleotide_targets.tsv")}
-    nucleotide = search_hits(args.nucleotide_hits, targets, args) if args.nucleotide_hits else []
+    for target in targets.values():
+        for field in ("start0", "end0", "hit_start0", "hit_end0"):
+            target[field] = int(target[field])
+    if translated_nucleotide_hits is None:
+        nucleotide = search_hits(args.nucleotide_hits, targets, args) if args.nucleotide_hits else []
+    else:
+        nucleotide = translated_nucleotide_hits
+        for hit in nucleotide:
+            target = targets[hit["query"]]
+            if (hit["sequence"] != target["sequence"] or
+                    not target["start0"] <= hit["start0"] < hit["end0"] <= target["end0"]):
+                raise ValueError(f"Translated BLASTN hit outside its planned region: {hit['query']}")
+    raw_nt_by_query = group_by_query(nucleotide)
     nt_by_query = grouped_hits(nucleotide)
     protein = retained_hits(args.selected / "protein_hits.tsv")
     mega = retained_hits(args.selected / "megablast_hits.tsv")
     protein_by_query = grouped_hits(protein)
     mega_by_query = grouped_hits(mega)
+    raw_hosts = {method: group_by_query(hit for hit in hits if hit["host_relation"] == "host-compatible")
+                 for method, hits in (("protein", protein), ("megablast", mega), ("nucleotide", nucleotide))}
     plot_hits = defaultdict(list)
     mega_sequences = {hit["sequence"] for hits in mega_by_query.values() for hit in hits
                       if hit["lineage_at_host_rank"]}
     by_sequence = defaultdict(set)
     loci_by_sequence = defaultdict(list)
+    host_spans = defaultdict(list)
+    non_host_group_spans = defaultdict(lambda: defaultdict(list))
     for row in assigned:
         query = row["query"]
         nt = relationship(nt_by_query.get(query, []))
@@ -381,14 +574,42 @@ def summarize(args):
         elif not args.targeted:
             nt = "not-run"
         row["nucleotide_evidence"] = nt
-        by_sequence[row["sequence"]].update([row["protein_evidence"], row["megablast_evidence"], nt])
-        plotting = mega_by_query if row["sequence"] in mega_sequences else protein_by_query
-        plot_hits[row["sequence"]].extend(plotting.get(query, []))
-        loci_by_sequence[row["sequence"]].extend(ranked_loci(
-            protein_by_query.get(query, []), mega_by_query.get(query, []), nt_by_query.get(query, [])))
+        name = row["sequence"]
+        by_sequence[name].update([row["protein_evidence"], row["megablast_evidence"], nt])
+        plotting = mega_by_query if name in mega_sequences else protein_by_query
+        plot_hits[name].extend(plotting.get(query, []))
+        protein_hits = protein_by_query.get(query, [])
+        mega_hits = mega_by_query.get(query, [])
+        nt_hits = nt_by_query.get(query, [])
+        host_spans[name].extend((hit["start0"], hit["end0"]) for hits in (protein_hits, mega_hits, nt_hits)
+                                for hit in hits if hit["host_relation"] == "host-compatible")
+        hosts = {method: hits.get(query, []) for method, hits in raw_hosts.items()}
+        for locus in ranked_loci(protein_hits, mega_hits, nt_hits):
+            locus.update(locus_comparison(locus, hosts))
+            locus["blastn_followup"], locus["planned_hit"] = blastn_result(
+                locus, targets.get(query), raw_nt_by_query.get(query, ()), args.targeted)
+            locus["blastn_target"] = targets.get(query) if locus["blastn_followup"] and query in targets else None
+            for hit, _, competing in locus["hits"]:
+                group = hit["lineage_at_host_rank"]
+                if not competing and group and ";" not in group:
+                    non_host_group_spans[name][group].append((hit["start0"], hit["end0"]))
+            del locus["hits"]
+            loci_by_sequence[name].append(locus)
 
-    source = json.loads((args.prepared / "source.json").read_text())
-    metrics = table(args.metrics / "sequence_metrics.tsv")
+    if previous:
+        source = {key: previous[key] for key in (
+            "schema", "assembly", "stage", "source_sha256", "coordinates", "window_bp", "chunk_bp",
+            "minimum_acgt_bp", "source_bp", "windows", "search_queries", "search_query_bp", "chunks",
+            "boundary_policy")}
+        metrics = table(args.selected / "sequence_evidence.tsv")
+        review = [{key: row[key] for key in FIELDS} for row in table(args.selected / "review.tsv")
+                  if row["action"] == "REMOVE_SEQUENCE"]
+        if any(row["selected"] != "NO" for row in review):
+            raise ValueError("Use a generated report directory to rebuild the report")
+    else:
+        source = json.loads((args.prepared / "source.json").read_text())
+        metrics = table(args.metrics / "sequence_metrics.tsv")
+        review = table(args.metrics / "review.tsv")
     depths = {}
     if args.coverage:
         with args.coverage.open() as handle:
@@ -405,8 +626,9 @@ def summarize(args):
         }:
             raise ValueError("Coverage BAM sequence names and lengths differ from the evidence FASTA")
 
-    review = table(args.metrics / "review.tsv")
     whole_sequence = {row["sequence"]: row for row in review}
+    planned_hit_ids = set()
+    plot_rows = {}
     for row in metrics:
         name = row["sequence"]
         states = by_sequence[name]
@@ -420,14 +642,20 @@ def summarize(args):
             status = "no-hit"
         else:
             status = "unresolved"
-        _, depth, covered = depths.get(name, (0, "NA", None))
+        if previous:
+            depth, covered = row["mean_depth"], row["read_covered_bp"]
+        else:
+            _, depth, covered = depths.get(name, (0, "NA", None))
         distinct_bp = sum(locus["distinct_bp"] for locus in loci)
+        host_bp = span_union(host_spans[name])
         row.update(mean_depth=depth, read_covered_bp=covered if covered is not None else "NA", evidence=status,
                    plot_taxon=lineage_group(plot_hits[name], "no-hit" in states and not plot_hits[name]),
                    non_host_hit_bp=sum(locus["end0"] - locus["start0"] for locus in loci),
                    distinct_non_host_bp=distinct_bp,
                    distinct_non_host_pct=100 * distinct_bp / length if length else 0,
-                   competing_hit_bp=sum(span_union(locus["competing_spans"]) for locus in loci))
+                   competing_hit_bp=sum(span_union(locus["competing_spans"]) for locus in loci),
+                   host_aligned_bp=host_bp, host_aligned_pct=100 * host_bp / length if length else 0)
+        row.update(whole_contig_evidence(non_host_group_spans[name], distinct_bp, host_bp, length))
         for locus in loci:
             lo, hi = locus["start0"], locus["end0"]
             if lo == 0 and hi == length:
@@ -443,6 +671,17 @@ def summarize(args):
                           hit_context="; ".join(sorted(locus["context"])),
                           priority=locus["priority"], distinct_hit_bp=locus["distinct_bp"],
                           distinct_contig_pct=100 * locus["distinct_bp"] / length)
+            action.update({key: locus[key] for key in LOCUS_REVIEW_FIELDS})
+            target = locus["blastn_target"] or {}
+            plot_rows[action["action_id"]] = [
+                dict(action_id=action["action_id"], sequence=name, interval_start0=lo, interval_end0=hi,
+                     contig_bp=length, method=method, role=role, group=hit["lineage_at_host_rank"],
+                     blastn_start0=target.get("start0", ""), blastn_end0=target.get("end0", ""),
+                     **{key: hit[key] for key in ("subject", "start0", "end0", "identity_pct", "bitscore")})
+                for method, role, hit in locus["plot_hits"]
+            ]
+            if locus["planned_hit"]:
+                planned_hit_ids.add(action["action_id"])
 
     args.out.mkdir()
     write_table(args.out / "windows.tsv", assigned, WINDOW_FIELDS + ["nucleotide_evidence"])
@@ -468,8 +707,9 @@ def summarize(args):
         -(int(row["end0"]) - int(row["start0"])), row["sequence"], int(row["start0"])))
     write_table(args.out / "review.tsv", supported + [row for row in review if not row.get("support")],
                 FIELDS + ["priority", "distinct_hit_bp", "distinct_contig_pct", "sequence_evidence",
-                          *CONTIG_REVIEW_FIELDS, "support", "hit_lineages", "hit_context"])
-    shutil.copyfile(args.selected / "targets.fasta", args.out / "nucleotide_targets.fasta")
+                          *CONTIG_REVIEW_FIELDS, *LOCUS_REVIEW_FIELDS, "support", "hit_lineages", "hit_context"])
+    target_fasta = "nucleotide_targets.fasta" if previous else "targets.fasta"
+    shutil.copyfile(args.selected / target_fasta, args.out / "nucleotide_targets.fasta")
     shutil.copyfile(args.selected / "nucleotide_targets.tsv", args.out / "nucleotide_targets.tsv")
     if args.nucleotide_manifest:
         shutil.copyfile(args.nucleotide_manifest, args.out / "nucleotide_database.json")
@@ -482,10 +722,15 @@ def summarize(args):
     counts = Counter(row["protein_evidence"] for row in assigned)
     priorities = Counter(row["priority"] for row in supported)
     shortlist = [row for row in supported if PRIORITY[row["priority"]] <= PRIORITY["extended non-host"]]
-    contig_shortlist = sorted((row for row in metrics if row["evidence"] in
-                               {"concordant non-host", "extended non-host"}),
-                              key=lambda row: (PRIORITY[row["evidence"]], -row["distinct_non_host_pct"],
-                                               -row["distinct_non_host_bp"], row["sequence"]))
+    interval_preview = shortlist[:30]
+    shown_ids = {row["action_id"] for row in interval_preview}
+    interval_preview.extend(row for row in supported
+                            if row["action_id"] in planned_hit_ids and row["action_id"] not in shown_ids)
+    write_table(args.out / "locus_plot_hits.tsv",
+                (hit for row in interval_preview for hit in plot_rows[row["action_id"]]), PLOT_FIELDS)
+    contig_shortlist = sorted((row for row in metrics if row["whole_contig_candidate"] == "YES"),
+                              key=lambda row: (-row["dominant_non_host_bp"] / int(row["length_bp"]),
+                                               row["sequence"]))
     target_bp = sum(int(row["end0"]) - int(row["start0"]) for row in targets.values())
     flagged_bp = sum(int(row["end0"]) - int(row["start0"]) for row in supported)
     covered_bp = (sum(int(row["read_covered_bp"]) for row in metrics)
@@ -496,10 +741,12 @@ def summarize(args):
                     nucleotide_target_bp=target_bp,
                     megablast_windows=dict(mega_counts), flagged_interval_bp=flagged_bp,
                     interval_priorities=dict(priorities),
+                    whole_contig_candidates=len(contig_shortlist),
                     read_covered_bp=covered_bp,
                     nucleotide_status=("searched" if targets else "no-targets") if args.targeted else "not-run",
-                    coverage=args.coverage_source if args.coverage else "unavailable",
-                    protein_database=json.loads(args.database.read_text()),
+                    coverage=previous["coverage"] if previous else
+                    (args.coverage_source if args.coverage else "unavailable"),
+                    protein_database=previous["protein_database"] if previous else json.loads(args.database.read_text()),
                     nucleotide_database=args.nucleotide_db or None)
     (args.out / "evidence.json").write_text(json.dumps(metadata, indent=2) + "\n")
     lines = [
@@ -522,35 +769,60 @@ def summarize(args):
         "Every removal option starts unselected.", "",
         "| Evidence | Intervals |", "| --- | ---: |",
         *(f"| {name} | {priorities[name]:,} |" for name in PRIORITY), "",
-        "Concordant means distinct hits from different searches overlap by at least 250 bp "
-        "and agree on the taxonomic group. Extended means at least 1 kb of distinct hit coverage "
-        "in a locus. The other categories capture shorter signals and hits with competing host evidence.", "",
-        "Distinct and competing hit spans can overlap when the searches differ at the same locus.", "",
-        "### Contigs to review first", "",
-        f"Showing {min(len(contig_shortlist), 20):,} of {len(contig_shortlist):,} contigs with concordant or extended evidence.", "",
-        "| Contig | Length (bp) | Strongest evidence | Distinct non-host bp (% of contig) | Competing hit bp | Mean depth |",
-        "| --- | ---: | --- | ---: | ---: | ---: |",
-        *(f"| {row['sequence'].replace('|', '&#124;')} | {int(row['length_bp']):,} | "
-          f"{row['evidence']} | {row['distinct_non_host_bp']:,} ({row['distinct_non_host_pct']:.2f}%) | "
-          f"{row['competing_hit_bp']:,} | {row['mean_depth']} |" for row in contig_shortlist[:20]), "",
-        "### Intervals to review first", "",
-        (f"Showing {min(len(shortlist), 30):,} of {len(shortlist):,} concordant or extended intervals. "
-         "The review sheet includes all evidence intervals and whole-contig removal options.")
-        if shortlist else "No intervals met the concordant or extended evidence criteria.", "",
+        "Concordant means distinct protein and nucleotide hits agree on the taxonomic group "
+        "and overlap by at least 250 bp. MEGABLAST and BLASTN agreement is shown separately because "
+        "both search nt. Extended means at least 1 kb of distinct hit coverage in a locus.", "",
+        "The review reasons guide inspection. Host and non-host spans can overlap. "
+        "The host-aligned total counts the union of spans from retained host-compatible hits. "
+        "Bases outside those spans may lack informative alignments.", "",
+        "### Whole-contig removal candidates", "",
+        (f"{len(contig_shortlist):,} contigs met the whole-contig screen. "
+         f"Showing {min(len(contig_shortlist), 20):,}.")
+        if contig_shortlist else "**No contigs met the whole-contig screen.**", "",
+        "A candidate needs distinct hits to one non-host group across at least half the contig. "
+        "That group must cover at least 80% of the distinct non-host span, and host-compatible hits "
+        "must cover no more than 10% of the contig. A local hit can still qualify for interval review below.", "",
         *(
-            ["| Review ID | Contig | Interval (bp) | Evidence | Distinct bp | Searches | Hit lineages | Local context |",
-             "| --- | --- | --- | --- | ---: | --- | --- | --- |"]
-            + [f"| {row['action_id']} | {row['sequence'].replace('|', '&#124;')} | [{int(row['start0']):,}, {int(row['end0']):,}) | "
-               f"{row['priority']} | {row['distinct_hit_bp']:,} | "
-               f"{row['support']} | {row['hit_lineages'].replace('|', '&#124;')} | {row['hit_context']} |"
-               for row in shortlist[:30]]
+            ["| Review ID | Contig | Length (bp) | Dominant non-host group | Group-aligned bp (% of contig) | Host-aligned bp (% of contig) | Mean depth |",
+             "| --- | --- | ---: | --- | ---: | ---: | ---: |"]
+            + [f"| {whole_sequence[row['sequence']]['action_id']} | {markdown_cell(row['sequence'])} | {int(row['length_bp']):,} | "
+               f"{markdown_cell(row['dominant_non_host_group'])} | {row['dominant_non_host_bp']:,} "
+               f"({100 * row['dominant_non_host_bp'] / int(row['length_bp']):.2f}%) | "
+               f"{row['host_aligned_bp']:,} ({row['host_aligned_pct']:.2f}%) | {row['mean_depth']} |"
+               for row in contig_shortlist[:20]]
             + [""]
-            if shortlist else []
+            if contig_shortlist else []
+        ),
+        "### Intervals to review first", "",
+        (f"Showing the top {min(len(shortlist), 30):,} of {len(shortlist):,} concordant or extended intervals.")
+        if shortlist else "No intervals met the concordant or extended evidence criteria.", "",
+        "[**Open the full interval review sheet (TSV)**](review.tsv) for every evidence interval "
+        "and manual whole-contig removal options.", "",
+        *([INTERVAL_RANKING, ""] if shortlist else []),
+        *([f"Included {len(interval_preview) - min(len(shortlist), 30):,} additional intervals "
+           "with targeted BLASTN results.", ""] if len(interval_preview) > min(len(shortlist), 30) else []),
+        *interval_review_guide(args.host_rank),
+        *(
+            ["| Review ID | Contig interval (bp) | Non-host match | Host match at the same locus | Agreement across searches | Review reason |",
+             "| --- | --- | --- | --- | --- | --- |"]
+            + [f"| [{row['action_id']}](../diagnostics/loci/{row['action_id']}.png) | {markdown_cell(row['sequence'])} "
+               f"[{int(row['start0']):,}, {int(row['end0']):,})<br>{row['distinct_hit_bp']:,} distinct non-host bp | "
+               f"{markdown_cell(row['non_host_match'])}"
+               + (f"<br>Similarly scored taxa: {markdown_cell(row['alternative_non_host_taxa'])}"
+                  if row["alternative_non_host_taxa"] else "")
+               + f" | {markdown_cell(row['host_match'])} | {row['search_agreement']}"
+               + (f"<br>{row['blastn_followup']}" if row["blastn_followup"] else "")
+               + f" | {row['review_reason']} |"
+               for row in interval_preview]
+            + [""]
+            if interval_preview else []
         ),
         "See the [window assignments](windows.tsv), [protein hits](protein_hits.tsv) and "
         "[MEGABLAST hits](megablast_hits.tsv) and [targeted nucleotide hits](nucleotide_hits.tsv) "
         "for intervals and supporting matches. [All contig summaries](sequence_evidence.tsv).", "",
         "[Sensitive BLASTN plan](nucleotide_targets.tsv) · [Target FASTA](nucleotide_targets.fasta).", "",
+        *REVIEW_ACTION_GUIDE,
+        *review_apply_guide(source),
         "## Diagnostics", "",
         "Taxon groups use the union of aligned intervals per lineage. A lineage must account for "
         "at least 80% of the summed lineage spans to color a contig. MEGABLAST is used where it "
@@ -564,10 +836,23 @@ def summarize(args):
         "[BlobToolKit dataset](../blobdir/) with MEGABLAST taxonomy where available, "
         "protein evidence as fallback, and the separate review categories. "
         "[Sequences without measurable GC](blobdir_exclusions.tsv) remain in the evidence tables.", "",
-        "Review [proposed intervals and whole-sequence options](review.tsv). Every row starts at `NO`. "
-        "Change coordinates as needed and supply a reviewer and reason for each selected action.", "",
     ]
     (args.out / "README.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def rebuild_report(args):
+    previous = json.loads((args.previous / "evidence.json").read_text())
+    if digest(args.fasta) != previous["source_sha256"]:
+        raise ValueError("Original FASTA checksum differs from the previous evidence report")
+    nt_manifest = args.previous / "nucleotide_database.json"
+    summarize(SimpleNamespace(
+        selected=args.previous, out=args.out, coverage=None,
+        targeted=previous["nucleotide_status"] in {"searched", "no-targets"},
+        nucleotide_manifest=nt_manifest if nt_manifest.is_file() else None,
+        nucleotide_db=previous["nucleotide_database"], taxid=previous["host_taxid"],
+        host_rank=previous["host_rank"]),
+        translated_nucleotide_hits=retained_hits(args.previous / "nucleotide_hits.tsv"),
+        previous=previous)
 
 
 def main():
@@ -576,6 +861,9 @@ def main():
     verify = commands.add_parser("verify-database")
     for name in ("db", "database", "taxdump"):
         verify.add_argument("--" + name, type=Path, required=True)
+    rebuild = commands.add_parser("rebuild-report")
+    for name in ("previous", "fasta", "out"):
+        rebuild.add_argument("--" + name, type=Path, required=True)
     blob = commands.add_parser("blob-input")
     for name in ("fasta", "exclusions", "out"):
         blob.add_argument("--" + name, type=Path, required=True)
@@ -613,6 +901,8 @@ def main():
         for name, checksum in identity["taxonomy_sha256"].items():
             if digest(args.taxdump / name) != checksum:
                 raise ValueError(f"Search taxonomy differs from the database manifest: {name}")
+    elif args.command == "rebuild-report":
+        rebuild_report(args)
     elif args.command == "blob-input":
         # BlobToolKit's FASTA parser cannot compute GC for all-ambiguous sequences.
         excluded = {row["sequence"] for row in table(args.exclusions)}

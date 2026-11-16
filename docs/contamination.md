@@ -57,6 +57,10 @@ evidence columns are permitted and retained in the applied-action audit.
 
 ## Apply a reviewed sheet
 
+Apply the sheet to the exact FASTA used for evidence. This is currently a
+standalone step. The assembly Nextflow interface will accept the reviewed TSV
+when the post-FCS cleanup step is integrated.
+
 ```bash
 python3 gcl_genome_assembly/py_scripts/contamination_review.py apply \
   --fasta /project/assembly/contigs.fasta \
@@ -330,9 +334,17 @@ MEGABLAST searches every eligible window in parallel, including windows with
 host-compatible protein hits. Eligible windows contain at least 100 A/C/G/T
 bases and retain original sequence coordinates. The default run finishes the
 searches after BLASTX and MEGABLAST. The Markdown report prioritizes concordant
-and extended non-host evidence and reports the distinct non-host aligned bases
-and their percentage of each contig. Window classifications and all hit and
-manual review rows are available as TSVs.
+and extended non-host evidence. Whole-contig candidates require distinct hits
+to one non-host group across at least half the contig and at least 80% of the
+distinct non-host span, with host hits covering at most 10% of the contig.
+The contig table shows host-aligned and non-host spans as bases and percentages
+for those candidates. Full contig summaries are available in the TSV. The interval
+table compares representative non-host hits with overlapping host hits from
+each search, with accessions, identity, query span and bit score. Protein and
+nucleotide agreement is shown separately from agreement between the two
+searches of the same nucleotide database. When BLASTN follow-up has been run,
+the interval table includes its results for the nominated loci. Window classifications and all hit
+and manual review rows are available as TSVs.
 
 Read the planned follow-up query count and base total in
 `results/review/README.md` and inspect the exact coordinates in
@@ -348,6 +360,15 @@ roughly 25 kb search batches. All review actions still require human selection.
 Reports preserve the three hit tables separately. The diagnostics include
 sequence-span-weighted GC and depth margins and contig counts, span, and N50
 by displayed taxonomic group.
+
+### Rebuild a report from completed searches
+
+Use `--previous_report /path/to/results/review` with `--fasta` pointing to the
+exact original FASTA and `--taxonomy_dir` pointing to the local taxonomy.
+Use a new `--outdir` to keep both reports available. The report checks the FASTA
+checksum and uses the published hit tables, coverage, and BLASTN target plan
+from that report. This mode runs only reporting and diagnostics.
+Click a review ID in the interval shortlist to open its alignment-span plot.
 
 ### Search concurrency
 
