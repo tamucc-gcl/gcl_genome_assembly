@@ -248,6 +248,10 @@ def apply(args, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
+    plan = commands.add_parser('plan')
+    plan.add_argument('--review', type=Path, required=True)
+    plan.add_argument('--out', type=Path, required=True)
+    plan.add_argument('--assemblies', nargs='*', required=True)
     for name in ('prepare', 'apply', 'search-input'):
         sub = commands.add_parser(name)
         sub.add_argument('--fasta', type=Path, required=True)
@@ -263,6 +267,16 @@ def main():
     args = parser.parse_args()
     if args.out.exists() or args.out.is_symlink():
         parser.error('Output already exists; choose a new directory')
+    if args.command == 'plan':
+        rows = read_actions(args.review)
+        if any(row['selected'] not in ('YES', 'NO') for row in rows):
+            parser.error('Every decision row must use YES or NO')
+        selected = {row['assembly'] for row in rows if row['selected'] == 'YES'}
+        unexpected = selected - set(args.assemblies)
+        if unexpected:
+            parser.error('Selected removals reference unknown assemblies: ' + ', '.join(sorted(unexpected)))
+        args.out.write_text(json.dumps(sorted(selected)) + '\n')
+        return
     if not args.assembly.strip() or not args.stage.strip():
         parser.error('Assembly and stage must be non-empty')
     args.out.parent.mkdir(parents=True, exist_ok=True)

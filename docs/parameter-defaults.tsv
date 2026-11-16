@@ -36,6 +36,16 @@ psmc_bootstrap_max_forks	8
 psmc_seed	1729
 contamination_blastx_max_forks	8
 contamination_blastn_max_forks	8
+run_contamination_evidence	false
+contamination_read_support	true
+contamination_review	null
+contamination_protein_db_dir	null
+contamination_nucleotide_db	null
+contamination_nt_db_root	null
+contamination_nt_release	null
+contamination_targeted_blastn	false
+contamination_host_rank	'phylum'
+stop_after_contig_review	false
 max_cpus	64
 max_memory	'700 GB'
 max_time	'240.h'

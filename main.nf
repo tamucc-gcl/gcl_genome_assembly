@@ -122,6 +122,8 @@ include { HIC_SCAFFOLDING } from './workflows/hic_scaffolding.nf'
 include { ASSEMBLY_FINISHING } from './workflows/assembly_finishing.nf'
 include { READ_PREPARATION } from './workflows/read_preparation.nf'
 include { CONTIG_REFINEMENT } from './workflows/contig_refinement.nf'
+include { CONTAMINATION_POST_FCS } from './workflows/contamination_post_fcs.nf'
+include { RUN_PROVENANCE as CONTIG_RUN_PROVENANCE } from './workflows/run_provenance.nf'
 include { CONTIG_ASSEMBLY } from './workflows/contig_assembly.nf'
 
 //Organelle assembly/annotation
@@ -204,6 +206,19 @@ workflow {
     def run_all_qc  = qc_on && ( qc_mode != 'final_only' )
     def post_on     = ( params.run_post_assembly != false )
     def chimera_on  = params.chimera_break && params.chimera_break.toString() != 'false'
+    def reviewContamination = params.run_contamination_evidence || params.contamination_review
+    if (reviewContamination && !params.run_decon_contigs)
+        error 'Post-FCS contamination review requires --run_decon_contigs true'
+    if (params.run_contamination_evidence && !params.contamination_protein_db_dir)
+        error 'Supply --contamination_protein_db_dir when enabling contamination evidence'
+    if (params.run_contamination_evidence) {
+        if ((params.contamination_nt_db_root || params.contamination_nt_release) &&
+            (params.contamination_nucleotide_db || !params.contamination_nt_db_root ||
+             !(params.contamination_nt_release?.toString() ==~ /\d{4}-\d{2}-\d{2}/)))
+            error 'Supply a nucleotide DB prefix or a managed nt root and release date (YYYY-MM-DD)'
+        if (params.contamination_targeted_blastn && !(params.contamination_nt_db_root || params.contamination_nucleotide_db))
+            error 'Contamination targeted BLASTN requires a nucleotide database'
+    }
 
     // Parse sample sheet -> per-sample tuple(meta, reads)
     def validated_inputs = parseSampleSheet(params.sample_sheet, params.hic_readsets)
@@ -445,6 +460,18 @@ workflow {
     ch_organelle_filtered = CONTIG_REFINEMENT.out.organelle_filtered
     ch_shortread_conditioned = CONTIG_REFINEMENT.out.shortread_conditioned
     ch_versions = ch_versions.mix(CONTIG_REFINEMENT.out.versions)
+    postFcsMapping = Channel.empty()
+    if (reviewContamination) {
+        CONTAMINATION_POST_FCS(ch_decontaminated_contigs, ch_qc_reads, ch_taxdump)
+        ch_decontaminated_contigs = CONTAMINATION_POST_FCS.out.assembly
+        postFcsMapping = CONTAMINATION_POST_FCS.out.mapping_qc
+        ch_versions = ch_versions.mix(CONTAMINATION_POST_FCS.out.versions)
+    }
+    if (params.stop_after_contig_review) {
+        CONTIG_RUN_PROVENANCE(ch_versions)
+        log.info '[INFO] Finishing at the contig stage'
+        return
+    }
     HIC_SCAFFOLDING(ch_decontaminated_contigs, READ_PREPARATION.out.hifi,
         READ_PREPARATION.out.hic, ch_telo_by_taxid, ch_gxdb_dir, capabilities)
     ch_final_assembly = HIC_SCAFFOLDING.out.assembly
@@ -714,7 +741,7 @@ workflow {
         ch_all_bam_metrics,
         ch_all_pairs_metrics,
         ch_compile_qc_script,
-        ch_assembly_report_script, capabilities
+        ch_assembly_report_script, capabilities, postFcsMapping
     )
     ch_versions = ch_versions.mix(QC_PHASE.out.versions)
     }

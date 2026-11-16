@@ -95,6 +95,11 @@ ggsave(file.path(args[2], "cumulative.png"), cumulative, width = 8, height = 5, 
 
 if (length(args) >= 3) {
     loci <- read.delim(args[3], check.names = FALSE)
+    read_depth <- read_boundaries <- NULL
+    if (length(args) >= 4 && file.exists(file.path(args[4], "locus_read_depth.tsv"))) {
+        read_depth <- read.delim(file.path(args[4], "locus_read_depth.tsv"))
+        read_boundaries <- read.delim(file.path(args[4], "locus_read_boundaries.tsv"))
+    }
     locus_dir <- file.path(args[2], "loci")
     dir.create(locus_dir, showWarnings = FALSE)
     for (hits in split(loci, loci$action_id)) {
@@ -107,6 +112,10 @@ if (length(args) >= 3) {
         flank <- max(100, round(.12 * (first$interval_end0 - first$interval_start0)))
         limits <- c(max(0, min(hits$start0, first$interval_start0 - flank, first$blastn_start0, na.rm = TRUE)),
                     min(first$contig_bp, max(hits$end0, first$interval_end0 + flank, first$blastn_end0, na.rm = TRUE)))
+        depth <- if (!is.null(read_depth)) read_depth[read_depth$action_id == first$action_id, ]
+        if (!is.null(depth) && nrow(depth)) {
+            limits <- c(min(limits[1], depth$start0), max(limits[2], depth$end0))
+        }
         plot <- ggplot(hits, aes(y = track)) +
             annotate("rect", xmin = first$interval_start0, xmax = first$interval_end0,
                      ymin = -Inf, ymax = Inf, fill = "#F4E8C8") +
@@ -131,7 +140,26 @@ if (length(args) >= 3) {
             plot <- plot + annotate("segment", x = first$blastn_start0, xend = first$blastn_end0,
                                     y = window_label, yend = window_label, color = "#5E6573")
         }
+        height <- max(3.5, 2.2 + .48 * length(tracks))
+        if (!is.null(depth) && nrow(depth)) {
+            edges <- read_boundaries[read_boundaries$action_id == first$action_id, ]
+            counts <- ifelse(is.na(edges$spanning_reads), "insufficient flank", edges$spanning_reads)
+            caption <- paste(paste(edges$edge, "edge:", counts), collapse = "  |  ")
+            coverage <- ggplot(depth) +
+                annotate("rect", xmin = first$interval_start0, xmax = first$interval_end0,
+                         ymin = -Inf, ymax = Inf, fill = "#F4E8C8") +
+                geom_rect(aes(xmin = start0, xmax = end0, ymin = 0, ymax = mean_depth), fill = "#35687A") +
+                geom_vline(xintercept = edges$boundary0, color = "#946B26", linetype = "dashed") +
+                scale_x_continuous(labels = scales::label_number(big.mark = ",")) +
+                coord_cartesian(xlim = limits) +
+                labs(x = "Original contig coordinate (bp)", y = "Read depth",
+                     subtitle = paste("Spanning reads", caption, sep = "  |  ")) +
+                theme_bw(base_size = 11)
+            plot <- (plot + labs(x = NULL) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())) /
+                coverage + plot_layout(heights = c(height, 2))
+            height <- height + 2
+        }
         ggsave(file.path(locus_dir, paste0(first$action_id, ".png")), plot,
-               width = 10, height = max(3.5, 2.2 + .48 * length(tracks)), dpi = 150, bg = "white")
+               width = 10, height = height, dpi = 150, bg = "white")
     }
 }

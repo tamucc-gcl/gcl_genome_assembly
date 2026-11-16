@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_scripts"))
 from contamination_evidence import (blastn_result, followup_plan, locus_comparison, ranked_loci,
                                     search_hits, whole_contig_evidence)
+from contamination_read_support import measure, spans_boundary
 
 
 def hit(start, end, relation="non-host", group="Arthropoda"):
@@ -73,6 +74,24 @@ class ContaminationEvidenceTests(unittest.TestCase):
         status, nominated = blastn_result(locus, target, [host], searched=True)
         self.assertTrue(nominated)
         self.assertEqual(status, "BLASTN: overlapping host hit found (900 bp of interval searched)")
+
+    def test_spanning_requires_aligned_sequence_on_both_sides(self):
+        self.assertTrue(spans_boundary([(40, 99), (103, 160)], 100))
+        self.assertFalse(spans_boundary([(20, 85), (115, 180)], 100))
+        self.assertFalse(spans_boundary([(20, 100)], 100))
+
+    def test_read_panel_preserves_zero_depth_and_unassessable_contig_end(self):
+        reads = [
+            SimpleNamespace(flag=0, mapping_quality=60, query_name="read1", get_blocks=lambda: [(90, 210)]),
+            SimpleNamespace(flag=0x800, mapping_quality=60, query_name="read2", get_blocks=lambda: [(0, 300)]),
+        ]
+        bam = SimpleNamespace(get_reference_length=lambda _: 300, fetch=lambda *args: iter(reads))
+        locus = dict(action_id="A1", sequence="contig", interval_start0=0, interval_end0=150, contig_bp=300)
+        depth, boundaries = measure(bam, locus)
+        values = list(depth)
+        self.assertEqual([row["spanning_reads"] for row in boundaries], ["NA", 1])
+        self.assertEqual(values[0]["mean_depth"], 0)
+        self.assertEqual(values[100]["mean_depth"], 1)
 
     def test_followup_alignment_uses_cropped_origin_and_preserves_strand(self):
         target = {"query": dict(sequence="contig", start0=1500, end0=2800)}

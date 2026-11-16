@@ -381,6 +381,20 @@ REVIEW_ACTION_GUIDE = [
 ]
 
 
+def add_read_support_guide(review_dir):
+    readme = review_dir / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    readme.write_text(text.replace(
+        "### Intervals to review first\n\n",
+        "### Intervals to review first\n\n"
+        "Locus plots include [local read depth](locus_read_depth.tsv) and "
+        "[reads spanning each interval edge](locus_read_boundaries.tsv). "
+        "Counts use primary alignments with mapping quality at least 20, with at least 30 aligned bases "
+        "in each 50 bp flank. Edges within 50 bp of the contig end have insufficient flanking sequence "
+        "for a spanning test. Read support measures sequence continuity. Taxonomic assignments come from the search tracks.\n\n",
+        1), encoding="utf-8")
+
+
 def review_apply_guide(source):
     return [
         "### Apply the reviewed decisions", "",
@@ -393,9 +407,11 @@ def review_apply_guide(source):
         '  --review "/path/to/reviewed.tsv" \\',
         '  --out "/path/to/cleaned-output"',
         "```", "",
-        "The command checks the assembly, stage, and FASTA checksum before writing "
-        "`retained.fasta` and the removal audit. Applying a reviewed sheet is a standalone step today. "
-        "The assembly Nextflow command will take the reviewed sheet once the post-FCS cleanup step is integrated.",
+        "For a post-FCS report, add `--contamination_review /path/to/reviewed.tsv` and `-resume` "
+        "to the original assembly command. Set `--stop_after_contig_review false` to continue into scaffolding. "
+        "Keep the original assembly inputs and FCS settings so the reviewed coordinates still match.", "",
+        "The standalone command above checks the assembly, stage, and FASTA checksum before writing "
+        "`retained.fasta` and the removal audit.",
         "",
     ]
 
@@ -853,6 +869,17 @@ def rebuild_report(args):
         host_rank=previous["host_rank"]),
         translated_nucleotide_hits=retained_hits(args.previous / "nucleotide_hits.tsv"),
         previous=previous)
+    read_tables = ["locus_read_depth.tsv", "locus_read_boundaries.tsv"]
+    if all((args.previous / name).is_file() for name in read_tables):
+        # Carry forward read evidence only when the review IDs still identify the same loci.
+        def coordinates(directory):
+            return {tuple(row[key] for key in ("action_id", "sequence", "interval_start0", "interval_end0"))
+                    for row in table(directory / "locus_plot_hits.tsv")}
+        if (args.previous / "locus_plot_hits.tsv").is_file() and coordinates(args.previous) == coordinates(args.out):
+            for name in read_tables:
+                shutil.copyfile(args.previous / name, args.out / name)
+            if table(args.out / "locus_read_boundaries.tsv"):
+                add_read_support_guide(args.out)
 
 
 def main():

@@ -1,10 +1,8 @@
 nextflow.enable.dsl = 2
 
-include { CONTAMINATION_PREPARE; CONTAMINATION_BLASTX; CONTAMINATION_SELECT_NUCLEOTIDE;
-          CONTAMINATION_BLASTN as CONTAMINATION_MEGABLAST;
-          CONTAMINATION_BLASTN as CONTAMINATION_TARGETED_BLASTN;
-          CONTAMINATION_REPORT; CONTAMINATION_REBUILD_REPORT; CONTAMINATION_DIAGNOSTICS;
-          CONTAMINATION_BLOBDIR } from '../../modules/contamination_evidence.nf'
+include { CONTAMINATION_REBUILD_REPORT; CONTAMINATION_DIAGNOSTICS; CONTAMINATION_BLOBDIR
+} from '../../modules/contamination_evidence.nf'
+include { CONTAMINATION_SEARCH } from '../../workflows/contamination_search.nf'
 include { DOWNLOAD_CONTAMINATION_NT; VERIFY_CONTAMINATION_NT } from '../../modules/download_contamination_nt.nf'
 
 params.fasta = null
@@ -38,17 +36,15 @@ workflow {
         file("${projectDir}/../../py_scripts/${it}", checkIfExists: true)
     }
     def plotter = file("${projectDir}/../../r_scripts/plot_contamination_diagnostics.R", checkIfExists: true)
-    def review
-    def host
-    def hasCoverage
 
     if (params.previous_report) {
         def previous = file(params.previous_report, checkIfExists: true)
         def metadata = new groovy.json.JsonSlurper().parseText(previous.resolve('evidence.json').text)
-        CONTAMINATION_REBUILD_REPORT(previous, fasta, helpers)
-        review = CONTAMINATION_REBUILD_REPORT.out
-        hasCoverage = metadata.coverage != 'unavailable'
-        host = metadata.host_taxid
+        CONTAMINATION_REBUILD_REPORT(previous, fasta, helpers, metadata.assembly)
+        CONTAMINATION_DIAGNOSTICS(CONTAMINATION_REBUILD_REPORT.out, plotter, false)
+        CONTAMINATION_BLOBDIR(CONTAMINATION_REBUILD_REPORT.out.map { id, review ->
+            tuple(id, fasta, review, metadata.coverage != 'unavailable', metadata.host_taxid)
+        }, taxdump, helpers, false)
     } else {
         ['contamination_blastx_max_forks', 'contamination_blastn_max_forks', 'contamination_followup_max_bp'].each { name ->
             def value = params[name].toString()
@@ -69,9 +65,6 @@ workflow {
             !(params.nt_release?.toString() ==~ /\d{4}-\d{2}-\d{2}/) ||
             !(params.nt_collection.toString() ==~ /[A-Za-z0-9_]+/)))
             error 'Supply --nucleotide_db, or --nt_db_root and --nt_release YYYY-MM-DD for a managed NCBI database'
-        def bundle = file(params.protein_db_dir, checkIfExists: true).toAbsolutePath()
-        def database = file(bundle.resolve('reference_proteomes.dmnd'), checkIfExists: true).toString()
-        def manifest = file(bundle.resolve('protein_database.json'), checkIfExists: true)
         def ntDb = params.nucleotide_db ? file(params.nucleotide_db).toAbsolutePath().toString() : ''
         def ntManifest = []
         if (managed) {
@@ -89,31 +82,12 @@ workflow {
             error 'Targeted BLASTN requires a nucleotide database'
         def bam = params.coverage_bam ? file(params.coverage_bam, checkIfExists: true) : []
         def coverage = params.coverage_tsv ? file(params.coverage_tsv, checkIfExists: true) : []
-        CONTAMINATION_PREPARE(fasta, params.assembly, params.stage, params.window_bp,
-            params.chunk_bp, database, manifest, taxdump, helpers)
-        def chunks = CONTAMINATION_PREPARE.out.chunks.flatten()
-        CONTAMINATION_BLASTX(chunks, database)
-        def hits = CONTAMINATION_BLASTX.out.collect().ifEmpty([])
-        def megaHits = []
-        if (mega) {
-            CONTAMINATION_MEGABLAST(chunks, ntDb, 'megablast')
-            megaHits = CONTAMINATION_MEGABLAST.out.collect().ifEmpty([])
-        }
-        CONTAMINATION_SELECT_NUCLEOTIDE(fasta, CONTAMINATION_PREPARE.out.queries, hits, megaHits, mega,
-            params.contamination_followup_max_bp, taxdump, params.taxid, params.host_rank, helpers)
-        def nucleotide = []
-        if (targeted) {
-            CONTAMINATION_TARGETED_BLASTN(CONTAMINATION_SELECT_NUCLEOTIDE.out.chunks.flatten(), ntDb, 'blastn')
-            nucleotide = CONTAMINATION_TARGETED_BLASTN.out.collect().ifEmpty([])
-        }
-        CONTAMINATION_REPORT(CONTAMINATION_PREPARE.out.queries, CONTAMINATION_PREPARE.out.metrics,
-            CONTAMINATION_SELECT_NUCLEOTIDE.out.selected, nucleotide, ntDb, targeted, ntManifest,
-            bam, coverage, taxdump,
-            params.taxid, params.host_rank, manifest, helpers)
-        review = CONTAMINATION_REPORT.out
-        hasCoverage = !!(params.coverage_bam || params.coverage_tsv)
-        host = params.taxid
+        CONTAMINATION_SEARCH(
+            Channel.of(tuple(params.assembly, fasta, params.taxid)),
+            Channel.of(tuple(params.assembly, bam, [], coverage)),
+            taxdump, [protein: params.protein_db_dir, stage: params.stage, window: params.window_bp,
+                chunk: params.chunk_bp, nt: ntDb, mega: mega, targeted: targeted,
+                followup: params.contamination_followup_max_bp, rank: params.host_rank, nested: false],
+            file("${projectDir}/../.."), ntManifest)
     }
-    CONTAMINATION_DIAGNOSTICS(review, plotter)
-    CONTAMINATION_BLOBDIR(fasta, review, hasCoverage, taxdump, host, helpers)
 }

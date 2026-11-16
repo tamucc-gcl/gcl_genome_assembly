@@ -2,13 +2,11 @@
 
 ## Implementation status
 
-The standalone tools cover reviewed cleaning, shared reference database setup,
-whole-assembly MEGABLAST, translated protein searches, and targeted BLASTN.
-They are **not yet called by `main.nf`**. The search accepts an assembly-matched
-coverage BAM or a retained `samtools coverage` table. Main-pipeline coverage
-generation and the contig-only stopping control are subsequent work.
-The existing FCS workflow is unchanged. Do not enable the currently blocked
-`run_blobtools_evidence` flag yet.
+The [assembly pipeline](#run-post-fcs-review-in-the-assembly-pipeline) can generate
+post-FCS evidence and apply reviewed removals before scaffolding. It can also
+stop at the contig stage. The standalone tools support database setup and report
+rebuilds. In the assembly pipeline, `--run_contamination_evidence` enables the
+new report and BlobToolKit dataset.
 
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
@@ -57,9 +55,9 @@ evidence columns are permitted and retained in the applied-action audit.
 
 ## Apply a reviewed sheet
 
-Apply the sheet to the exact FASTA used for evidence. This is currently a
-standalone step. The assembly Nextflow interface will accept the reviewed TSV
-when the post-FCS cleanup step is integrated.
+Apply the sheet to the exact FASTA used for evidence. For a post-FCS
+report, the assembly Nextflow interface accepts `--contamination_review`
+as described below. The standalone command is also available.
 
 ```bash
 python3 gcl_genome_assembly/py_scripts/contamination_review.py apply \
@@ -379,19 +377,45 @@ Click a review ID in the interval shortlist to open its alignment-span plot.
 
 Each search task requests 8 CPUs. BLASTX and MEGABLAST can overlap, so at the
 defaults they can run up to 16 search tasks together. Both limits accept positive
-integers. The current standalone entry point takes one assembly. When wiring
-the cohort workflow, feed chunks from all haplotypes through a single invocation
-of each search process so every haplotype shares its process's limit. Separate
-Nextflow runs have independent limits.
+integers. The standalone entry point takes one assembly. In the assembly
+pipeline, all haplotypes share each process's limit. Separate Nextflow runs
+have independent limits.
 
-## Remaining implementation steps
+## Run post-FCS review in the assembly pipeline
 
-1. Verify the whole-haplotype run on Crest with the intended databases. Evaluate
-   window-boundary sensitivity and the size of the nucleotide target set.
-2. Add pipeline-generated HiFi or shotgun coverage, the pre-scaffolding workflow,
-   and the general contig-stage stopping control.
-   Test zero downstream task submissions and subsequent normal cache reuse.
-3. Validate reviewed cleaning/downstream invalidation and the optional final check.
+Add these options to the usual assembly command to generate review evidence
+and stop before scaffolding:
+
+```bash
+--run_decon_contigs true \
+--run_contamination_evidence true \
+--contamination_protein_db_dir "$protein_bundle" \
+--contamination_nucleotide_db "$nt_prefix" \
+--stop_after_contig_review true
+```
+
+The protein bundle contains the DIAMOND index and its manifest. For a managed
+NCBI nucleotide database, replace the local prefix option with
+`--contamination_nt_db_root "$db_root" --contamination_nt_release "$nt_release"`.
+Sensitive BLASTN is optional via `--contamination_targeted_blastn true`.
+Evidence is published under `assembly/contamination/<assembly-id>/`.
+By default, read support retains the indexed BAM in Nextflow work and uses it
+for coverage summaries and the shortlisted locus plots. If post-FCS mapping QC
+is enabled, it uses the same mapping task. Set
+`--contamination_read_support false` to generate evidence without the mapping.
+
+For the next run, preserve the original assembly and FCS inputs, add
+`-resume --contamination_review "$reviewed_tsv"` and set
+`--stop_after_contig_review false`. Use the same Nextflow launch directory and
+work directory to resume. The reviewed sheet can contain multiple assembly IDs.
+The workflow applies selected rows on the matching source FASTA and publishes
+the removal and coordinate audit in each affected assembly's `cleanup/audit/`
+directory. Assemblies with zero selected rows pass through using their original
+FASTA. Evidence generation can be enabled separately from applying the sheet.
+
+The next Crest checks cover cohort evidence, the contig-stage stop, and reviewed
+cleanup with normal Nextflow cache invalidation. A final-assembly evidence pass
+is a separate follow-up.
 
 Local foundation checks:
 

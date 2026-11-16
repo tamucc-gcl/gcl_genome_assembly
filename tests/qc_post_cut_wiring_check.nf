@@ -33,7 +33,7 @@ __POST_CUT_QC__
     ASSEMBLY_QC(ch_staged_assemblies.map { m,s,f -> tuple(m,f) },
         Channel.of(tuple([sample:'changed'],file(root+'/reads.fq')),tuple([sample:'singleton'],file(root+'/reads.fq'))),
         Channel.of(tuple([sample:'changed'],file(root+'/names.tsv')),tuple([sample:'singleton'],file(root+'/names.tsv'))),
-        Channel.value(['1':'stub']), 'chimera_broken')
+        Channel.value(['1':'stub']), 'chimera_broken', Channel.empty())
     ASSEMBLY_QC.out.assembly_summary.toList().view { rows ->
         assert rows.size() == 2
         assert rows.collect { it[0] }.sort() == ['changed','singleton']

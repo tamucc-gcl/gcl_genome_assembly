@@ -60,6 +60,7 @@ workflow QC_PHASE {
     assembly_report_script  // value: generate_assembly_report.py
 
     capabilities
+    post_fcs_mapping
 
     main:
     def all_stages = (params.qc_mode ?: 'all_stages') != 'final_only'
@@ -102,72 +103,72 @@ workflow QC_PHASE {
     ch_all_assembly_summaries = Channel.empty()
 
     if (all_stages) {
-    ASSEMBLY_QC_INITIAL(            st.initial.map            { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig')
+    ASSEMBLY_QC_INITIAL(            st.initial.map            { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_INITIAL.out.assembly_summary)
     }
 
     if (all_stages) {
-    ASSEMBLY_QC_ORGANELLE_FILTERED(st.organelle_filtered.map { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_organelle_filtered')
+    ASSEMBLY_QC_ORGANELLE_FILTERED(st.organelle_filtered.map { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_organelle_filtered', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_ORGANELLE_FILTERED.out.assembly_summary)
     }
 
     if (all_stages && capabilities.purge) {
-    ASSEMBLY_QC_PURGED(            st.purged.map             { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_purged')
+    ASSEMBLY_QC_PURGED(            st.purged.map             { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_purged', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_PURGED.out.assembly_summary)
     }
 
     if (all_stages && capabilities.spades) {
-    ASSEMBLY_QC_REDUNDANS(         st.redundans.map          { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_purged')
+    ASSEMBLY_QC_REDUNDANS(         st.redundans.map          { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_purged', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_REDUNDANS.out.assembly_summary)
     }
 
     if (all_stages && capabilities.hifiasm && params.run_inspector_contigs) {
-    ASSEMBLY_QC_CONTIG_CORRECTED(  st.contig_corrected.map   { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_corrected')
+    ASSEMBLY_QC_CONTIG_CORRECTED(  st.contig_corrected.map   { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_corrected', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_CORRECTED.out.assembly_summary)
     }
 
     if (all_stages && params.run_decon_contigs) {
-    ASSEMBLY_QC_CONTIG_DECONTAM(   st.contig_decontam.map    { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_decontam')
+    ASSEMBLY_QC_CONTIG_DECONTAM(   st.contig_decontam.map    { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'contig_decontam', post_fcs_mapping)
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CONTIG_DECONTAM.out.assembly_summary)
     }
 
     if (all_stages && capabilities.scaffold) {
-    ASSEMBLY_QC_SCAFFOLD(          st.scaffold.map           { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold')
+    ASSEMBLY_QC_SCAFFOLD(          st.scaffold.map           { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD.out.assembly_summary)
     }
 
     if (all_stages && capabilities.scaffold && params.run_inspector_scaffolds) {
-    ASSEMBLY_QC_SCAFFOLD_CORRECTED(st.scaffold_corrected.map { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold_corrected')
+    ASSEMBLY_QC_SCAFFOLD_CORRECTED(st.scaffold_corrected.map { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold_corrected', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_CORRECTED.out.assembly_summary)
     }
 
     if (all_stages && capabilities.scaffold && params.run_decon_scaffolds) {
-    ASSEMBLY_QC_SCAFFOLD_DECONTAM( st.scaffold_decontam.map  { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold_decontam')
+    ASSEMBLY_QC_SCAFFOLD_DECONTAM( st.scaffold_decontam.map  { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold_decontam', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_DECONTAM.out.assembly_summary)
     }
 
     if (all_stages && capabilities.scaffold && params.run_scaffold_round2) {
-    ASSEMBLY_QC_SCAFFOLD_ROUND2(   st.scaffold_round2.map    { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold_round2')
+    ASSEMBLY_QC_SCAFFOLD_ROUND2(   st.scaffold_round2.map    { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'scaffold_round2', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_SCAFFOLD_ROUND2.out.assembly_summary)
     }
 
     if (all_stages && capabilities.scaffold) {
-    ASSEMBLY_QC_GAP_FILLED(        st.gap_filled.map         { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'gap_filled')
+    ASSEMBLY_QC_GAP_FILLED(        st.gap_filled.map         { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'gap_filled', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_GAP_FILLED.out.assembly_summary)
     }
 
     if (all_stages && capabilities.hifiasm && params.run_teloclip_extend) {
-    ASSEMBLY_QC_TELOCLIP(          st.teloclip.map           { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'teloclip_extended')
+    ASSEMBLY_QC_TELOCLIP(          st.teloclip.map           { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'teloclip_extended', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_TELOCLIP.out.assembly_summary)
     }
 
     // After scaffolding and before gap filling/telomere extension. The caller includes
     // all haplotypes of affected samples so paired QUAST/Merqury summaries can complete.
     if (all_stages && capabilities.harmonize && params.harmonize_scaffold_names && params.chimera_break && params.chimera_break.toString() != 'false') {
-    ASSEMBLY_QC_CHIMERA_BROKEN(    st.chimera_broken.map     { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'chimera_broken')
+    ASSEMBLY_QC_CHIMERA_BROKEN(    st.chimera_broken.map     { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'chimera_broken', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_CHIMERA_BROKEN.out.assembly_summary)
     }
-    ASSEMBLY_QC_FINAL(             st.finalstage.map         { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'final')
+    ASSEMBLY_QC_FINAL(             st.finalstage.map         { m, s, f -> tuple(m, f) }, hifi_reads, meryl_db, busco_db, 'final', Channel.empty())
     ch_all_assembly_summaries = ch_all_assembly_summaries.mix(ASSEMBLY_QC_FINAL.out.assembly_summary)
 
     ch_final_busco = ASSEMBLY_QC_FINAL.out.busco_results

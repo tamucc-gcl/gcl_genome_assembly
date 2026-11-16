@@ -2,32 +2,47 @@ def quote(value) {
     "'" + value.toString().replace("'", "'\"'\"'") + "'"
 }
 
+process CONTAMINATION_VERIFY_PROTEIN {
+    conda 'conda-forge::python=3.11'
+    memory '1 GB'
+    time '2h'
+
+    input:
+    path database
+    path manifest
+    val taxdump
+    path helpers
+
+    output:
+    path 'protein_database.verified'
+
+    script:
+    """
+    python3 contamination_evidence.py verify-database --db ${quote(database)} \
+        --database ${quote(manifest)} --taxdump ${quote(taxdump)}
+    touch protein_database.verified
+    """
+}
+
 process CONTAMINATION_PREPARE {
+    tag "${assembly}"
     label 'contamination_evidence'
     conda 'conda-forge::python=3.11'
     memory '8 GB'
     time '4h'
 
     input:
-    path fasta
-    val assembly
+    tuple val(assembly), path(fasta)
     val stage
     val window_bp
     val chunk_bp
-    val database
-    path manifest
-    val taxdump
-    path helpers
+    path helper
 
     output:
-    path 'metrics', emit: metrics
-    path 'queries', emit: queries
-    path 'queries/protein_*.fasta', optional: true, emit: chunks
+    tuple val(assembly), path('metrics'), path('queries'), emit: prepared
 
     script:
     """
-    python3 contamination_evidence.py verify-database --db ${quote(database)} \
-        --database ${quote(manifest)} --taxdump ${quote(taxdump)}
     python3 contamination_review.py prepare --fasta ${quote(fasta)} \
         --assembly ${quote(assembly)} --stage ${quote(stage)} --out metrics
     python3 contamination_review.py search-input --fasta ${quote(fasta)} \
@@ -37,7 +52,7 @@ process CONTAMINATION_PREPARE {
 }
 
 process CONTAMINATION_BLASTX {
-    tag "${chunk.name}"
+    tag "${assembly}/${chunk.name}"
     maxForks (params.contamination_blastx_max_forks as int)
     conda 'bioconda::diamond=2.1.14'
     cpus 8
@@ -45,11 +60,12 @@ process CONTAMINATION_BLASTX {
     time '12h'
 
     input:
-    path chunk
+    tuple val(assembly), path(chunk)
     val database
+    path verification
 
     output:
-    path "${chunk.baseName}.hits.tsv"
+    tuple val(assembly), path("${chunk.baseName}.hits.tsv")
 
     script:
     """
@@ -61,25 +77,21 @@ process CONTAMINATION_BLASTX {
 }
 
 process CONTAMINATION_SELECT_NUCLEOTIDE {
+    tag "${assembly}"
     conda 'conda-forge::python=3.11'
     memory '8 GB'
     time '4h'
 
     input:
-    path fasta
-    path queries
-    path hits
-    path mega_hits
+    tuple val(assembly), path(fasta), path(queries), val(host), path(hits), path(mega_hits)
     val mega_enabled
     val followup_max_bp
     val taxdump
-    val host
     val rank
     path helpers
 
     output:
-    path 'selected', emit: selected
-    path 'selected/target_*.fasta', optional: true, emit: chunks
+    tuple val(assembly), path('selected'), emit: selected
 
     script:
     def hitArgs = hits instanceof List ? hits.collect { quote(it) }.join(' ') : quote(hits)
@@ -94,7 +106,7 @@ process CONTAMINATION_SELECT_NUCLEOTIDE {
 }
 
 process CONTAMINATION_BLASTN {
-    tag "${mode}/${chunk.name}"
+    tag "${assembly}/${mode}/${chunk.name}"
     maxForks (params.contamination_blastn_max_forks as int)
     conda 'bioconda::blast=2.16.0'
     cpus 8
@@ -102,12 +114,12 @@ process CONTAMINATION_BLASTN {
     time '24h'
 
     input:
-    path chunk
+    tuple val(assembly), path(chunk)
     val nt_db
     val mode
 
     output:
-    path "${mode}_${chunk.baseName}.hits.tsv"
+    tuple val(assembly), path("${mode}_${chunk.baseName}.hits.tsv")
 
     script:
     """
@@ -119,29 +131,27 @@ process CONTAMINATION_BLASTN {
 }
 
 process CONTAMINATION_REPORT {
-    conda 'conda-forge::python=3.11 bioconda::samtools=1.21'
+    tag "${assembly}"
+    conda 'conda-forge::python=3.11 bioconda::samtools=1.21 bioconda::pysam=0.23.3'
     memory '8 GB'
     time '8h'
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir { nested ? "${params.outdir}/assembly/contamination/${assembly}" : params.outdir }, mode: 'copy'
 
     input:
-    path queries
-    path metrics
-    path selected
-    path nt_hits
+    tuple val(assembly), path(metrics), path(queries), path(selected), path(nt_hits), path(bam), path(bai),
+          path(coverage_table), val(host)
     val nt_db
     val targeted
     path nt_manifest
-    path bam
-    path coverage_table
     val taxdump
-    val host
     val rank
     path manifest
     path helpers
+    val nested
+    path reader
 
     output:
-    path 'review'
+    tuple val(assembly), path('review')
 
     script:
     def depth = bam ? "samtools coverage -q 20 --ff UNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY ${quote(bam)} > coverage.tsv" : ''
@@ -151,12 +161,14 @@ process CONTAMINATION_REPORT {
     def nt = (nt_db ? "--nucleotide-db ${quote(nt_db)}" : '') +
         (nt_manifest ? " --nucleotide-manifest ${quote(nt_manifest)}" : '')
     def targetedFlag = targeted ? '--targeted' : ''
+    def readSupport = bai ? "python3 ${quote(reader)} --bam ${quote(bam)} --index ${quote(bai)} --review review" : ''
     """
     ${depth}
     python3 contamination_evidence.py summarize --prepared ${quote(queries)} \
         --metrics ${quote(metrics)} --selected ${quote(selected)} --database ${quote(manifest)} \
         --taxdump ${quote(taxdump)} --taxid ${host} --host-rank ${quote(rank)} \
         --out review ${cov} ${nt} ${targetedFlag} --nucleotide-hits ${ntArgs}
+    ${readSupport}
     """
 }
 
@@ -170,9 +182,10 @@ process CONTAMINATION_REBUILD_REPORT {
     path previous, stageAs: 'prior'
     path fasta
     path helpers
+    val assembly
 
     output:
-    path 'review'
+    tuple val(assembly), path('review')
 
     script:
     """
@@ -185,11 +198,12 @@ process CONTAMINATION_DIAGNOSTICS {
     conda 'conda-forge::r-base=4.3.3 conda-forge::r-ggplot2=3.5.2 conda-forge::r-patchwork=1.3.0'
     memory '4 GB'
     time '2h'
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir { nested ? "${params.outdir}/assembly/contamination/${assembly}" : params.outdir }, mode: 'copy'
 
     input:
-    path review
+    tuple val(assembly), path(review)
     path plotter
+    val nested
 
     output:
     path 'diagnostics'
@@ -197,7 +211,7 @@ process CONTAMINATION_DIAGNOSTICS {
     script:
     """
     Rscript ${quote(plotter)} ${quote(review.resolve('sequence_evidence.tsv'))} diagnostics \
-        ${quote(review.resolve('locus_plot_hits.tsv'))}
+        ${quote(review.resolve('locus_plot_hits.tsv'))} ${quote(review)}
     """
 }
 
@@ -206,15 +220,13 @@ process CONTAMINATION_BLOBDIR {
     cpus 4
     memory '16 GB'
     time '8h'
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir { nested ? "${params.outdir}/assembly/contamination/${assembly}" : params.outdir }, mode: 'copy'
 
     input:
-    path fasta
-    path review
-    val hasCoverage
+    tuple val(assembly), path(fasta), path(review), val(hasCoverage), val(host)
     val taxdump
-    val host
     path helpers
+    val nested
 
     output:
     path 'blobdir'

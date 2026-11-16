@@ -42,6 +42,7 @@ workflow ASSEMBLY_QC {
     meryl_db     // channel: tuple(meta, meryl_db)        — per-sample (sample-level meta)
     busco_db     // value:   MAP taxid -> busco_lineage (passed straight through to BUSCO)
     qc_label     // value:   label for output subfolder
+    shared_mapping
 
     main:
 
@@ -93,7 +94,15 @@ workflow ASSEMBLY_QC {
         .map { sample, meta, fasta, hifi_fastq -> tuple(meta, fasta, hifi_fastq) }
         .set { ch_mapping_input }
 
-    MAPPING_QC(ch_mapping_input)
+    def mapping_channel
+    def mapping_versions = Channel.empty()
+    if (qc_label == 'contig_decontam' && params.run_contamination_evidence && params.contamination_read_support) {
+        mapping_channel = shared_mapping
+    } else {
+        MAPPING_QC(ch_mapping_input, false)
+        mapping_channel = MAPPING_QC.out.results
+        mapping_versions = MAPPING_QC.out.versions
+    }
 
     /*
     ========================================================================================
@@ -112,7 +121,7 @@ workflow ASSEMBLY_QC {
         }
         .set { ch_busco_by_sample }   // (sample_id, [hap_ids], [busco_results])
 
-    MAPPING_QC.out.results
+    mapping_channel
         .map { meta, results -> tuple(groupKey(meta.sample, meta.n_hap), meta, results) }
         .groupTuple()
         .map { key, metas, results ->
@@ -148,5 +157,5 @@ workflow ASSEMBLY_QC {
     assembly_summary = COMBINE_ASSEMBLY_QC.out.summary   // (sample_id, qc_label, summary_tsv)
     busco_results    = BUSCO.out.results                 // per-haplotype (meta, results)
     busco_full_table = BUSCO.out.full_table    // per-haplotype (meta, full_table.tsv)
-    versions       = QUAST.out.versions.mix(MERQURY.out.versions).mix(BUSCO.out.versions).mix(MAPPING_QC.out.versions)
+    versions       = QUAST.out.versions.mix(MERQURY.out.versions).mix(BUSCO.out.versions).mix(mapping_versions)
 }
