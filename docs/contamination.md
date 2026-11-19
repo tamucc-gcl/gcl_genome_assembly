@@ -381,6 +381,56 @@ integers. The standalone entry point takes one assembly. In the assembly
 pipeline, all haplotypes share each process's limit. Separate Nextflow runs
 have independent limits.
 
+### Exclusive node workers for MEGABLAST
+
+Set `--contamination_megablast_execution nodes` to search a cohort through
+exclusive node allocations. The existing `chunks` mode remains available.
+DIAMOND and optional targeted BLASTN retain their separate process limits.
+
+| Parameter | Default | Meaning |
+| --- | ---: | --- |
+| `--contamination_megablast_nodes` | 7 | Maximum simultaneous exclusive search workers |
+| `--contamination_megablast_slots` | 8 | Simultaneous searches inside each worker |
+| `--contamination_megablast_threads` | 8 | Threads per search |
+| `--contamination_megablast_scratch` | `/scratch` | Node-local directory used for database and query copies |
+| `--contamination_megablast_time` | `96h` | Wall-time limit for each worker and assembly collector |
+
+Each worker requests slots multiplied by threads CPUs, exclusive access, and
+all node memory via Slurm `--mem=0`. Configure worker count, scratch directory
+and any required node constraints for the local cluster. The driver allocation
+must outlast its workers and any retries. Seven 64-CPU workers leave room for
+a driver and other tasks on an eight-node allocation limit.
+
+Preparation produces a cohort queue that interleaves assemblies. Each worker
+copies and checksum-verifies the complete nucleotide database once, checks
+scratch capacity, and dynamically assigns chunks to its available search slots.
+The private scratch directory is removed when the worker exits normally.
+
+Completed chunks are retained under `work/contamination_megablast/` when using
+the default work directory. A completion record binds each output to the exact
+query checksum, database file metadata and manifest checksum, BLAST version,
+threads and search flags, and the hit-file checksum. The input database must be
+an immutable snapshot. Changed identities create distinct entries. Corrupt or
+incomplete results are recomputed. This is the checkpoint unit inside the larger
+Nextflow node task; normal Nextflow caching still handles the surrounding tasks.
+
+Workers coordinate using Linux file locks on shared storage. The Crest acceptance
+fixture tests those locks across two physical nodes. An interruption releases
+the claims while retaining already committed chunks. Completion records are
+written atomically. Assembly collectors release results independently, allowing
+reports to begin before the cohort finishes. Empty query sets still produce reports.
+
+The old per-chunk Nextflow tasks have a different execution identity. Their
+completed outputs require an explicitly validated one-time import before they
+can serve as checkpoints for node workers. Preserve their work directories and
+run logs during that transition.
+
+The bounded native acceptance fixture is `tests/contamination_node_fixture.py`.
+It creates a tiny nucleotide database and 24 planted queries across two synthetic
+assemblies, tests shared filesystem locks with two Slurm ranks, verifies all
+searches, then exercises recovery of one missing completion record. It does not
+require the production nucleotide database.
+
 ## Run post-FCS review in the assembly pipeline
 
 Add these options to the usual assembly command to generate review evidence

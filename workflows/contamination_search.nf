@@ -5,13 +5,14 @@ include { CONTAMINATION_VERIFY_PROTEIN; CONTAMINATION_PREPARE; CONTAMINATION_BLA
           CONTAMINATION_BLASTN as CONTAMINATION_TARGETED_BLASTN;
           CONTAMINATION_REPORT; CONTAMINATION_DIAGNOSTICS; CONTAMINATION_BLOBDIR
 } from '../modules/contamination_evidence.nf'
+include { CONTAMINATION_MEGABLAST_NODES } from './contamination_megablast_nodes.nf'
 
 // Include one empty result per assembly so all-ambiguous sequences and empty shortlists survive the join.
-def hitsByAssembly(sources, hits) {
-    sources.map { id, fasta, host -> tuple(id, []) }
-        .mix(hits.map { id, hit -> tuple(id, [hit]) })
+def hitsByAssembly(counts, hits) {
+    counts.map { id, count -> tuple(groupKey(id, count + 1), []) }
+        .mix(hits.combine(counts, by: 0).map { id, hit, count -> tuple(groupKey(id, count + 1), [hit]) })
         .groupTuple()
-        .map { id, batches -> tuple(id, batches.flatten().sort { it.name }) }
+        .map { key, batches -> tuple(key.getGroupTarget(), batches.flatten().sort { it.name }) }
 }
 
 workflow CONTAMINATION_SEARCH {
@@ -36,6 +37,12 @@ workflow CONTAMINATION_SEARCH {
     def plotter = file(base.resolve('r_scripts/plot_contamination_diagnostics.R'), checkIfExists: true)
     def mega = settings.mega
     def targeted = mega && settings.targeted
+    if (!(params.contamination_megablast_execution in ['chunks', 'nodes']))
+        error 'Set --contamination_megablast_execution to chunks or nodes'
+    ['contamination_megablast_nodes', 'contamination_megablast_slots', 'contamination_megablast_threads'].each { name ->
+        if (!(params[name]?.toString() ==~ /[1-9][0-9]*/))
+            error "Supply a positive integer for --${name}"
+    }
 
     CONTAMINATION_VERIFY_PROTEIN(file(database), manifest, taxdump, helpers)
     CONTAMINATION_PREPARE(sources.map { id, fasta, host -> tuple(id, fasta) },
@@ -45,16 +52,24 @@ workflow CONTAMINATION_SEARCH {
             tuple(id, queries.resolve(line.split('\t', 2)[0]))
         }
     }
+    def counts = CONTAMINATION_PREPARE.out.prepared.map { id, metrics, queries ->
+        tuple(id, queries.resolve('chunks.tsv').readLines().size() - 1)
+    }
     CONTAMINATION_BLASTX(chunks, database, CONTAMINATION_VERIFY_PROTEIN.out)
     def megaHits = Channel.empty()
     if (mega) {
-        CONTAMINATION_MEGABLAST(chunks, settings.nt, 'megablast')
-        megaHits = CONTAMINATION_MEGABLAST.out
+        if (params.contamination_megablast_execution == 'nodes') {
+            CONTAMINATION_MEGABLAST_NODES(CONTAMINATION_PREPARE.out.prepared, settings.nt, base)
+            megaHits = CONTAMINATION_MEGABLAST_NODES.out.results
+        } else {
+            CONTAMINATION_MEGABLAST(chunks, settings.nt, 'megablast')
+            megaHits = CONTAMINATION_MEGABLAST.out
+        }
     }
 
     def prepared = sources.join(CONTAMINATION_PREPARE.out.prepared, failOnDuplicate: true)
-    def selectionInput = prepared.join(hitsByAssembly(sources, CONTAMINATION_BLASTX.out), failOnDuplicate: true)
-        .join(hitsByAssembly(sources, megaHits), failOnDuplicate: true)
+    def selectionInput = prepared.join(hitsByAssembly(counts, CONTAMINATION_BLASTX.out), failOnDuplicate: true)
+        .join(hitsByAssembly(mega ? counts : counts.map { id, count -> tuple(id, 0) }, megaHits), failOnDuplicate: true)
         .map { id, fasta, host, metrics, queries, hits, nt -> tuple(id, fasta, queries, host, hits, nt) }
     CONTAMINATION_SELECT_NUCLEOTIDE(selectionInput, mega, settings.followup, taxdump, settings.rank, helpers)
     def nucleotide = Channel.empty()
@@ -66,8 +81,11 @@ workflow CONTAMINATION_SEARCH {
         CONTAMINATION_TARGETED_BLASTN(targets, settings.nt, 'blastn')
         nucleotide = CONTAMINATION_TARGETED_BLASTN.out
     }
+    def targetCounts = CONTAMINATION_SELECT_NUCLEOTIDE.out.selected.map { id, selected ->
+        tuple(id, targeted ? selected.toFile().listFiles().count { it.name ==~ /target_.*\.fasta/ } : 0)
+    }
     def reportInput = prepared.join(CONTAMINATION_SELECT_NUCLEOTIDE.out.selected, failOnDuplicate: true)
-        .join(hitsByAssembly(sources, nucleotide), failOnDuplicate: true)
+        .join(hitsByAssembly(targetCounts, nucleotide), failOnDuplicate: true)
         .join(coverageInput, failOnDuplicate: true, failOnMismatch: true)
         .map { id, fasta, host, metrics, queries, selected, hits, bam, bai, cov ->
             tuple(id, metrics, queries, selected, hits, bam, bai, cov, host)

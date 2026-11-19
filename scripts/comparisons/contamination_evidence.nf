@@ -25,6 +25,12 @@ params.window_bp = 100000
 params.chunk_bp = 5000000
 params.contamination_blastx_max_forks = 8
 params.contamination_blastn_max_forks = 8
+params.contamination_megablast_execution = 'chunks'
+params.contamination_megablast_nodes = 7
+params.contamination_megablast_slots = 8
+params.contamination_megablast_threads = 8
+params.contamination_megablast_scratch = '/scratch'
+params.contamination_megablast_time = '96h'
 params.outdir = 'contamination-evidence'
 
 workflow {
