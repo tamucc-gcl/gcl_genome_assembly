@@ -1,5 +1,5 @@
 include { CONTAMINATION_MEGABLAST_PLAN; CONTAMINATION_MEGABLAST_NODE;
-          CONTAMINATION_MEGABLAST_COLLECT } from '../modules/contamination_nodes.nf'
+          CONTAMINATION_MEGABLAST_COLLECT; CONTAMINATION_MEGABLAST_CHECK } from '../modules/contamination_nodes.nf'
 
 workflow CONTAMINATION_MEGABLAST_NODES {
     take:
@@ -18,6 +18,8 @@ workflow CONTAMINATION_MEGABLAST_NODES {
         CONTAMINATION_MEGABLAST_PLAN.out, helper)
     CONTAMINATION_MEGABLAST_COLLECT(prepared.map { id, metrics, queries -> id },
         CONTAMINATION_MEGABLAST_PLAN.out, helper)
+    CONTAMINATION_MEGABLAST_CHECK(CONTAMINATION_MEGABLAST_PLAN.out,
+        CONTAMINATION_MEGABLAST_NODE.out.toList(), helper)
     def hits = CONTAMINATION_MEGABLAST_COLLECT.out.flatMap { id, directory ->
         directory.toFile().listFiles().findAll { it.name.endsWith('.hits.tsv') }
             .sort { it.name }.collect { tuple(id, it.toPath()) }

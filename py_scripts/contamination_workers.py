@@ -22,6 +22,15 @@ SEARCH = ['-task', 'megablast', '-evalue', '1e-10', '-culling_limit', '10',
 SCHEMA = 'contamination-megablast-chunk-v1'
 
 
+class InsufficientScratch(RuntimeError):
+    def __init__(self, path, needed, usage):
+        self.details = dict(hostname=os.uname().nodename, scratch=str(path),
+                            required_bytes=needed, available_bytes=usage.free, total_bytes=usage.total)
+        super().__init__(f'{self.details["hostname"]}: {path} requires {needed / 1024**3:.1f} GiB '
+                         f'but has {usage.free / 1024**3:.1f} GiB available '
+                         f'of {usage.total / 1024**3:.1f} GiB total')
+
+
 def digest(path):
     with Path(path).open('rb') as handle:
         return hashlib.file_digest(handle, 'sha256').hexdigest()
@@ -140,8 +149,9 @@ def stage_database(plan, directory, stopped=None):
     if current != plan['database_identity']:
         raise ValueError('The source nucleotide database changed after search planning')
     needed = sum(row['size'] for row in plan['database_files'])
-    if shutil.disk_usage(directory.parent).free < needed + 10 * 1024 ** 3:
-        raise ValueError('Insufficient scratch space for the complete database plus 10 GiB')
+    usage = shutil.disk_usage(directory.parent)
+    if usage.free < needed + 10 * 1024 ** 3:
+        raise InsufficientScratch(directory.parent, needed + 10 * 1024 ** 3, usage)
     directory.mkdir()
     start = time.monotonic()
     for row in plan['database_files']:
@@ -192,7 +202,13 @@ def worker(args):
                 raise ValueError('The source nucleotide database changed after planning')
             prefix, staging_seconds = Path(plan['database']), 0
         else:
-            prefix, staging_seconds = stage_database(plan, local / 'database', stopped)
+            try:
+                prefix, staging_seconds = stage_database(plan, local / 'database', stopped)
+            except InsufficientScratch as error:
+                print(f'Worker {args.worker} skipped: {error}', flush=True)
+                atomic_json(args.out, dict(worker=args.worker, searched=0,
+                                           status='skipped_insufficient_scratch', **error.details))
+                return
         print(f'Worker {args.worker} ready on {os.uname().nodename}; staging {staging_seconds:.1f}s', flush=True)
 
         def slot(index):
@@ -306,6 +322,19 @@ def collect(args):
             time.sleep(args.poll_seconds)
 
 
+def check(args):
+    plan = json.loads(args.plan.read_text())
+    store = Results(plan)
+    missing = [dict(assembly=task['assembly'], name=task['name'])
+               for task in plan['tasks'] if not store.completed(task)]
+    summaries = [json.loads(path.read_text()) for path in args.summaries]
+    skipped = [row for row in summaries if row.get('status') == 'skipped_insufficient_scratch']
+    atomic_json(args.out, dict(chunks=len(plan['tasks']), missing=missing, skipped_workers=skipped))
+    if missing:
+        raise RuntimeError(f'{len(missing)} chunks remain after all node workers exited. '
+                           f'{len(skipped)} workers lacked scratch space. See {args.out}.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -326,6 +355,10 @@ def main():
     c.add_argument('--out', type=Path, required=True)
     c.add_argument('--poll-seconds', type=float, default=10)
     c.add_argument('--timeout', type=float, default=4 * 86400)
+    v = commands.add_parser('check')
+    v.add_argument('--plan', type=Path, required=True)
+    v.add_argument('--summaries', type=Path, nargs='+', required=True)
+    v.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'plan' and args.threads < 1:
         parser.error('Threads must be positive')
@@ -333,7 +366,7 @@ def main():
         parser.error('Slots and worker identity must be positive')
     if args.command == 'collect' and (args.poll_seconds <= 0 or args.timeout <= 0):
         parser.error('Collector polling interval and timeout must be positive')
-    dict(plan=prepare, worker=worker, collect=collect)[args.command](args)
+    dict(plan=prepare, worker=worker, collect=collect, check=check)[args.command](args)
 
 
 if __name__ == '__main__':

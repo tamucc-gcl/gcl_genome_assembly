@@ -161,7 +161,7 @@ pathlib.Path(sys.argv[sys.argv.index('-out')+1]).write_text(query+'\\tmatch\\n')
 
     def test_verified_database_copy(self):
         plan = self.make_plan()
-        with patch.object(worker.shutil, 'disk_usage', return_value=SimpleNamespace(free=10**15)):
+        with patch.object(worker.shutil, 'disk_usage', return_value=SimpleNamespace(free=10**15, total=10**15)):
             local, seconds = worker.stage_database(plan, self.root / 'scratch-db')
         self.assertEqual(worker.digest(Path(str(local) + '.nal')),
                          worker.digest(Path(str(self.database) + '.nal')))
@@ -172,6 +172,24 @@ pathlib.Path(sys.argv[sys.argv.index('-out')+1]).write_text(query+'\\tmatch\\n')
         (self.database.parent / 'nt.000.ndb').write_text('changed after plan')
         self.assertNotEqual(self.start().wait(timeout=15), 0)
         self.assertEqual(self.calls(), [])
+
+    def test_space_limited_worker_releases_work_for_capable_worker(self):
+        output = self.root / 'space-limited.json'
+        args = SimpleNamespace(plan=self.plan, worker=1, slots=1, scratch_root=self.root,
+                               shared_database=False, out=output)
+        with patch.object(worker.shutil, 'disk_usage', return_value=SimpleNamespace(free=1, total=100)):
+            worker.worker(args)
+        skipped = json.loads(output.read_text())
+        self.assertEqual(skipped['status'], 'skipped_insufficient_scratch')
+        self.assertEqual(skipped['available_bytes'], 1)
+        self.assertEqual(self.calls(), [])
+        check_args = SimpleNamespace(plan=self.plan, summaries=[output], out=self.root / 'check.json')
+        with self.assertRaisesRegex(RuntimeError, '2 chunks remain'):
+            worker.check(check_args)
+        self.assertEqual(self.start().wait(timeout=15), 0)
+        worker.check(check_args)
+        self.assertEqual(json.loads(check_args.out.read_text())['missing'], [])
+        self.assertCountEqual(self.calls(), ['A', 'B'])
 
 
 if __name__ == '__main__':

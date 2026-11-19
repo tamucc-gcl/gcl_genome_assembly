@@ -405,6 +405,14 @@ Preparation produces a cohort queue that interleaves assemblies. Each worker
 copies and checksum-verifies the complete nucleotide database once, checks
 scratch capacity, and dynamically assigns chunks to its available search slots.
 The private scratch directory is removed when the worker exits normally.
+Workers with insufficient free scratch record the hostname, available capacity
+and required space, then release their allocations. Other workers continue
+processing the shared queue. A final completion check fails with a missing-chunk
+summary if the workers finish without completing the queue. Exclusive allocation
+does not remove old scratch files; retained copies from completed benchmarks
+can reduce the free space available to a new worker.
+The final worker-capacity and chunk-completion summary is published as
+`pipeline/contamination_megablast_completion.json`.
 
 Completed chunks are retained under `work/contamination_megablast/` when using
 the default work directory. A completion record binds each output to the exact

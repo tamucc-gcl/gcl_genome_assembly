@@ -78,3 +78,28 @@ process CONTAMINATION_MEGABLAST_COLLECT {
         --timeout ${timeout} --out hits
     """
 }
+
+process CONTAMINATION_MEGABLAST_CHECK {
+    conda 'conda-forge::python=3.11'
+    cpus 1
+    memory '1 GB'
+    time '1h'
+    errorStrategy 'terminate'
+    publishDir "${params.outdir}/pipeline", mode: 'copy', pattern: 'chunk_completion.json',
+        saveAs: { 'contamination_megablast_completion.json' }
+
+    input:
+    path plan
+    path summaries, stageAs: 'workers/worker??/*'
+    path helper
+
+    output:
+    path 'chunk_completion.json'
+
+    script:
+    def files = summaries instanceof List ? summaries.collect { nodeQuote(it) }.join(' ') : nodeQuote(summaries)
+    """
+    python3 contamination_workers.py check --plan ${nodeQuote(plan)} \
+        --summaries ${files} --out chunk_completion.json
+    """
+}
