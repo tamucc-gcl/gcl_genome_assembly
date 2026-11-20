@@ -479,6 +479,11 @@ Local foundation checks:
 
 ```bash
 python3 -m unittest discover -s tests -p test_contamination_review.py -v
+nextflow run tests/contamination_grouping.nf
 ```
 
 These use small, known DNA sequences; no species-specific rules or CTlk coordinates.
+The Nextflow grouping fixture uses 2,088 synthetic hit paths across ten haplotypes
+and an empty assembly. It checks mixed interpolated/plain-string assembly IDs,
+both evidence sources, coverage joins, and unchanged task hashes after ID
+normalization. No database downloads or alignment tools are required.

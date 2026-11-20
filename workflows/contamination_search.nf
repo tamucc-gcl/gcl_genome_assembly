@@ -7,10 +7,17 @@ include { CONTAMINATION_VERIFY_PROTEIN; CONTAMINATION_PREPARE; CONTAMINATION_BLA
 } from '../modules/contamination_evidence.nf'
 include { CONTAMINATION_MEGABLAST_NODES } from './contamination_megablast_nodes.nf'
 
+// GString metadata and plain String IDs from JSON/cache must use identical join keys.
+def assemblyKeys(channel) {
+    channel.map { row -> [row[0].toString()] + row.drop(1) }
+}
+
 // Include one empty result per assembly so all-ambiguous sequences and empty shortlists survive the join.
 def hitsByAssembly(counts, hits) {
-    counts.map { id, count -> tuple(groupKey(id, count + 1), []) }
-        .mix(hits.combine(counts, by: 0).map { id, hit, count -> tuple(groupKey(id, count + 1), [hit]) })
+    def keyedCounts = assemblyKeys(counts)
+    keyedCounts.map { id, count -> tuple(groupKey(id, count + 1), []) }
+        .mix(assemblyKeys(hits).combine(keyedCounts, by: 0)
+            .map { id, hit, count -> tuple(groupKey(id, count + 1), [hit]) })
         .groupTuple()
         .map { key, batches -> tuple(key.getGroupTarget(), batches.flatten().sort { it.name }) }
 }
@@ -25,8 +32,8 @@ workflow CONTAMINATION_SEARCH {
     nt_manifest    // value, optional managed database manifest
 
     main:
-    def sources = assemblies
-    def coverageInput = coverage
+    def sources = assemblyKeys(assemblies)
+    def coverageInput = assemblyKeys(coverage)
     def bundle = file(settings.protein, checkIfExists: true).toAbsolutePath()
     def database = file(bundle.resolve('reference_proteomes.dmnd'), checkIfExists: true).toString()
     def manifest = file(bundle.resolve('protein_database.json'), checkIfExists: true)
@@ -47,19 +54,20 @@ workflow CONTAMINATION_SEARCH {
     CONTAMINATION_VERIFY_PROTEIN(file(database), manifest, taxdump, helpers)
     CONTAMINATION_PREPARE(sources.map { id, fasta, host -> tuple(id, fasta) },
         settings.stage, settings.window, settings.chunk, helpers[0])
-    def chunks = CONTAMINATION_PREPARE.out.prepared.flatMap { id, metrics, queries ->
+    def preparedOutputs = assemblyKeys(CONTAMINATION_PREPARE.out.prepared)
+    def chunks = preparedOutputs.flatMap { id, metrics, queries ->
         queries.resolve('chunks.tsv').readLines().drop(1).collect { line ->
             tuple(id, queries.resolve(line.split('\t', 2)[0]))
         }
     }
-    def counts = CONTAMINATION_PREPARE.out.prepared.map { id, metrics, queries ->
+    def counts = preparedOutputs.map { id, metrics, queries ->
         tuple(id, queries.resolve('chunks.tsv').readLines().size() - 1)
     }
     CONTAMINATION_BLASTX(chunks, database, CONTAMINATION_VERIFY_PROTEIN.out)
     def megaHits = Channel.empty()
     if (mega) {
         if (params.contamination_megablast_execution == 'nodes') {
-            CONTAMINATION_MEGABLAST_NODES(CONTAMINATION_PREPARE.out.prepared, settings.nt, base)
+            CONTAMINATION_MEGABLAST_NODES(preparedOutputs, settings.nt, base)
             megaHits = CONTAMINATION_MEGABLAST_NODES.out.results
         } else {
             CONTAMINATION_MEGABLAST(chunks, settings.nt, 'megablast')
@@ -67,24 +75,25 @@ workflow CONTAMINATION_SEARCH {
         }
     }
 
-    def prepared = sources.join(CONTAMINATION_PREPARE.out.prepared, failOnDuplicate: true)
+    def prepared = sources.join(preparedOutputs, failOnDuplicate: true, failOnMismatch: true)
     def selectionInput = prepared.join(hitsByAssembly(counts, CONTAMINATION_BLASTX.out), failOnDuplicate: true)
         .join(hitsByAssembly(mega ? counts : counts.map { id, count -> tuple(id, 0) }, megaHits), failOnDuplicate: true)
         .map { id, fasta, host, metrics, queries, hits, nt -> tuple(id, fasta, queries, host, hits, nt) }
     CONTAMINATION_SELECT_NUCLEOTIDE(selectionInput, mega, settings.followup, taxdump, settings.rank, helpers)
+    def selectedOutputs = assemblyKeys(CONTAMINATION_SELECT_NUCLEOTIDE.out.selected)
     def nucleotide = Channel.empty()
     if (targeted) {
-        def targets = CONTAMINATION_SELECT_NUCLEOTIDE.out.selected.flatMap { id, selected ->
+        def targets = selectedOutputs.flatMap { id, selected ->
             selected.toFile().listFiles().findAll { it.name ==~ /target_.*\.fasta/ }
                 .sort { it.name }.collect { tuple(id, it.toPath()) }
         }
         CONTAMINATION_TARGETED_BLASTN(targets, settings.nt, 'blastn')
         nucleotide = CONTAMINATION_TARGETED_BLASTN.out
     }
-    def targetCounts = CONTAMINATION_SELECT_NUCLEOTIDE.out.selected.map { id, selected ->
+    def targetCounts = selectedOutputs.map { id, selected ->
         tuple(id, targeted ? selected.toFile().listFiles().count { it.name ==~ /target_.*\.fasta/ } : 0)
     }
-    def reportInput = prepared.join(CONTAMINATION_SELECT_NUCLEOTIDE.out.selected, failOnDuplicate: true)
+    def reportInput = prepared.join(selectedOutputs, failOnDuplicate: true)
         .join(hitsByAssembly(targetCounts, nucleotide), failOnDuplicate: true)
         .join(coverageInput, failOnDuplicate: true, failOnMismatch: true)
         .map { id, fasta, host, metrics, queries, selected, hits, bam, bai, cov ->
@@ -92,12 +101,13 @@ workflow CONTAMINATION_SEARCH {
         }
     CONTAMINATION_REPORT(reportInput, settings.nt, targeted, nt_manifest,
         taxdump, settings.rank, manifest, helpers, settings.nested, reader)
-    CONTAMINATION_DIAGNOSTICS(CONTAMINATION_REPORT.out, plotter, settings.nested)
-    def blobInput = sources.join(CONTAMINATION_REPORT.out, failOnDuplicate: true)
+    def reports = assemblyKeys(CONTAMINATION_REPORT.out)
+    CONTAMINATION_DIAGNOSTICS(reports, plotter, settings.nested)
+    def blobInput = sources.join(reports, failOnDuplicate: true)
         .join(coverageInput, failOnDuplicate: true, failOnMismatch: true)
         .map { id, fasta, host, review, bam, bai, cov -> tuple(id, fasta, review, !!(bam || cov), host) }
     CONTAMINATION_BLOBDIR(blobInput, taxdump, helpers, settings.nested)
 
     emit:
-    review = CONTAMINATION_REPORT.out
+    review = reports
 }
