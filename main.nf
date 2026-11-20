@@ -209,9 +209,17 @@ workflow {
     def reviewContamination = params.run_contamination_evidence || params.contamination_review
     if (reviewContamination && !params.run_decon_contigs)
         error 'Post-FCS contamination review requires --run_decon_contigs true'
-    if (params.run_contamination_evidence && !params.contamination_protein_db_dir)
-        error 'Supply --contamination_protein_db_dir when enabling contamination evidence'
     if (params.run_contamination_evidence) {
+        def managedProtein = params.contamination_protein_db_root || params.contamination_protein_release ||
+            params.contamination_protein_source || params.contamination_protein_sha256
+        if (managedProtein && (params.contamination_protein_db_dir || !params.contamination_protein_db_root ||
+            !(params.contamination_protein_release?.toString() ==~ /[A-Za-z0-9][A-Za-z0-9_.-]*/) ||
+            !(params.contamination_protein_format in ['fasta', 'tar']) ||
+            (!!params.contamination_protein_source != !!params.contamination_protein_sha256) ||
+            (params.contamination_protein_sha256 && !(params.contamination_protein_sha256.toString() ==~ /[a-fA-F0-9]{64}/))))
+            error 'Supply a protein DB directory OR a managed protein root/release; custom sources also require SHA256 and fasta/tar format'
+        if (!managedProtein && !params.contamination_protein_db_dir)
+            error 'Supply --contamination_protein_db_dir or --contamination_protein_db_root and --contamination_protein_release'
         if ((params.contamination_nt_db_root || params.contamination_nt_release) &&
             (params.contamination_nucleotide_db || !params.contamination_nt_db_root ||
              !(params.contamination_nt_release?.toString() ==~ /\d{4}-\d{2}-\d{2}/)))

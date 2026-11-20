@@ -72,7 +72,8 @@ def prepare(source, source_format, nodes, merged, fasta, mapping, probe):
                 aliases[int(old)] = int(new)
     count, residues, reassigned = 0, 0, 0
     probe_taxid = None
-    with gzip.open(fasta, "wt", encoding="utf-8") as fa, gzip.open(mapping, "wt", encoding="ascii") as tax:
+    with gzip.open(fasta, "wt", encoding="utf-8", compresslevel=1) as fa, \
+            gzip.open(mapping, "wt", encoding="ascii", compresslevel=1) as tax:
         tax.write("accession\taccession.version\ttaxid\tgi\n")
         for label, header, sequence in protein_records(source, source_format):
             match = TAXID.search(header)
@@ -100,6 +101,7 @@ def prepare(source, source_format, nodes, merged, fasta, mapping, probe):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, help="Local file or HTTPS URL")
+    parser.add_argument("--source-origin", help="Original URL/path when building from a retained download")
     parser.add_argument("--source-sha256", required=True)
     parser.add_argument("--format", choices=["fasta", "tar"], required=True)
     parser.add_argument("--release", required=True)
@@ -140,7 +142,8 @@ def main():
         if before != {path.name: digest(path) for path in taxonomy}:
             raise ValueError("Taxonomy files changed during database build")
         version = subprocess.check_output(["diamond", "version"], text=True).strip()
-        manifest = dict(collection="uniprot_reference_proteomes", release=args.release, source=args.source,
+        manifest = dict(collection="uniprot_reference_proteomes", release=args.release,
+                        source=args.source_origin or args.source,
                         source_format=args.format, source_sha256=source_sha, taxonomy_sha256=before,
                         diamond_version=version, protein_records=count, amino_acids=residues,
                         merged_taxid_records=reassigned, probe_taxid=taxid, database_sha256=digest(db))

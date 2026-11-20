@@ -34,9 +34,14 @@ workflow CONTAMINATION_SEARCH {
     main:
     def sources = assemblyKeys(assemblies)
     def coverageInput = assemblyKeys(coverage)
-    def bundle = file(settings.protein, checkIfExists: true).toAbsolutePath()
-    def database = file(bundle.resolve('reference_proteomes.dmnd'), checkIfExists: true).toString()
-    def manifest = file(bundle.resolve('protein_database.json'), checkIfExists: true)
+    def bundles = (settings.protein instanceof CharSequence || settings.protein instanceof java.nio.file.Path) ?
+        Channel.value(settings.protein) : settings.protein
+    def database = bundles.map { directory ->
+        file(file(directory).resolve('reference_proteomes.dmnd'), checkIfExists: true).toAbsolutePath().toString()
+    }
+    def manifest = bundles.map { directory ->
+        file(file(directory).resolve('protein_database.json'), checkIfExists: true).toAbsolutePath()
+    }
     def helpers = ['contamination_review.py', 'contamination_evidence.py'].collect {
         file(base.resolve("py_scripts/${it}"), checkIfExists: true)
     }
@@ -51,7 +56,7 @@ workflow CONTAMINATION_SEARCH {
             error "Supply a positive integer for --${name}"
     }
 
-    CONTAMINATION_VERIFY_PROTEIN(file(database), manifest, taxdump, helpers)
+    CONTAMINATION_VERIFY_PROTEIN(database, manifest, taxdump, helpers)
     CONTAMINATION_PREPARE(sources.map { id, fasta, host -> tuple(id, fasta) },
         settings.stage, settings.window, settings.chunk, helpers[0])
     def preparedOutputs = assemblyKeys(CONTAMINATION_PREPARE.out.prepared)

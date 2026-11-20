@@ -219,7 +219,9 @@ timeline.enabled = false
     phases = [('baseline', 'baseline'), ('repeat', 'baseline'), ('changed', 'changed'),
               ('noop', 'noop'), ('disabled', 'noop')]
     if not args.skip_negative:
-        phases += [(name, 'baseline') for name in ('wrong_checksum', 'wrong_stage', 'unknown_assembly', 'overlap')]
+        # Invalid sheets select only the bad assembly. Other inputs must remain unchanged,
+        # regardless of which task reaches completion before the intended rejection.
+        phases += [(name, 'noop') for name in ('wrong_checksum', 'wrong_stage', 'unknown_assembly', 'overlap')]
     for label, scenario in phases:
         phase = out / label
         phase.mkdir()

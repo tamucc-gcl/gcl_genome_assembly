@@ -151,6 +151,110 @@ isoform members. Budget temporary space for the archive, combined search inputs
 and built index. When taxonomy is intentionally refreshed, use a new storage
 release label to preserve the previous database and its recorded snapshot.
 
+## Managed protein databases in the main workflow
+
+Choose either an existing `--contamination_protein_db_dir` bundle or managed
+download/build controls:
+
+```bash
+--contamination_protein_db_root /absolute/database/root \
+--contamination_protein_release 2026_04
+```
+
+The managed path uses the official UniProt reference-proteome archive. The release
+must match the publisher's HTTPS `RELEASE.metalink`, which pins the archive name,
+compressed size and MD5. The completed download is checked against those pins,
+also hashed with SHA256, and retained separately from the index build. Later
+build attempts reuse this verified download. The build checks its SHA256 again,
+streams canonical proteins, constructs taxonomy mappings and performs a real
+self-search to check taxid lookup. A matching existing bundle is resolved offline;
+the evidence workflow still checks index and taxonomy checksums before searches.
+No annotation pipeline is required.
+
+The user-selected root contains:
+
+```text
+downloads/uniprot_reference_proteomes/<release>/source/archive
+downloads/uniprot_reference_proteomes/<release>/source/source.json
+diamond/uniprot_reference_proteomes/<release>/reference_proteomes.dmnd
+diamond/uniprot_reference_proteomes/<release>/protein_database.json
+```
+
+The last two files form the reusable bundle. Compatible bundles from another
+pipeline can be supplied directly; a bare DIAMOND file without the taxonomy and
+provenance manifest does not meet this contract. A changed source/checksum under
+the same release label is rejected. Use a new label for a new source. Reuse does
+not refresh shared taxonomy files; an outdated/incompatible taxonomy must be
+updated deliberately rather than dropping unmapped protein records.
+
+Managed protein builds default to a separate reusable taxonomy snapshot at
+`<root>/ncbi_taxonomy/<release>`, including `nodes.dmp`, `names.dmp` and
+`merged.dmp`. This does not refresh the assembly/FCS taxonomy snapshot. Set
+`--contamination_protein_taxonomy_dir` to reuse a compatible shared snapshot.
+When reusing an index through `--contamination_protein_db_dir`, the same option
+can select its matching taxonomy. All three files control taxonomy `storeDir`
+reuse; the protein manifest records their checksums.
+
+Custom local or HTTPS sources also require `--contamination_protein_source`,
+`--contamination_protein_sha256` and `--contamination_protein_format fasta|tar`.
+This supports archived releases and bounded test FASTAs. Temporary prepared FASTA
+and taxon maps use fast gzip compression; the sequences and search settings are
+unchanged. A tiny real build confirmed the identical DIAMOND database checksum
+before and after this compression-only change.
+
+### Build before benchmarking the full collection
+
+This helper calls the same managed setup workflow as `main.nf`, without starting
+the cohort searches:
+
+```bash
+pipeline="$PWD/gcl_genome_assembly"
+run="$PWD/comparisons/contamination-full-protein-01"
+nextflow -c "$pipeline/nextflow.config" run \
+  "$pipeline/scripts/comparisons/contamination_managed_protein_db.nf" -profile slurm \
+  -w "$run/work" --outdir "$run/build" \
+  --contamination_protein_db_root "$run/db" --contamination_protein_release 2026_04
+```
+
+The 2026_04 catalog inspected on 20 November 2026 lists 355,492,909,566 compressed
+bytes. This is a one-time download; also budget space for the prepared protein
+FASTA/taxon map and final index. The final index size and full-database search
+runtime must be measured; the small eight-species pilot does not establish them.
+
+### Protein storage/throughput benchmark
+
+The standalone benchmark selects twelve retained 5 Mb chunks across assemblies
+and positions from a production trace. It runs the accepted DIAMOND 2.1.14
+settings twice on one exclusive node: shared database and copied scratch database.
+Both use scratch for temporary files, eight concurrent searches and eight threads
+per search. Sensitivity, frameshift handling, range culling, output fields and
+reporting thresholds remain unchanged. Normalized hit files must match exactly.
+
+```bash
+nextflow -c "$pipeline/nextflow.config" run \
+  "$pipeline/scripts/comparisons/contamination_protein_benchmark.nf" -profile slurm \
+  -w "$run/benchmark-work" --outdir "$run/benchmark" \
+  --benchmark_project "$PWD" \
+  --benchmark_trace "$PWD/comparisons/contamination-pipeline-01/results/pipeline/pipeline_trace.txt" \
+  --benchmark_protein_db_dir "$run/db/diamond/uniprot_reference_proteomes/2026_04" \
+  --benchmark_node crest-c018
+```
+
+Use a node with enough scratch for the index plus 100 GiB per simultaneous search;
+`--benchmark_node` is optional. The temporary copy is removed on normal completion
+or a handled failure. The benchmark records commands, individual runtimes and
+peak memory, index staging time, and rough cohort extrapolations by chunk count
+and query span at the tested concurrency. It compares warm/cache-influenced runs,
+so it cannot establish cold-cache storage performance or scaling across nodes.
+Read `<outdir>/benchmark/benchmark.json` and `<outdir>/queries/selection.json`.
+
+The previous panel had 2,088 chunks, 39.9 seconds median, and 36.58 aggregate task
+hours (4.57 ideal hours at eight-way concurrency). Full-database forecasts should
+use the new measurements. In particular, DIAMOND block size affects results, and
+iterative sensitivity is intended for best-hit searches; neither is silently
+changed for this multi-hit contamination screen. See the
+[DIAMOND performance options](https://github.com/bbuchfink/diamond/wiki/3.-Command-line-options#memory--performance-options).
+
 ## Run the known-answer search pilot on Crest
 
 From the assembly project root, prepare a fixture and a fresh protein database.

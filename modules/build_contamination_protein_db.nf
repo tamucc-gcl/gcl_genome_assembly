@@ -23,8 +23,11 @@ process BUILD_CONTAMINATION_PROTEIN_DB {
 
     script:
     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+    def location = source instanceof Map ? source.location : source
+    def origin = source instanceof Map ? source.origin : source
     """
-    python3 ${quote(builder)} --source ${quote(source)} --source-sha256 ${quote(source_sha256)} \
+    python3 ${quote(builder)} --source ${quote(location)} --source-origin ${quote(origin)} \
+      --source-sha256 ${quote(source_sha256)} \
       --format ${quote(source_format)} --release ${quote(release)} --taxonomy ${quote(taxonomy_dir)} \
       --threads ${task.cpus}
     """
