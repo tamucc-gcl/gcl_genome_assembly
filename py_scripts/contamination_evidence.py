@@ -34,6 +34,28 @@ def table(path):
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
+def protein_identity(path):
+    identity = json.loads(path.read_text())
+    resolution = identity.get('taxonomy_resolution')
+    if resolution:
+        if resolution['audit_file'] != 'taxonomy_resolution.tsv.gz':
+            raise ValueError('Unexpected protein taxonomy audit filename')
+        audit = path.resolve().parent / resolution['audit_file']
+        if digest(audit) != resolution['audit_sha256']:
+            raise ValueError('Protein taxonomy audit does not match its manifest')
+    return identity
+
+
+def protein_taxonomy_note(identity):
+    resolution = identity.get('taxonomy_resolution')
+    if not resolution:
+        return []
+    return [f"Protein reference taxonomy: {resolution['mapped_protein_records']:,} proteins mapped; "
+            f"**{resolution['unresolved_protein_records']:,} proteins retained with unresolved taxonomy**. "
+            "Unresolved hits remain searchable and are recorded as unresolved evidence. "
+            "[Database taxonomy-resolution audit (gzipped TSV)](protein_taxonomy_resolution.tsv.gz).", ""]
+
+
 def taxonomy(taxdump, rank, host, ids):
     with (taxdump / "nodes.dmp").open() as handle:
         nodes = {}
@@ -762,8 +784,15 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
                     nucleotide_status=("searched" if targets else "no-targets") if args.targeted else "not-run",
                     coverage=previous["coverage"] if previous else
                     (args.coverage_source if args.coverage else "unavailable"),
-                    protein_database=previous["protein_database"] if previous else json.loads(args.database.read_text()),
+                    protein_database=previous["protein_database"] if previous else protein_identity(args.database),
                     nucleotide_database=args.nucleotide_db or None)
+    resolution = metadata['protein_database'].get('taxonomy_resolution')
+    if resolution:
+        audit = (args.selected / 'protein_taxonomy_resolution.tsv.gz' if previous else
+                 args.database.resolve().parent / resolution['audit_file'])
+        if digest(audit) != resolution['audit_sha256']:
+            raise ValueError('Protein taxonomy audit checksum mismatch')
+        shutil.copyfile(audit, args.out / 'protein_taxonomy_resolution.tsv.gz')
     (args.out / "evidence.json").write_text(json.dumps(metadata, indent=2) + "\n")
     lines = [
         f"# Contamination evidence — {source['assembly']}", "",
@@ -773,6 +802,7 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
         f"({len(targets):,} planned regions, {target_bp:,} of {source['source_bp']:,} bp "
         f"or {100 * target_bp / source['source_bp']:.3f}%). "
         f"Read coverage: {metadata['coverage']}.", "",
+        *protein_taxonomy_note(metadata['protein_database']),
         *(["[Managed nucleotide database provenance](nucleotide_database.json).", ""]
           if args.nucleotide_manifest else []),
         *([f"**Bases covered by reads: {covered_bp:,} of {source['source_bp']:,} bp "
@@ -922,7 +952,7 @@ def main():
             sub.add_argument("--nucleotide-manifest", type=Path)
     args = parser.parse_args()
     if args.command == "verify-database":
-        identity = json.loads(args.database.read_text())
+        identity = protein_identity(args.database)
         if digest(args.db) != identity["database_sha256"]:
             raise ValueError("DIAMOND index does not match its database manifest")
         for name, checksum in identity["taxonomy_sha256"].items():

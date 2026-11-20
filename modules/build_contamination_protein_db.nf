@@ -20,6 +20,7 @@ process BUILD_CONTAMINATION_PROTEIN_DB {
 
     output:
     tuple path('reference_proteomes.dmnd'), path('protein_database.json'), emit: database
+    path 'taxonomy_resolution.tsv.gz', emit: taxonomy_audit, optional: true
 
     script:
     def quote = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }

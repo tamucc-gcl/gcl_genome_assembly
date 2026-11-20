@@ -2,6 +2,7 @@
 """Build a taxonomy-aware DIAMOND database from canonical UniProt proteomes."""
 
 import argparse
+import csv
 from contextlib import contextmanager
 import gzip
 import hashlib
@@ -61,7 +62,17 @@ def protein_records(source, source_format):
                         yield from records(handle, member.name)
 
 
-def prepare(source, source_format, nodes, merged, fasta, mapping, probe):
+def resolved_taxid(taxid, known, aliases):
+    seen = set()
+    while taxid in aliases:
+        if taxid in seen:
+            raise ValueError('Cycle in merged taxonomy IDs')
+        seen.add(taxid)
+        taxid = aliases[taxid]
+    return taxid if taxid in known and taxid > 1 else 0
+
+
+def prepare(source, source_format, nodes, merged, fasta, mapping, probe, audit=None, summary=None):
     with nodes.open() as handle:
         known = {int(line.split("|", 1)[0]) for line in handle if line.strip()}
     aliases = {}
@@ -70,7 +81,8 @@ def prepare(source, source_format, nodes, merged, fasta, mapping, probe):
             for line in handle:
                 old, new, *_ = line.split("|")
                 aliases[int(old)] = int(new)
-    count, residues, reassigned = 0, 0, 0
+    count, residues, reassigned, unresolved = 0, 0, 0, 0
+    resolutions = {}
     probe_taxid = None
     with gzip.open(fasta, "wt", encoding="utf-8", compresslevel=1) as fa, \
             gzip.open(mapping, "wt", encoding="ascii", compresslevel=1) as tax:
@@ -80,21 +92,44 @@ def prepare(source, source_format, nodes, merged, fasta, mapping, probe):
             if match is None or not sequence:
                 raise ValueError(f"{label}: missing UniProt OX taxid or sequence for {header!r}")
             old = int(match[1])
-            taxid = aliases.get(old, old)
-            if taxid not in known or taxid <= 1:
-                raise ValueError(f"{label}: taxid {old} absent from the supplied taxonomy or merged IDs")
+            if old <= 1:
+                raise ValueError(f'{label}: invalid source taxid {old}')
+            taxid = resolved_taxid(old, known, aliases)
             count += 1
             residues += len(sequence)
-            reassigned += taxid != old
+            reassigned += taxid > 1 and taxid != old
+            unresolved += taxid == 0
             # Give each archive entry its own ID even if two proteomes share an accession.
             subject = f"UPR{count}"
             fa.write(f">{subject} {header}\n{sequence}\n")
             tax.write(f"{subject}\t{subject}\t{taxid}\t0\n")
-            if probe_taxid is None and len(sequence) >= 80:
+            if taxid != old:
+                status = 'merged' if taxid else ('unresolved_merge_target' if old in aliases else 'unresolved_missing_taxid')
+                row = resolutions.setdefault((old, taxid), dict(source_taxid=old, mapped_taxid=taxid,
+                    status=status, protein_records=0, amino_acids=0, first_subject=subject,
+                    first_member=label, first_header=header))
+                row['protein_records'] += 1
+                row['amino_acids'] += len(sequence)
+            if probe_taxid is None and taxid > 1 and len(sequence) >= 80:
                 probe_taxid = taxid
                 probe.write_text(f">{subject}\n{sequence}\n", encoding="ascii")
+            if count % 1000000 == 0:
+                print(f'Prepared {count:,} proteins; {unresolved:,} retained with unresolved taxonomy', flush=True)
     if not count or probe_taxid is None:
-        raise ValueError("Need canonical protein entries including one of at least 80 aa for the taxonomy probe")
+        raise ValueError("Need a canonical protein of at least 80 aa with a known taxid for the taxonomy probe")
+    if audit is not None:
+        fields = ['source_taxid', 'mapped_taxid', 'status', 'protein_records', 'amino_acids',
+                  'first_subject', 'first_member', 'first_header']
+        with gzip.open(audit, 'wt', encoding='utf-8', compresslevel=1, newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, delimiter='\t', lineterminator='\n')
+            writer.writeheader()
+            writer.writerows(resolutions[key] for key in sorted(resolutions))
+    if summary is not None:
+        summary.update(policy='retain-unresolved', mapped_protein_records=count-unresolved,
+                       unresolved_protein_records=unresolved,
+                       unresolved_source_taxids=sum(taxid == 0 for old, taxid in resolutions))
+    print(f'Prepared {count:,} proteins: {count-unresolved:,} mapped, {unresolved:,} unresolved, '
+          f'{reassigned:,} mapped through merged IDs', flush=True)
     return count, residues, reassigned, probe_taxid
 
 
@@ -122,14 +157,20 @@ def main():
                             "--output", str(source), args.source], check=True)
         else:
             source = Path(args.source)
+        print('Verifying protein source SHA256', flush=True)
         source_sha = digest(source)
         if source_sha != args.source_sha256.lower():
             raise ValueError(f"Source SHA256 mismatch: observed {source_sha}")
 
         fasta, mapping, probe = (work / name for name in ("proteins.faa.gz", "taxonmap.tsv.gz", "probe.faa"))
+        audit = work / 'taxonomy_resolution.tsv.gz'
+        resolution = {}
+        print('Preparing canonical proteins and taxonomy mappings', flush=True)
         count, residues, reassigned, taxid = prepare(
-            source, args.format, nodes, merged if merged.is_file() else None, fasta, mapping, probe)
+            source, args.format, nodes, merged if merged.is_file() else None, fasta, mapping, probe,
+            audit=audit, summary=resolution)
         db = work / "reference_proteomes.dmnd"
+        print('Building DIAMOND index', flush=True)
         subprocess.run(["diamond", "makedb", "--in", str(fasta), "--db", str(db),
                         "--no-parse-seqids", "--taxonmap", str(mapping), "--taxonnodes", str(nodes),
                         "--taxonnames", str(names), "--threads", str(args.threads)], check=True)
@@ -147,7 +188,10 @@ def main():
                         source_format=args.format, source_sha256=source_sha, taxonomy_sha256=before,
                         diamond_version=version, protein_records=count, amino_acids=residues,
                         merged_taxid_records=reassigned, probe_taxid=taxid, database_sha256=digest(db))
+        manifest['taxonomy_resolution'] = dict(resolution, audit_file='taxonomy_resolution.tsv.gz',
+                                                audit_sha256=digest(audit))
         db.rename("reference_proteomes.dmnd")
+        audit.rename('taxonomy_resolution.tsv.gz')
         Path("protein_database.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 

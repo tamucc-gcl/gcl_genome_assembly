@@ -1,4 +1,5 @@
 import hashlib
+import csv
 import gzip
 import io
 import json
@@ -11,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_scripts'))
 from contamination_protein_source import BASE, catalog_request, fetch, resolve, validate_download
-from build_contamination_protein_db import prepare
+from build_contamination_protein_db import prepare, resolved_taxid
 
 
 def catalog(release='2026_04', digest='1' * 32):
@@ -121,6 +122,35 @@ class ProteinSourceTests(unittest.TestCase):
             self.assertEqual(handle.read(), f'>UPR1 canonical OX=10\n{sequence}\n')
         with gzip.open(mapping, 'rt') as handle:
             self.assertEqual(handle.read(), 'accession\taccession.version\ttaxid\tgi\nUPR1\tUPR1\t20\t0\n')
+
+    def test_missing_taxids_are_retained_audited_and_not_used_for_the_probe(self):
+        sequence = 'ACDEFGHIKLMNPQRSTVWY' * 5
+        source = self.root / 'source.faa'
+        source.write_text(f'>unknown1 OX=1554481\n{sequence}\n>unknown2 OX=1554481\n{sequence}\n'
+                          f'>known OX=20\n{sequence}\n')
+        nodes = self.root / 'nodes.dmp'
+        nodes.write_text('1\t|\t1\t|\tno rank\t|\n20\t|\t1\t|\tspecies\t|\n')
+        fasta, mapping, probe, audit = [self.root / name for name in ('out.gz', 'map.gz', 'probe.fa', 'audit.gz')]
+        summary = {}
+        result = prepare(source, 'fasta', nodes, None, fasta, mapping, probe, audit, summary)
+        self.assertEqual(result, (3, 300, 0, 20))
+        self.assertTrue(probe.read_text().startswith('>UPR3\n'))
+        self.assertEqual(summary['unresolved_protein_records'], 2)
+        self.assertEqual(summary['unresolved_source_taxids'], 1)
+        with gzip.open(fasta, 'rt') as handle:
+            self.assertEqual(handle.read().count('>'), 3)
+        with gzip.open(mapping, 'rt') as handle:
+            self.assertIn('UPR1\tUPR1\t0\t0\n', handle.read())
+        with gzip.open(audit, 'rt') as handle:
+            rows = list(csv.DictReader(handle, delimiter='\t'))
+        self.assertEqual([(r['source_taxid'], r['mapped_taxid'], r['protein_records']) for r in rows],
+                         [('1554481', '0', '2')])
+
+    def test_merged_chains_resolve_but_cycles_are_errors(self):
+        self.assertEqual(resolved_taxid(10, {1, 20}, {10: 11, 11: 20}), 20)
+        self.assertEqual(resolved_taxid(10, {1, 20}, {10: 11}), 0)
+        with self.assertRaises(ValueError):
+            resolved_taxid(10, {1, 20}, {10: 11, 11: 10})
 
 
 if __name__ == '__main__':

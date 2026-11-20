@@ -185,7 +185,26 @@ pipeline can be supplied directly; a bare DIAMOND file without the taxonomy and
 provenance manifest does not meet this contract. A changed source/checksum under
 the same release label is rejected. Use a new label for a new source. Reuse does
 not refresh shared taxonomy files; an outdated/incompatible taxonomy must be
-updated deliberately rather than dropping unmapped protein records.
+updated deliberately.
+
+UniProt and NCBI taxonomy are not identical: some reference proteins retain a
+UniProt isolate taxid that has no current NCBI node or merged-ID replacement.
+The builder follows recognized merged-ID chains, retains unresolvable proteins
+with an unassigned taxid, and keeps their original headers/OX IDs in the index.
+Those hits remain searchable and become `unresolved` evidence; no host/non-host
+classification is inferred from their archive folder, organism name, or a guessed
+parent. Missing OX headers, invalid root/zero source IDs, and cyclic merge mappings
+remain errors. A known-taxid protein is required for the database self-test.
+
+`taxonomy_resolution.tsv.gz` in the database bundle records affected source taxids,
+mapped IDs (zero for unresolved), status, protein/residue counts, and example
+indexed identifiers and original headers. The manifest records totals, the policy,
+and the audit checksum. The evidence report copies this as
+`protein_taxonomy_resolution.tsv.gz`, links it, and states the number of unresolved
+reference proteins. The audit is checksum-verified when declared in a manifest;
+older fully mapped bundles remain compatible without it. No proteins are silently
+excluded because of unresolvable taxonomy. Builds log preparation progress every
+million records.
 
 Managed protein builds default to a separate reusable taxonomy snapshot at
 `<root>/ncbi_taxonomy/<release>`, including `nodes.dmp`, `names.dmp` and

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_scripts"))
 from contamination_evidence import (blastn_result, followup_plan, locus_comparison, ranked_loci,
-                                    search_hits, whole_contig_evidence)
+                                    search_hits, whole_contig_evidence, protein_identity, protein_taxonomy_note)
 from contamination_read_support import measure, spans_boundary
 
 
@@ -103,6 +103,36 @@ class ContaminationEvidenceTests(unittest.TestCase):
                 result, = search_hits([raw], target, args)
         self.assertEqual((result["sequence"], result["start0"], result["end0"], result["strand"]),
                          ("contig", 1600, 2100, "-"))
+
+    def test_unmapped_protein_hit_is_retained_as_unresolved_evidence(self):
+        args = SimpleNamespace(taxdump=None, host_rank='phylum', taxid=1)
+        windows = {'query': dict(sequence='contig', start0=0, end0=300)}
+        with tempfile.TemporaryDirectory() as work:
+            raw = Path(work) / 'hits.tsv'
+            raw.write_text('query\tUPR1\t\t1\t300\t100\t1e-30\t95\tOriginal OX=1554481\n')
+            with patch('contamination_evidence.taxonomy', return_value=(1, {}, {})):
+                result, = search_hits([raw], windows, args)
+        self.assertEqual(result['host_relation'], 'unresolved')
+        self.assertEqual(result['subject'], 'UPR1')
+        self.assertIn('OX=1554481', result['subject_title'])
+
+    def test_protein_taxonomy_audit_is_verified_and_disclosed(self):
+        import hashlib
+        import json
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            audit = root / 'taxonomy_resolution.tsv.gz'
+            audit.write_bytes(b'audit fixture')
+            identity = dict(taxonomy_resolution=dict(audit_file=audit.name,
+                audit_sha256=hashlib.sha256(audit.read_bytes()).hexdigest(),
+                mapped_protein_records=2, unresolved_protein_records=1))
+            path = root / 'protein_database.json'
+            path.write_text(json.dumps(identity))
+            loaded = protein_identity(path)
+            self.assertIn('1 proteins retained with unresolved taxonomy', ''.join(protein_taxonomy_note(loaded)))
+            audit.write_bytes(b'changed')
+            with self.assertRaises(ValueError):
+                protein_identity(path)
 
 
 if __name__ == "__main__":
