@@ -471,9 +471,45 @@ the removal and coordinate audit in each affected assembly's `cleanup/audit/`
 directory. Assemblies with zero selected rows pass through using their original
 FASTA. Evidence generation can be enabled separately from applying the sheet.
 
-The next Crest checks cover cohort evidence, the contig-stage stop, and reviewed
-cleanup with normal Nextflow cache invalidation. A final-assembly evidence pass
-is a separate follow-up.
+The cohort evidence and contig-stage stop can be checked separately from reviewed
+cleanup. A final-assembly evidence pass is a separate follow-up.
+
+### Reviewed-cleanup acceptance
+
+The bounded runner uses the actual `CONTAMINATION_POST_FCS` workflow with synthetic
+FASTA files and decision sheets. It does not run FCS, alignment searches, or
+scaffolding, and it does not read or alter production assemblies. It checks:
+
+- Whole-sequence removal, an internal split, and terminal trimming against exact
+  expected DNA, preserving case and ambiguous bases.
+- Both an explicitly unselected assembly and an assembly absent from the sheet:
+  their original FASTA paths and bytes must reach the downstream consumer.
+- Applied decisions, output checksums, retained/removed base accounting, and
+  coordinate partitions that reconstruct every original sequence exactly.
+- An unchanged repeat fully cached, a changed review taking effect while the two
+  untouched downstream inputs remain cached, all decisions unselected, and the
+  cleanup switch disabled.
+- Expected failures for a wrong source checksum, wrong coordinate stage, unknown
+  assembly, and overlapping selected intervals.
+
+After syncing the pipeline, run from the project directory on Crest:
+
+```bash
+module load nextflow/23.10.1 miniconda3
+python3 gcl_genome_assembly/scripts/comparisons/contamination_cleanup_acceptance.py run \
+  --profile slurm --out "$PWD/comparisons/contamination-cleanup-acceptance-01"
+```
+
+The driver must remain running for all nine phases; it can run inside a small
+Slurm driver allocation. Each fixture task requests one CPU and 1 GB. Some runs
+are intentionally expected to fail; the runner checks the specific rejection
+and continues. Overall success is `PASS` in `acceptance_summary.json`. The runner
+also writes `<output-directory>.review.tar.gz` without its Nextflow work/cache
+directories. Use a new output directory for each acceptance run.
+
+For local testing with Python already available, use `--profile local --no-conda`.
+The test entry point is [tests/contamination_cleanup.nf](../tests/contamination_cleanup.nf),
+driven by [the acceptance runner](../scripts/comparisons/contamination_cleanup_acceptance.py).
 
 Local foundation checks:
 

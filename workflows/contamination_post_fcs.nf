@@ -12,6 +12,7 @@ workflow CONTAMINATION_POST_FCS {
     taxdump
 
     main:
+    def base = file("${moduleDir}/..").normalize()
     def mapping = Channel.empty()
     def mappingVersions = Channel.empty()
     def coverage = assemblies.map { meta, fasta -> tuple(meta.id, [], [], []) }
@@ -31,7 +32,7 @@ workflow CONTAMINATION_POST_FCS {
         def ntManifest = []
         if (params.contamination_nt_db_root) {
             def root = file(params.contamination_nt_db_root).toAbsolutePath().toString()
-            def downloader = file("${projectDir}/py_scripts/download_contamination_nt.py", checkIfExists: true)
+            def downloader = file(base.resolve('py_scripts/download_contamination_nt.py'), checkIfExists: true)
             DOWNLOAD_CONTAMINATION_NT(root, 'nt', params.contamination_nt_release, downloader)
             VERIFY_CONTAMINATION_NT(DOWNLOAD_CONTAMINATION_NT.out.bundle, root,
                 'nt', params.contamination_nt_release, downloader)
@@ -43,20 +44,20 @@ workflow CONTAMINATION_POST_FCS {
             [protein: params.contamination_protein_db_dir, stage: 'post_fcs', window: 100000,
              chunk: 5000000, nt: nt, mega: mega, targeted: params.contamination_targeted_blastn,
              followup: 100000, rank: params.contamination_host_rank, nested: true],
-            file(projectDir), ntManifest)
+            base, ntManifest)
         reviews = CONTAMINATION_SEARCH.out.review
     }
 
     def cleaned = assemblies
     if (params.contamination_review) {
         def sheet = file(params.contamination_review, checkIfExists: true)
-        def helper = file("${projectDir}/py_scripts/contamination_review.py", checkIfExists: true)
+        def helper = file(base.resolve('py_scripts/contamination_review.py'), checkIfExists: true)
         CONTAMINATION_DECISIONS(sheet, assemblies.map { meta, fasta -> meta.id }.toList(), helper)
         def decisionPlan = CONTAMINATION_DECISIONS.out.collect().map { files ->
             [selected: new groovy.json.JsonSlurper().parseText(files[0].text)]
         }
         def routed = assemblies.combine(decisionPlan).branch { meta, fasta, plan ->
-            apply: meta.id in plan.selected
+            apply: meta.id.toString() in plan.selected
                 return tuple(meta, fasta)
             keep: true
                 return tuple(meta, fasta)
