@@ -17,13 +17,13 @@ process SELECT_PROTEIN_BENCHMARK {
     memory '2 GB'
     time '30m'
     scratch false
-    publishDir "${params.outdir}", mode: 'copy', pattern: 'queries/selection.json'
+    publishDir "${params.outdir}", mode: 'copy'
     input:
     val project
     val trace
     path helper
     output:
-    path 'queries'
+    path 'queries', emit: queries
     script:
     """
     python3 ${helper} select --project ${benchQuote(project)} --trace ${benchQuote(trace)} \
@@ -32,6 +32,7 @@ process SELECT_PROTEIN_BENCHMARK {
 }
 
 process RUN_PROTEIN_BENCHMARK {
+    errorStrategy 'terminate'
     conda 'bioconda::diamond=2.1.14 conda-forge::python=3.11 conda-forge::time=1.9'
     cpus { (params.benchmark_jobs as int) * (params.benchmark_threads as int) }
     memory '0 B'
@@ -64,6 +65,6 @@ workflow {
     def helper = file("${projectDir}/contamination_protein_benchmark.py", checkIfExists: true)
     SELECT_PROTEIN_BENCHMARK(file(params.benchmark_project).toAbsolutePath().toString(),
         file(params.benchmark_trace, checkIfExists: true).toAbsolutePath().toString(), helper)
-    RUN_PROTEIN_BENCHMARK(SELECT_PROTEIN_BENCHMARK.out,
+    RUN_PROTEIN_BENCHMARK(SELECT_PROTEIN_BENCHMARK.out.queries,
         file(params.benchmark_protein_db_dir, checkIfExists: true).toAbsolutePath().toString(), helper)
 }
