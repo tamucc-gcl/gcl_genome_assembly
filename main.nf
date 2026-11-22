@@ -210,6 +210,20 @@ workflow {
     if (reviewContamination && !params.run_decon_contigs)
         error 'Post-FCS contamination review requires --run_decon_contigs true'
     if (params.run_contamination_evidence) {
+        if (!(params.contamination_search_mode in ['staged', 'full']))
+            error 'Set --contamination_search_mode to staged or full'
+        if (params.contamination_search_mode == 'staged') {
+            if (!(params.contamination_sample_window_bp?.toString() ==~ /[1-9][0-9]*/) ||
+                !(params.contamination_sample_spacing_bp?.toString() ==~ /[1-9][0-9]*/) ||
+                !(params.contamination_sample_short_contig_bp?.toString() ==~ /[0-9]+/) ||
+                params.contamination_sample_window_bp.toLong() < 100 ||
+                params.contamination_sample_window_bp.toLong() > 5000000 ||
+                params.contamination_sample_spacing_bp.toLong() < params.contamination_sample_window_bp.toLong() ||
+                !(params.contamination_sample_gc_delta instanceof Number) ||
+                params.contamination_sample_gc_delta <= 0 || params.contamination_sample_gc_delta > 1 ||
+                !(params.contamination_sample_depth_fold instanceof Number) || params.contamination_sample_depth_fold <= 1)
+                error 'Invalid contamination sampling parameters: window 100..5000000, spacing >= window, short-contig >= 0, GC delta (0,1], depth fold > 1'
+        }
         def managedProtein = params.contamination_protein_db_root || params.contamination_protein_release ||
             params.contamination_protein_source || params.contamination_protein_sha256
         if (managedProtein && (params.contamination_protein_db_dir || !params.contamination_protein_db_root ||

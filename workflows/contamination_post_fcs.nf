@@ -61,7 +61,7 @@ workflow CONTAMINATION_POST_FCS {
         }
         def mega = !!(params.contamination_nucleotide_db || params.contamination_nt_db_root)
         CONTAMINATION_SEARCH(assemblyInput, coverage, taxonomy,
-            [protein: protein, stage: 'post_fcs', window: 100000,
+            [protein: protein, stage: 'post_fcs', window: 100000, mode: params.contamination_search_mode,
              chunk: 5000000, nt: nt, mega: mega, targeted: params.contamination_targeted_blastn,
              followup: 100000, rank: params.contamination_host_rank, nested: true],
             base, ntManifest)

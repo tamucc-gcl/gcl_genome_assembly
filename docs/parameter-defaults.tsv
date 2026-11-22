@@ -43,6 +43,12 @@ contamination_megablast_threads	8
 contamination_megablast_scratch	'/scratch'
 contamination_megablast_time	'96h'
 run_contamination_evidence	false
+contamination_search_mode	'staged'
+contamination_sample_window_bp	10000
+contamination_sample_spacing_bp	1000000
+contamination_sample_short_contig_bp	100000
+contamination_sample_gc_delta	0.15
+contamination_sample_depth_fold	4
 contamination_read_support	true
 contamination_review	null
 contamination_protein_db_dir	null

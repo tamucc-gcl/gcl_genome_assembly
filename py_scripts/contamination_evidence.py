@@ -21,6 +21,8 @@ TARGET_FIELDS = ["query", "sequence", "start0", "end0", "hit_start0", "hit_end0"
 CONTIG_REVIEW_FIELDS = ["non_host_hit_bp", "distinct_non_host_bp", "distinct_non_host_pct",
                         "competing_hit_bp", "host_aligned_bp", "host_aligned_pct",
                         "dominant_non_host_group", "dominant_non_host_bp", "whole_contig_candidate"]
+SEARCH_COVERAGE_FIELDS = ['protein_searched_bp', 'protein_searched_pct',
+                          'megablast_searched_bp', 'megablast_searched_pct']
 SEARCH_LABELS = {"protein": "BLASTX", "megablast": "MEGABLAST", "nucleotide": "BLASTN"}
 LOCUS_REVIEW_FIELDS = ["non_host_match", "host_match", "alternative_non_host_taxa",
                        "search_agreement", "blastn_followup", "review_reason"]
@@ -505,17 +507,30 @@ def select(args):
     grouped = grouped_hits(hits)
     mega_hits = search_hits(args.megablast_hits, windows, args) if args.megablast_hits else []
     mega_grouped = grouped_hits(mega_hits)
+    mega_plan = getattr(args, 'megablast_plan', None)
+    mega_queries = {row['query'] for row in table(mega_plan)} if mega_plan else None
+    if mega_queries is not None and (not mega_queries <= windows.keys() or
+                                    not mega_grouped.keys() <= mega_queries):
+        raise ValueError('MEGABLAST hits/plan do not match the prepared windows')
+    if any(windows[hit['query']]['status'] != 'search' for hit in hits):
+        raise ValueError('Protein hit references an unsearched window')
+    if mega_plan:
+        for row in table(mega_plan):
+            if any(str(row[key]) != str(windows[row['query']][key]) for key in ('sequence', 'start0', 'end0')):
+                raise ValueError('MEGABLAST plan coordinates differ from prepared windows')
     plan = followup_plan(windows, grouped, mega_grouped, args.followup_max_bp)
     targets = defaultdict(list)
     for row in plan.values():
         targets[row["sequence"]].append(row)
     assignments = []
     for query, window in windows.items():
-        status = relationship(grouped.get(query, [])) if window["status"] == "search" else "insufficient-acgt"
+        status = (relationship(grouped.get(query, [])) if window['status'] == 'search' else
+                  'unsearched' if window['status'] == 'unsearched' else 'insufficient-acgt')
         mega = "not-run"
         if args.megablast:
-            mega = (relationship(mega_grouped.get(query, [])) if window["status"] == "search"
-                    else "insufficient-acgt")
+            searched = query in mega_queries if mega_queries is not None else window['status'] == 'search'
+            mega = (relationship(mega_grouped.get(query, [])) if searched else
+                    'insufficient-acgt' if window['status'] == 'insufficient_acgt' else 'unsearched')
         assignments.append(dict(window, protein_evidence=status, megablast_evidence=mega,
                                 nucleotide_target="YES" if query in plan else "NO"))
     args.out.mkdir()
@@ -575,6 +590,7 @@ def taxon_summary(metrics):
 
 
 def summarize(args, translated_nucleotide_hits=None, previous=None):
+    search_mode = (previous or json.loads((args.prepared / 'source.json').read_text())).get('search_mode', 'full')
     assigned = table(args.selected / "windows.tsv")
     targets = {row["query"]: row for row in table(args.selected / "nucleotide_targets.tsv")}
     for target in targets.values():
@@ -601,6 +617,9 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
     mega_sequences = {hit["sequence"] for hits in mega_by_query.values() for hit in hits
                       if hit["lineage_at_host_rank"]}
     by_sequence = defaultdict(set)
+    windows_by_sequence = defaultdict(list)
+    for row in assigned:
+        windows_by_sequence[row['sequence']].append(row)
     loci_by_sequence = defaultdict(list)
     host_spans = defaultdict(list)
     non_host_group_spans = defaultdict(lambda: defaultdict(list))
@@ -614,10 +633,15 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
         row["nucleotide_evidence"] = nt
         name = row["sequence"]
         by_sequence[name].update([row["protein_evidence"], row["megablast_evidence"], nt])
-        plotting = mega_by_query if name in mega_sequences else protein_by_query
-        plot_hits[name].extend(plotting.get(query, []))
         protein_hits = protein_by_query.get(query, [])
         mega_hits = mega_by_query.get(query, [])
+        if search_mode == 'staged':
+            # Selective nt is enriched for suspicious regions: it must not replace
+            # the distributed protein evidence when colouring a whole contig.
+            plot_hits[name].extend(protein_hits + mega_hits)
+        else:
+            plotting = mega_by_query if name in mega_sequences else protein_by_query
+            plot_hits[name].extend(plotting.get(query, []))
         nt_hits = nt_by_query.get(query, [])
         host_spans[name].extend((hit["start0"], hit["end0"]) for hits in (protein_hits, mega_hits, nt_hits)
                                 for hit in hits if hit["host_relation"] == "host-compatible")
@@ -639,6 +663,9 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
             "schema", "assembly", "stage", "source_sha256", "coordinates", "window_bp", "chunk_bp",
             "minimum_acgt_bp", "source_bp", "windows", "search_queries", "search_query_bp", "chunks",
             "boundary_policy")}
+        for key in ('search_mode', 'sampling'):
+            if key in previous:
+                source[key] = previous[key]
         metrics = table(args.selected / "sequence_evidence.tsv")
         review = [{key: row[key] for key in FIELDS} for row in table(args.selected / "review.tsv")
                   if row["action"] == "REMOVE_SEQUENCE"]
@@ -693,6 +720,12 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
                    distinct_non_host_pct=100 * distinct_bp / length if length else 0,
                    competing_hit_bp=sum(span_union(locus["competing_spans"]) for locus in loci),
                    host_aligned_bp=host_bp, host_aligned_pct=100 * host_bp / length if length else 0)
+        sequence_windows = windows_by_sequence[name]
+        for method in ('protein', 'megablast'):
+            assessed = sum(int(window['end0']) - int(window['start0']) for window in sequence_windows
+                           if window[method + '_evidence'] not in {'unsearched', 'not-run', 'insufficient-acgt'})
+            row[method + '_searched_bp'] = assessed
+            row[method + '_searched_pct'] = 100 * assessed / length if length else 0
         row.update(whole_contig_evidence(non_host_group_spans[name], distinct_bp, host_bp, length))
         for locus in loci:
             lo, hi = locus["start0"], locus["end0"]
@@ -740,12 +773,13 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
         contig = contigs[row["sequence"]]
         row["sequence_evidence"] = contig["evidence"]
         row.update({key: contig[key] for key in CONTIG_REVIEW_FIELDS})
+        row.update({key: contig[key] for key in SEARCH_COVERAGE_FIELDS})
     supported = sorted((row for row in review if row.get("support")), key=lambda row: (
         PRIORITY[row["priority"]], -row["distinct_hit_bp"], -row["distinct_contig_pct"],
         -(int(row["end0"]) - int(row["start0"])), row["sequence"], int(row["start0"])))
     write_table(args.out / "review.tsv", supported + [row for row in review if not row.get("support")],
                 FIELDS + ["priority", "distinct_hit_bp", "distinct_contig_pct", "sequence_evidence",
-                          *CONTIG_REVIEW_FIELDS, *LOCUS_REVIEW_FIELDS, "support", "hit_lineages", "hit_context"])
+                          *CONTIG_REVIEW_FIELDS, *SEARCH_COVERAGE_FIELDS, *LOCUS_REVIEW_FIELDS, "support", "hit_lineages", "hit_context"])
     target_fasta = "nucleotide_targets.fasta" if previous else "targets.fasta"
     shutil.copyfile(args.selected / target_fasta, args.out / "nucleotide_targets.fasta")
     shutil.copyfile(args.selected / "nucleotide_targets.tsv", args.out / "nucleotide_targets.tsv")
@@ -786,6 +820,13 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
                     (args.coverage_source if args.coverage else "unavailable"),
                     protein_database=previous["protein_database"] if previous else protein_identity(args.database),
                     nucleotide_database=args.nucleotide_db or None)
+    metadata['search_mode'] = source.get('search_mode', 'full')
+    metadata['sampling'] = source.get('sampling')
+    metadata['protein_searched_bp'] = sum(int(row['protein_searched_bp']) for row in metrics)
+    metadata['megablast_searched_bp'] = sum(int(row['megablast_searched_bp']) for row in metrics)
+    sampling_path = (args.selected / 'sampling_windows.tsv' if previous else args.prepared / 'windows.tsv')
+    if metadata['search_mode'] == 'staged' and sampling_path.is_file():
+        shutil.copyfile(sampling_path, args.out / 'sampling_windows.tsv')
     resolution = metadata['protein_database'].get('taxonomy_resolution')
     if resolution:
         audit = (args.selected / 'protein_taxonomy_resolution.tsv.gz' if previous else
@@ -797,6 +838,16 @@ def summarize(args, translated_nucleotide_hits=None, previous=None):
     lines = [
         f"# Contamination evidence — {source['assembly']}", "",
         f"Coordinate stage: `{source['stage']}`. Coordinates are 0-based, half-open.", "",
+        f"**Search mode: {metadata['search_mode']}.** Protein searched "
+        f"{metadata['protein_searched_bp']:,} of {source['source_bp']:,} bp; MEGABLAST searched "
+        f"{metadata['megablast_searched_bp']:,} bp. "
+        "Unsearched bases are not searched no-hits, and a host-compatible sampled region does not clear the rest of its contig.", "",
+        *(["Staged selection: one coding-rich window per spacing block, all eligible windows of short contigs, "
+           "and GC/depth outliers. Nucleotide searches cover unresolved/non-host samples and outliers, with adjacent windows. "
+           "This is a sampling heuristic, not a BUSCO annotation or an exhaustive internal-contamination screen. "
+           "[All windows, search status and selection reasons](sampling_windows.tsv). "
+           f"Parameters: `{json.dumps(metadata['sampling'], sort_keys=True)}`.", ""]
+          if metadata['search_mode'] == 'staged' else []),
         f"Host comparison: NCBI taxid {args.taxid}, {args.host_rank}. "
         f"Nucleotide follow-up: {metadata['nucleotide_status']} "
         f"({len(targets):,} planned regions, {target_bp:,} of {source['source_bp']:,} bp "
@@ -940,6 +991,7 @@ def main():
             sub.add_argument("--hits", type=Path, nargs="*", default=[])
             sub.add_argument("--megablast-hits", type=Path, nargs="*", default=[])
             sub.add_argument("--megablast", action="store_true")
+            sub.add_argument('--megablast-plan', type=Path)
             sub.add_argument("--followup-max-bp", type=int, default=100_000)
         else:
             for name in ("selected", "metrics", "database"):

@@ -154,8 +154,8 @@ process CONTAMINATION_REPORT {
     tuple val(assembly), path('review')
 
     script:
-    def depth = bam ? "samtools coverage -q 20 --ff UNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY ${quote(bam)} > coverage.tsv" : ''
-    def cov = bam ? '--coverage coverage.tsv' :
+    def depth = bam && !coverage_table ? "samtools coverage -q 20 --ff UNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY ${quote(bam)} > coverage.tsv" : ''
+    def cov = coverage_table ? "--coverage ${quote(coverage_table)} --coverage-source ${bam ? 'provided-bam' : 'provided-coverage-table'}" : bam ? '--coverage coverage.tsv' :
         (coverage_table ? "--coverage ${quote(coverage_table)} --coverage-source provided-coverage-table" : '')
     def ntArgs = nt_hits instanceof List ? nt_hits.collect { quote(it) }.join(' ') : quote(nt_hits)
     def nt = (nt_db ? "--nucleotide-db ${quote(nt_db)}" : '') +

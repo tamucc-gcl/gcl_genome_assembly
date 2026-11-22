@@ -6,6 +6,8 @@ include { CONTAMINATION_VERIFY_PROTEIN; CONTAMINATION_PREPARE; CONTAMINATION_BLA
           CONTAMINATION_REPORT; CONTAMINATION_DIAGNOSTICS; CONTAMINATION_BLOBDIR
 } from '../modules/contamination_evidence.nf'
 include { CONTAMINATION_MEGABLAST_NODES } from './contamination_megablast_nodes.nf'
+include { CONTAMINATION_STAGED_PREPARE; CONTAMINATION_STAGED_NUCLEOTIDE;
+          CONTAMINATION_SELECT_STAGED } from '../modules/contamination_staged.nf'
 
 // GString metadata and plain String IDs from JSON/cache must use identical join keys.
 def assemblyKeys(channel) {
@@ -49,6 +51,9 @@ workflow CONTAMINATION_SEARCH {
     def plotter = file(base.resolve('r_scripts/plot_contamination_diagnostics.R'), checkIfExists: true)
     def mega = settings.mega
     def targeted = mega && settings.targeted
+    // Standalone legacy pilots retain full mode unless they explicitly opt in.
+    def staged = settings.mode == 'staged'
+    def stagedHelpers = helpers + [file(base.resolve('py_scripts/contamination_staged.py'), checkIfExists: true)]
     if (!(params.contamination_megablast_execution in ['chunks', 'nodes']))
         error 'Set --contamination_megablast_execution to chunks or nodes'
     ['contamination_megablast_nodes', 'contamination_megablast_slots', 'contamination_megablast_threads'].each { name ->
@@ -57,9 +62,22 @@ workflow CONTAMINATION_SEARCH {
     }
 
     CONTAMINATION_VERIFY_PROTEIN(database, manifest, taxdump, helpers)
-    CONTAMINATION_PREPARE(sources.map { id, fasta, host -> tuple(id, fasta) },
-        settings.stage, settings.window, settings.chunk, helpers[0])
-    def preparedOutputs = assemblyKeys(CONTAMINATION_PREPARE.out.prepared)
+    def preparedOutputs
+    if (staged) {
+        CONTAMINATION_STAGED_PREPARE(sources.join(coverageInput, failOnDuplicate: true, failOnMismatch: true)
+            .map { id, fasta, host, bam, bai, cov -> tuple(id, fasta, bam, bai, cov) },
+            [window: params.contamination_sample_window_bp, spacing: params.contamination_sample_spacing_bp,
+             shortContig: params.contamination_sample_short_contig_bp, gcDelta: params.contamination_sample_gc_delta,
+             depthFold: params.contamination_sample_depth_fold], stagedHelpers)
+        preparedOutputs = assemblyKeys(CONTAMINATION_STAGED_PREPARE.out.prepared)
+        coverageInput = assemblyKeys(CONTAMINATION_STAGED_PREPARE.out.coverage).map { id, bam, bai, cov ->
+            tuple(id, bam, bai, cov.size() ? cov : [])
+        }
+    } else {
+        CONTAMINATION_PREPARE(sources.map { id, fasta, host -> tuple(id, fasta) },
+            settings.stage, settings.window, settings.chunk, helpers[0])
+        preparedOutputs = assemblyKeys(CONTAMINATION_PREPARE.out.prepared)
+    }
     def chunks = preparedOutputs.flatMap { id, metrics, queries ->
         queries.resolve('chunks.tsv').readLines().drop(1).collect { line ->
             tuple(id, queries.resolve(line.split('\t', 2)[0]))
@@ -69,23 +87,47 @@ workflow CONTAMINATION_SEARCH {
         tuple(id, queries.resolve('chunks.tsv').readLines().size() - 1)
     }
     CONTAMINATION_BLASTX(chunks, database, CONTAMINATION_VERIFY_PROTEIN.out)
+    def prepared = sources.join(preparedOutputs, failOnDuplicate: true, failOnMismatch: true)
+    def proteinInput = prepared.join(hitsByAssembly(counts, CONTAMINATION_BLASTX.out), failOnDuplicate: true)
+    def ntPrepared = preparedOutputs
+    def ntCounts = counts
+    def ntPlans = Channel.empty()
+    if (staged) {
+        CONTAMINATION_STAGED_NUCLEOTIDE(proteinInput.map { id, fasta, host, metrics, queries, hits ->
+            tuple(id, fasta, queries, host, hits)
+        }, taxdump, settings.rank, stagedHelpers)
+        ntPlans = assemblyKeys(CONTAMINATION_STAGED_NUCLEOTIDE.out)
+        ntPrepared = ntPlans.map { id, queries -> tuple(id, [], queries) }
+        ntCounts = ntPlans.map { id, queries -> tuple(id, queries.resolve('chunks.tsv').readLines().size() - 1) }
+    }
     def megaHits = Channel.empty()
     if (mega) {
         if (params.contamination_megablast_execution == 'nodes') {
-            CONTAMINATION_MEGABLAST_NODES(preparedOutputs, settings.nt, base)
+            CONTAMINATION_MEGABLAST_NODES(ntPrepared, settings.nt, base)
             megaHits = CONTAMINATION_MEGABLAST_NODES.out.results
         } else {
-            CONTAMINATION_MEGABLAST(chunks, settings.nt, 'megablast')
+            def ntChunks = staged ? ntPlans.flatMap { id, queries ->
+                queries.resolve('chunks.tsv').readLines().drop(1).collect { line ->
+                    tuple(id, queries.resolve(line.split('\t', 2)[0]))
+                }
+            } : chunks
+            CONTAMINATION_MEGABLAST(ntChunks, settings.nt, 'megablast')
             megaHits = CONTAMINATION_MEGABLAST.out
         }
     }
 
-    def prepared = sources.join(preparedOutputs, failOnDuplicate: true, failOnMismatch: true)
-    def selectionInput = prepared.join(hitsByAssembly(counts, CONTAMINATION_BLASTX.out), failOnDuplicate: true)
-        .join(hitsByAssembly(mega ? counts : counts.map { id, count -> tuple(id, 0) }, megaHits), failOnDuplicate: true)
+    def selectionInput = proteinInput
+        .join(hitsByAssembly(mega ? ntCounts : counts.map { id, count -> tuple(id, 0) }, megaHits), failOnDuplicate: true)
         .map { id, fasta, host, metrics, queries, hits, nt -> tuple(id, fasta, queries, host, hits, nt) }
-    CONTAMINATION_SELECT_NUCLEOTIDE(selectionInput, mega, settings.followup, taxdump, settings.rank, helpers)
-    def selectedOutputs = assemblyKeys(CONTAMINATION_SELECT_NUCLEOTIDE.out.selected)
+    def selectedOutputs
+    if (staged) {
+        CONTAMINATION_SELECT_STAGED(selectionInput.join(ntPlans, failOnDuplicate: true, failOnMismatch: true),
+            mega, settings.followup, taxdump, settings.rank, helpers)
+        selectedOutputs = assemblyKeys(CONTAMINATION_SELECT_STAGED.out.selected)
+    } else {
+        CONTAMINATION_SELECT_NUCLEOTIDE(selectionInput, mega, settings.followup, taxdump, settings.rank, helpers)
+        selectedOutputs = assemblyKeys(CONTAMINATION_SELECT_NUCLEOTIDE.out.selected)
+    }
     def nucleotide = Channel.empty()
     if (targeted) {
         def targets = selectedOutputs.flatMap { id, selected ->

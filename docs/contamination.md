@@ -8,6 +8,77 @@ stop at the contig stage. The standalone tools support database setup and report
 rebuilds. In the assembly pipeline, `--run_contamination_evidence` enables the
 new report and BlobToolKit dataset.
 
+## Optional post-FCS search modes
+
+FCS screening and cleaning are unchanged. Additional post-FCS review remains
+disabled by default (`run_contamination_evidence = false`). Enabling it now uses
+`--contamination_search_mode staged`. Use `--contamination_search_mode full` for
+the previous exhaustive protein + optional whole-genome MEGABLAST workflow,
+including exclusive nucleotide node workers and their content-addressed cache.
+Changing modes changes query contents; their alignment results are not interchangeable.
+Full mode retains its original 100 kb windows, 5 Mb chunks and alignment flags.
+
+Staged mode generates metrics and plots for **every contig**, while searching:
+
+1. One 10 kb protein-query window per 1 Mb block of each long contig. The window
+   with the longest six-frame stop-free run is selected (ties: most ACGT, then
+   earliest coordinate). This is a coding-content heuristic, not gene prediction
+   or BUSCO annotation. Short final blocks are also represented.
+2. Every eligible window of contigs up to 100 kb, and every window whose GC differs
+   from the assembly ACGT-weighted GC by at least 0.15. Contigs with mean depth
+   at most one-quarter or at least four times the length-weighted median contig
+   depth are also searched in full. Depth selection requires coverage; unavailable
+   or zero-baseline coverage is disclosed and does not create outlier calls.
+3. If an nt database is configured, MEGABLAST searches sampled windows without
+   exclusively host-compatible informative protein evidence, plus sampled GC/depth
+   outliers even if protein hits are host-compatible. Each nominated window includes
+   its adjacent window on either side, within the same contig. There is no top-30
+   cutoff. Existing optional sensitive BLASTN followup remains controlled by
+   `--contamination_targeted_blastn`.
+
+Alignment modes and hit interpretation are unchanged; this mode reduces the
+sequence submitted to searches. Reports record mode, parameters and actual searched
+bp, and link `sampling_windows.tsv` with all original windows and selection reasons.
+`windows.tsv` distinguishes searched no-hits from `unsearched`, `not-run` and
+insufficient-ACGT windows. `sequence_evidence.tsv` includes per-contig protein and
+MEGABLAST searched bp and percentages. Host-compatible sampled evidence does **not**
+certify an entire contig. Sampling can miss internal contamination with ordinary
+GC/depth. These starting thresholds need biological validation; full mode remains
+available for exhaustive review. No mode automatically removes sequence.
+
+In staged mode, whole-contig plot colours combine distributed protein evidence
+and selective nucleotide evidence; selective nt hits do not replace the entire
+contig's protein evidence. Full mode retains its previous nt-first plot-taxonomy
+assignment. Alignment/locus evidence remains separately available in both modes.
+
+| Parameter | Default |
+| --- | ---: |
+| `contamination_sample_window_bp` | 10000 |
+| `contamination_sample_spacing_bp` | 1000000 |
+| `contamination_sample_short_contig_bp` | 100000 |
+| `contamination_sample_gc_delta` | 0.15 |
+| `contamination_sample_depth_fold` | 4 |
+
+The existing protein database options are required in both modes. nt remains
+optional, with the same prebuilt or managed-download settings. BAM/BAI retention,
+read-support panels, BlobToolKit output and reviewed removal application continue
+to use the existing paths. Staged preparation computes coverage once for reuse in
+the report. Add to the normal assembly command, retaining its input/database flags:
+
+```bash
+# Optional staged post-FCS review (default mode when enabled)
+--run_contamination_evidence true --contamination_search_mode staged
+
+# Optional exhaustive review using the previous search design
+--run_contamination_evidence true --contamination_search_mode full
+```
+
+Before launching a cohort, inspect `queries/source.json` from a small staged
+preparation: `search_query_bp / source_bp` measures the actual protein-search
+fraction. Distributed sampling of long contigs is approximately 1%, but short
+contigs and outliers can increase this substantially. Runtime does not scale
+exactly with searched bp; measure a pilot before assigning a production estimate.
+
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.
