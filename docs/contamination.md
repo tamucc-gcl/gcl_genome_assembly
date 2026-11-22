@@ -79,6 +79,35 @@ fraction. Distributed sampling of long contigs is approximately 1%, but short
 contigs and outliers can increase this substantially. Runtime does not scale
 exactly with searched bp; measure a pilot before assigning a production estimate.
 
+### Bounded Crest staged pilot
+
+After syncing the pipeline checkout to Crest, submit from the assembly project
+root (the directory containing `data`, `work` and `gcl_genome_assembly`):
+
+```bash
+mkdir -p comparisons/contamination-staged-pilot-01
+sbatch --parsable gcl_genome_assembly/scripts/comparisons/run_contamination_staged_pilot.sh
+```
+
+The helper reuses the existing full 2026_04 protein bundle and its taxonomy from
+`comparisons/contamination-full-protein-01/db`, and nt from
+`comparisons/contamination-ctlk-whole-02/db/blast/nt/2026-11-08/database/nt`.
+It resolves the CTlk hap1 post-FCS FASTA and matching coverage from the production
+trace, selects whole contigs totalling at most 30 Mb across size/GC strata, and
+runs the same staged search/report workflow. Missing retained inputs fail with
+their exact paths; it does not download replacement databases or remap reads.
+This pilot uses existing coverage tables, so it does not test BAM depth/spanning
+panels. Subset composition affects GC/depth baselines; use this test to check
+operation and cost, not cohort sensitivity or production removal decisions.
+
+Outputs, isolated cache and task work directories are under
+`comparisons/contamination-staged-pilot-01`. The Slurm log is `slurm-<jobid>.out`.
+Successful completion creates `comparisons/contamination-staged-pilot-01.review.tar.gz`
+with the reports, actual figures, selection manifest and execution trace. Repeating
+the submission resumes this pilot's cache. To explicitly choose a mode in the
+standalone `scripts/comparisons/contamination_evidence.nf` workflow, use
+`--search_mode staged` or `--search_mode full`; its legacy default remains full.
+
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.

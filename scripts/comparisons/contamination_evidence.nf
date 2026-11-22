@@ -23,6 +23,12 @@ params.coverage_tsv = null
 params.previous_report = null
 params.window_bp = 100000
 params.chunk_bp = 5000000
+params.search_mode = 'full' // Legacy standalone default; use staged for bounded post-FCS pilots.
+params.contamination_sample_window_bp = 10000
+params.contamination_sample_spacing_bp = 1000000
+params.contamination_sample_short_contig_bp = 100000
+params.contamination_sample_gc_delta = 0.15
+params.contamination_sample_depth_fold = 4
 params.contamination_blastx_max_forks = 8
 params.contamination_blastn_max_forks = 8
 params.contamination_megablast_execution = 'chunks'
@@ -52,6 +58,10 @@ workflow {
             tuple(id, fasta, review, metadata.coverage != 'unavailable', metadata.host_taxid)
         }, taxdump, helpers, false)
     } else {
+        if (!(params.search_mode in ['staged', 'full']))
+            error 'Set --search_mode to staged or full'
+        if (params.search_mode == 'staged' && params.stage != 'post_fcs')
+            error 'Staged review requires --stage post_fcs'
         ['contamination_blastx_max_forks', 'contamination_blastn_max_forks', 'contamination_followup_max_bp'].each { name ->
             def value = params[name].toString()
             if (!value.isInteger() || value.toInteger() < 1)
@@ -92,7 +102,7 @@ workflow {
             Channel.of(tuple(params.assembly, fasta, params.taxid)),
             Channel.of(tuple(params.assembly, bam, [], coverage)),
             taxdump, [protein: params.protein_db_dir, stage: params.stage, window: params.window_bp,
-                chunk: params.chunk_bp, nt: ntDb, mega: mega, targeted: targeted,
+                chunk: params.chunk_bp, mode: params.search_mode, nt: ntDb, mega: mega, targeted: targeted,
                 followup: params.contamination_followup_max_bp, rank: params.host_rank, nested: false],
             file("${projectDir}/../.."), ntManifest)
     }
