@@ -22,6 +22,41 @@ SEARCH = ['-task', 'megablast', '-evalue', '1e-10', '-culling_limit', '10',
 SCHEMA = 'contamination-megablast-chunk-v1'
 
 
+class NodeMemory:
+    """Sample physical node headroom; RSS can count shared mapped pages repeatedly."""
+    def __init__(self, path=Path('/proc/meminfo'), interval=5):
+        self.path, self.interval = path, interval
+        self.stopped = threading.Event()
+        self.values = dict(source='/proc/meminfo', interval_seconds=interval, samples=0,
+                           hostname=os.uname().nodename)
+        self.poll()
+        self.thread = threading.Thread(target=self.watch, daemon=True)
+        self.thread.start()
+
+    def poll(self):
+        try:
+            values = {line.split(':', 1)[0]: int(line.split()[1]) * 1024
+                      for line in self.path.read_text().splitlines() if line.startswith(('MemTotal:', 'MemAvailable:'))}
+            total, available = values['MemTotal'], values['MemAvailable']
+        except (OSError, ValueError, KeyError):
+            return
+        self.values['samples'] += 1
+        self.values['total_bytes'] = total
+        self.values.setdefault('initial_available_bytes', available)
+        self.values['minimum_available_bytes'] = min(self.values.get('minimum_available_bytes', available), available)
+        self.values['last_available_bytes'] = available
+
+    def watch(self):
+        while not self.stopped.wait(self.interval):
+            self.poll()
+
+    def finish(self):
+        self.stopped.set()
+        self.thread.join()
+        self.poll()
+        return dict(self.values)
+
+
 class InsufficientScratch(RuntimeError):
     def __init__(self, path, needed, usage):
         self.details = dict(hostname=os.uname().nodename, scratch=str(path),
@@ -196,6 +231,7 @@ def worker(args):
                 pass
 
     old_handlers = {s: signal.signal(s, terminate) for s in (signal.SIGTERM, signal.SIGINT)}
+    memory = NodeMemory()
     try:
         if args.shared_database:
             if database_identity(Path(plan['database']))[0] != plan['database_identity']:
@@ -288,8 +324,10 @@ def worker(args):
         if stopped.is_set():
             raise RuntimeError('Worker interrupted; completed chunks have been retained')
         atomic_json(args.out, dict(worker=args.worker, searched=len(outcomes),
-                                   staging_seconds=staging_seconds, completed=outcomes))
+                                   staging_seconds=staging_seconds, completed=outcomes,
+                                   node_memory=memory.finish()))
     finally:
+        memory.finish()
         for signum, handler in old_handlers.items():
             signal.signal(signum, handler)
         shutil.rmtree(local)
@@ -329,7 +367,8 @@ def check(args):
                for task in plan['tasks'] if not store.completed(task)]
     summaries = [json.loads(path.read_text()) for path in args.summaries]
     skipped = [row for row in summaries if row.get('status') == 'skipped_insufficient_scratch']
-    atomic_json(args.out, dict(chunks=len(plan['tasks']), missing=missing, skipped_workers=skipped))
+    atomic_json(args.out, dict(chunks=len(plan['tasks']), missing=missing, skipped_workers=skipped,
+                              workers=summaries))
     if missing:
         raise RuntimeError(f'{len(missing)} chunks remain after all node workers exited. '
                            f'{len(skipped)} workers lacked scratch space. See {args.out}.')

@@ -146,6 +146,46 @@ This planning run uses retained production coverage tables, matching the subset
 pilot. Filtered BAM coverage in the full pipeline may change depth outliers and
 therefore the query count. It changes no FCS or production pipeline settings.
 
+### Complete CTlk hap1 staged test
+
+After the preflight passes, sync the checkout and submit from the Crest project root:
+
+```bash
+mkdir -p comparisons/contamination-staged-haplotype-01
+sbatch --parsable gcl_genome_assembly/scripts/comparisons/run_contamination_staged_haplotype.sh
+```
+
+The test binds to the preflight's complete `Sde-CTlk_104_hap1` FASTA, coverage
+table and sampling settings, verifies input checksums and reuses the existing
+full protein/nt databases. It does not use the earlier 30 Mb subset. The observed
+preflight selected 63,666,317 bp in 13 protein chunks. Up to 16 protein jobs may
+run concurrently, allowing all 13 chunks to be scheduled together when available.
+
+Nucleotide searches use one exclusive 64-CPU node worker with eight concurrent
+eight-thread searches and one verified local nt copy. The worker is pinned to
+`crest-c018`, where 1.8 TB scratch was verified. The controller explicitly excludes
+that node to avoid blocking its own exclusive worker. If c018 is occupied, the
+worker waits for it; this test is deliberately pinned for a comparable resource
+measurement. Scratch capacity is checked before copying. The worker reserves the
+whole node and all its memory, rather than relying on a 16 GB per-search request.
+
+Worker summaries now record sampled `/proc/meminfo` total/available physical RAM
+every five seconds, including minimum available RAM across staging and searching.
+These node-wide figures supplement RSS and are not a measurement of private
+per-process heap. The published `pipeline/contamination_megablast_completion.json`
+includes the worker summaries, per-chunk elapsed times and staging duration.
+Search flags, affinity and content-addressed chunk cache keys are unchanged.
+
+Results, isolated Nextflow cache and task work are under
+`comparisons/contamination-staged-haplotype-01`. The Slurm log is
+`slurm-<jobid>.out`. Completion verifies the resulting source identity, sampling
+and query counts against the preflight and creates
+`comparisons/contamination-staged-haplotype-01.review.tar.gz`. The archive includes
+reports, figures, worker measurements, execution trace and the pinned test settings.
+No removals or new read mappings are performed; coverage comes from the retained
+table, so BAM read-support panels remain outside this test. Resubmission resumes
+the test's native cache and durable nucleotide chunk cache.
+
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.

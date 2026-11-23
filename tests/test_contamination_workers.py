@@ -21,6 +21,23 @@ if os.name == 'posix':
 
 @unittest.skipUnless(os.name == 'posix', 'Node workers use Linux file locks and CPU affinity')
 class NodeWorkerTests(unittest.TestCase):
+    def test_node_memory_records_sampled_available_ram(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'meminfo'
+            path.write_text('MemTotal: 10000 kB\nMemAvailable: 8000 kB\n')
+            monitor = worker.NodeMemory(path, interval=60)
+            try:
+                path.write_text('MemTotal: 10000 kB\nMemAvailable: 3000 kB\n')
+                monitor.poll()
+                path.write_text('MemTotal: 10000 kB\nMemAvailable: 7000 kB\n')
+                result = monitor.finish()
+                self.assertEqual(result['minimum_available_bytes'], 3000 * 1024)
+                self.assertEqual(result['initial_available_bytes'], 8000 * 1024)
+                self.assertEqual(result['last_available_bytes'], 7000 * 1024)
+                self.assertEqual(result['total_bytes'], 10000 * 1024)
+            finally:
+                monitor.finish()
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -89,6 +106,10 @@ pathlib.Path(sys.argv[sys.argv.index('-out')+1]).write_text(query+'\\tmatch\\n')
         processes = [self.start(1), self.start(2)]
         self.assertEqual([p.wait(timeout=15) for p in processes], [0, 0])
         self.assertCountEqual(self.calls(), ['A', 'B'])
+        summaries = [json.loads((self.root / f'worker-{i}.json').read_text()) for i in (1, 2)]
+        measured = [row['node_memory'] for row in summaries if row.get('searched')]
+        self.assertTrue(measured)
+        self.assertTrue(all(row['samples'] >= 2 and row['minimum_available_bytes'] > 0 for row in measured))
         # A fresh worker reuses the completed chunks without searching or staging again.
         self.assertEqual(self.start(3).wait(timeout=15), 0)
         self.assertCountEqual(self.calls(), ['A', 'B'])
