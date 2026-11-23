@@ -15,6 +15,35 @@ def table(path):
         return list(csv.DictReader(handle, delimiter='\t'))
 
 
+def validate_sample_membership(path, assemblies):
+    """Compare assembly-capable rows; Hi-C-only rows produce no assembly outputs.
+
+    Use the same capability gate as functions/input_validation.nf. Nextflow still
+    validates read paths, paired reads and sample metadata before scheduling.
+    """
+    with path.open(newline='', encoding='utf-8-sig') as handle:
+        records = [cells for cells in csv.reader(handle) if any(cell.strip() for cell in cells)]
+    if not records:
+        raise ValueError('Empty sample sheet: ' + str(path))
+    header = [cell.strip() for cell in records[0]]
+    if not all(header) or len(header) != len(set(header)) or 'sample_id' not in header:
+        raise ValueError('Sample sheet requires unique column names including sample_id')
+    rows = []
+    for cells in records[1:]:
+        if len(cells) != len(header):
+            raise ValueError('Malformed sample sheet row')
+        rows.append(dict(zip(header, [cell.strip() for cell in cells])))
+    samples = [row['sample_id'] for row in rows]
+    if any(not sample for sample in samples) or len(samples) != len(set(samples)):
+        raise ValueError('Missing or duplicate sample_id in sample sheet')
+    capable = {row['sample_id'] for row in rows if row.get('hifi_bam') or row.get('sr_r1')}
+    expected = {assembly.rsplit('_hap', 1)[0] for assembly in assemblies}
+    if capable != expected:
+        raise ValueError('Assembly-capable sample sheet membership differs from the preflight cohort: '
+                         f'missing={sorted(expected - capable)}, unexpected={sorted(capable - expected)}')
+    return sorted(set(samples) - capable)
+
+
 def configure(project, preflight, out, expected_count=10):
     metadata = json.loads((preflight / 'preflight.json').read_text())
     inputs = table(preflight / 'inputs.tsv')
@@ -41,11 +70,9 @@ def configure(project, preflight, out, expected_count=10):
                  taxonomy / 'nodes.dmp', taxonomy / 'names.dmp', taxonomy / 'merged.dmp', Path(str(nt) + '.nal')):
         if not path.is_file() or not path.stat().st_size:
             raise ValueError('Missing retained input: ' + str(path))
-    with (project / 'data/assembly_samplesheet.csv').open(newline='') as handle:
-        samples = [row['sample_id'] for row in csv.DictReader(handle)]
-    if (len(samples) != len(set(samples)) or
-            set(samples) != {assembly.rsplit('_hap', 1)[0] for assembly in expected}):
-        raise ValueError('Sample sheet membership differs from the preflight cohort')
+    skipped = validate_sample_membership(project / 'data/assembly_samplesheet.csv', expected)
+    if skipped:
+        print('Non-assembly sample rows retained for pipeline validation: ' + ', '.join(skipped), flush=True)
     params = dict(sample_sheet=str(project / 'data/assembly_samplesheet.csv'),
                   hic_readsets=str(project / 'data/hic_readsets.csv'), publish_dir_mode='link',
                   taxid=373251, ploidy=2, qc_mode='none', run_purge_dups=True,

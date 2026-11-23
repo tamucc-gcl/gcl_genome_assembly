@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_contamination_staged_preflight as fixtures
-from prepare_contamination_staged_cohort import configure, verify
+from prepare_contamination_staged_cohort import configure, verify, validate_sample_membership
 import contamination_staged_preflight as preflight
 
 
@@ -26,7 +26,8 @@ class CohortTests(fixtures.PreflightTests):
             path = self.project / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('fixture')
-        (self.project / 'data/assembly_samplesheet.csv').write_text('sample_id\nfixture\n')
+        (self.project / 'data/assembly_samplesheet.csv').write_text(
+            'sample_id,hifi_bam,hic_r1,hic_r2\nfixture,fixture.bam,,\nhic_only,,R1.fq,R2.fq\n')
         run = self.project / 'cohort'
         configure(self.project, self.out, run, expected_count=2)
         params = json.loads((run / 'params.json').read_text())
@@ -58,6 +59,19 @@ class CohortTests(fixtures.PreflightTests):
         (results / 'assembly/contamination/fixture_hap1/review/locus_read_boundaries.tsv').write_text('action_id\tedge\nA1\tLeft\n')
         with self.assertRaisesRegex(ValueError, 'Missing boundary'):
             verify(run / 'expected.json', results, run / 'invalid.json')
+
+    def test_membership_keeps_hic_only_rows_but_rejects_assembly_mismatches(self):
+        sheet = self.project / 'samples.csv'
+        sheet.write_text('\ufeffsample_id, hifi_bam, sr_r1, sr_r2, hic_r1, hic_r2\n'
+                         'hifi,reads.bam,,,,\nshotgun,,R1.fq,R2.fq,,\nhic_only,,,,H1.fq,H2.fq\n\n', encoding='utf-8')
+        self.assertEqual(validate_sample_membership(sheet, ['hifi_hap1', 'hifi_hap2', 'shotgun_hap1']), ['hic_only'])
+        with self.assertRaisesRegex(ValueError, "unexpected=\\['shotgun'\\]"):
+            validate_sample_membership(sheet, ['hifi_hap1', 'hifi_hap2'])
+        with self.assertRaisesRegex(ValueError, "missing=\\['absent'\\]"):
+            validate_sample_membership(sheet, ['hifi_hap1', 'shotgun_hap1', 'absent_hap1'])
+        sheet.write_text('sample_id,hifi_bam\nhifi,a.bam\nhifi,b.bam\n')
+        with self.assertRaisesRegex(ValueError, 'duplicate sample_id'):
+            validate_sample_membership(sheet, ['hifi_hap1'])
 
 
 if __name__ == '__main__':
