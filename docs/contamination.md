@@ -186,6 +186,50 @@ No removals or new read mappings are performed; coverage comes from the retained
 table, so BAM read-support panels remain outside this test. Resubmission resumes
 the test's native cache and durable nucleotide chunk cache.
 
+### Staged cohort validation in the normal assembly pipeline
+
+After the complete-haplotype test passes, sync and submit from the Crest project root:
+
+```bash
+mkdir -p comparisons/contamination-staged-cohort-01
+sbatch --parsable gcl_genome_assembly/scripts/comparisons/run_contamination_staged_cohort.sh
+```
+
+This resumes the earlier assembly session `747f1a27-488b-4b45-b991-201d684489ed`
+with the original project `work/` and upstream assembly/FCS settings. The runner
+locates its cache under `.nf/assembly`, the project root or the pipeline checkout;
+it fails before launching if none is present. It uses the actual `main.nf`
+post-FCS branch, retained BAM/BAI, filtered coverage and read-support panels.
+The preflight's source FASTAs and current sample-sheet membership are checked
+before submission. Existing protein/nt databases and the protein bundle's own
+taxonomy snapshot are reused. No removal sheet is supplied, and the run stops
+before scaffolding. Independent pilot runs have separate Nextflow caches and
+are not automatically imported into this assembly session.
+
+The cohort shares a cap of 56 concurrent eight-CPU protein jobs, with an explicit
+executor queue size of 100. Four exclusive 64-CPU nucleotide workers each run
+eight eight-thread searches from one verified local nt copy. Workers 1–4 are
+pinned respectively to `crest-c018`, `crest-c021`, `crest-c028`, `crest-c029`,
+which previously supported the nt worker workload. The controller excludes those
+four hosts. Small waiting collectors are pinned to the controller's node so they
+cannot block their own exclusive workers or consume the remaining user node quota.
+Occupied hosts may queue;
+local scratch capacity is checked before staging. The sensitive BLASTN third pass
+remains disabled. FCS and the optional full search mode are unchanged.
+
+Outputs are under `comparisons/contamination-staged-cohort-01/results`, with
+per-assembly evidence at `assembly/contamination/<assembly>/`. The controller log
+is `slurm-<jobid>.out` and Nextflow log `nextflow-<jobid>.log` in the run directory.
+After success, the acceptance helper checks all ten source identities, staged
+mode, BAM-derived coverage, per-panel depth and paired boundary tables, nonempty
+figures, unselected review rows and nucleotide chunk completeness. Protein query
+counts can differ from the table-only preflight because coverage filtering can
+change outlier selection. A successful check writes `acceptance.json` and creates
+`comparisons/contamination-staged-cohort-01.review.tar.gz`, including reports,
+figures, provenance, worker measurements and pipeline traces, excluding sequence,
+read-alignment and BlobToolKit binary dataset files. Repeating the submission
+resumes the same native assembly session and durable nucleotide chunk cache.
+
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.
