@@ -108,6 +108,44 @@ the submission resumes this pilot's cache. To explicitly choose a mode in the
 standalone `scripts/comparisons/contamination_evidence.nf` workflow, use
 `--search_mode staged` or `--search_mode full`; its legacy default remains full.
 
+### Whole-cohort preparation-only preflight
+
+Before committing to searches across all haplotypes, sync the checkout and run
+from the Crest assembly project root:
+
+```bash
+mkdir -p comparisons/contamination-staged-preflight-01
+sbatch --parsable gcl_genome_assembly/scripts/comparisons/run_contamination_staged_preflight.sh
+```
+
+This submits one four-CPU, 32 GB job with four parallel Python preparations.
+It discovers ten successful `FCS_CLEAN_GENOME` tasks from
+`genome_assembly/pipeline/pipeline_trace.txt`, resolves their retained FASTAs and
+matching post-FCS QC coverage, and prepares the exact staged sampling windows and
+5 Mb protein-search chunks for each complete haplotype. It fails on missing or
+ambiguous tasks, an unexpected assembly count, or mismatched coverage dictionaries.
+It launches **no alignments, mappings, database setup, cleanup or scaffolding**.
+
+`summary.tsv` reports per-assembly source/query bp, percentage, windows and chunk
+counts. `selection_reasons.tsv` explains the selected volume using mutually
+exclusive reason combinations, so its bp sum equals total query bp. `preflight.json`
+records cohort totals and parameters. Nucleotide volume is explicitly unknown until
+protein results can be classified; these counts alone do not establish runtime.
+
+All outputs are under `comparisons/contamination-staged-preflight-01`, including
+the log `slurm-<jobid>.out`. Query FASTAs and coordinate windows remain under
+`assemblies/<assembly>/queries/`. The small return archive is
+`comparisons/contamination-staged-preflight-01.review.tar.gz`; it includes the
+summary, selection reasons, resolved input paths and per-assembly checksummed
+manifests, but excludes the FASTAs. Resubmission validates source/coverage/settings
+and every retained output checksum before reuse. Changed inputs require a new
+output directory. The CLI supports `--project`, `--trace`, `--out`, `--workers`
+and the same sampling thresholds as the staged sampler for other projects.
+
+This planning run uses retained production coverage tables, matching the subset
+pilot. Filtered BAM coverage in the full pipeline may change depth outliers and
+therefore the query count. It changes no FCS or production pipeline settings.
+
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.
