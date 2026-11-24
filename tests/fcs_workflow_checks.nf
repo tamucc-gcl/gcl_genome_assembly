@@ -3,6 +3,7 @@ include { DECONTAMINATE_ASSEMBLY as CLEAN } from '__REPO__/workflows/decontamina
 include { FCS_FINAL_SCREEN as AUDIT } from '__REPO__/workflows/fcs_final_screen.nf'
 include { FCS_DIAGNOSTICS as PLOTS } from '__REPO__/workflows/fcs_diagnostics.nf'
 include { CONTAMINATION_REPORTING as REPORT } from '__REPO__/workflows/contamination_reporting.nf'
+include { FCS_OVERVIEW as OVERVIEW } from '__REPO__/workflows/fcs_overview.nf'
 params.outdir='/tmp/fcs-workflow-check/results'
 workflow {
     def root=file('/tmp/fcs-workflow-check/inputs'); root.mkdirs()
@@ -16,6 +17,8 @@ workflow {
         Channel.of(tuple([id:'A'],map),tuple([id:'B'],map)),true)
     REPORT(AUDIT.out.assembly,AUDIT.out.action_report,AUDIT.out.taxonomy_report,
         Channel.empty(),Channel.empty(),Channel.empty(),'final',true,false,PLOTS.out.metrics,AUDIT.out.adaptor_report)
+    OVERVIEW(REPORT.out.tables)
+    OVERVIEW.out.report.view { stage,p -> assert stage=='overview'; assert p.text.contains('FCS evidence'); 'PASS combined overview consumes current-run stage tables' }
     AUDIT.out.assembly.toList().view { rows ->
         assert rows.size()==2
         assert rows.every { it[1].text==fa.text }

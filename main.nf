@@ -109,6 +109,7 @@ include { REPORT_PAINTINGS; MAIN_REPORTING } from './workflows/main_report.nf'
 include { CONTAMINATION_REPORTING as CONTIG_CONTAMINATION_REPORTING } from './workflows/contamination_reporting.nf'
 include { CONTAMINATION_REPORTING as SCAFFOLD_CONTAMINATION_REPORTING } from './workflows/contamination_reporting.nf'
 include { CONTAMINATION_REPORTING as FINAL_CONTAMINATION_REPORTING } from './workflows/contamination_reporting.nf'
+include { FCS_OVERVIEW } from './workflows/fcs_overview.nf'
 include { FCS_DIAGNOSTICS as CONTIG_FCS_DIAGNOSTICS; FCS_DIAGNOSTICS as SCAFFOLD_FCS_DIAGNOSTICS;
           FCS_DIAGNOSTICS as FINAL_FCS_DIAGNOSTICS } from './workflows/fcs_diagnostics.nf'
 include { FCS_FINAL_SCREEN } from './workflows/fcs_final_screen.nf'
@@ -505,6 +506,7 @@ workflow {
         'contig', params.run_decon_contigs, params.run_contamination_evidence,
         contigFcsMetrics, CONTIG_REFINEMENT.out.adaptor_report)
     ch_contamination_reports = CONTIG_CONTAMINATION_REPORTING.out.report
+    ch_fcs_report_tables = CONTIG_CONTAMINATION_REPORTING.out.tables
     if (params.stop_after_contig_review) {
         CONTIG_RUN_PROVENANCE(ch_versions)
         log.info '[INFO] Finishing at the contig stage'
@@ -815,6 +817,11 @@ workflow {
             Channel.empty(),Channel.empty(),Channel.empty(),'final',true,false,
             FINAL_FCS_DIAGNOSTICS.out.metrics,ch_final_adaptor)
         ch_contamination_reports = ch_contamination_reports.mix(FINAL_CONTAMINATION_REPORTING.out.report)
+        ch_fcs_report_tables = ch_fcs_report_tables.mix(FINAL_CONTAMINATION_REPORTING.out.tables)
+    }
+    if(params.run_decon_contigs) {
+        FCS_OVERVIEW(ch_fcs_report_tables)
+        ch_contamination_reports = ch_contamination_reports.mix(FCS_OVERVIEW.out.report)
     }
 
     /*

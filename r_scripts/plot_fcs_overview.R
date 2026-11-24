@@ -1,0 +1,5 @@
+library(ggplot2)
+source(file.path(dirname(sub('^--file=','',grep('^--file=',commandArgs(),value=TRUE)[1])),'fcs_plot_common.R'))
+args<-commandArgs(trailingOnly=TRUE)
+d<-read.delim(args[1],check.names=FALSE)
+fcs_composition(d,args[2])

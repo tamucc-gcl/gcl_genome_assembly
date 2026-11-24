@@ -10,7 +10,7 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:?Submit from the project root}"
 module load nextflow/23.10.1 miniconda3
 pipeline="$PWD/gcl_genome_assembly"
-run="$PWD/comparisons/fcs-assembly-acceptance-01"
+run="$PWD/comparisons/${FCS_ACCEPTANCE_RUN:-fcs-assembly-acceptance-01}"
 mkdir -p "$run"
 helper="$pipeline/scripts/comparisons/prepare_fcs_assembly_acceptance.py"
 python3 "$helper" configure --project "$PWD" --out "$run" "$@"

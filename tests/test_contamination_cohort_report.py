@@ -44,7 +44,7 @@ class CohortReportTests(unittest.TestCase):
             self.assertIn('cohort_gc_coverage.png', text)
             self.assertNotIn('Priority / all evidence', text)
             self.assertNotIn('500,000-bp block', text)
-            self.assertIn('FCS-GX divisions', text)
+            self.assertIn('base-pair fractions', text)
             self.assertEqual(rows(root/'out/report/cohort_fcs_sequence_evidence.tsv')[0]['classification_source'],'FCS-GX')
 
     def test_disabled_is_not_a_negative_result(self):

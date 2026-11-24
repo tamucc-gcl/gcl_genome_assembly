@@ -2,7 +2,7 @@
 process CONTAMINATION_COHORT_REPORT {
     conda 'conda-forge::python=3.11 conda-forge::r-base=4.3.3 conda-forge::r-ggplot2=3.5.2 conda-forge::r-scales=1.3.0'
     cpus 1
-    memory '2 GB'
+    memory '4 GB'
     time '1h'
     publishDir "${params.outdir}/${stage}/decontam", mode: 'copy'
     input:
@@ -21,8 +21,11 @@ process CONTAMINATION_COHORT_REPORT {
     cat > report_spec.json <<'SPEC'
 ${groovy.json.JsonOutput.toJson(spec)}
 SPEC
-    python3 ${helper} --spec report_spec.json --out .
+    python3 contamination_cohort_report.py --spec report_spec.json --out .
     ${plot}
+    if [ -f report/cohort_fcs_segments.tsv ]; then
+        Rscript plot_fcs_breakdown.R report/cohort_fcs_sequence_evidence.tsv report/cohort_fcs_segments.tsv report
+    fi
     """
 }
 
@@ -61,8 +64,11 @@ workflow CONTAMINATION_REPORTING {
         specification.map { s -> s.fcs.collectMany { [it.actions,it.taxonomy,it.contaminants].findAll { it }.collect { file(it) } } +
             s.blobtools.collectMany { [file(it.review),file(it.diagnostics)] } +
             s.fcs_metrics.collect { file(it.metrics) } + s.adaptor_reports.collect { file(it.report) } },
-        file("${moduleDir}/../py_scripts/contamination_cohort_report.py",checkIfExists:true),
-        file("${moduleDir}/../r_scripts/plot_contamination_cohort.R",checkIfExists:true))
+        ['contamination_cohort_report.py','fcs_category_evidence.py'].collect {
+            file("${moduleDir}/../py_scripts/${it}",checkIfExists:true) },
+        ['plot_contamination_cohort.R','fcs_plot_common.R','plot_fcs_breakdown.R'].collect {
+            file("${moduleDir}/../r_scripts/${it}",checkIfExists:true) })
     emit:
     report = CONTAMINATION_COHORT_REPORT.out.report
+    tables = CONTAMINATION_COHORT_REPORT.out.tables.map { p -> tuple(stage,p) }
 }

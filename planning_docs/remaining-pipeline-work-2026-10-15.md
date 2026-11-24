@@ -1,6 +1,6 @@
 # Canonical pipeline rework checklist
 
-Updated 2026-11-09. This is the current 13-category checklist; older checkpoint
+Updated 2026-11-24 (contamination status reconciled). This is the current 13-category checklist; older checkpoint
 narratives are acceptance evidence, not current instructions to repeat investigations.
 The supported core is defined by [interface 1.0](../docs/core-interface.md).
 
@@ -14,7 +14,7 @@ The supported core is defined by [interface 1.0](../docs/core-interface.md).
 | 6. Unified Markdown reporting and freeze | Accepted | [Core-freeze-01](core-freeze-01-assessment.md): native PASS, 875 cached/64 completed tasks, 543 report links, zero version-record issues and unchanged selected evidence |
 | 7. Operational cleanup | Accepted | [Combined integration](core-integration-02-assessment.md); ordinary Nextflow cache handling and exact YaHS replay |
 | 8. PSMC | Accepted | Five individuals, 55 verified fits, core integration and read-support audits passed. Auto routes paired haplotypes to Dipcall and a sole assembly from a diploid individual to HiFi. Method-history disagreement is a deferred open question, not an implementation blocker; [assessment and decision](psmc-methods-and-cohort-acceptance-2026-11-09.md) |
-| 9. BlobToolKit evidence / cleaning | Design agreed; implementation pending | Protein + targeted nucleotide evidence after FCS/before scaffolding; reviewed whole-sequence/internal removal; optional final check; shared storeDir DBs and contig-only stopping control. See [scope](post-core-optional-analyses-plan.md#agreed-implementation-scope--2026-11-09) |
+| 9. Contamination screening / evidence | Standard FCS route accepted on one real haplotype; production resume pending | FCS-adaptor + GX cleanup, exact-final-FASTA audit and FCS-colored GC/depth reports passed real-container and complete-haplotype checks. Normal production resume remains for cohort/main-report integration. Heuristic sampling retired; full BlobTools branch retained optional, full-database acceptance deferred. See [current scope and acceptance](../docs/contamination.md) |
 | 10. Graph QC | Planned | Bounded read-to-graph self-mapping plus separately scheduled missing intrinsic graph metrics; [agreed QC/MultiQC scope](pangenome-qc-growth-followup.md) |
 | 11. Private/accessory evidence | Planned | Distinguish individual/haplotype privacy, missing representation and detection power |
 | 12. Graph SV interpretation / supplementary SyRI | Planned | Known-answer method validation and bounded pilot; active SyRI route remains a pilot |

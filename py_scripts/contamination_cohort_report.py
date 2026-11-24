@@ -140,16 +140,28 @@ def build(spec, out):
                 source_bp=data.get('source_bp',sum(int(x['length_bp']) for x in current_sequences)),
                 protein_searched_bp=data['protein_searched_bp'],megablast_searched_bp=data['megablast_searched_bp'],
                 sensitive_blastn_status=data['nucleotide_status'])
+    if fcs_sequences and all(x.get('taxonomy') for x in fcs.values()):
+        from fcs_category_evidence import enrich
+        enrich(fcs_sequences,fcs,detail,spec['stage'])
     lines += ['', '## GC and read coverage across assemblies', '']
     if fcs_sequences:
         lines += ['![GC and read coverage coloured by FCS-GX](report/cohort_gc_coverage.png)', '',
-            'One panel per assembly and one dot per contig; dot area represents contig length. Colours use **FCS-GX '
-            'divisions and explicit unresolved/mixed categories**, not BLAST or BlobTools assignments. Repeat, '
-            'low-coverage and other inconclusive FCS results are not promoted to host assignments. '
+            'One panel per assembly and one pie per contig; pie area represents contig length. Wedges show the '
+            'base-pair fractions in the same categories as the composition charts. GC and read depth refer to '
+            'the complete record. Expected division comes from the GX asserted-division metadata. Repeat, '
+            'low GX coverage and other inconclusive FCS results remain inconclusive. These figures are '
+            'coloured by FCS-GX evidence, without new contamination thresholds. '
             'All contigs are included where GC and read depth are measurable; zero-depth contigs are included. '
             'Panel labels count observations omitted for missing measurements. '
             '[PDF](report/cohort_gc_coverage.pdf) · [Plot scope](report/cohort_gc_coverage_scope.tsv) · '
             '[All FCS plot evidence](report/cohort_fcs_sequence_evidence.tsv)', '']
+        if all('cat_primary_bp' in x for x in fcs_sequences):
+            lines += ['![Composition of mixed records](report/cohort_fcs_composition.png)', '',
+                'Bars partition the full base-pair span of records previously labeled mixed; they are not '
+                'percentages of the entire assembly. [Segment evidence](report/cohort_fcs_segments.tsv).', '',
+                '## Assembly-specific detail', '']
+            for index,name in enumerate(expected,1):
+                lines += [f'- [{name}](report/assembly_{index:04d}.md)']
     else:
         lines += ['FCS GC/coverage plot unavailable: FCS plot evidence was not supplied.', '']
     if blob:

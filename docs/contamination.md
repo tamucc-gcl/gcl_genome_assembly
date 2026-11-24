@@ -67,9 +67,15 @@ are explicitly identified. Adaptor-input, GX-input and post-FCS coordinates rema
 separate. FCS action counts are recommendations, not measurements of bases removed.
 
 The combined GC/coverage figure has one panel per assembly, shared axes and
-colours, and contig length represented by point area. It uses **FCS-GX taxonomy
-results**, not protein/nucleotide search hits. Inconclusive/repeat/low-coverage
-results remain unresolved; differing segment assignments remain mixed. Missing
+colours, and one proportional pie per complete record. Pie area represents
+record length and wedges represent category base-pair proportions. Small centre
+marks keep tiny records visible. It uses **FCS-GX taxonomy results**, not
+protein/nucleotide search hits. The seven display categories are primary division,
+repeat with expected division reported, low GX coverage with expected division
+reported, repeat/low GX coverage with another division reported, other inconclusive
+results, taxonomy contaminant/chimeric results, and unreported span. Expected
+division is the `asserted-div` in GX metadata; when unavailable, no expected-division
+assignment is invented. Repeat/low-coverage results remain inconclusive. Missing
 measurements and zero-depth contigs are counted explicitly. No GC, coverage,
 contig-length or coding-content threshold selects which contigs receive a screen.
 
@@ -78,6 +84,19 @@ assembly summaries and separate GX/adaptor action tables. Per-assembly
 `*.fcs_metrics.json` files bind plot metrics to FASTA, taxonomy and coverage
 checksums. Plotting uses pinned R/ggplot2/scales dependencies; it does not change
 screening or cleaning calculations.
+
+The same palette is shared by the GC/coverage pies, mixed-record composition
+bars and assembly-specific detail pages. The overview at
+`overview/decontam/contamination_report.md` combines current-run stage tables:
+one assembly per row, contigs on the left and finalized assemblies on the right.
+Bars partition the full span of records previously labeled mixed, including
+explicit unreported intervals. They do not use aligned bp as their denominator.
+Every stage report links to assembly detail pages with GC/coverage pies, the 30
+longest mixed records (ties by identifier), complete tables, and independent GX
+alignment/masking summaries. Masking tracks may overlap and must not be summed.
+Coordinates, raw results and all records remain in the tables regardless of the
+display cap. Non-overlapping segments and complete base-pair partitions are
+checked before plotting. No new biological threshold or removal rule is added.
 
 ## Optional full BlobTools workflow
 
@@ -206,6 +225,54 @@ then makes `comparisons/fcs-assembly-acceptance-01.review.tar.gz` with reports,
 plots, provenance and logs. Biological findings do not fail this integration
 check automatically; review the final recommendations and rendered figures.
 Resubmit the same command to use this run's Nextflow cache.
+
+The bounded real-assembly check passed on Crest on 2026-11-24 (controller
+1576138; returned `fcs-assembly-acceptance-01.review.tar.gz`). Eight screen,
+cleanup and mapping tasks loaded from cache; four evidence/report tasks completed
+with exit code zero. The resumed run took 7m 2s, including environment setup;
+the original mappings each took approximately 41 minutes.
+
+Both stage reports and PNG figures were inspected. All 2,267 contig-stage records
+and all 365 finalized records were plotted, with none omitted for missing GC or
+depth. Metrics cover 953,537,721 bp and 953,579,871 bp respectively; these are
+different assembly stages, not a claimed cleanup delta. Source/taxonomy checksums
+and row counts passed, the finalized FASTA was unchanged, and both stages had
+zero actionable GX/adaptor findings. The removed-sequence FASTA link is absent
+from the review archive by design because FASTAs are excluded; it remains a
+production output. Other report links resolve within the archive.
+
+This accepts the maintained component workflows on a complete real haplotype,
+including real screening, fresh exact-frame read mapping, R figures, stage reports
+and ordinary cache reuse. The remaining integration gate is a normal production
+entry-point resume to confirm cohort collection and main-report links. Optional
+full-database BlobTools acceptance remains deferred.
+
+## Full-cohort category/report acceptance
+
+After syncing, submit from the CREST project root:
+
+```bash
+mkdir -p comparisons/fcs-cohort-acceptance-01
+sbatch --parsable \
+  --output=comparisons/fcs-cohort-acceptance-01/slurm-%j.out \
+  --export=ALL,FCS_ACCEPTANCE_RUN=fcs-cohort-acceptance-01,FCS_ADAPTOR_IMAGE=/work/birdlab/singularity_cache/ncbi-fcs-adaptor-0.5.5.img \
+  gcl_genome_assembly/scripts/comparisons/run_fcs_assembly_acceptance.sh --cohort
+```
+
+This discovers all finalized assemblies in the production trace and requires the
+initial FCS cohort to match. Both haplotypes remain separate; read inputs are
+deduplicated by individual only for channel routing. It uses complete retained
+pre-FCS and final FASTAs, the existing GX database and HiFi reads. It reruns the
+bounded FCS/mapping/report route for that cohort without assembly, scaffolding or
+BlobTools searches. This new run has its own cache; the earlier single-assembly
+cache is not automatically imported. Repeat the same command to resume it.
+
+Return `comparisons/fcs-cohort-acceptance-01.review.tar.gz`. The combined index is
+`results/overview/decontam/contamination_report.md`; individual stage reports
+remain under `results/contig/decontam/` and `results/final/decontam/`. The launcher
+checks exact source/taxonomy provenance, preserved final FASTAs, cohort membership,
+category partitions, record counts and expected figures. Visual review of the
+cohort figures and main production-resume acceptance remain separate checks.
 
 ## Method references
 

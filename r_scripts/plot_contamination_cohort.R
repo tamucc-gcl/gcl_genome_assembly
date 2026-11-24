@@ -7,6 +7,11 @@ d <- read.delim(args[1], check.names=FALSE, stringsAsFactors=FALSE)
 required <- c('cohort_assembly','sequence','length_bp','gc_fraction','mean_depth','plot_taxon')
 if(!all(required %in% names(d))) stop('Required GC/coverage evidence columns missing')
 dir.create(args[2],recursive=TRUE,showWarnings=FALSE)
+if(fcs && all(paste0('cat_',c('primary','repeat_expected','low_expected','repeat_other','inconclusive','taxonomy_flag','unreported'),'_bp') %in% names(d))) {
+    source(file.path(dirname(sub('^--file=','',grep('^--file=',commandArgs(),value=TRUE)[1])),'fcs_plot_common.R'))
+    fcs_pies(d,file.path(args[2],'cohort_gc_coverage'))
+    quit(save='no')
+}
 for(k in c('length_bp','gc_fraction','mean_depth')) d[[k]] <- as.numeric(d[[k]])
 if(any(d$length_bp<0,na.rm=TRUE) || any(d$mean_depth<0,na.rm=TRUE)) stop('Negative sequence length or depth')
 d$gc_pct <- 100*d$gc_fraction

@@ -14,6 +14,31 @@ spec.loader.exec_module(prepare)
 
 
 class RetainedInputs(unittest.TestCase):
+    def test_cohort_keeps_both_haplotypes_with_one_read_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);trace=root/'trace.tsv';db=root/'db';db.mkdir()
+            (db/'all.gxi').write_bytes(b'db')
+            rows=['hash\tname\tstatus\texit']
+            for index,assembly in enumerate(('sample_hap1','sample_hap2'),1):
+                for prefix,process in [(f'a{index}','FCS_GX_SCREEN'),(f'b{index}','FINALIZE_ASSEMBLY')]:
+                    path=root/'work'/prefix/'123456full';path.mkdir(parents=True)
+                    rows.append(f'{prefix}/123456\tPREFIX:{process} ({assembly})\tCACHED\t0')
+                    if process=='FCS_GX_SCREEN':
+                        (path/'input.fa').write_text('>c\nACGT\n')
+                        (path/'.command.sh').write_text('run_gx --fasta input.fa\n')
+                    else:(path/(assembly+'.fasta')).write_text('>chr\nACGT\n')
+            reads=root/'work/cc/123456full';reads.mkdir(parents=True)
+            (reads/'sample.fastq.gz').write_bytes(b'reads')
+            rows.append('cc/123456\tPREFIX:BAM_TO_FASTQ (sample)\tCACHED\t0')
+            trace.write_text('\n'.join(rows)+'\n')
+            args=argparse.Namespace(project=root,trace=trace,assembly='unused',taxid=373251,cohort=True,
+                source_fasta=None,final_fasta=None,hifi_fastq=None,gxdb_dir=db,out=root/'run')
+            prepare.configure(args)
+            params=json.loads((args.out/'params.json').read_text())
+            cohort=params['acceptance_assemblies']
+            self.assertEqual([x['assembly'] for x in cohort],['sample_hap1','sample_hap2'])
+            self.assertEqual(len({x['hifi_fastq'] for x in cohort}),1)
+
     def test_scratch_input_resolves_exact_retained_staging_source(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
