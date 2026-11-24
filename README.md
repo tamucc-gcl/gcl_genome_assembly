@@ -19,7 +19,7 @@ reporting integration. Execution acceptance does not imply biological completene
 - [Canonical completion checklist](planning_docs/remaining-pipeline-work-2026-10-15.md)
 - [Agreed optional extensions](planning_docs/post-core-optional-analyses-plan.md)
 - [PSMC inputs, controls, evidence and first Crest pilot](docs/psmc.md)
-- [Optional post-FCS review, staged/full searches and reviewed cleaning](docs/contamination.md)
+- [FCS-adaptor/GX screening, final audit, GC/coverage plots and optional full BlobTools searches](docs/contamination.md)
 - [R/ggplot2 plotting convention](planning_docs/r-plotting-conventions.md)
 
 ## Quick start

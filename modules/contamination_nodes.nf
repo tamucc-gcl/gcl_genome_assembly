@@ -49,6 +49,37 @@ process CONTAMINATION_MEGABLAST_REMAINING {
     """
 }
 
+process CONTAMINATION_MEGABLAST_POOL {
+    // The coordinator owns its Slurm children so unused pending requests can retire.
+    executor 'local'
+    conda 'conda-forge::python=3.11 bioconda::blast=2.16.0'
+    cpus 1
+    memory '1 GB'
+    scratch false
+    cache false
+    errorStrategy 'terminate'
+    time { params.contamination_megablast_time }
+    publishDir "${params.outdir}/pipeline/contamination_workers", mode: 'copy'
+    input:
+    path plan
+    path helper
+    path pool_helper
+    output:
+    path 'pool', emit: pool
+    path 'pool/worker_*.json', optional: true, emit: summaries
+    script:
+    def seconds = nextflow.util.Duration.of(params.contamination_megablast_time.toString()).toSeconds()
+    def walltime = "${(seconds / 3600) as int}:${((seconds % 3600) / 60) as int}:${seconds % 60}"
+    """
+    python3 ${nodeQuote(pool_helper)} --plan ${nodeQuote(plan)} --helper ${nodeQuote(helper)} --out pool \
+        --nodes ${params.contamination_megablast_nodes} --slots ${params.contamination_megablast_slots} \
+        --partition ${nodeQuote(params.contamination_megablast_partition)} \
+        --nodelist ${nodeQuote(params.contamination_megablast_nodelist)} \
+        --scratch ${nodeQuote(params.contamination_megablast_scratch)} --walltime ${nodeQuote(walltime)} \
+        --timeout ${seconds}
+    """
+}
+
 process CONTAMINATION_MEGABLAST_NODE {
     tag "node_worker_${worker}"
     conda 'conda-forge::python=3.11 bioconda::blast=2.16.0'

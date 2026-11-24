@@ -9,6 +9,9 @@
 #SBATCH --output=comparisons/contamination-staged-haplotype-01/slurm-%j.out
 
 set -euo pipefail
+printf "%s\n" "Heuristic sampling is retired. Use the standard FCS workflow; the full BlobTools branch remains optional. See gcl_genome_assembly/docs/contamination.md." >&2
+exit 2
+
 cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the project root}"
 module load nextflow/23.10.1 miniconda3
 

@@ -2,7 +2,7 @@ process FCS_CLEAN_GENOME {
   tag "${meta.id}"
   label 'fcs_clean'
 
-  publishDir "${params.outdir}/assembly/${stage}/decontam", mode: params.publish_dir_mode
+  publishDir "${params.outdir}/${stage}/decontam/fcs", mode: params.publish_dir_mode
 
   input:
     tuple val(meta), path(assembly_fa), path(action_report), val(stage)
@@ -13,7 +13,8 @@ process FCS_CLEAN_GENOME {
 
   stub:
   """
-  touch ${meta.id}.decontaminated.fasta ${meta.id}.contaminants.fasta
+  cp ${assembly_fa} ${meta.id}.decontaminated.fasta
+  touch ${meta.id}.contaminants.fasta
   """
 
   script:

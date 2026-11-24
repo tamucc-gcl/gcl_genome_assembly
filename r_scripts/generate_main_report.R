@@ -453,6 +453,12 @@ if(nrow(graph)>0) {
         md <- c(md,link('Complete pangenome report: biological results and technical validation',paste0('reports/main/',hub_name)),'')
     }
 }
+contamination <- artifacts |> filter(type=='contamination')
+if(nrow(contamination)>0) {
+    md <- c(md,'## Contamination evidence','',
+        'FCS actions and optional post-FCS BlobTools evidence are collected across assemblies. Each report identifies checks that were not run and links to the evidence and decision sheets.','')
+    for(i in seq_len(nrow(contamination))) md <- c(md,link(paste(contamination$id[[i]],'contamination report'),contamination$path[[i]]),'')
+}
 psmc <- artifacts |> filter(type=='psmc', basename(path)=='README.md')
 if(nrow(psmc)>0) {
     md <- c(md,'## Demographic history (PSMC)','',link('PSMC histories, input scope and callable-region evidence',psmc$path[[1]]),'')

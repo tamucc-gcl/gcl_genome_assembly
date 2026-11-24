@@ -5,7 +5,7 @@
     Repo location: workflows/decontaminate_assembly.nf
 
     - Screen assemblies for contaminants using NCBI FCS-GX
-    - Optional: adapter/vector removal with FCS-adaptor
+    - Adapter/vector screening and removal with FCS-adaptor whenever this stage runs
     - Clean genomes by removing identified contaminants
     - Per-haplotype throughout (each haplotype independent — critical for caching)
     - Reusable for contigs OR scaffolds via the `stage` string
@@ -22,7 +22,7 @@
 
 nextflow.enable.dsl=2
 
-include { FCS_ADAPTOR }      from '../modules/fcs_adaptor.nf'
+include { FCS_ADAPTOR; FCS_ADAPTOR_CLEAN } from '../modules/fcs_adaptor.nf'
 include { FCS_GX_SCREEN }    from '../modules/fcs_gx_screen.nf'
 include { FCS_CLEAN_GENOME } from '../modules/fcs_clean_genome.nf'
 
@@ -36,27 +36,28 @@ workflow DECONTAMINATE_ASSEMBLY {
 
     /*
     ========================================================================================
-        STEP 1: Optional Adapter/Vector Screening
+        STEP 1: Adapter/Vector Screening and Complete Cleanup
     ========================================================================================
     */
-    if (params.run_fcs_adaptor ?: false) {
-        assemblies
-            .map { meta, assembly_fasta ->
-                tuple(meta, assembly_fasta, params.decon_fcsadaptor_mode ?: 'euk', params.decon_container_engine ?: 'singularity', stage)
-            }
-            .set { ch_adaptor_input }
+    ch_versions = Channel.empty()
+    assemblies
+        .map { meta, assembly_fasta ->
+            tuple(meta, assembly_fasta, params.decon_fcsadaptor_mode ?: 'euk', params.decon_container_engine ?: 'singularity', stage)
+        }
+        .set { ch_adaptor_input }
 
-        FCS_ADAPTOR(ch_adaptor_input)
+    FCS_ADAPTOR(ch_adaptor_input)
+    ch_adaptor_report = FCS_ADAPTOR.out.action_report
+    ch_versions = ch_versions.mix(FCS_ADAPTOR.out.versions)
 
-        // Restore meta with cleaned assemblies (FCS_ADAPTOR passes meta through unchanged)
-        assemblies
-            .join(FCS_ADAPTOR.out.cleaned_fasta, by: 0)
-            .map { meta, orig_fa, cleaned_fa -> tuple(meta, cleaned_fa) }
-            .set { ch_cleaned_input }
-    } else {
-        // Skip adaptor step - use original assemblies
-        assemblies.set { ch_cleaned_input }
-    }
+    // Restore meta with cleaned assemblies (FCS_ADAPTOR passes meta through unchanged)
+    assemblies
+        .map { m,fa -> tuple(m.id.toString(),m,fa) }
+        .join(ch_adaptor_report.map { m,p -> tuple(m.id.toString(),p) },failOnDuplicate:true,failOnMismatch:true)
+        .map { id,m,fa,p -> tuple(m,fa,p,stage) }
+        .set { ch_adaptor_clean }
+    FCS_ADAPTOR_CLEAN(ch_adaptor_clean)
+    ch_cleaned_input = FCS_ADAPTOR_CLEAN.out.cleaned_fasta
 
     /*
     ========================================================================================
@@ -98,5 +99,7 @@ workflow DECONTAMINATE_ASSEMBLY {
     contaminants = FCS_CLEAN_GENOME.out.contaminants_fasta      // tuple(meta, fasta)
     action_report = FCS_GX_SCREEN.out.action_report             // tuple(meta, report)
     taxonomy_report = FCS_GX_SCREEN.out.taxonomy_report         // tuple(meta, report)
-    versions = FCS_GX_SCREEN.out.versions
+    screened_input = ch_cleaned_input
+    adaptor_report = ch_adaptor_report
+    versions = ch_versions.mix(FCS_GX_SCREEN.out.versions)
 }

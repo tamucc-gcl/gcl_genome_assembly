@@ -125,6 +125,8 @@ def run(rscript,root,case,actual=None):
             with decisions.open('w',newline='') as handle:
                 w=csv.writer(handle,delimiter='\t');w.writerow(columns);w.writerows(decision_rows)
             v.write_text(json.dumps(dict(exact_parent_reconstruction=True,selected_actions=[dict(zip(columns,row)) for row in decision_rows])))
+    if case=='reviewed':
+        artifacts.append(dict(type='contamination',id='contig',path='contig/decontam/contamination_report.md'))
     spec=dict(eligibility=str(eligibility),expected=expected,name_maps=list(map(str,names)),paintings=list(map(str,painting)),
         qc=str(qc),decisions=str(decisions),verifications=list(map(str,verifications)),artifacts=artifacts,versions=str(empty),
         run=dict(run_name='renderer_validation',nextflow='23.10.1',profile='local',top_scaffolds=20,chimera_enabled=case!='disabled'))
@@ -142,6 +144,9 @@ def run(rscript,root,case,actual=None):
     (out/'renderer.log').write_text(result.stdout)
     assert result.returncode==0,result.stdout
     text=(out/'assembly_report.md').read_text()
+    if case=='reviewed':
+        assert '[contig contamination report](contig/decontam/contamination_report.md)' in text
+        assert 'FCS actions and optional post-FCS BlobTools evidence' in text
     index=(out/'reports/main/evidence_index.md').read_text()
     for target in {item['path'] for item in artifacts}:
         assert index.count('../../'+target)==1, 'Artifact listed in multiple evidence categories: '+target

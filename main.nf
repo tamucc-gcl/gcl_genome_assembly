@@ -41,6 +41,9 @@ if (params.diamond_force || params.gxdb_force || params.getorganelle_force_downl
     error 'Database force-download flags are retired. Set the relevant database directory to a new snapshot directory instead.'
 }
 // Print pipeline header
+if (params.containsKey('run_fcs_adaptor')) {
+    error '--run_fcs_adaptor is retired. FCS-adaptor and GX are controlled together by the FCS stage settings.'
+}
 // helpers for the startup banner
 def onOff  = { it ? 'Enabled' : 'Disabled' }
 def stages = { c, s -> ([c ? 'Contigs' : null, s ? 'Scaffolds' : null].findAll().join(' + ')) ?: 'Disabled' }
@@ -58,7 +61,8 @@ log.info """\
      purge_dups       : ${onOff(params.run_purge_dups)}
      Pilon polish     : ${onOff(params.run_pilon)}
      Inspector        : ${stages(params.run_inspector_contigs, params.run_inspector_scaffolds)}
-     Decontamination  : ${stages(params.run_decon_contigs, params.run_decon_scaffolds)}${params.run_fcs_adaptor ? '  (+FCS-adaptor)' : ''}
+     Decontamination  : ${stages(params.run_decon_contigs, params.run_decon_scaffolds)} (GX + adaptor)
+     Final FCS audit  : ${onOff(params.run_decon_contigs && params.run_decon_final != false)}
      Scaffold round 2 : ${onOff(params.run_scaffold_round2)}
      Gap filling      : Enabled
      Hi-C contact maps: ${onOff((params.qc_mode ?: 'all_stages').toString().toLowerCase() != 'none' && params.run_final_contact_maps)}
@@ -102,6 +106,12 @@ include { INPUT_TAXONOMY } from './workflows/input_taxonomy.nf'
 include { ASSEMBLY_RUN_SUMMARY } from './modules/assembly_run_summary.nf'
 include { RUN_PROVENANCE } from './workflows/run_provenance.nf'
 include { REPORT_PAINTINGS; MAIN_REPORTING } from './workflows/main_report.nf'
+include { CONTAMINATION_REPORTING as CONTIG_CONTAMINATION_REPORTING } from './workflows/contamination_reporting.nf'
+include { CONTAMINATION_REPORTING as SCAFFOLD_CONTAMINATION_REPORTING } from './workflows/contamination_reporting.nf'
+include { CONTAMINATION_REPORTING as FINAL_CONTAMINATION_REPORTING } from './workflows/contamination_reporting.nf'
+include { FCS_DIAGNOSTICS as CONTIG_FCS_DIAGNOSTICS; FCS_DIAGNOSTICS as SCAFFOLD_FCS_DIAGNOSTICS;
+          FCS_DIAGNOSTICS as FINAL_FCS_DIAGNOSTICS } from './workflows/fcs_diagnostics.nf'
+include { FCS_FINAL_SCREEN } from './workflows/fcs_final_screen.nf'
 include { graphReportPath; rebaseReportMarkdown } from './functions/report_artifacts.nf'
 include { ASSEMBLY_ELIGIBILITY } from './modules/assembly_eligibility.nf'
 include { SHARED_REFERENCE } from './modules/shared_reference.nf'
@@ -207,23 +217,12 @@ workflow {
     def post_on     = ( params.run_post_assembly != false )
     def chimera_on  = params.chimera_break && params.chimera_break.toString() != 'false'
     def reviewContamination = params.run_contamination_evidence || params.contamination_review
+    def finalFcs = params.run_decon_contigs && params.run_decon_final != false
     if (reviewContamination && !params.run_decon_contigs)
         error 'Post-FCS contamination review requires --run_decon_contigs true'
     if (params.run_contamination_evidence) {
-        if (!(params.contamination_search_mode in ['staged', 'full']))
-            error 'Set --contamination_search_mode to staged or full'
-        if (params.contamination_search_mode == 'staged') {
-            if (!(params.contamination_sample_window_bp?.toString() ==~ /[1-9][0-9]*/) ||
-                !(params.contamination_sample_spacing_bp?.toString() ==~ /[1-9][0-9]*/) ||
-                !(params.contamination_sample_short_contig_bp?.toString() ==~ /[0-9]+/) ||
-                params.contamination_sample_window_bp.toLong() < 100 ||
-                params.contamination_sample_window_bp.toLong() > 5000000 ||
-                params.contamination_sample_spacing_bp.toLong() < params.contamination_sample_window_bp.toLong() ||
-                !(params.contamination_sample_gc_delta instanceof Number) ||
-                params.contamination_sample_gc_delta <= 0 || params.contamination_sample_gc_delta > 1 ||
-                !(params.contamination_sample_depth_fold instanceof Number) || params.contamination_sample_depth_fold <= 1)
-                error 'Invalid contamination sampling parameters: window 100..5000000, spacing >= window, short-contig >= 0, GC delta (0,1], depth fold > 1'
-        }
+        if (params.contamination_search_mode != 'full')
+            error 'Heuristic contamination sampling is retired. Optional BlobTools searches support full mode only.'
         def managedProtein = params.contamination_protein_db_root || params.contamination_protein_release ||
             params.contamination_protein_source || params.contamination_protein_sha256
         if (managedProtein && (params.contamination_protein_db_dir || !params.contamination_protein_db_root ||
@@ -483,12 +482,29 @@ workflow {
     ch_shortread_conditioned = CONTIG_REFINEMENT.out.shortread_conditioned
     ch_versions = ch_versions.mix(CONTIG_REFINEMENT.out.versions)
     postFcsMapping = Channel.empty()
+    postFcsReviews = Channel.empty()
+    postFcsDiagnostics = Channel.empty()
+    contigFcsMetrics = Channel.empty()
+    if(params.run_decon_contigs) {
+        CONTIG_FCS_DIAGNOSTICS(CONTIG_REFINEMENT.out.fcs_input,CONTIG_REFINEMENT.out.fcs_taxonomy,
+            ch_qc_reads,'contig',Channel.empty(),false)
+        contigFcsMetrics = CONTIG_FCS_DIAGNOSTICS.out.metrics
+        ch_versions = ch_versions.mix(CONTIG_FCS_DIAGNOSTICS.out.versions)
+    }
     if (reviewContamination) {
         CONTAMINATION_POST_FCS(ch_decontaminated_contigs, ch_qc_reads, ch_taxdump)
         ch_decontaminated_contigs = CONTAMINATION_POST_FCS.out.assembly
         postFcsMapping = CONTAMINATION_POST_FCS.out.mapping_qc
+        postFcsReviews = CONTAMINATION_POST_FCS.out.review
+        postFcsDiagnostics = CONTAMINATION_POST_FCS.out.diagnostics
         ch_versions = ch_versions.mix(CONTAMINATION_POST_FCS.out.versions)
     }
+    CONTIG_CONTAMINATION_REPORTING(CONTIG_REFINEMENT.out.assembly,
+        CONTIG_REFINEMENT.out.fcs_actions, CONTIG_REFINEMENT.out.fcs_taxonomy,
+        CONTIG_REFINEMENT.out.fcs_contaminants, postFcsReviews, postFcsDiagnostics,
+        'contig', params.run_decon_contigs, params.run_contamination_evidence,
+        contigFcsMetrics, CONTIG_REFINEMENT.out.adaptor_report)
+    ch_contamination_reports = CONTIG_CONTAMINATION_REPORTING.out.report
     if (params.stop_after_contig_review) {
         CONTIG_RUN_PROVENANCE(ch_versions)
         log.info '[INFO] Finishing at the contig stage'
@@ -503,6 +519,16 @@ workflow {
     ch_all_bam_metrics = HIC_SCAFFOLDING.out.bam_metrics
     ch_all_pairs_metrics = HIC_SCAFFOLDING.out.pairs_metrics
     ch_versions = ch_versions.mix(HIC_SCAFFOLDING.out.versions)
+    if (params.run_decon_scaffolds) {
+        SCAFFOLD_FCS_DIAGNOSTICS(HIC_SCAFFOLDING.out.fcs_input,HIC_SCAFFOLDING.out.fcs_taxonomy,
+            ch_qc_reads,'scaffold',Channel.empty(),false)
+        ch_versions = ch_versions.mix(SCAFFOLD_FCS_DIAGNOSTICS.out.versions)
+        SCAFFOLD_CONTAMINATION_REPORTING(HIC_SCAFFOLDING.out.decontaminated,
+            HIC_SCAFFOLDING.out.fcs_actions, HIC_SCAFFOLDING.out.fcs_taxonomy,
+            HIC_SCAFFOLDING.out.fcs_contaminants, Channel.empty(), Channel.empty(),
+            'scaffold', true, false,SCAFFOLD_FCS_DIAGNOSTICS.out.metrics,HIC_SCAFFOLDING.out.adaptor_report)
+        ch_contamination_reports = ch_contamination_reports.mix(SCAFFOLD_CONTAMINATION_REPORTING.out.report)
+    }
     // =========================================================================
     //  HARMONIZATION / CHIMERA ASSESSMENT - before sequence finishing
     // =========================================================================
@@ -551,9 +577,20 @@ workflow {
     ch_pre_finalize = ASSEMBLY_FINISHING.out.assemblies
 
     FINALIZE_ASSEMBLY(ch_pre_finalize)
+    ch_final_fcs_actions = Channel.empty()
+    ch_final_fcs_taxonomy = Channel.empty()
+    ch_final_adaptor = Channel.empty()
+    ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
+    if(finalFcs) {
+        FCS_FINAL_SCREEN(FINALIZE_ASSEMBLY.out.assembly,ch_gxdb_dir)
+        ch_final_fcs_actions = FCS_FINAL_SCREEN.out.action_report
+        ch_final_fcs_taxonomy = FCS_FINAL_SCREEN.out.taxonomy_report
+        ch_final_adaptor = FCS_FINAL_SCREEN.out.adaptor_report
+        ch_finalized_assembly = FCS_FINAL_SCREEN.out.assembly
+        ch_versions = ch_versions.mix(FCS_FINAL_SCREEN.out.versions)
+    }
     COLLECT_NAME_MAPS(FINALIZE_ASSEMBLY.out.name_map.map { meta, nm -> nm }.collect())
     ch_name_map_for_report = COLLECT_NAME_MAPS.out.map.ifEmpty(file('NO_NAMEMAP'))
-    ch_finalized_assembly = FINALIZE_ASSEMBLY.out.assembly
     // Side-channel identities do not enter expensive upstream task metadata.
     ch_expected_assemblies = ch_declared_assemblies.join(ch_sample_identity)
         .map { sample, meta, tax ->
@@ -561,7 +598,7 @@ workflow {
              assembler: meta.assembler, ploidy: meta.ploidy as int, n_hap: meta.n_hap as int,
              hic_phasing: meta.hic && params.hifiasm_use_hic && meta.n_hap == 2]
         }.collect(flat: false)
-    ch_finalized_with_fai = FINALIZE_ASSEMBLY.out.assembly.join(FINALIZE_ASSEMBLY.out.fai)
+    ch_finalized_with_fai = ch_finalized_assembly.join(FINALIZE_ASSEMBLY.out.fai)
     ASSEMBLY_ELIGIBILITY(ch_expected_assemblies,
         ch_finalized_with_fai.collect(flat: false).map { records ->
             def ordered = records.sort { a, b -> a[0].id <=> b[0].id }
@@ -770,6 +807,15 @@ workflow {
     else {
         log.info "[INFO] qc_mode = 'none': skipping QC_PHASE and everything derived from it"
     }
+    if(finalFcs) {
+        FINAL_FCS_DIAGNOSTICS(ch_finalized_assembly,ch_final_fcs_taxonomy,ch_qc_reads,'final',
+            qc_on ? QC_PHASE.out.final_mapping : Channel.empty(),qc_on)
+        ch_versions = ch_versions.mix(FINAL_FCS_DIAGNOSTICS.out.versions)
+        FINAL_CONTAMINATION_REPORTING(ch_finalized_assembly,ch_final_fcs_actions,ch_final_fcs_taxonomy,
+            Channel.empty(),Channel.empty(),Channel.empty(),'final',true,false,
+            FINAL_FCS_DIAGNOSTICS.out.metrics,ch_final_adaptor)
+        ch_contamination_reports = ch_contamination_reports.mix(FINAL_CONTAMINATION_REPORTING.out.report)
+    }
 
     /*
     ========================================================================================
@@ -882,7 +928,7 @@ workflow {
             ORGANELLE.out.circular_map,ORGANELLE.out.stats,ORGANELLE.out.annotation,ORGANELLE.out.recovery_status,
             ch_qc_plots,ch_teloclip_stats_for_report,ch_qc_report_html,ch_snail_final,
             ch_input.map { meta,reads -> [sample:meta.sample.toString(),hifi:meta.hifi==true,hic:meta.hic==true,shortread:meta.shortread==true] }.toList(),
-            CHIMERA.out.registry,RUN_PROVENANCE.out.files,PSMC_ANALYSIS.out.report)
+            CHIMERA.out.registry,RUN_PROVENANCE.out.files,PSMC_ANALYSIS.out.report,ch_contamination_reports)
     }
 }
 /*

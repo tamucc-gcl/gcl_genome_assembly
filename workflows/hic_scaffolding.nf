@@ -40,6 +40,11 @@ workflow HIC_SCAFFOLDING {
     ch_versions = Channel.empty()
     ch_scaffold_corrected = Channel.empty()
     ch_scaffold_decontaminated = Channel.empty()
+    ch_fcs_actions = Channel.empty()
+    ch_fcs_taxonomy = Channel.empty()
+    ch_fcs_contaminants = Channel.empty()
+    ch_fcs_input = Channel.empty()
+    ch_adaptor_report = Channel.empty()
 
 
     ch_individual_haplotypes = ch_decontaminated_contigs.filter { meta, fasta -> meta.assembler == 'hifiasm' }
@@ -190,6 +195,11 @@ workflow HIC_SCAFFOLDING {
 
         // Store final decontaminated scaffolds
         ch_scaffold_decontaminated = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.decontaminated
+        ch_fcs_actions = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.action_report
+        ch_fcs_taxonomy = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.taxonomy_report
+        ch_fcs_contaminants = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.contaminants
+        ch_fcs_input = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.screened_input
+        ch_adaptor_report = DECONTAMINATE_ASSEMBLY_SCAFFOLD.out.adaptor_report
         ch_final_scaffolds = ch_scaffold_decontaminated
     } else {
         // Use corrected or original scaffolds (depending on Inspector setting)
@@ -338,6 +348,11 @@ workflow HIC_SCAFFOLDING {
     contig_pairs = ch_contig_pairs
     corrected = ch_scaffold_corrected
     decontaminated = ch_scaffold_decontaminated
+    fcs_actions = ch_fcs_actions
+    fcs_taxonomy = ch_fcs_taxonomy
+    fcs_contaminants = ch_fcs_contaminants
+    fcs_input = ch_fcs_input
+    adaptor_report = ch_adaptor_report
     evidence_agp = ch_evidence_agp
     evidence_pairs = ch_evidence_pairs
     evidence_inputs = ch_evidence_inputs

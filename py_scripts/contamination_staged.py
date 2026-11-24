@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Auditable sampling and nucleotide routing for optional post-FCS review.
+"""Legacy experimental sampling for reproducing historical trials only; retired from production.
 
 Sampling nominates evidence, never removal. Coordinates remain on the exact
 post-FCS FASTA. Unselected windows remain explicitly unsearched in reports.

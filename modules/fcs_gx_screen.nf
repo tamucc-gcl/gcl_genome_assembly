@@ -2,7 +2,7 @@ process FCS_GX_SCREEN {
   tag "${meta.id}"
   label 'fcs'
 
-  publishDir "${params.outdir}/assembly/${stage}/decontam",
+  publishDir "${params.outdir}/${stage}/decontam/fcs",
     mode: params.publish_dir_mode,
     saveAs: { filename -> filename.startsWith('gx_out/') ? null : filename }
 
@@ -18,7 +18,15 @@ process FCS_GX_SCREEN {
   stub:
   """
   mkdir -p gx_out
-  touch ${meta.id}.fcs_gx_report.txt ${meta.id}.taxonomy.rpt gx_out/fcs_gx_stdout.log
+  printf '#seq_id\\tstart_pos\\tend_pos\\tseq_len\\taction\\tdiv\\tagg_cont_cov\\ttop_tax_name\\n' > ${meta.id}.fcs_gx_report.txt
+  python3 - <<'PY' > ${meta.id}.taxonomy.rpt
+from pathlib import Path
+print('#seq-id\\tseq-len\\tresult\\tdiv')
+for block in Path('${assembly_fa}').read_text().split('>')[1:]:
+    lines=block.splitlines()
+    print(lines[0].split()[0],len(''.join(lines[1:])), 'primary-div','test:host',sep='\\t')
+PY
+  touch gx_out/fcs_gx_stdout.log
   touch versions.tsv
   """
 

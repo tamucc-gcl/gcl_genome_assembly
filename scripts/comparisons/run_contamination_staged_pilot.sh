@@ -10,6 +10,9 @@
 # Submit from the Crest project root after creating the output directory.
 # Only whole contigs totalling <=30 Mb are searched. No new DB download/build.
 set -euo pipefail
+printf "%s\n" "Heuristic sampling is retired. Use the standard FCS workflow; the full BlobTools branch remains optional. See gcl_genome_assembly/docs/contamination.md." >&2
+exit 2
+
 cd "${SLURM_SUBMIT_DIR:?Submit this script with sbatch from the project root}"
 module load nextflow/23.10.1 miniconda3
 

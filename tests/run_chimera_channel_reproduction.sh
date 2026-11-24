@@ -145,6 +145,22 @@ EOF
     script="$runtime/reproduction.nf"
     extra=(-c "$runtime/scaffolding.config")
     cd "$runtime/scaffolding-launch"
+elif [[ "${1:-}" == fcs_workflow_checks.nf ]]; then
+    script="$repo/.fcs-workflow-check.nf"
+    cp reproduction.nf "$script"
+    trap 'rm -f "$repo/.fcs-workflow-check.nf"' EXIT
+    cat > "$runtime/fcs-check.config" <<'EOF'
+conda.enabled=false
+singularity.enabled=false
+docker.enabled=false
+params.publish_dir_mode='copy'
+process { withName: '.*' { cpus=1; memory='2 GB'; scratch=false; errorStrategy='terminate' } }
+EOF
+    extra=(-stub-run -c "$runtime/fcs-check.config")
+elif [[ "${1:-}" == contamination_reporting_checks.nf ]]; then
+    script="$repo/.contamination-report-check.nf"
+    cp reproduction.nf "$script"
+    trap 'rm -f "$repo/.contamination-report-check.nf"' EXIT
 elif [[ "${1:-}" == main_report_checks.nf || "${1:-}" == main_compile_checks.nf ]]; then
     python3 "$repo/tests/setup_main_report_checks.py" "$runtime" "${2:-enabled}"
     cp reproduction.nf "$repo/.main-report-checks.nf"

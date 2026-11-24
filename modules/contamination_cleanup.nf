@@ -20,7 +20,7 @@ process APPLY_CONTAMINATION_REVIEW {
     conda 'conda-forge::python=3.11'
     memory '6 GB'
     time '4h'
-    publishDir "${params.outdir}/assembly/contamination/${meta.id}/cleanup", mode: 'copy', pattern: 'audit'
+    publishDir "${params.outdir}/contig/decontam/blobtools/${meta.id}/cleanup", mode: 'copy', pattern: 'audit'
 
     input:
     tuple val(meta), path(fasta)

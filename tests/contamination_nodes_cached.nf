@@ -6,6 +6,8 @@ params.contamination_megablast_slots = 1
 params.contamination_megablast_threads = 1
 params.contamination_megablast_scratch = '/tmp'
 params.contamination_megablast_time = '1h'
+params.contamination_megablast_partition = 'normal'
+params.contamination_megablast_nodelist = ''
 params.outdir = '/tmp/contamination-nodes-cached/results'
 include { CONTAMINATION_MEGABLAST_NODES } from '__REPO__/workflows/contamination_megablast_nodes.nf'
 

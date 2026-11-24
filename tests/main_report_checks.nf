@@ -27,7 +27,7 @@ workflow {
         Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),
         annotations,Channel.empty(),Channel.empty(),Channel.empty(),Channel.empty(),snails,
         Channel.value(data.assemblies.collect { [sample:it.sample,hifi:false,hic:false,shortread:false] }.unique { it.sample }),Channel.empty(),
-        Channel.value([file("${root}/software_versions.tsv"),file("${root}/run_provenance.json")]),psmc)
+        Channel.value([file("${root}/software_versions.tsv"),file("${root}/run_provenance.json")]),psmc,Channel.empty())
     MAIN_REPORTING.out.report.view { report ->
         assert report.text.contains('| sample | Finalized |')
         assert report.text.contains('## Chromosome structure')==(mode!='disabled')

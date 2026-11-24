@@ -38,7 +38,7 @@ class CohortTests(fixtures.PreflightTests):
         expected = json.loads((run / 'expected.json').read_text())
         results = run / 'results'
         for assembly, source in expected.items():
-            directory = results / 'assembly/contamination' / assembly
+            directory = results / 'contig/decontam/blobtools' / assembly
             review = directory / 'review'
             review.mkdir(parents=True)
             metadata = dict(source, assembly=assembly, search_mode='staged', coverage='provided-bam',
@@ -54,9 +54,19 @@ class CohortTests(fixtures.PreflightTests):
                 path.write_bytes(b'figure transport fixture')
         (results / 'pipeline').mkdir()
         (results / 'pipeline/contamination_megablast_completion.json').write_text(json.dumps(dict(missing=[], skipped_workers=[])))
+        cohort = results / 'contig/decontam/report'
+        cohort.mkdir()
+        (cohort / 'report.json').write_text(json.dumps(dict(fcs_enabled=True, blobtools_enabled=True,
+            assemblies=[dict(assembly=name) for name in expected])))
+        for name in ('cohort_gc_coverage.png', 'cohort_gc_coverage.pdf', 'cohort_gc_coverage_scope.tsv'):
+            (cohort / name).write_text('figure transport fixture')
+        fcs = results / 'contig/decontam/fcs'
+        fcs.mkdir()
+        for assembly in expected:
+            (fcs / f'{assembly}.fcs_gx_report.txt').write_text('#seq_id\tstart_pos\tend_pos\taction\n')
         verify(run / 'expected.json', results, run / 'acceptance.json')
         self.assertEqual(json.loads((run / 'acceptance.json').read_text())['status'], 'PASS')
-        (results / 'assembly/contamination/fixture_hap1/review/locus_read_boundaries.tsv').write_text('action_id\tedge\nA1\tLeft\n')
+        (results / 'contig/decontam/blobtools/fixture_hap1/review/locus_read_boundaries.tsv').write_text('action_id\tedge\nA1\tLeft\n')
         with self.assertRaisesRegex(ValueError, 'Missing boundary'):
             verify(run / 'expected.json', results, run / 'invalid.json')
 

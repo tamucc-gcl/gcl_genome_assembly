@@ -9,6 +9,9 @@
 #SBATCH --output=comparisons/contamination-staged-cohort-01/slurm-%j.out
 
 set -euo pipefail
+printf "%s\n" "Heuristic sampling is retired. Use the standard FCS workflow; the full BlobTools branch remains optional. See gcl_genome_assembly/docs/contamination.md." >&2
+exit 2
+
 cd "${SLURM_SUBMIT_DIR:?Submit with sbatch from the project root}"
 module load nextflow/23.10.1 miniconda3
 project="$PWD"
@@ -34,21 +37,8 @@ python3 "$helper" configure --project "$project" \
     --preflight "$project/comparisons/contamination-staged-preflight-01" --out "$run"
 
 cat > "$run/workers.config" <<'CONFIG'
-process {
-    withName: '.*CONTAMINATION_MEGABLAST_COLLECT' {
-        clusterOptions = {
-            def controller = System.getenv('SLURMD_NODENAME') ?: System.getenv('HOSTNAME')
-            if (!controller) throw new IllegalStateException('Controller hostname unavailable')
-            "--nodelist=${controller}"
-        }
-    }
-    withName: '.*CONTAMINATION_MEGABLAST_NODE' {
-        clusterOptions = {
-            def hosts = ['crest-c018', 'crest-c021', 'crest-c028', 'crest-c029']
-            "--exclusive --mem=0 --nodelist=${hosts[(worker as int) - 1]}"
-        }
-    }
-}
+// The pool owns bounded exclusive requests; params.json supplies the eligible node set.
+// No worker is pinned to one particular host and collectors start after searches finish.
 CONFIG
 
 cd "$launch"
@@ -64,7 +54,7 @@ if [[ -d "$run/recovery-before-resume" ]]; then
 fi
 tar -czf "$run.review.tar.gz" --exclude='*.bam' --exclude='*.bai' \
     --exclude='*.fasta' --exclude='*.fasta.gz' --exclude='*.fa' --exclude='blobdir' \
-    -C "$run" results/assembly/contamination results/pipeline \
+    -C "$run" results/contig/decontam results/pipeline \
     params.json expected.json workers.config acceptance.json \
     "nextflow-${SLURM_JOB_ID}.log" "slurm-${SLURM_JOB_ID}.out" "${recovery[@]}"
 printf '\nReview archive: %s\n' "$run.review.tar.gz"

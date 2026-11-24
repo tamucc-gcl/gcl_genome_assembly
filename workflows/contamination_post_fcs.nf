@@ -19,6 +19,7 @@ workflow CONTAMINATION_POST_FCS {
     def mappingVersions = Channel.empty()
     def coverage = assemblies.map { meta, fasta -> tuple(meta.id, [], [], []) }
     def reviews = Channel.empty()
+    def diagnostics = Channel.empty()
     if (params.run_contamination_evidence) {
         def taxonomy = taxdump.collect().map { dirs -> dirs[0].toString() }
         def protein = params.contamination_protein_db_dir
@@ -66,6 +67,7 @@ workflow CONTAMINATION_POST_FCS {
              followup: 100000, rank: params.contamination_host_rank, nested: true],
             base, ntManifest)
         reviews = CONTAMINATION_SEARCH.out.review
+        diagnostics = CONTAMINATION_SEARCH.out.diagnostics
     }
 
     def cleaned = assemblies
@@ -89,6 +91,7 @@ workflow CONTAMINATION_POST_FCS {
     emit:
     assembly = cleaned
     review = reviews
+    diagnostics = diagnostics
     mapping_qc = mapping
     versions = mappingVersions
 }

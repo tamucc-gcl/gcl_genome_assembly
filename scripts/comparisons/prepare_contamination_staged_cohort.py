@@ -84,6 +84,8 @@ def configure(project, preflight, out, expected_count=10):
                   contamination_nucleotide_db=str(nt), contamination_targeted_blastn=False,
                   contamination_blastx_max_forks=56, contamination_megablast_execution='nodes',
                   contamination_megablast_nodes=4, contamination_megablast_slots=8,
+                  contamination_megablast_partition='normal',
+                  contamination_megablast_nodelist='crest-c018,crest-c021,crest-c028,crest-c029',
                   contamination_megablast_threads=8, contamination_megablast_time='48h',
                   contamination_megablast_scratch='/scratch')
     for key, value in metadata['settings'].items():
@@ -99,7 +101,7 @@ def configure(project, preflight, out, expected_count=10):
 
 def verify(expected_path, results, out):
     expected = json.loads(expected_path.read_text())
-    directories = {path.name: path for path in (results / 'assembly/contamination').iterdir()
+    directories = {path.name: path for path in (results / 'contig/decontam/blobtools').iterdir()
                    if path.is_dir() and (path / 'review/evidence.json').is_file()}
     if directories.keys() != expected.keys():
         raise ValueError('Report assembly set differs from expected cohort')
@@ -141,6 +143,18 @@ def verify(expected_path, results, out):
     completion = json.loads((results / 'pipeline/contamination_megablast_completion.json').read_text())
     if completion['missing']:
         raise ValueError('Nucleotide chunks are incomplete')
+    cohort = json.loads((results / 'contig/decontam/report/report.json').read_text())
+    if {row['assembly'] for row in cohort['assemblies']} != set(expected):
+        raise ValueError('Combined contamination report membership differs')
+    if not cohort['fcs_enabled'] or not cohort['blobtools_enabled']:
+        raise ValueError('Combined report must include FCS and BlobTools')
+    for name in ('cohort_gc_coverage.png', 'cohort_gc_coverage.pdf', 'cohort_gc_coverage_scope.tsv'):
+        figure = results / 'contig/decontam/report' / name
+        if not figure.is_file() or not figure.stat().st_size:
+            raise ValueError('Combined GC/coverage output missing: ' + name)
+    for assembly in expected:
+        if not (results / 'contig/decontam/fcs' / f'{assembly}.fcs_gx_report.txt').is_file():
+            raise ValueError('Published FCS action report missing: ' + assembly)
     out.write_text(json.dumps(dict(status='PASS', assemblies=summaries,
                                   skipped_nucleotide_workers=completion['skipped_workers'],
                                   note='Filtered BAM coverage may select different windows than the table-only preflight.'), indent=2) + '\n')

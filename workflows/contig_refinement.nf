@@ -22,6 +22,11 @@ workflow CONTIG_REFINEMENT {
     ch_versions = Channel.empty()
     ch_corrected = Channel.empty()
     ch_decontaminated = Channel.empty()
+    ch_fcs_actions = Channel.empty()
+    ch_fcs_taxonomy = Channel.empty()
+    ch_fcs_contaminants = Channel.empty()
+    ch_fcs_input = Channel.empty()
+    ch_adaptor_report = Channel.empty()
 
     ch_contigs
         .map { meta, fasta -> tuple(meta.sample, meta, fasta) }
@@ -145,6 +150,11 @@ workflow CONTIG_REFINEMENT {
     if (params.run_decon_contigs) {
         DECONTAMINATE_ASSEMBLY_CONTIG(ch_assemblies_for_decontam, ch_gxdb_dir, "contig")
         ch_decontaminated = DECONTAMINATE_ASSEMBLY_CONTIG.out.decontaminated
+        ch_fcs_actions = DECONTAMINATE_ASSEMBLY_CONTIG.out.action_report
+        ch_fcs_taxonomy = DECONTAMINATE_ASSEMBLY_CONTIG.out.taxonomy_report
+        ch_fcs_contaminants = DECONTAMINATE_ASSEMBLY_CONTIG.out.contaminants
+        ch_fcs_input = DECONTAMINATE_ASSEMBLY_CONTIG.out.screened_input
+        ch_adaptor_report = DECONTAMINATE_ASSEMBLY_CONTIG.out.adaptor_report
         ch_decontaminated_contigs = ch_decontaminated
         ch_versions = ch_versions.mix(DECONTAMINATE_ASSEMBLY_CONTIG.out.versions)
     } else {
@@ -158,5 +168,10 @@ workflow CONTIG_REFINEMENT {
     shortread_conditioned = ch_shortread_conditioned
     corrected = ch_corrected
     decontaminated = ch_decontaminated
+    fcs_actions = ch_fcs_actions
+    fcs_taxonomy = ch_fcs_taxonomy
+    fcs_contaminants = ch_fcs_contaminants
+    fcs_input = ch_fcs_input
+    adaptor_report = ch_adaptor_report
     versions = ch_versions
 }

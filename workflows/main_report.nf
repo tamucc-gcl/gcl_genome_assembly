@@ -54,6 +54,7 @@ workflow MAIN_REPORTING {
     chimera_registry
     versions
     psmc_reports
+    contamination_reports
     main:
     def artifact={ type,id,path -> [type:type,id:id.toString(),path:path.toString()] }
     def annotation_helper=file("${projectDir}/py_scripts/annotation_counts.py",checkIfExists:true)
@@ -71,6 +72,8 @@ workflow MAIN_REPORTING {
     }).mix(psmc_reports.map { p ->
         [type:p.name=='summary.tsv' ? 'psmc_summary' : 'psmc',id:'run',
          path:"post_assembly/psmc/${p.name}".toString(),content:p.name=='summary.tsv' ? p.text : '']
+    }).mix(contamination_reports.map { stage, md ->
+        artifact('contamination',stage,"${stage}/decontam/contamination_report.md")
     }).mix(detailed_report.map { md -> artifact('assembly_details','run',md.name) })
       .mix(dotplots.map { a,b,p -> artifact('dotplot',"${a} / ${b}","pairwise_alignments/${p.name}") })
       .mix(ribbons.map { a,b,p -> artifact('ribbon',"${a} / ${b}","pairwise_alignments/${p.name}") })

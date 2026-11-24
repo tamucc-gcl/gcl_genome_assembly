@@ -191,5 +191,6 @@ workflow QC_PHASE {
     report_html = ASSEMBLY_REPORT.out.report_html    // assembly_qc_report.html
     final_busco = ch_final_busco                     // per-haplotype (meta, results) — for SNAIL
     final_busco_table = ch_final_busco_table    // per-haplotype (meta, full_table.tsv) — for SNAIL
+    final_mapping = ASSEMBLY_QC_FINAL.out.mapping
     versions    = ASSEMBLY_QC_FINAL.out.versions
 }
