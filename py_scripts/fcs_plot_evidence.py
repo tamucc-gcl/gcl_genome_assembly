@@ -24,14 +24,23 @@ def read_taxonomy(path):
 
 
 def parent_sequence(identifier, lengths):
-    if identifier in lengths:
-        return identifier
-    match = re.fullmatch(r'(.+?)(?:~~|~)(\d+)\.\.(\d+)', identifier)
-    if match and match[1] in lengths:
-        if not 1 <= int(match[2]) <= int(match[3]) <= lengths[match[1]]:
+    # GX can report a segment of a segment (e.g. scaffold~a..b~~c..d).
+    # Stop at the nearest exact FASTA name: coordinate-looking text can be a
+    # literal part of that name. Then validate every suffix in its parent's frame.
+    name=identifier
+    segments=[]
+    while name not in lengths:
+        match = re.fullmatch(r'(.+?)(?:~~|~)(\d+)\.\.(\d+)', name)
+        if not match:
+            raise ValueError('FCS sequence absent from exact screened FASTA: ' + identifier)
+        segments.append((int(match[2]),int(match[3])))
+        name=match[1]
+    parent_length=lengths[name]
+    for lo,hi in reversed(segments):
+        if not 1 <= lo <= hi <= parent_length:
             raise ValueError('FCS segment coordinates outside source: ' + identifier)
-        return match[1]
-    raise ValueError('FCS sequence absent from exact screened FASTA: ' + identifier)
+        parent_length=hi-lo+1
+    return name
 
 
 def classification(rows):
