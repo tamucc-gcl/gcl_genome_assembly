@@ -27,7 +27,9 @@ def check(source,report,clean,rescreen,out):
     expected_ids={f'seq_{i:05d}' for i in range(1,11)}|{'seq_00018'}
     if len(actions)!=11 or {x['accession'] for x in actions}!=expected_ids:
         raise ValueError('NCBI fixture did not produce the 11 published adaptor calls')
-    expected=dict(original)
+    # gx clean-genome emits uppercase sequence, including otherwise unchanged
+    # records. Verify exact bases and trim coordinates after that normalization.
+    expected={name:sequence.upper() for name,sequence in original.items()}
     for row in actions:
         name=row['accession'];sequence=expected.pop(name)
         if name=='seq_00018':
@@ -41,12 +43,18 @@ def check(source,report,clean,rescreen,out):
         if lo>1:expected[f'{name}~1..{lo-1}']=sequence[:lo-1]
         if hi<len(sequence):expected[f'{name}~{hi+1}..{len(sequence)}']=sequence[hi:]
     if actual!=expected:
-        raise ValueError('Cleaned records differ from exact terminal trim/internal split expectations')
+        missing=sorted(expected.keys()-actual.keys())
+        extra=sorted(actual.keys()-expected.keys())
+        different=sorted(name for name in expected.keys()&actual.keys()
+                         if expected[name]!=actual[name])
+        raise ValueError('Cleaned records differ from exact terminal trim/internal split expectations: '
+                         f'missing={missing}; extra={extra}; sequence_mismatches={different}')
     if adaptor_rows(rescreen):
         raise ValueError('Adaptor findings remain after cleaning the fixture')
     Path(out).write_text(json.dumps(dict(status='PASS',source_url=SOURCE,
         source_sha256=hashlib.sha256(Path(source).read_bytes()).hexdigest(),
-        input_sequences=len(original),output_sequences=len(actual),terminal_trims=5,internal_splits=5,
+        input_sequences=len(original),output_sequences=len(actual),sequence_case='uppercase',
+        terminal_trims=5,internal_splits=5,
         excluded_sequences=1,removed_bp=sum(map(len,original.values()))-sum(map(len,actual.values())),
         repeat_adaptor_actions=0),indent=2)+'\n')
 

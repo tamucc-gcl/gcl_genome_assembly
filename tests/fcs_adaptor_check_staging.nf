@@ -8,7 +8,8 @@ workflow {
     for(i in 1..10) {
         def id=String.format('seq_%05d',i)
         def sequence=i<=5 ? 'A'*1000 : 'ACGT'*25100
-        original.add('>'+id+'\n'+sequence+'\n')
+        // Real GX uppercases mixed/lowercase source bases during cleanup.
+        original.add('>'+id+'\n'+sequence.toLowerCase()+'\n')
         if(i<=5) {
             actions.add("${id}\t${sequence.size()}\tACTION_TRIM\t1..58\tfixture")
             cleaned.add('>'+id+'~59..'+sequence.size()+'\n'+sequence.substring(58)+'\n')
