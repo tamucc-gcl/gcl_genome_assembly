@@ -168,6 +168,11 @@ def verify(args):
             for suffix in ('gc_coverage','composition','diagnostics'):
                 if not (base/'report'/f'assembly_{index:04d}_{suffix}.png').is_file():raise ValueError('Missing assembly detail figure')
     if not (args.out/'results/overview/decontam/cohort_fcs_composition.png').is_file():raise ValueError('Missing combined stage overview')
+    overview=json.loads((args.out/'results/overview/decontam/overview_scope.json').read_text())
+    expected_counts={stage:sum(x['contigs'] for x in records.values()) for stage,records in summary.items()}
+    if (set(overview['assemblies'])!=expected or set(overview['stages'])!={'contig','final'}
+            or overview['records_by_stage']!=expected_counts):
+        raise ValueError('Combined overview does not contain the complete accepted stage cohorts')
     result=dict(status='PASS',assemblies=sorted(expected),final_fastas_unchanged=True,stages=summary,
                 scope='Integration and complete category partitions; review FCS findings and rendered figures separately')
     (args.out/'acceptance.json').write_text(json.dumps(result,indent=2)+'\n')

@@ -18,7 +18,15 @@ workflow {
     REPORT(AUDIT.out.assembly,AUDIT.out.action_report,AUDIT.out.taxonomy_report,
         Channel.empty(),Channel.empty(),Channel.empty(),'final',true,false,PLOTS.out.metrics,AUDIT.out.adaptor_report)
     OVERVIEW(REPORT.out.tables)
-    OVERVIEW.out.report.view { stage,p -> assert stage=='overview'; assert p.text.contains('FCS evidence'); 'PASS combined overview consumes current-run stage tables' }
+    OVERVIEW.out.report.view { stage,p ->
+        assert stage=='overview'
+        assert p.text.contains('cohort_fcs_composition.png')
+        assert p.parent.resolve('cohort_fcs_composition.png').size()>0
+        assert p.parent.resolve('cohort_fcs_composition.pdf').size()>0
+        def scope=new groovy.json.JsonSlurper().parse(p.parent.resolve('overview_scope.json'))
+        assert scope.assemblies.sort()==['A','B'] && scope.records==4
+        'PASS combined overview reads staged reports and renders the actual figure'
+    }
     AUDIT.out.assembly.toList().view { rows ->
         assert rows.size()==2
         assert rows.every { it[1].text==fa.text }

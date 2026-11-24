@@ -12,8 +12,10 @@ process FCS_EVIDENCE_OVERVIEW {
     tuple val('overview'),path('overview/contamination_report.md'),emit:report
     path 'overview/*',emit:artifacts
     script:
+    def q={ p -> "'"+p.toString().replace("'","'\"'\"'")+"'" }
+    def inputs=(directories instanceof Collection ? directories : [directories]).collect { q(it) }.join(' ')
     """
-    python3 fcs_overview.py
+    python3 fcs_overview.py ${inputs}
     if [ -f overview/cohort_fcs_sequence_evidence.tsv ]; then
         Rscript plot_fcs_overview.R overview/cohort_fcs_sequence_evidence.tsv overview/cohort_fcs_composition
     fi

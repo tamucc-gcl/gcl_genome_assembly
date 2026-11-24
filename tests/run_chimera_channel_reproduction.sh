@@ -174,6 +174,7 @@ elif [[ "${1:-}" == fcs_workflow_checks.nf ]]; then
     cp reproduction.nf "$script"
     trap 'rm -f "$repo/.fcs-workflow-check.nf"' EXIT
     cat > "$runtime/fcs-check.config" <<'EOF'
+params.outdir='/tmp/fcs-workflow-check/results'
 conda.enabled=false
 singularity.enabled=false
 docker.enabled=false
@@ -336,4 +337,10 @@ if [[ "${1:-}" == core_contract_checks.nf && "${3:-}" == resume_build ]]; then
     done
     cp core-resume.log "$repo/comparisons/core-graph-resume-check.log"
     echo 'PASS: completed graph construction uses ordinary Nextflow resume'
+fi
+
+if [[ "${1:-}" == fcs_workflow_checks.nf ]]; then
+    test -s /tmp/fcs-workflow-check/results/overview/decontam/cohort_fcs_composition.png
+    test -s /tmp/fcs-workflow-check/results/overview/decontam/cohort_fcs_composition.pdf
+    echo 'PASS combined FCS figures published at the expected overview paths'
 fi
