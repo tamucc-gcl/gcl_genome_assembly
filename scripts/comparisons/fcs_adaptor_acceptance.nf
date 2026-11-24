@@ -20,10 +20,10 @@ process CHECK {
     memory '1 GB'
     publishDir params.outdir,mode:'copy'
     input:
-    path source
-    path report
-    path clean
-    path rescreen
+    path source, stageAs: 'source/*'
+    path report, stageAs: 'initial/*'
+    path clean, stageAs: 'cleaned/*'
+    path rescreen, stageAs: 'rescreen/*'
     path helpers
     output:
     path 'acceptance.json'

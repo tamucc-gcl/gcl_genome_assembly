@@ -145,6 +145,17 @@ EOF
     script="$runtime/reproduction.nf"
     extra=(-c "$runtime/scaffolding.config")
     cd "$runtime/scaffolding-launch"
+elif [[ "${1:-}" == fcs_adaptor_check_staging.nf ]]; then
+    script="$repo/.fcs-adaptor-check-staging.nf"
+    cp reproduction.nf "$script"
+    trap 'rm -f "$repo/.fcs-adaptor-check-staging.nf"' EXIT
+    cat > "$runtime/fcs-staging.config" <<'EOF'
+conda.enabled=false
+singularity.enabled=false
+docker.enabled=false
+process { executor='local'; withName: '.*' { cpus=1; memory='1 GB'; scratch=false; errorStrategy='terminate' } }
+EOF
+    extra=(-c "$runtime/fcs-staging.config")
 elif [[ "${1:-}" == fcs_adaptor_host_checks.nf ]]; then
     python3 "$repo/tests/setup_fcs_adaptor_host_checks.py"
     script="$repo/.fcs-adaptor-host-check.nf"
