@@ -1,4 +1,4 @@
-include { CONTAMINATION_MEGABLAST_PLAN; CONTAMINATION_MEGABLAST_NODE;
+include { CONTAMINATION_MEGABLAST_PLAN; CONTAMINATION_MEGABLAST_REMAINING; CONTAMINATION_MEGABLAST_NODE;
           CONTAMINATION_MEGABLAST_COLLECT; CONTAMINATION_MEGABLAST_CHECK } from '../modules/contamination_nodes.nf'
 
 workflow CONTAMINATION_MEGABLAST_NODES {
@@ -14,7 +14,12 @@ workflow CONTAMINATION_MEGABLAST_NODES {
         allQueries.map { rows -> rows.collect { id, queries -> [assembly: id, queries: queries.toString()] } },
         allQueries.map { rows -> rows.collect { it[1] } }, database,
         workflow.workDir.resolve('contamination_megablast').toString(), helper)
-    CONTAMINATION_MEGABLAST_NODE(Channel.fromList((1..(params.contamination_megablast_nodes as int)).toList()),
+    CONTAMINATION_MEGABLAST_REMAINING(CONTAMINATION_MEGABLAST_PLAN.out, helper)
+    def requestedWorkers = CONTAMINATION_MEGABLAST_REMAINING.out.flatMap { status ->
+        def remaining = new groovy.json.JsonSlurper().parseText(status.text)
+        remaining.remaining ? (1..(params.contamination_megablast_nodes as int)).toList() : []
+    }
+    CONTAMINATION_MEGABLAST_NODE(requestedWorkers,
         CONTAMINATION_MEGABLAST_PLAN.out, helper)
     CONTAMINATION_MEGABLAST_COLLECT(prepared.map { id, metrics, queries -> id },
         CONTAMINATION_MEGABLAST_PLAN.out, helper)

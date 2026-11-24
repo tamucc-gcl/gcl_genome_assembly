@@ -58,9 +58,13 @@ nextflow -log "$run/nextflow-${SLURM_JOB_ID}.log" -c "$pipeline/nextflow.config"
     --outdir "$run/results"
 
 python3 "$helper" verify --expected "$run/expected.json" --results "$run/results" --out "$run/acceptance.json"
+recovery=()
+if [[ -d "$run/recovery-before-resume" ]]; then
+    recovery=(recovery-before-resume)
+fi
 tar -czf "$run.review.tar.gz" --exclude='*.bam' --exclude='*.bai' \
     --exclude='*.fasta' --exclude='*.fasta.gz' --exclude='*.fa' --exclude='blobdir' \
     -C "$run" results/assembly/contamination results/pipeline \
     params.json expected.json workers.config acceptance.json \
-    "nextflow-${SLURM_JOB_ID}.log" "slurm-${SLURM_JOB_ID}.out"
+    "nextflow-${SLURM_JOB_ID}.log" "slurm-${SLURM_JOB_ID}.out" "${recovery[@]}"
 printf '\nReview archive: %s\n' "$run.review.tar.gz"

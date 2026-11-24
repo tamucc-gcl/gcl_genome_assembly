@@ -29,6 +29,26 @@ SPECIFICATIONS
     """
 }
 
+process CONTAMINATION_MEGABLAST_REMAINING {
+    conda 'conda-forge::python=3.11'
+    cpus 1
+    memory '1 GB'
+    time '1h'
+    cache false
+
+    input:
+    path plan
+    path helper
+
+    output:
+    path 'remaining.json'
+
+    script:
+    """
+    python3 contamination_workers.py remaining --plan ${nodeQuote(plan)} --out remaining.json
+    """
+}
+
 process CONTAMINATION_MEGABLAST_NODE {
     tag "node_worker_${worker}"
     conda 'conda-forge::python=3.11 bioconda::blast=2.16.0'

@@ -230,6 +230,24 @@ figures, provenance, worker measurements and pipeline traces, excluding sequence
 read-alignment and BlobToolKit binary dataset files. Repeating the submission
 resumes the same native assembly session and durable nucleotide chunk cache.
 
+Before requesting exclusive nucleotide nodes, an uncached lightweight check now
+verifies every durable chunk record and hit checksum. A complete cache launches
+zero workers and still runs the normal final completeness check. Missing or corrupt
+chunks remain pending work. This avoids reserving nodes solely to discover there
+is nothing to search on a resumed run.
+
+For a cohort already waiting on an unused pinned worker after all assembly
+collectors and reports completed, sync this fix before recovery. From the project
+root, `scripts/comparisons/recover_contamination_staged_cohort.sh` accepts the
+controller job ID, pending worker job ID and the completed PLAN task's `plan.json`.
+The pending worker's inputs may not yet be staged; use the PLAN output, not its
+worker directory. The recovery script loads the Python environment, checks job
+ownership/names, verifies all chunk checksums and refuses to proceed if work
+remains. It preserves completed-worker measurements and original logs, stops only
+the identified controller/worker, waits for controller exit and resubmits the normal
+cohort runner with its native cache. Recovery records are included in the final
+review archive. Fresh-run worker pinning is unchanged.
+
 The supported script for this foundation is `py_scripts/contamination_review.py`.
 It requires Python 3.11 or later and has no third-party Python dependencies.
 It processes one sequence at a time rather than loading a cohort into memory.

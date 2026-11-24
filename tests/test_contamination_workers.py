@@ -114,6 +114,24 @@ pathlib.Path(sys.argv[sys.argv.index('-out')+1]).write_text(query+'\\tmatch\\n')
         self.assertEqual(self.start(3).wait(timeout=15), 0)
         self.assertCountEqual(self.calls(), ['A', 'B'])
 
+    def test_remaining_checks_hashes_and_accepts_zero_worker_summaries(self):
+        status = self.root / 'remaining.json'
+        worker.remaining(SimpleNamespace(plan=self.plan, out=status))
+        self.assertEqual(json.loads(status.read_text())['remaining'], 2)
+        self.assertEqual(self.start().wait(timeout=15), 0)
+        worker.remaining(SimpleNamespace(plan=self.plan, out=status))
+        self.assertEqual(json.loads(status.read_text())['remaining'], 0)
+        final = self.root / 'checked.json'
+        worker.check(SimpleNamespace(plan=self.plan, summaries=[], out=final))
+        self.assertEqual(json.loads(final.read_text())['missing'], [])
+        plan = json.loads(self.plan.read_text())
+        hits = worker.Results(plan).directory(plan['tasks'][0]) / 'hits.tsv'
+        hits.write_text('corrupt\n')
+        worker.remaining(SimpleNamespace(plan=self.plan, out=status))
+        self.assertEqual(json.loads(status.read_text())['remaining'], 1)
+        with self.assertRaises(RuntimeError):
+            worker.check(SimpleNamespace(plan=self.plan, summaries=[], out=final))
+
     def test_failed_search_retains_and_reuses_successful_chunks(self):
         self.assertNotEqual(self.start(FAIL_ONCE=str(self.root / 'failed')).wait(timeout=15), 0)
         self.assertEqual(self.start(FAIL_ONCE=str(self.root / 'failed')).wait(timeout=15), 0)

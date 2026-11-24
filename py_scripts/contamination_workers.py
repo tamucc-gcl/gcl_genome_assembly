@@ -374,6 +374,15 @@ def check(args):
                            f'{len(skipped)} workers lacked scratch space. See {args.out}.')
 
 
+def remaining(args):
+    """Revalidate durable results before requesting any exclusive worker nodes."""
+    plan = json.loads(args.plan.read_text())
+    store = Results(plan)
+    pending = [dict(assembly=task['assembly'], name=task['name'])
+               for task in plan['tasks'] if not store.completed(task)]
+    atomic_json(args.out, dict(chunks=len(plan['tasks']), remaining=len(pending), pending=pending))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -396,8 +405,11 @@ def main():
     c.add_argument('--timeout', type=float, default=4 * 86400)
     v = commands.add_parser('check')
     v.add_argument('--plan', type=Path, required=True)
-    v.add_argument('--summaries', type=Path, nargs='+', required=True)
+    v.add_argument('--summaries', type=Path, nargs='*', default=[])
     v.add_argument('--out', type=Path, required=True)
+    r = commands.add_parser('remaining')
+    r.add_argument('--plan', type=Path, required=True)
+    r.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'plan' and args.threads < 1:
         parser.error('Threads must be positive')
@@ -405,7 +417,7 @@ def main():
         parser.error('Slots and worker identity must be positive')
     if args.command == 'collect' and (args.poll_seconds <= 0 or args.timeout <= 0):
         parser.error('Collector polling interval and timeout must be positive')
-    dict(plan=prepare, worker=worker, collect=collect, check=check)[args.command](args)
+    dict(plan=prepare, worker=worker, collect=collect, check=check, remaining=remaining)[args.command](args)
 
 
 if __name__ == '__main__':
