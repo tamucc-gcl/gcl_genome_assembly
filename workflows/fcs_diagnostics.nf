@@ -46,7 +46,7 @@ workflow FCS_DIAGNOSTICS {
         .join(ch_mapping.map { m,p -> tuple(m.id.toString(),p) },failOnDuplicate:true,failOnMismatch:true)
         .map { id,m,fa,tax,map -> tuple(m,fa,tax,map) }
     FCS_PLOT_EVIDENCE(ch_plot_inputs,stage,['fcs_plot_evidence.py','contamination_review.py'].collect {
-        file("${projectDir}/py_scripts/${it}",checkIfExists:true) })
+        file("${moduleDir}/../py_scripts/${it}",checkIfExists:true) })
     emit:
     metrics = FCS_PLOT_EVIDENCE.out.metrics
     versions = ch_versions

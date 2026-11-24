@@ -145,13 +145,63 @@ and source FASTA checksum.
 
 It downloads NCBI's published approximately 12 Mb test FASTA, checks the 11 known
 adaptor calls, verifies five terminal trims, five internal splits and one complete
-sequence exclusion against exact expected sequence bytes, then repeats adaptor
+sequence exclusion against exact expected bases after GX's uppercase conversion, then repeats adaptor
 screening and requires zero remaining calls. It uses the actual adaptor and GX
 cleaning containers, without a large GX/nt/protein database download or production
 assembly run. Return `comparisons/fcs-adaptor-acceptance-01.review.tar.gz`.
 
-Actual-container acceptance is pending until that check passes. A subsequent
-bounded real assembly check can verify the integrated contig and final reports.
+Actual-container acceptance passed on Crest on 2026-11-24 (controller job
+1575945; all five tasks completed with exit code zero, no retries; elapsed
+1m 16s). The returned `fcs-adaptor-acceptance-01.review.tar.gz` records:
+
+- Source SHA256 `276d661078d16301963b2dc6eaf50149e9bfd3fa8f58ff8019876325998de938`.
+- 418 source sequences and 422 cleaned sequences; five terminal trims, five
+  internal splits, one excluded sequence and exactly 1,102 bases removed.
+- Exact retained bases, identifiers and lengths after uppercase conversion;
+  zero adaptor findings on the cleaned FASTA.
+- FCS-adaptor 0.5.5 local image launched with Singularity CE 4.4.2, and the GX
+  cleaning container; reports published separately under contig and final FCS
+  folders.
+
+This accepts the real adaptor screen/cleanup/rescreen path, not a full GX
+database screen or the integrated assembly/reporting route. A subsequent bounded
+real assembly check remains necessary to verify the integrated contig and final
+reports, exact FASTA/depth matching and FCS-colored GC/coverage plots.
+
+## Bounded real-assembly integration check
+
+After syncing, submit from the CREST project root:
+
+```bash
+mkdir -p comparisons/fcs-assembly-acceptance-01
+sbatch --parsable \
+  --export=ALL,FCS_ADAPTOR_IMAGE=/work/birdlab/singularity_cache/ncbi-fcs-adaptor-0.5.5.img \
+  gcl_genome_assembly/scripts/comparisons/run_fcs_assembly_acceptance.sh
+```
+
+The launcher resolves the complete CTlk hap1 original GX input, finalized FASTA
+and sample HiFi FASTQ from successful tasks in
+`genome_assembly/pipeline/pipeline_trace.txt`. Ambiguous or absent retained inputs
+stop preparation; no arbitrary task is selected. Explicit `--trace`,
+`--source-fasta`, `--final-fasta`, `--hifi-fastq` and `--gxdb-dir` overrides are
+available as arguments after the submission script. The existing full GX database
+is reused; no nt or protein databases or BlobTools searches are involved.
+
+This calls the maintained cleanup, final audit, diagnostics and reporting
+workflows. It screens all sequence in one haplotype at each stage and computes
+fresh full-read mapping for both exact plotted frames. It does not rerun assembly,
+scaffolding or finalization: the final screen audits the actual retained finalized
+FASTA, independently of the newly cleaned contigs. A full main-pipeline resume
+remains separate from this bounded integration check.
+
+Results, controller cache and work files stay under
+`comparisons/fcs-assembly-acceptance-01/`. The existing stage-relative output layout
+is retained inside `results/`. The launcher verifies FASTA preservation, report
+scope, metrics row counts, source/taxonomy checksums and rendered PNG/PDF files,
+then makes `comparisons/fcs-assembly-acceptance-01.review.tar.gz` with reports,
+plots, provenance and logs. Biological findings do not fail this integration
+check automatically; review the final recommendations and rendered figures.
+Resubmit the same command to use this run's Nextflow cache.
 
 ## Method references
 

@@ -61,8 +61,8 @@ workflow CONTAMINATION_REPORTING {
         specification.map { s -> s.fcs.collectMany { [it.actions,it.taxonomy,it.contaminants].findAll { it }.collect { file(it) } } +
             s.blobtools.collectMany { [file(it.review),file(it.diagnostics)] } +
             s.fcs_metrics.collect { file(it.metrics) } + s.adaptor_reports.collect { file(it.report) } },
-        file("${projectDir}/py_scripts/contamination_cohort_report.py",checkIfExists:true),
-        file("${projectDir}/r_scripts/plot_contamination_cohort.R",checkIfExists:true))
+        file("${moduleDir}/../py_scripts/contamination_cohort_report.py",checkIfExists:true),
+        file("${moduleDir}/../r_scripts/plot_contamination_cohort.R",checkIfExists:true))
     emit:
     report = CONTAMINATION_COHORT_REPORT.out.report
 }
