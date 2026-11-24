@@ -182,7 +182,11 @@ sbatch --parsable \
 The launcher resolves the complete CTlk hap1 original GX input, finalized FASTA
 and sample HiFi FASTQ from successful tasks in
 `genome_assembly/pipeline/pipeline_trace.txt`. Ambiguous or absent retained inputs
-stop preparation; no arbitrary task is selected. Explicit `--trace`,
+stop preparation; no arbitrary task is selected.
+Scratch-only input links are resolved through the exact source/destination
+binding retained in the task's `.command.run`; the wrapper is never executed.
+Missing upstream files still stop preparation rather than substituting cleaned
+sequence. Explicit `--trace`,
 `--source-fasta`, `--final-fasta`, `--hifi-fastq` and `--gxdb-dir` overrides are
 available as arguments after the submission script. The existing full GX database
 is reused; no nt or protein databases or BlobTools searches are involved.

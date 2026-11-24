@@ -3,6 +3,7 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import tempfile
 import unittest
 
@@ -13,6 +14,21 @@ spec.loader.exec_module(prepare)
 
 
 class RetainedInputs(unittest.TestCase):
+    def test_scratch_input_resolves_exact_retained_staging_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            task=root/'task';task.mkdir()
+            source=root/'upstream with spaces'/'assembly_corrected.fasta'
+            source.parent.mkdir();source.write_text('>c\nACGT\n')
+            (task/'.command.run').write_text(
+                'nxf_stage() {\n ln -s '+shlex.quote(source.as_posix())+
+                ' assembly_corrected.fasta\n}\n')
+            self.assertEqual(prepare.staged_input(task,'assembly_corrected.fasta'),source.resolve())
+            # A nearby file with the same basename is not sufficient evidence.
+            (task/'.command.run').write_text('nxf_stage() { :; }\n')
+            with self.assertRaisesRegex(ValueError,'0 usable exact staging bindings'):
+                prepare.staged_input(task,'assembly_corrected.fasta')
+
     def test_configure_binds_original_screen_input_and_actual_final_output(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)

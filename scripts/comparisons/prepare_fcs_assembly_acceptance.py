@@ -27,6 +27,35 @@ def task(project,trace,process,identifier):
     return matches[0]
 
 
+def staged_input(directory,name):
+    """Resolve a scratch-only input using Nextflow's retained staging command.
+
+    Scratch tasks need not retain input links in their work directory. Read the
+    exact literal `ln -s SOURCE NAME` binding; never execute the task wrapper or
+    search for a different FASTA with a matching basename.
+    """
+    requested=Path(name)
+    path=directory/requested
+    if path.is_file():return path.resolve(strict=True)
+    candidates=set()
+    wrapper=directory/'.command.run'
+    if wrapper.is_file():
+        for line in wrapper.read_text().splitlines():
+            try:tokens=shlex.split(line)
+            except ValueError:continue
+            if (len(tokens)>=4 and tokens[0]=='ln' and '-s' in tokens[1:-2]
+                    and Path(tokens[-1])==requested):
+                source=Path(tokens[-2])
+                if source.is_absolute() and source.is_file():
+                    candidates.add(source.resolve(strict=True))
+    if len(candidates)!=1:
+        raise ValueError(f'Cannot resolve retained input {path}: the work-directory link is absent '
+                         f'and .command.run has {len(candidates)} usable exact staging bindings. '
+                         'Supply --source-fasta with the retained pre-FCS FASTA; '
+                         'do not substitute a post-FCS cleaned assembly.')
+    return candidates.pop()
+
+
 def configure(args):
     project=args.project.resolve(strict=True)
     trace=(args.trace or project/'genome_assembly/pipeline/pipeline_trace.txt').resolve(strict=True)
@@ -38,7 +67,7 @@ def configure(args):
         # Read the exact original GX input from the successful task command.
         tokens=shlex.split((screen/'.command.sh').read_text().replace('\\\n',' '))
         if tokens.count('--fasta')!=1:raise ValueError('Cannot identify exact GX input; supply --source-fasta')
-        source=screen/tokens[tokens.index('--fasta')+1]
+        source=staged_input(screen,tokens[tokens.index('--fasta')+1])
     final=args.final_fasta or task(project,trace,'FINALIZE_ASSEMBLY',args.assembly)/(args.assembly+'.fasta')
     reads=args.hifi_fastq or task(project,trace,'BAM_TO_FASTQ',sample)/(sample+'.fastq.gz')
     paths={k:Path(v).resolve(strict=True) for k,v in
