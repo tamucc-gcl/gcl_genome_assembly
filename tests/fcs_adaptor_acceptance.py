@@ -4,8 +4,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 import urllib.request
 
+# Nextflow stages these helpers together, often as symlinks into node scratch.
+# Python can resolve this script back to tests/, so explicitly include the task directory.
+sys.path.insert(0,str(Path.cwd()))
 from contamination_review import records
 from contamination_cohort_report import adaptor_rows
 
