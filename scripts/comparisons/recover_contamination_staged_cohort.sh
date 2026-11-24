@@ -32,14 +32,17 @@ fi
 python3 "$project/gcl_genome_assembly/scripts/comparisons/check_contamination_cohort_recovery.py" \
     --project "$project" --plan "$plan" --controller "$controller"
 
-scancel --signal=TERM "$controller"
-scancel "$pending" || true
-for attempt in {1..30}; do
+# Cancel the job, rather than merely signalling steps. Plain --signal=TERM does
+# not signal the batch script/its child Nextflow JVM on Slurm.
+scancel "$controller"
+for attempt in {1..60}; do
     if [[ -z "$(squeue -h -j "$controller" -o '%i' 2>/dev/null || true)" ]]; then
+        # The controller can no longer interpret this cancellation as a retry.
+        scancel "$pending" || true
         sbatch --parsable "$project/gcl_genome_assembly/scripts/comparisons/run_contamination_staged_cohort.sh"
         exit 0
     fi
     sleep 2
 done
-echo 'Controller still stopping. Wait for it to exit, then submit run_contamination_staged_cohort.sh.' >&2
+echo 'Controller still stopping. No child cancellation or resubmission was attempted. Recheck the controller before proceeding.' >&2
 exit 1
