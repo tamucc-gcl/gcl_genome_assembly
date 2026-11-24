@@ -46,7 +46,7 @@ workflow DECONTAMINATE_ASSEMBLY {
         }
         .set { ch_adaptor_input }
 
-    FCS_ADAPTOR(ch_adaptor_input)
+    FCS_ADAPTOR(ch_adaptor_input,file("${moduleDir}/../py_scripts/run_fcs_adaptor.py",checkIfExists:true))
     ch_adaptor_report = FCS_ADAPTOR.out.action_report
     ch_versions = ch_versions.mix(FCS_ADAPTOR.out.versions)
 

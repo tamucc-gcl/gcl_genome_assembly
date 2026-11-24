@@ -7,7 +7,8 @@ workflow FCS_FINAL_SCREEN {
     assemblies
     database
     main:
-    FINAL_ADAPTOR(assemblies.map { m,fa -> tuple(m,fa,params.decon_fcsadaptor_mode,'nextflow','final') })
+    FINAL_ADAPTOR(assemblies.map { m,fa -> tuple(m,fa,params.decon_fcsadaptor_mode,'nextflow','final') },
+        file("${moduleDir}/../py_scripts/run_fcs_adaptor.py",checkIfExists:true))
     adaptor = FINAL_ADAPTOR.out.action_report
     versions = FINAL_ADAPTOR.out.versions
     FINAL_GX(assemblies.map { m,fa -> tuple(m,fa,m.taxid ?: params.taxid) }

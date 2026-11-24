@@ -1,23 +1,30 @@
-// Nextflow supplies the container; do not launch nested container runners.
+// The NCBI image has no shell. Run this task on the host and execute its app directly.
 process FCS_ADAPTOR {
     tag "${meta.id}"
     label 'fcs_adaptor'
+    container false
+    conda 'conda-forge::python=3.11'
     publishDir "${params.outdir}/${stage}/decontam/fcs", mode: params.publish_dir_mode,
         pattern: "${meta.id}.fcs_adaptor*"
     input:
     tuple val(meta), path(assembly_fa), val(mode), val(engine), val(stage)
+    path launcher
     output:
     tuple val(meta), path("${meta.id}.fcs_adaptor_report.txt"), emit: action_report
     tuple val(meta), path("${meta.id}.fcsadaptor"), emit: out_dir
     tuple val(meta), path("${meta.id}.fcs_adaptor.log"), emit: log
+    tuple val(meta), path("${meta.id}.fcs_adaptor_launch.json"), emit: provenance
     path 'versions.tsv', emit: versions
     script:
     if (!(mode in ['euk','prok'])) error 'FCS-adaptor mode must be euk or prok'
+    def runtime = engine == 'nextflow' ? params.decon_container_engine : engine
+    def q = { value -> "'" + value.toString().replace("'", "'\"'\"'") + "'" }
     """
     set -euo pipefail
     mkdir -p ${meta.id}.fcsadaptor
-    /app/fcs/bin/av_screen_x -o "\$PWD/${meta.id}.fcsadaptor" --${mode} ${assembly_fa} \
-        > ${meta.id}.fcs_adaptor.log 2>&1
+    python3 ${q(launcher)} --fasta ${q(assembly_fa)} --output ${meta.id}.fcsadaptor \
+        --image ${q(params.fcs_adaptor_container)} --engine ${q(runtime)} --mode ${mode} \
+        --log ${meta.id}.fcs_adaptor.log --provenance ${meta.id}.fcs_adaptor_launch.json
     test -f ${meta.id}.fcsadaptor/fcs_adaptor_report.txt
     cp ${meta.id}.fcsadaptor/fcs_adaptor_report.txt ${meta.id}.fcs_adaptor_report.txt
     printf 'FCS-adaptor-image\\t%s\\n' '${params.fcs_adaptor_container}' > versions.tsv
@@ -27,6 +34,7 @@ process FCS_ADAPTOR {
     mkdir -p ${meta.id}.fcsadaptor
     printf '#accession\\tlength\\taction\\trange\\tname\\n' > ${meta.id}.fcs_adaptor_report.txt
     touch ${meta.id}.fcs_adaptor.log versions.tsv
+    printf '{}\\n' > ${meta.id}.fcs_adaptor_launch.json
     """
 }
 

@@ -19,9 +19,14 @@ The contig-stage order is:
 5. GC/read-depth plots use every contig in the exact GX input, including sequences
    subsequently removed by GX. This keeps classification and coordinates consistent.
 
-Nextflow runs the adaptor executable inside the configured container. It does
-not require a separate runner on PATH, launch a nested container, guess a cleaned
-output filename, or use shared temporary filenames. `decon_fcsadaptor_mode` is
+The adaptor image lacks a shell. Nextflow runs a **host Python task**, which invokes
+Singularity/Apptainer (or Docker) with `/app/fcs/bin/av_screen_x` directly. Nextflow's
+own container wrapping is disabled for this task, so it never asks the image to
+run `/bin/bash`. The host runtime must be available on PATH; its native image cache
+is used. A local SIF path can also be supplied through `fcs_adaptor_container`.
+The launcher does not guess a cleaned output filename or use shared temporary
+filenames. `decon_container_engine` selects the host runtime (`singularity` by
+default; `apptainer` and `docker` are supported). `decon_fcsadaptor_mode` is
 `euk` by default; use `prok` for prokaryotes. The adaptor image defaults to
 `docker://ncbi/fcs-adaptor:0.5.5`; `fcs_gx_container` controls the GX image. Set an
 audited local SIF or immutable image reference as needed for the deployment.
@@ -118,7 +123,8 @@ commands are obsolete.
 
 ## Bounded FCS-adaptor acceptance on Crest
 
-The local tests exercise workflow wiring, final-audit byte preservation, taxonomy
+The local tests exercise shell-less application launch with native Singularity
+wrapping enabled globally, scratch-staged helper imports, workflow wiring, final-audit byte preservation, taxonomy
 segment handling, exact-frame checks, missing/zero-depth handling and real R
 figures. Screen binaries in the orchestration test are stubs, not a substitute for
 testing the actual containers on Crest.
@@ -129,6 +135,13 @@ Submit this small real-container test from the project root:
 mkdir -p comparisons/fcs-adaptor-acceptance-01
 sbatch --parsable gcl_genome_assembly/scripts/comparisons/run_fcs_adaptor_acceptance.sh
 ```
+
+If an image is already downloaded, the acceptance launcher accepts
+`sbatch --export=ALL,FCS_ADAPTOR_IMAGE=/absolute/path/to/fcs-adaptor.sif ...`.
+It passes that local image to the host runtime directly, preserving the fixture
+download cache and avoiding another image pull. The per-assembly
+`*.fcs_adaptor_launch.json` records the image, runtime, exact application arguments
+and source FASTA checksum.
 
 It downloads NCBI's published approximately 12 Mb test FASTA, checks the 11 known
 adaptor calls, verifies five terminal trims, five internal splits and one complete

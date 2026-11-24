@@ -145,6 +145,19 @@ EOF
     script="$runtime/reproduction.nf"
     extra=(-c "$runtime/scaffolding.config")
     cd "$runtime/scaffolding-launch"
+elif [[ "${1:-}" == fcs_adaptor_host_checks.nf ]]; then
+    python3 "$repo/tests/setup_fcs_adaptor_host_checks.py"
+    script="$repo/.fcs-adaptor-host-check.nf"
+    cp reproduction.nf "$script"
+    trap 'rm -f "$repo/.fcs-adaptor-host-check.nf"' EXIT
+    cat > "$runtime/fcs-host.config" <<'EOF'
+conda.enabled=false
+singularity.enabled=true
+docker.enabled=false
+params.publish_dir_mode='copy'
+process { executor='local'; withName: '.*' { cpus=1; memory='1 GB'; scratch=false; errorStrategy='terminate'; beforeScript='export PATH=/tmp/fcs-adaptor-host-check/tools:/usr/local/bin:/usr/bin:/bin' } }
+EOF
+    extra=(-c "$runtime/fcs-host.config")
 elif [[ "${1:-}" == fcs_workflow_checks.nf ]]; then
     script="$repo/.fcs-workflow-check.nf"
     cp reproduction.nf "$script"
