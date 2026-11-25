@@ -274,6 +274,28 @@ checks exact source/taxonomy provenance, preserved final FASTAs, cohort membersh
 category partitions, record counts and expected figures. Visual review of the
 cohort figures and main production-resume acceptance remain separate checks.
 
+The full-cohort check passed on 2026-11-24 (controller 1576601; returned
+`fcs-cohort-acceptance-01.review.tar.gz`). All ten assemblies were present in both
+stages. The combined overview accounted for 20,150 contig-stage records and 6,182
+final records; all 26,332 records were plotted without omissions and their seven
+category spans summed exactly to each complete record length. Source/taxonomy
+provenance and preservation of all finalized FASTAs passed the acceptance check.
+The final reports had zero actionable adaptor/GX findings for every assembly;
+two contig-stage GX actions were recorded across the cohort. This is not a claim
+that uncertain taxonomy assignments have become resolved.
+
+The overview, both cohort GC/coverage figures and representative capped detail
+figures were inspected; archive Markdown links resolved except the ten
+removed-sequence FASTAs deliberately excluded from the review bundle. The resume
+completed in 1m 7s with 100 cached tasks and three completed reporting tasks.
+The initial full cohort ran 103 tasks in 2h 46m 23s. Compact facet-count captions
+and display-space axis-label spacing were subsequently applied to improve the
+cohort GC plots without changing points, category proportions or evidence.
+
+The full-cohort component/reporting gate is accepted. A normal production
+entry-point resume remains for final main-report integration; the large optional
+full-search BlobTools acceptance remains deferred.
+
 ## Method references
 
 - [NCBI FCS-adaptor quickstart](https://github.com/ncbi/fcs/wiki/FCS-adaptor-quickstart)

@@ -35,10 +35,16 @@ fcs_pies <- function(d,prefix) {
     }
   }
   polygons<-if(length(verts))do.call(rbind,verts) else data.frame(cohort_assembly=character(),group=integer(),category=character(),x=numeric(),y=numeric())
-  labels<-setNames(sprintf('%s\n%d / %d records plotted; %d omitted',scope$assembly,scope$plotted,scope$contigs,scope$omitted),scope$assembly)
+  labels<-setNames(sprintf('%s\n%d/%d plotted; %d omitted',scope$assembly,scope$plotted,scope$contigs,scope$omitted),scope$assembly)
   positive<-x$mean_depth[x$mean_depth>0]
   ticks<-if(length(positive))unique(c(0,10^seq(floor(log10(min(positive))),ceiling(log10(max(positive)))))) else c(0,1,10)
   ticks<-ticks[trans$transform(ticks)>=yrange[1]&trans$transform(ticks)<=yrange[2]]
+  # Very small powers of ten crowd together near zero on a pseudo-log axis.
+  # Thin axis labels in transformed display space, retaining every data point.
+  spaced_ticks<-numeric()
+  for(tick in ticks) if(!length(spaced_ticks) ||
+      trans$transform(tick)-trans$transform(tail(spaced_ticks,1))>=.07*diff(yrange)) spaced_ticks<-c(spaced_ticks,tick)
+  ticks<-spaced_ticks
   p<-ggplot(polygons,aes(x,y,group=group,fill=category))+
     geom_point(data=x,aes(100*gc_fraction,trans$transform(mean_depth)),inherit.aes=FALSE,size=.45,color='#5B666E')+geom_polygon(alpha=.9)+
     geom_blank(data=data.frame(cohort_assembly=assemblies,x=mean(xrange),y=mean(yrange)),aes(x,y),inherit.aes=FALSE)+
