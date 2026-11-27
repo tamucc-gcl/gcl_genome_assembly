@@ -6,7 +6,7 @@ process FCS_PLOT_EVIDENCE {
     cpus 1
     memory '2 GB'
     time '2h'
-    publishDir "${params.outdir}/${stage}/decontam/fcs", mode:'copy',pattern:"${meta.id}.fcs_metrics.*"
+    publishDir "${params.outdir}/assembly/${stage}/decontam/fcs", mode:'copy',pattern:"${meta.id}.fcs_metrics.*"
     input:
     tuple val(meta), path(fasta), path(taxonomy), path(mapping)
     val stage

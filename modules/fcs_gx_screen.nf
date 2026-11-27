@@ -2,7 +2,7 @@ process FCS_GX_SCREEN {
   tag "${meta.id}"
   label 'fcs'
 
-  publishDir "${params.outdir}/${stage}/decontam/fcs",
+  publishDir "${params.outdir}/assembly/${stage}/decontam/fcs",
     mode: params.publish_dir_mode,
     saveAs: { filename -> filename.startsWith('gx_out/') ? null : filename }
 

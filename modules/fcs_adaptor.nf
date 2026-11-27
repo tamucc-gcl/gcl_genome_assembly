@@ -4,7 +4,7 @@ process FCS_ADAPTOR {
     label 'fcs_adaptor'
     container false
     conda 'conda-forge::python=3.11'
-    publishDir "${params.outdir}/${stage}/decontam/fcs", mode: params.publish_dir_mode,
+    publishDir "${params.outdir}/assembly/${stage}/decontam/fcs", mode: params.publish_dir_mode,
         pattern: "${meta.id}.fcs_adaptor*"
     input:
     tuple val(meta), path(assembly_fa), val(mode), val(engine), val(stage)
@@ -41,7 +41,7 @@ process FCS_ADAPTOR {
 process FCS_ADAPTOR_CLEAN {
     tag "${meta.id}"
     label 'fcs_clean'
-    publishDir "${params.outdir}/${stage}/decontam/fcs", mode: params.publish_dir_mode,
+    publishDir "${params.outdir}/assembly/${stage}/decontam/fcs", mode: params.publish_dir_mode,
         pattern: "${meta.id}.adaptor*"
     input:
     tuple val(meta), path(assembly_fa), path(report), val(stage)

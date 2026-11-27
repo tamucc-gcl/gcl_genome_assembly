@@ -140,7 +140,7 @@ def verify_phase(output, fixture, cases, scenario):
         expected = case['expected'][scenario]
         if report['retained_bp'] != sum(map(len, expected.values())):
             raise AssertionError(identity + ': downstream base count')
-        audit = output / 'contig/decontam/blobtools' / identity / 'cleanup/audit'
+        audit = output / 'assembly/contig/decontam/blobtools' / identity / 'cleanup/audit'
         selected = [row for row in rows if row['assembly'] == identity and row['selected'] == 'YES']
         if not selected:
             if audit.exists():
@@ -249,7 +249,7 @@ timeline.enabled = false
             console = (phase / 'console.log').read_text()
             if result.returncode == 0 or expected_error not in console:
                 raise RuntimeError(f'{label}: expected specific rejection; see {phase / "console.log"}')
-            if (phase / 'contig/decontam/blobtools/internal_hap1/cleanup/audit').exists():
+            if (phase / 'assembly/contig/decontam/blobtools/internal_hap1/cleanup/audit').exists():
                 raise AssertionError(label + ': invalid decisions published a cleanup audit')
             summaries.append(dict(phase=label, expected_rejection=True))
             continue

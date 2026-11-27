@@ -137,7 +137,7 @@ def verify(args):
             if digest(value['path'])!=value['sha256']:raise ValueError('Input FASTA changed: '+value['path'])
     summary={}
     for stage in ('contig','final'):
-        base=args.out/'results'/stage/'decontam'
+        base=args.out/'results'/'assembly'/stage/'decontam'
         report=json.loads((base/'report/report.json').read_text())
         if (not report['fcs_enabled'] or report['blobtools_enabled'] or
             report['plot_classification_source']!='FCS-GX' or

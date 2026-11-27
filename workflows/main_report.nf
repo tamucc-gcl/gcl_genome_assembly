@@ -73,7 +73,7 @@ workflow MAIN_REPORTING {
         [type:p.name=='summary.tsv' ? 'psmc_summary' : 'psmc',id:'run',
          path:"post_assembly/psmc/${p.name}".toString(),content:p.name=='summary.tsv' ? p.text : '']
     }).mix(contamination_reports.map { stage, md ->
-        artifact('contamination',stage,"${stage}/decontam/contamination_report.md")
+        artifact('contamination',stage,stage=='overview' ? "overview/decontam/contamination_report.md" : "assembly/${stage}/decontam/contamination_report.md")
     }).mix(detailed_report.map { md -> artifact('assembly_details','run',md.name) })
       .mix(dotplots.map { a,b,p -> artifact('dotplot',"${a} / ${b}","pairwise_alignments/${p.name}") })
       .mix(ribbons.map { a,b,p -> artifact('ribbon',"${a} / ${b}","pairwise_alignments/${p.name}") })

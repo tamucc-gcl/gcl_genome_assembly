@@ -4,7 +4,7 @@ process CONTAMINATION_COHORT_REPORT {
     cpus 1
     memory '4 GB'
     time '1h'
-    publishDir "${params.outdir}/${stage}/decontam", mode: 'copy'
+    publishDir "${params.outdir}/assembly/${stage}/decontam", mode: 'copy'
     input:
     val stage
     val spec

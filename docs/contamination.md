@@ -55,11 +55,11 @@ read evidence, when enabled, uses a separate matching post-cleanup frame.
 
 FCS outputs stay together, with assembly identifiers in their filenames:
 
-- `contig/decontam/fcs/`: adaptor reports, cleaning logs, GX reports and FCS plot evidence.
-- `contig/decontam/contamination_report.md`: all contig assemblies in one report.
-- `final/decontam/fcs/` and `final/decontam/contamination_report.md`: final audit results.
-- `scaffold/decontam/`: corresponding outputs for the optional intermediate screen.
-- `contig/decontam/blobtools/<assembly>/`: separately enabled full-search results.
+- `assembly/contig/decontam/fcs/`: adaptor reports, cleaning logs, GX reports and FCS plot evidence.
+- `assembly/contig/decontam/contamination_report.md`: all contig assemblies in one report.
+- `assembly/final/decontam/fcs/` and `assembly/final/decontam/contamination_report.md`: final audit results.
+- `assembly/scaffold/decontam/`: corresponding outputs for the optional intermediate screen.
+- `assembly/contig/decontam/blobtools/<assembly>/`: separately enabled full-search results.
 
 The main assembly report links to the contamination reports. Each combines FCS
 and optional BlobTools evidence only when those analyses ran. Disabled analyses
@@ -269,7 +269,7 @@ cache is not automatically imported. Repeat the same command to resume it.
 
 Return `comparisons/fcs-cohort-acceptance-01.review.tar.gz`. The combined index is
 `results/overview/decontam/contamination_report.md`; individual stage reports
-remain under `results/contig/decontam/` and `results/final/decontam/`. The launcher
+remain under `results/assembly/contig/decontam/` and `results/assembly/final/decontam/`. The launcher
 checks exact source/taxonomy provenance, preserved final FASTAs, cohort membership,
 category partitions, record counts and expected figures. Visual review of the
 cohort figures and main production-resume acceptance remain separate checks.

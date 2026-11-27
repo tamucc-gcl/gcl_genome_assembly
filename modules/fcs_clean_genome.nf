@@ -2,7 +2,7 @@ process FCS_CLEAN_GENOME {
   tag "${meta.id}"
   label 'fcs_clean'
 
-  publishDir "${params.outdir}/${stage}/decontam/fcs", mode: params.publish_dir_mode
+  publishDir "${params.outdir}/assembly/${stage}/decontam/fcs", mode: params.publish_dir_mode
 
   input:
     tuple val(meta), path(assembly_fa), path(action_report), val(stage)

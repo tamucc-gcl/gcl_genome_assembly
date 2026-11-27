@@ -54,7 +54,7 @@ if [[ -d "$run/recovery-before-resume" ]]; then
 fi
 tar -czf "$run.review.tar.gz" --exclude='*.bam' --exclude='*.bai' \
     --exclude='*.fasta' --exclude='*.fasta.gz' --exclude='*.fa' --exclude='blobdir' \
-    -C "$run" results/contig/decontam results/pipeline \
+    -C "$run" results/assembly/contig/decontam results/pipeline \
     params.json expected.json workers.config acceptance.json \
     "nextflow-${SLURM_JOB_ID}.log" "slurm-${SLURM_JOB_ID}.out" "${recovery[@]}"
 printf '\nReview archive: %s\n' "$run.review.tar.gz"

@@ -33,5 +33,5 @@ stages=sorted({r['coordinate_stage'] for r in rows})
     'Taxonomy flags are not cleaning recommendations.\n\n'
     '[PDF](cohort_fcs_composition.pdf) · [All record evidence](cohort_fcs_sequence_evidence.tsv)\n\n'
     if rows else 'FCS category evidence was not supplied.\n\n')+
-    ' · '.join(f'[{stage.title()} reports and GC/coverage](../../{stage}/decontam/contamination_report.md)'
+    ' · '.join(f'[{stage.title()} reports and GC/coverage](../../assembly/{stage}/decontam/contamination_report.md)'
                for stage in ('contig','scaffold','final') if stage in stages)+'\n',encoding='utf-8')

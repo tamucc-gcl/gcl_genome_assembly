@@ -135,7 +135,7 @@ process CONTAMINATION_REPORT {
     conda 'conda-forge::python=3.11 bioconda::samtools=1.21 bioconda::pysam=0.23.3'
     memory '8 GB'
     time '8h'
-    publishDir { nested ? "${params.outdir}/contig/decontam/blobtools/${assembly}" : params.outdir }, mode: 'copy'
+    publishDir { nested ? "${params.outdir}/assembly/contig/decontam/blobtools/${assembly}" : params.outdir }, mode: 'copy'
 
     input:
     tuple val(assembly), path(metrics), path(queries), path(selected), path(nt_hits), path(bam), path(bai),
@@ -204,7 +204,7 @@ process CONTAMINATION_DIAGNOSTICS {
     conda 'conda-forge::r-base=4.3.3 conda-forge::r-ggplot2=3.5.2 conda-forge::r-patchwork=1.3.0'
     memory '4 GB'
     time '2h'
-    publishDir { nested ? "${params.outdir}/contig/decontam/blobtools/${assembly}" : params.outdir }, mode: 'copy'
+    publishDir { nested ? "${params.outdir}/assembly/contig/decontam/blobtools/${assembly}" : params.outdir }, mode: 'copy'
 
     input:
     tuple val(assembly), path(review)
@@ -226,7 +226,7 @@ process CONTAMINATION_BLOBDIR {
     cpus 4
     memory '16 GB'
     time '8h'
-    publishDir { nested ? "${params.outdir}/contig/decontam/blobtools/${assembly}" : params.outdir }, mode: 'copy'
+    publishDir { nested ? "${params.outdir}/assembly/contig/decontam/blobtools/${assembly}" : params.outdir }, mode: 'copy'
 
     input:
     tuple val(assembly), path(fasta), path(review), val(hasCoverage), val(host)
